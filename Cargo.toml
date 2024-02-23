@@ -1,0 +1,17 @@
+[workspace]
+members = ["fht-compositor", "smithay-egui"]
+resolver = "2"
+
+[workspace.dependencies]
+egui = "0.23"
+egui_glow = "0.23"
+egui_extras = "0.23"
+
+[workspace.dependencies.smithay]
+git = "https://github.com/Smithay/Smithay"
+rev = "7f9e6d5"
+default-features = false
+
+[workspace.dependencies.smithay-drm-extras]
+git = "https://github.com/smithay/smithay"
+rev = "91e61f1"

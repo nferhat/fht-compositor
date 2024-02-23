@@ -1,0 +1,49 @@
+[package]
+name = "fht-compositor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.79"
+indexmap = { version = "2.1.0", features = ["serde"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+xcursor = "0.3.3"
+x11rb = { version = "0.12.0", optional = true, default-features = false, features = ["composite"] }
+serde = { version = "1.0.196", features = ["derive"] }
+xdg = "2.5.2"
+color-eyre = "0.6.2"
+ron = "0.8.1"
+colors-transform = "0.2.11"
+egui.workspace = true
+smithay = { workspace = true, features = ["desktop", "wayland_frontend", "backend_libinput"] }
+smithay-drm-extras = { workspace = true, optional = true }
+smithay-egui.path = "../smithay-egui/" # Track smithay-egui in this repo in order to avoid version mismatch madness
+bitflags = "2.4.2"
+thiserror = "1.0.56"
+libc = "0.2.153"
+wayland-backend = "0.3.2"
+wayland-scanner = "0.31.0"
+tracing-appender = "0.2.3"
+profiling = "1.0.14"
+puffin_http = { version = "0.16.0", optional = true }
+
+[features]
+default = ["egl", "x11_backend", "udev_backend", "xwayland", "profile"]
+egl = ["smithay/use_system_lib", "smithay/backend_egl"]
+x11_backend = ["smithay/backend_x11", "x11rb", "smithay/renderer_glow", "smithay/backend_vulkan"]
+udev_backend = [
+    "smithay-drm-extras",
+    "smithay/backend_libinput",
+    "smithay/backend_udev",
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_vulkan",
+    "smithay/backend_egl",
+    "smithay/backend_session_libseat",
+    "smithay/renderer_multi",
+]
+xwayland = ["smithay/xwayland", "x11rb", "smithay/x11rb_event_source"]
+profile = ["profiling/profile-with-puffin", "puffin_http"]
