@@ -101,7 +101,11 @@ impl State {
                 // Otherwise, the focused target will be the focused window on the active workspace.
                 if let Some(window) = self.fht.focus_state.output.as_ref().and_then(|o| {
                     let active = self.fht.wset_for(o).active();
-                    active.focused().cloned()
+                    active
+                        .fullscreen
+                        .as_ref()
+                        .map(|f| f.inner.clone())
+                        .or_else(|| active.focused().cloned())
                 }) {
                     self.fht.focus_state.focus_target = Some(window.into());
                     self.fht.keyboard.clone().set_focus(
