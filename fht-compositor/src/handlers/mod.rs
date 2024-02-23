@@ -17,6 +17,8 @@ mod pointer_gestures;
 mod presentation;
 mod primary_selection;
 mod relative_pointer;
+#[cfg(feature = "udev_backend")]
+pub mod screencopy;
 mod seat;
 mod security_context;
 mod selection;

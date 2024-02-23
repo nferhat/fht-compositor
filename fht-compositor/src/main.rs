@@ -28,6 +28,7 @@ mod backend;
 mod config;
 mod handlers;
 mod input;
+mod protocols;
 mod shell;
 mod state;
 mod utils;

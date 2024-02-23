@@ -17,6 +17,7 @@ use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::Error as OutputDamageTrackerError;
+use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
@@ -24,7 +25,9 @@ use smithay::backend::renderer::multigpu::{
 };
 #[cfg(feature = "egl")]
 use smithay::backend::renderer::ImportEgl;
-use smithay::backend::renderer::{ImportDma, ImportMemWl};
+use smithay::backend::renderer::{
+    self, Bind, BufferType, ExportMem, ImportDma, ImportMemWl, Offscreen,
+};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -45,17 +48,22 @@ use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::DeviceFd;
+use smithay::utils::{DeviceFd, Point, Rectangle, Size};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
+use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
+use smithay::wayland::shm;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 use wayland_backend::server::GlobalId;
 
 use crate::backend::Backend;
 use crate::config::CONFIG;
+use crate::handlers::screencopy::PendingScreencopy;
+use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
@@ -791,6 +799,75 @@ fn render_surface(
             _ => unreachable!(),
         })?;
 
+    if let Some(mut screencopy) = surface
+        .output
+        .user_data()
+        .get::<PendingScreencopy>()
+        .and_then(|scpy| scpy.borrow_mut().take())
+    {
+        // Mark entire buffer as damaged.
+        let region = screencopy.region();
+        if !res.is_empty {
+            screencopy.damage(&[Rectangle::from_loc_and_size((0, 0), region.size)]);
+        }
+
+        let shm_buffer = screencopy.buffer();
+
+        // Ignore unknown buffer types.
+        let buffer_type = renderer::buffer_type(shm_buffer);
+        if !matches!(buffer_type, Some(BufferType::Shm)) {
+            warn!("Unsupported buffer type: {:?}", buffer_type);
+        } else {
+            // Create and bind an offscreen render buffer.
+            let buffer_dimensions = renderer::buffer_dimensions(shm_buffer).unwrap();
+            let offscreen_buffer = Offscreen::<GlesTexture>::create_buffer(
+                &mut renderer,
+                Fourcc::Argb8888,
+                buffer_dimensions,
+            )
+            .unwrap();
+            renderer.bind(offscreen_buffer).unwrap();
+
+            let output = &screencopy.output;
+            let scale = output.current_scale().fractional_scale();
+            let output_size = output.current_mode().unwrap().size;
+            let transform = output.current_transform();
+
+            // Calculate drawing area after output transform.
+            let damage = transform.transform_rect_in(region, &output_size);
+
+            let _ = res
+                .blit_frame_result(damage.size, transform, scale, &mut renderer, [damage], [])
+                .unwrap();
+
+            let region = Rectangle {
+                loc: Point::from((region.loc.x, region.loc.y)),
+                size: Size::from((region.size.w, region.size.h)),
+            };
+            let mapping = renderer.copy_framebuffer(region, Fourcc::Argb8888).unwrap();
+            let buffer = renderer.map_texture(&mapping);
+            // shm_buffer.
+            // Copy offscreen buffer's content to the SHM buffer.
+            shm::with_buffer_contents_mut(shm_buffer, |shm_buffer_ptr, shm_len, buffer_data| {
+                // Ensure SHM buffer is in an acceptable format.
+                if dbg!(buffer_data.format) != wl_shm::Format::Argb8888
+                    || buffer_data.stride != region.size.w * 4
+                    || buffer_data.height != region.size.h
+                    || shm_len as i32 != buffer_data.stride * buffer_data.height
+                {
+                    error!("Invalid buffer format");
+                    return;
+                }
+
+                // Copy the offscreen buffer's content to the SHM buffer.
+                unsafe { shm_buffer_ptr.copy_from(buffer.unwrap().as_ptr(), shm_len) };
+            })
+            .unwrap();
+        }
+        // Mark screencopy frame as successful.
+        screencopy.submit();
+    }
+
     if res.needs_sync() {
         if let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
             profiling::scope!("SyncPoint::wait");
@@ -899,7 +976,8 @@ pub fn init(state: &mut State) -> anyhow::Result<()> {
         state.fht.pointer = pointer;
     }
     RelativePointerManagerState::new::<State>(&state.fht.display_handle);
-    RelativePointerManagerState::new::<State>(&state.fht.display_handle);
+    PointerGesturesState::new::<State>(&state.fht.display_handle);
+    ScreencopyManagerState::new::<State>(&state.fht.display_handle);
 
     let udev_backend =
         UdevBackend::new(&seat_name).context("Failed to initialize Udev backend source!")?;
