@@ -96,8 +96,9 @@ use xdg::BaseDirectories;
 
 #[allow(unused_imports)]
 pub use self::types::{
-    CursorConfig, FhtConfig as FhtConfigInner, GeneralConfig, InputConfig, KeyboardConfig,
-    MouseConfig, PerDeviceInputConfig,
+    AnimationConfig, CursorConfig, Easing, FhtConfig as FhtConfigInner, GeneralConfig, InputConfig,
+    KeyboardConfig, MouseConfig, PerDeviceInputConfig, WorkspaceSwitchAnimationConfig,
+    WorkspaceSwitchAnimationDirection,
 };
 
 // To avoid mutable static madness just use an private unsafe cell with one getter and setter.

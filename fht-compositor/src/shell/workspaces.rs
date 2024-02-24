@@ -15,13 +15,13 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::seat::WaylandFocus;
-use tween::{ExpoOut, Tween, Tweener};
+use tween::{Tween, Tweener};
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
 use crate::backend::render::AsGlowRenderer;
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
-use crate::config::CONFIG;
+use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
 use crate::utils::geometry::{PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt};
 use crate::utils::output::OutputExt;
 
@@ -219,28 +219,60 @@ impl WorkspaceSet {
                 // Focusing the next offset.
                 // For the active, how much should we *remove* from the current position
                 // For the target, how much should we add to the current position
-                let offset = (animation.current_offset * output_geo.size.w as f64).round() as i32;
-                (offset - output_geo.size.w, offset)
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from(((offset - output_geo.size.w), 0)),
+                            Point::from(((offset), 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.current_offset * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (offset - output_geo.size.h))),
+                            Point::from((0, (offset))),
+                        )
+                    }
+                }
             }
             WorkspaceSwitchDirection::Previous => {
                 // Focusing a previous workspace
                 // For the active, how much should we add to tyhe current position
                 // For the target, how much should we remove from the current position.
-                let offset = (animation.current_offset * output_geo.size.w as f64).round() as i32;
-                (-offset + output_geo.size.w, -offset)
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from((-offset + output_geo.size.w, 0)),
+                            Point::from((-offset, 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.current_offset * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (-offset + output_geo.size.h))),
+                            Point::from((0, (-offset))),
+                        )
+                    }
+                }
             }
         };
 
         elements.extend(active_elements.into_iter().filter_map(|element| {
-            let offset = Point::from((current_offset, 0));
-            let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
+            let relocate =
+                RelocateRenderElement::from_element(element, current_offset, Relocate::Relative);
             // FIXME: This makes the border look funky. Should go figure out why
             // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
             Some(WorkspaceSetRenderElement::Switching(relocate))
         }));
         elements.extend(target_elements.into_iter().filter_map(|element| {
-            let offset = Point::from((target_offset, 0));
-            let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
+            let relocate =
+                RelocateRenderElement::from_element(element, target_offset, Relocate::Relative);
             // FIXME: This makes the border look funky. Should go figure out why
             // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
             Some(WorkspaceSetRenderElement::Switching(relocate))
@@ -264,13 +296,16 @@ pub struct WorkspaceSwitchAnimation {
 
 impl WorkspaceSwitchAnimation {
     fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
-        let tween = Box::new(|delta, percent| ExpoOut.tween(delta, percent)) as Box<dyn Tween<f64>>;
+        // PERF: Uh, we won't speak about this.
+        let easing = CONFIG.animation.workspace_switch.easing;
+        let tween = Box::new(move |value_delta, percent| easing.tween(value_delta, percent))
+            as Box<dyn Tween<f64>>;
 
         // When going to the next workspace, the values describes the offset of the next workspace.
         // When going to the previous workspace, the values describe the offset of the current
         // workspace
 
-        let tweener = Tweener::new(1.0, 0.0, 400.0, tween);
+        let tweener = Tweener::new(1.0, 0.0, CONFIG.animation.workspace_switch.duration, tween);
 
         Self {
             tweener,

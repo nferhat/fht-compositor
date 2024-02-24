@@ -1,3 +1,4 @@
+mod animation;
 mod decoration;
 mod input;
 
@@ -5,6 +6,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use smithay::reexports::rustix::path::Arg;
 
+pub use self::animation::*;
 pub use self::decoration::*;
 pub use self::input::*;
 use crate::backend::render::BackendAllocator;
@@ -42,6 +44,9 @@ pub struct FhtConfig {
     #[serde(default)]
     pub decoration: DecorationConfig,
 
+    /// Different animations that fht-compositor provides you with.
+    pub animation: AnimationConfig,
+
     /// Configuration for the backend renderer.
     #[serde(default)]
     pub renderer: RenderConfig,
@@ -56,6 +61,7 @@ impl Default for FhtConfig {
             input: InputConfig::default(),
             general: GeneralConfig::default(),
             decoration: DecorationConfig::default(),
+            animation: AnimationConfig::default(),
             renderer: RenderConfig::default(),
         }
     }
