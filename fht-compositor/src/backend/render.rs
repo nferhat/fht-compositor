@@ -4,9 +4,6 @@ use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::utils::{
-    CropRenderElement, Relocate, RelocateRenderElement,
-};
 use smithay::backend::renderer::element::{AsRenderElements, Element, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
@@ -21,6 +18,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use super::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
+use crate::shell::workspaces::WorkspaceSetRenderElement;
 use crate::state::Fht;
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::output::OutputExt;
@@ -87,11 +85,12 @@ where
     CursorRenderElement<R>: RenderElement<R>,
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     Cursor(CursorRenderElement<R>),
     Egui(TextureRenderElement<GlesTexture>),
     Wayland(WaylandSurfaceRenderElement<R>),
-    WorkspaceSet(CropRenderElement<RelocateRenderElement<FhtWindowRenderElement<R>>>),
+    WorkspaceSet(WorkspaceSetRenderElement<R>),
 }
 
 impl<R> From<WaylandSurfaceRenderElement<R>> for FhtRenderElement<R>
@@ -103,6 +102,7 @@ where
 
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
         Self::Wayland(value)
@@ -117,6 +117,7 @@ where
     CursorRenderElement<R>: RenderElement<R>,
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     fn from(value: CursorRenderElement<R>) -> Self {
         Self::Cursor(value)
@@ -131,6 +132,7 @@ where
     CursorRenderElement<R>: RenderElement<R>,
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -310,9 +312,9 @@ where
     <R as Renderer>::TextureId: Texture + Clone + 'static,
 
     CursorRenderElement<R>: RenderElement<R>,
-
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     let mut elements = cursor_elements(state, renderer, output);
 
@@ -336,33 +338,26 @@ where
     }
 
     let output_scale = output.current_scale().fractional_scale();
-    let output_geo = output
-        .geometry()
-        .as_logical()
-        .to_physical_precise_round(output_scale);
-
-    let active = state.wset_for(output).active();
-    let has_fullscreen = active.fullscreen.is_some();
 
     let overlay_elements = layer_elements(renderer, output, Layer::Overlay);
     elements.extend(overlay_elements);
 
-    let mut window_elements = if has_fullscreen {
-        vec![]
-    } else {
+    let (has_fullscreen, wset_elements) =
+        state
+            .wset_for(output)
+            .render_elements(renderer, output_scale.into(), 1.0);
+
+    if !has_fullscreen {
         // Only render top layer shells if we dont have fullscreen elements
         // FIXME: This isn't good, since the fullscreen window may be transparent
-        layer_elements(renderer, output, Layer::Top)
+        elements.extend(layer_elements(renderer, output, Layer::Top))
     };
 
-    let active_elements = active.render_elements(renderer, output_scale.into(), 1.0);
-    window_elements.extend(active_elements.into_iter().filter_map(|e| {
-        let relocate = RelocateRenderElement::from_element(e, Point::default(), Relocate::Relative);
-        let crop = CropRenderElement::from_element(relocate, output_scale, output_geo)?;
-        Some(FhtRenderElement::WorkspaceSet(crop))
-    }));
-
-    elements.extend(window_elements);
+    elements.extend(
+        wset_elements
+            .into_iter()
+            .map(FhtRenderElement::WorkspaceSet),
+    );
 
     let background = layer_elements(renderer, output, Layer::Bottom)
         .into_iter()
@@ -383,9 +378,9 @@ where
     <R as Renderer>::TextureId: Texture + Clone + 'static,
 
     CursorRenderElement<R>: RenderElement<R>,
-
     FhtWindowRenderElement<R>: RenderElement<R>,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
 
@@ -440,6 +435,7 @@ where
     <R as Renderer>::TextureId: Clone + 'static,
     CursorRenderElement<R>: RenderElement<R>,
     FhtWindowRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
 {
     let mut cursor_guard = state.cursor_theme_manager.image_status.lock().unwrap();
     let mut elements = vec![];

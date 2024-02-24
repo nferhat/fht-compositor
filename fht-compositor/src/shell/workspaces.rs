@@ -1,27 +1,35 @@
 use std::cmp::min;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::RenderElement;
+use smithay::backend::renderer::element::utils::{
+    CropRenderElement, Relocate, RelocateRenderElement,
+};
+use smithay::backend::renderer::element::{Element, RenderElement};
+use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SpaceElement;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Scale};
+use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::seat::WaylandFocus;
+use tween::{ExpoOut, Tween, Tweener};
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
 use crate::backend::render::AsGlowRenderer;
+use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::CONFIG;
 use crate::utils::geometry::{PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt};
 use crate::utils::output::OutputExt;
 
-#[derive(Debug)]
 pub struct WorkspaceSet {
     pub(super) output: Output,
     pub workspaces: Vec<Workspace>,
-    active_idx: usize,
+    switch_animation: Option<WorkspaceSwitchAnimation>,
+    active_idx: AtomicUsize,
 }
 
 impl WorkspaceSet {
@@ -29,17 +37,43 @@ impl WorkspaceSet {
         Self {
             output: output.clone(),
             workspaces: (0..9).map(|_| Workspace::new(output.clone())).collect(),
-            active_idx: 0,
+            switch_animation: None,
+            active_idx: 0.into(),
         }
     }
 
     pub fn refresh(&mut self) {
-        self.workspaces_mut().for_each(Workspace::refresh)
+        let _ = self
+            .switch_animation
+            .take_if(|anim| anim.tweener.is_finished());
+        if let Some(animation) = self.switch_animation.as_mut() {
+            animation.advance();
+            if animation.tweener.is_finished() {
+                self.active_idx
+                    .store(animation.target_idx, Ordering::SeqCst);
+            }
+        }
+
+        self.workspaces_mut().for_each(Workspace::refresh);
     }
 
-    pub fn set_active_idx(&mut self, new_idx: usize) {
-        let new_idx = new_idx.clamp(0, 9);
-        self.active_idx = new_idx;
+    pub fn set_active_idx(&mut self, target_idx: usize) -> Option<FhtWindow> {
+        let target_idx = target_idx.clamp(0, 9);
+        let active_idx = self.active_idx.load(Ordering::SeqCst);
+        if target_idx == active_idx || self.switch_animation.is_some() {
+            return None;
+        }
+
+        self.switch_animation = Some(WorkspaceSwitchAnimation::new(
+            target_idx,
+            if target_idx > active_idx {
+                WorkspaceSwitchDirection::Next
+            } else {
+                WorkspaceSwitchDirection::Previous
+            },
+        ));
+
+        self.workspaces[target_idx].focused().cloned()
     }
 
     pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
@@ -51,11 +85,11 @@ impl WorkspaceSet {
     }
 
     pub fn active(&self) -> &Workspace {
-        &self.workspaces[self.active_idx]
+        &self.workspaces[self.active_idx.load(Ordering::SeqCst)]
     }
 
     pub fn active_mut(&mut self) -> &mut Workspace {
-        &mut self.workspaces[self.active_idx]
+        &mut self.workspaces[self.active_idx.load(Ordering::SeqCst)]
     }
 
     pub fn all_windows(&mut self) -> impl Iterator<Item = &FhtWindow> {
@@ -134,6 +168,276 @@ impl WorkspaceSet {
                 .cloned();
             window.map(|w| (w, ws))
         })
+    }
+
+    pub fn render_elements<R>(
+        &self,
+        renderer: &mut R,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: 'static,
+
+        FhtWindowRenderElement<R>: RenderElement<R>,
+        WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    {
+        let mut elements = vec![];
+        let active = self.active();
+        let output_geo: Rectangle<i32, Physical> = self
+            .output
+            .geometry()
+            .as_logical()
+            .to_physical_precise_round(scale);
+
+        if self.switch_animation.is_none() {
+            let active_elements = active.render_elements(renderer, scale, alpha);
+            elements.extend(
+                active_elements
+                    .into_iter()
+                    .map(WorkspaceSetRenderElement::Normal),
+            );
+
+            return (active.fullscreen.is_some(), elements);
+        }
+
+        let Some(animation) = self.switch_animation.as_ref() else {
+            unreachable!()
+        };
+        if animation.tweener.is_finished() {
+            self.active_idx
+                .store(animation.target_idx, Ordering::SeqCst);
+        }
+        let active_elements = active.render_elements(renderer, scale, alpha);
+        let target = &self.workspaces[animation.target_idx];
+        let target_elements = target.render_elements(renderer, scale, alpha);
+
+        let (current_offset, target_offset) = match animation.direction {
+            WorkspaceSwitchDirection::Next => {
+                // Focusing the next offset.
+                // For the active, how much should we *remove* from the current position
+                // For the target, how much should we add to the current position
+                let offset = (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                (offset - output_geo.size.w, offset)
+            }
+            WorkspaceSwitchDirection::Previous => {
+                // Focusing a previous workspace
+                // For the active, how much should we add to tyhe current position
+                // For the target, how much should we remove from the current position.
+                let offset = (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                (-offset + output_geo.size.w, -offset)
+            }
+        };
+
+        elements.extend(active_elements.into_iter().filter_map(|element| {
+            let offset = Point::from((current_offset, 0));
+            let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
+            let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(crop))
+        }));
+        elements.extend(target_elements.into_iter().filter_map(|element| {
+            let offset = Point::from((target_offset, 0));
+            let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
+            let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(crop))
+        }));
+
+        (
+            active.fullscreen.is_some() || target.fullscreen.is_some(),
+            elements,
+        )
+    }
+}
+
+struct WorkspaceSwitchAnimation {
+    // pub switch_animation: Option<(Tweener<f64, f64, Box<dyn Tween<f64>>>, Instant, usize, f64)>,
+    tweener: Tweener<f64, f64, Box<dyn Tween<f64>>>,
+    direction: WorkspaceSwitchDirection,
+    current_offset: f64,
+    started_at: Instant,
+    target_idx: usize,
+}
+
+impl WorkspaceSwitchAnimation {
+    pub fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
+        let tween = Box::new(|delta, percent| ExpoOut.tween(delta, percent)) as Box<dyn Tween<f64>>;
+
+        // When going to the next workspace, the values describes the offset of the next workspace.
+        // When going to the previous workspace, the values describe the offset of the current
+        // workspace
+
+        let tweener = Tweener::new(1.0, 0.0, 400.0, tween);
+
+        Self {
+            tweener,
+            direction,
+            current_offset: 0.0,
+            started_at: Instant::now(),
+            target_idx,
+        }
+    }
+
+    /// Advance the animation.
+    pub fn advance(&mut self) {
+        // Advance the tween by however much we need
+        // NOTE: The duration is in MILLISECONDS, and we should also prob add a blocker for
+        // animated clients.
+
+        self.current_offset = self
+            .tweener
+            .move_to(self.started_at.elapsed().as_millis() as f64);
+    }
+}
+
+enum WorkspaceSwitchDirection {
+    Next,
+    Previous,
+}
+
+#[derive(Debug)]
+pub enum WorkspaceSetRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem,
+    <R as Renderer>::TextureId: 'static,
+
+    FhtWindowRenderElement<R>: RenderElement<R>,
+    WaylandSurfaceRenderElement<R>: RenderElement<R>,
+{
+    Normal(FhtWindowRenderElement<R>),
+    Switching(CropRenderElement<RelocateRenderElement<FhtWindowRenderElement<R>>>),
+}
+
+impl<R> Element for WorkspaceSetRenderElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+
+    FhtWindowRenderElement<R>: RenderElement<R>,
+    WaylandSurfaceRenderElement<R>: RenderElement<R>,
+{
+    fn id(&self) -> &smithay::backend::renderer::element::Id {
+        match self {
+            Self::Normal(e) => e.id(),
+            Self::Switching(e) => e.id(),
+        }
+    }
+
+    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+        match self {
+            Self::Normal(e) => e.current_commit(),
+            Self::Switching(e) => e.current_commit(),
+        }
+    }
+
+    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
+        match self {
+            Self::Normal(e) => e.src(),
+            Self::Switching(e) => e.src(),
+        }
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
+        match self {
+            Self::Normal(e) => e.geometry(scale),
+            Self::Switching(e) => e.geometry(scale),
+        }
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
+        match self {
+            Self::Normal(e) => e.location(scale),
+            Self::Switching(e) => e.location(scale),
+        }
+    }
+
+    fn transform(&self) -> smithay::utils::Transform {
+        match self {
+            Self::Normal(e) => e.transform(),
+            Self::Switching(e) => e.transform(),
+        }
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
+    ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+        match self {
+            Self::Normal(e) => e.damage_since(scale, commit),
+            Self::Switching(e) => e.damage_since(scale, commit),
+        }
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+        match self {
+            Self::Normal(e) => e.opaque_regions(scale),
+            Self::Switching(e) => e.opaque_regions(scale),
+        }
+    }
+
+    fn alpha(&self) -> f32 {
+        match self {
+            Self::Normal(e) => e.alpha(),
+            Self::Switching(e) => e.alpha(),
+        }
+    }
+
+    fn kind(&self) -> smithay::backend::renderer::element::Kind {
+        match self {
+            Self::Normal(e) => e.kind(),
+            Self::Switching(e) => e.kind(),
+        }
+    }
+}
+
+impl RenderElement<GlowRenderer> for WorkspaceSetRenderElement<GlowRenderer> {
+    fn draw(
+        &self,
+        frame: &mut GlowFrame,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, smithay::utils::Physical>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
+        match self {
+            Self::Normal(e) => e.draw(frame, src, dst, damage),
+            Self::Switching(e) => e.draw(frame, src, dst, damage),
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut GlowRenderer,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        match self {
+            Self::Normal(e) => e.underlying_storage(renderer),
+            Self::Switching(e) => e.underlying_storage(renderer),
+        }
+    }
+}
+
+impl<'a> RenderElement<UdevRenderer<'a>> for WorkspaceSetRenderElement<UdevRenderer<'a>> {
+    fn draw(
+        &self,
+        frame: &mut UdevFrame<'a, '_>,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, smithay::utils::Physical>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+    ) -> Result<(), UdevRenderError<'a>> {
+        match self {
+            Self::Normal(e) => e.draw(frame, src, dst, damage),
+            Self::Switching(e) => e.draw(frame, src, dst, damage),
+        }
+    }
+
+    fn underlying_storage(
+        &self,
+        renderer: &mut UdevRenderer<'a>,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        match self {
+            Self::Normal(e) => e.underlying_storage(renderer),
+            Self::Switching(e) => e.underlying_storage(renderer),
+        }
     }
 }
 

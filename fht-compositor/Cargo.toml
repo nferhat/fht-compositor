@@ -29,6 +29,7 @@ wayland-scanner = "0.31.0"
 tracing-appender = "0.2.3"
 profiling = "1.0.14"
 puffin_http = { version = "0.16.0", optional = true }
+tween = "2.0.2"
 
 [features]
 default = ["egl", "x11_backend", "udev_backend", "xwayland", "profile"]
