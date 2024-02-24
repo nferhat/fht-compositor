@@ -22,7 +22,7 @@ pub use self::focus_target::FocusTarget;
 use self::grabs::MoveSurfaceGrab;
 pub use self::window::FhtWindow;
 pub use self::workspaces::FullscreenSurface;
-use self::workspaces::Workspace;
+use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
 use crate::utils::geometry::{PointExt, PointGlobalExt, RectGlobalExt};
@@ -162,6 +162,34 @@ impl Fht {
         self.outputs()
             .filter(move |o| o.geometry().intersection(window_geo).is_some())
             .collect()
+    }
+
+    /// Find every window that is curently displayed on this output
+    #[profiling::function]
+    pub fn visible_windows_for_output(&self, output: &Output) -> Vec<&FhtWindow> {
+        let wset = self.wset_for(output);
+
+        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = wset.switch_animation.as_ref() {
+            let active = wset.active();
+            let target = &wset.workspaces[*target_idx];
+            if let Some(fullscreen) = active
+                .fullscreen
+                .as_ref()
+                .map(|f| &f.inner)
+                .or_else(|| target.fullscreen.as_ref().map(|f| &f.inner))
+            {
+                return vec![fullscreen];
+            } else {
+                return active.windows.iter().chain(target.windows.iter()).collect();
+            }
+        } else {
+            let active = wset.active();
+            if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
+                return vec![fullscreen];
+            } else {
+                return active.windows.iter().collect();
+            }
+        }
     }
 
     /// Map a pending window (if found)

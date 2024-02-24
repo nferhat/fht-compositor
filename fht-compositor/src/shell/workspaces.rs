@@ -28,7 +28,7 @@ use crate::utils::output::OutputExt;
 pub struct WorkspaceSet {
     pub(super) output: Output,
     pub workspaces: Vec<Workspace>,
-    switch_animation: Option<WorkspaceSwitchAnimation>,
+    pub switch_animation: Option<WorkspaceSwitchAnimation>,
     active_idx: AtomicUsize,
 }
 
@@ -170,6 +170,7 @@ impl WorkspaceSet {
         })
     }
 
+    #[profiling::function]
     pub fn render_elements<R>(
         &self,
         renderer: &mut R,
@@ -250,17 +251,17 @@ impl WorkspaceSet {
     }
 }
 
-struct WorkspaceSwitchAnimation {
+pub struct WorkspaceSwitchAnimation {
     // pub switch_animation: Option<(Tweener<f64, f64, Box<dyn Tween<f64>>>, Instant, usize, f64)>,
     tweener: Tweener<f64, f64, Box<dyn Tween<f64>>>,
     direction: WorkspaceSwitchDirection,
     current_offset: f64,
     started_at: Instant,
-    target_idx: usize,
+    pub target_idx: usize,
 }
 
 impl WorkspaceSwitchAnimation {
-    pub fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
+    fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
         let tween = Box::new(|delta, percent| ExpoOut.tween(delta, percent)) as Box<dyn Tween<f64>>;
 
         // When going to the next workspace, the values describes the offset of the next workspace.
@@ -279,7 +280,8 @@ impl WorkspaceSwitchAnimation {
     }
 
     /// Advance the animation.
-    pub fn advance(&mut self) {
+    #[profiling::function]
+    fn advance(&mut self) {
         // Advance the tween by however much we need
         // NOTE: The duration is in MILLISECONDS, and we should also prob add a blocker for
         // animated clients.

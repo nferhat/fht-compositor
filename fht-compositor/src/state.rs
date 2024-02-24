@@ -442,7 +442,7 @@ impl Fht {
         let time = self.clock.now();
         let throttle = Some(std::time::Duration::from_secs(1));
 
-        for window in &self.wset_for(output).active().windows {
+        for window in self.visible_windows_for_output(output) {
             window.with_surfaces(|surface, states| {
                 let primary_scanout_output = update_surface_primary_scanout_output(
                     surface,
