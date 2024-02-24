@@ -128,25 +128,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
 
     for cmd in &CONFIG.autostart {
-        let mut command = std::process::Command::new("sh");
-        // Disable all I/O
-        command.stdin(Stdio::null());
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
-        // Pass in our actual command
-        command.arg("-c");
-        command.arg(cmd);
-
-        let _ = std::thread::Builder::new()
-            .name(format!("Command spawner for {cmd}"))
-            .spawn(move || match command.spawn() {
-                Ok(mut child) => {
-                    let _res = child.wait();
-                }
-                Err(err) => {
-                    warn!(?err, ?command, "Failed to spawn command!");
-                }
-            });
+        utils::spawn(cmd.clone());
     }
 
     event_loop

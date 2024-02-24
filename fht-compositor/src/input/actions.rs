@@ -1,5 +1,3 @@
-use std::process::Stdio;
-
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
@@ -229,31 +227,7 @@ impl State {
                 .stop
                 .store(true, std::sync::atomic::Ordering::SeqCst),
             KeyAction::ReloadConfig => self.reload_config(),
-            KeyAction::RunCommand(cmd) => {
-                let mut command = std::process::Command::new("/bin/sh");
-
-                // Disable all I/O
-                command.stdin(Stdio::null());
-                command.stdout(Stdio::null());
-                command.stderr(Stdio::null());
-
-                // Pass in our actual command
-                command.arg("-c");
-                command.arg(&cmd);
-
-                // Since we dont export this variable.
-                command.env("WAYLAND_DISPLAY", &self.fht.socket_name);
-                let _ = std::thread::Builder::new()
-                    .name(format!("Command spawner for {cmd}"))
-                    .spawn(move || match command.spawn() {
-                        Ok(mut child) => {
-                            let _res = child.wait();
-                        }
-                        Err(err) => {
-                            warn!(?err, ?command, "Failed to spawn command!");
-                        }
-                    });
-            }
+            KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
             KeyAction::SelectNextLayout => active.select_next_layout(),
             KeyAction::SelectPreviousLayout => active.select_previous_layout(),
             KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
