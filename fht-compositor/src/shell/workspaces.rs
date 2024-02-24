@@ -234,14 +234,16 @@ impl WorkspaceSet {
         elements.extend(active_elements.into_iter().filter_map(|element| {
             let offset = Point::from((current_offset, 0));
             let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
-            let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
-            Some(WorkspaceSetRenderElement::Switching(crop))
+            // FIXME: This makes the border look funky. Should go figure out why
+            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(relocate))
         }));
         elements.extend(target_elements.into_iter().filter_map(|element| {
             let offset = Point::from((target_offset, 0));
             let relocate = RelocateRenderElement::from_element(element, offset, Relocate::Relative);
-            let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
-            Some(WorkspaceSetRenderElement::Switching(crop))
+            // FIXME: This makes the border look funky. Should go figure out why
+            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(relocate))
         }));
 
         (
@@ -307,7 +309,9 @@ where
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
 {
     Normal(FhtWindowRenderElement<R>),
-    Switching(CropRenderElement<RelocateRenderElement<FhtWindowRenderElement<R>>>),
+    // FIXME: This makes the border look funky. Should go figure out why
+    // Switching(CropRenderElement<RelocateRenderElement<FhtWindowRenderElement<R>>>),
+    Switching(RelocateRenderElement<FhtWindowRenderElement<R>>),
 }
 
 impl<R> Element for WorkspaceSetRenderElement<R>
