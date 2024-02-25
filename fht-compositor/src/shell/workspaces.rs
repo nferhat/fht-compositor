@@ -20,6 +20,7 @@ use tween::{Tween, Tweener};
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
 use crate::backend::render::AsGlowRenderer;
+#[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
 use crate::utils::geometry::{PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt};
@@ -457,6 +458,7 @@ impl RenderElement<GlowRenderer> for WorkspaceSetRenderElement<GlowRenderer> {
     }
 }
 
+#[cfg(feature = "udev_backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for WorkspaceSetRenderElement<UdevRenderer<'a>> {
     fn draw(
         &self,
