@@ -873,10 +873,8 @@ impl FhtWindow {
             return render_elements;
         };
 
-        let location = self
-            .render_location()
-            .as_logical()
-            .to_physical_precise_round(scale);
+        let location = self.render_location().as_logical();
+        let p_location = location.to_physical_precise_round(scale);
 
         let popup_render_elements = PopupManager::popups_for_surface(&wl_surface)
             .flat_map(|(p, offset)| {
@@ -886,7 +884,7 @@ impl FhtWindow {
                 render_elements_from_surface_tree(
                     renderer,
                     p.wl_surface(),
-                    location + offset,
+                    p_location + offset,
                     scale,
                     alpha,
                     Kind::Unspecified,
@@ -911,10 +909,7 @@ impl FhtWindow {
                 scale.x.max(scale.y), // WARN: This may not be accurate.
                 alpha,
                 &wl_surface,
-                Rectangle::from_loc_and_size(
-                    self.global_geometry().loc.to_local(output),
-                    self.geometry().size.as_local(),
-                ),
+                Rectangle::from_loc_and_size(location.as_local(), self.geometry().size.as_local()),
                 settings,
             );
             render_elements.push(FhtWindowRenderElement::Shader(element));
@@ -923,7 +918,7 @@ impl FhtWindow {
         let window_render_elements = render_elements_from_surface_tree(
             renderer,
             &wl_surface,
-            location,
+            p_location,
             scale,
             alpha,
             Kind::Unspecified,
