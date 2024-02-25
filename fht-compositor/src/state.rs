@@ -327,6 +327,7 @@ impl Fht {
         // TODO: Add output management config + wlr_output_management protocol.
         let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
         trace!(?x, y = 0, "Using fallback output location.");
+        output.change_current_state(None, None, None, Some((x, 0).into()));
 
         let workspace_set = WorkspaceSet::new(output.clone());
         self.workspaces.insert(output.clone(), workspace_set);
