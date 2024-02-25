@@ -15,3 +15,16 @@ default-features = false
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/smithay/smithay"
 rev = "91e61f1"
+
+[build]
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+    "-Z", "threads=8"
+]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+
+[profile.dev]
+opt-level = 3
