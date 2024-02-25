@@ -45,6 +45,7 @@ pub struct FhtConfig {
     pub decoration: DecorationConfig,
 
     /// Different animations that fht-compositor provides you with.
+    #[serde(default)]
     pub animation: AnimationConfig,
 
     /// Configuration for the backend renderer.
