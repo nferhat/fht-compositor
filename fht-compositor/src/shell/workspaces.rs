@@ -708,14 +708,15 @@ impl Workspace {
             window.set_geometry(output_geo);
         }
 
-        let output_geo = layer_map_for_output(&self.output)
+        let usable_geo = layer_map_for_output(&self.output)
             .non_exclusive_zone()
-            .as_local();
-        let mut maximized_geo = output_geo;
+            .as_local()
+            .to_global(&self.output);
+        let mut maximized_geo = usable_geo;
         maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
         maximized_geo.loc += (outer_gaps, outer_gaps).into();
         for window in maximized_windows {
-            window.set_geometry(maximized_geo.to_global(&self.output));
+            window.set_geometry(maximized_geo);
             if let Some(toplevel) = window.0.toplevel() {
                 toplevel.send_pending_configure();
             }
@@ -766,13 +767,10 @@ impl Workspace {
                             (master_geo.size.h as f32 / master_factor).round() as i32;
                         master_height += ((idx as f32) < master_rest) as i32;
 
-                        window.set_geometry(
-                            Rectangle::from_loc_and_size(
-                                master_geo.loc,
-                                (master_geo.size.w, master_height),
-                            )
-                            .to_global(&self.output),
-                        );
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height),
+                        ));
 
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
@@ -780,13 +778,10 @@ impl Workspace {
                             (stack_geo.size.h as f32 / stack_factor).round() as i32;
                         stack_height += ((idx as f32) < stack_rest) as i32;
 
-                        window.set_geometry(
-                            Rectangle::from_loc_and_size(
-                                stack_geo.loc,
-                                (stack_geo.size.w, stack_height),
-                            )
-                            .to_global(&self.output),
-                        );
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            stack_geo.loc,
+                            (stack_geo.size.w, stack_height),
+                        ));
 
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
@@ -836,13 +831,10 @@ impl Workspace {
                             (master_geo.size.w as f32 / master_factor).round() as i32;
                         master_width += ((idx as f32) < master_rest) as i32;
 
-                        window.set_geometry(
-                            Rectangle::from_loc_and_size(
-                                master_geo.loc,
-                                (master_width, master_geo.size.h),
-                            )
-                            .to_global(&self.output),
-                        );
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            master_geo.loc,
+                            (master_width, master_geo.size.h),
+                        ));
 
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
@@ -850,13 +842,10 @@ impl Workspace {
                             (stack_geo.size.w as f32 / stack_factor).round() as i32;
                         stack_width += ((idx as f32) < stack_rest) as i32;
 
-                        window.set_geometry(
-                            Rectangle::from_loc_and_size(
-                                stack_geo.loc,
-                                (stack_width, stack_geo.size.h),
-                            )
-                            .to_global(&self.output),
-                        );
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            stack_geo.loc,
+                            (stack_width, stack_geo.size.h),
+                        ));
 
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
