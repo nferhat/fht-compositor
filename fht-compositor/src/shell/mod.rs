@@ -157,16 +157,18 @@ impl Fht {
     }
 
     /// Find every output where this window (and it's subsurfaces) is displayed.
-    pub fn visible_outputs_for_window(&self, window: &FhtWindow) -> Vec<&Output> {
+    pub fn visible_outputs_for_window(&self, window: &FhtWindow) -> impl Iterator<Item = &Output> {
         let window_geo = window.global_geometry();
         self.outputs()
             .filter(move |o| o.geometry().intersection(window_geo).is_some())
-            .collect()
     }
 
     /// Find every window that is curently displayed on this output
     #[profiling::function]
-    pub fn visible_windows_for_output(&self, output: &Output) -> Vec<&FhtWindow> {
+    pub fn visible_windows_for_output(
+        &self,
+        output: &Output,
+    ) -> Box<dyn Iterator<Item = &FhtWindow> + '_> {
         let wset = self.wset_for(output);
 
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = wset.switch_animation.as_ref() {
@@ -178,16 +180,19 @@ impl Fht {
                 .map(|f| &f.inner)
                 .or_else(|| target.fullscreen.as_ref().map(|f| &f.inner))
             {
-                return vec![fullscreen];
+                return Box::new(std::iter::once(fullscreen))
+                    as Box<dyn Iterator<Item = &FhtWindow>>;
             } else {
-                return active.windows.iter().chain(target.windows.iter()).collect();
+                return Box::new(active.windows.iter().chain(target.windows.iter()))
+                    as Box<dyn Iterator<Item = &FhtWindow>>;
             }
         } else {
             let active = wset.active();
             if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
-                return vec![fullscreen];
+                return Box::new(std::iter::once(fullscreen))
+                    as Box<dyn Iterator<Item = &FhtWindow>>;
             } else {
-                return active.windows.iter().collect();
+                return Box::new(active.windows.iter()) as Box<dyn Iterator<Item = &FhtWindow>>;
             }
         }
     }
@@ -269,11 +274,11 @@ impl Fht {
         };
 
         let mut outputs_for_window = self.visible_outputs_for_window(window);
-        if outputs_for_window.is_empty() {
+        if outputs_for_window.next().is_none() {
             return;
         }
 
-        let mut outputs_geo = outputs_for_window.pop().unwrap().geometry();
+        let mut outputs_geo = outputs_for_window.next().unwrap().geometry();
         for output in outputs_for_window {
             outputs_geo = outputs_geo.merge(output.geometry());
         }
