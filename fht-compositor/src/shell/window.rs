@@ -36,11 +36,11 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size};
 use smithay::wayland::compositor::{
-    with_surface_tree_downward, SurfaceData as WlSurfaceData, TraversalAction,
+    with_states, with_surface_tree_downward, SurfaceData as WlSurfaceData, TraversalAction,
 };
 use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::ToplevelSurface;
+use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 #[cfg(feature = "xwayland")]
 use smithay::xwayland::X11Surface;
 
@@ -268,6 +268,44 @@ impl FhtWindow {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| s.bounds = bounds)
         }
+    }
+
+    pub fn app_id(&self) -> String {
+        #[cfg(feature = "xwayland")]
+        if let Some(x11_surface) = self.0.x11_surface() {
+            return x11_surface.class();
+        }
+
+        with_states(self.wl_surface().as_ref().unwrap(), |states| {
+            states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .app_id
+                .clone()
+                .unwrap_or_default()
+        })
+    }
+
+    pub fn title(&self) -> String {
+        #[cfg(feature = "xwayland")]
+        if let Some(x11_surface) = self.0.x11_surface() {
+            return x11_surface.title();
+        }
+
+        with_states(self.wl_surface().as_ref().unwrap(), |states| {
+            states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .title
+                .clone()
+                .unwrap_or_default()
+        })
     }
 
     pub fn get_z_index(&self) -> u32 {

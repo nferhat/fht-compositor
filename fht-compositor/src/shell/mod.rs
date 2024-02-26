@@ -16,7 +16,7 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Serial};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
-use smithay::wayland::shell::xdg::PopupSurface;
+use smithay::wayland::shell::xdg::{PopupSurface, XdgShellHandler};
 
 pub use self::focus_target::FocusTarget;
 use self::grabs::MoveSurfaceGrab;
@@ -205,26 +205,30 @@ impl Fht {
         };
 
         let (window, mut output) = self.pending_windows.remove(idx);
-        // TODO: Implement this in user config
-        let dummy_settings = WindowMapSettings {
-            floating: false,
-            fullscreen: false,
-            output: None,
-            workspace: None,
-        };
-        window.set_tiled(!dummy_settings.floating);
-
-        let client = self
-            .display_handle
-            .get_client(window.wl_surface().unwrap().id())
-            .unwrap();
-        let mut wl_output = None;
-        for o in output.client_outputs(&client) {
-            wl_output = Some(o);
+        let workspace_idx = self
+            .wset_for(&output)
+            .active_idx
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let map_settings = CONFIG
+            .rules
+            .iter()
+            .find(|(rules, _)| rules.iter().any(|r| r.matches(&window, workspace_idx)))
+            .map(|(_, settings)| settings.clone())
+            .unwrap_or_default();
+        if map_settings.floating {
+            window.set_tiled(false);
+            if map_settings.centered {
+                let mut geo = window.global_geometry();
+                let output_geo = output.geometry();
+                geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
+                geo.loc -= geo.size.downscale(2).to_point();
+                window.set_geometry(geo);
+            }
+        } else {
+            window.set_tiled(true);
         }
-        window.set_fullscreen(dummy_settings.fullscreen, wl_output);
 
-        if let Some(target_output) = dummy_settings
+        if let Some(target_output) = map_settings
             .output
             .and_then(|name| self.outputs().find(|o| o.name() == name))
             .cloned()
@@ -233,7 +237,7 @@ impl Fht {
         }
 
         let wset = self.wset_mut_for(&output);
-        let workspace = match dummy_settings.workspace {
+        let workspace = match map_settings.workspace {
             Some(idx) => {
                 let idx = idx.clamp(0, 8);
                 &mut wset.workspaces[idx]
@@ -256,6 +260,15 @@ impl Fht {
         }
 
         workspace.insert_window(window.clone());
+        if map_settings.fullscreen {
+            workspace.fullscreen_window(&window);
+        }
+        if map_settings.floating {
+            // I assume you want to see the window when it's floating, above existing tiled
+            // windows.
+            workspace.raise_window(&window);
+        }
+
         if CONFIG.general.focus_new_windows {
             self.focus_state.focus_target = Some(window.into());
         }
@@ -362,16 +375,4 @@ impl State {
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
-}
-
-/// Initial settings/state for a window when mapping it
-struct WindowMapSettings {
-    /// Should the window be floating?
-    floating: bool,
-    /// Should the window be fullscreen?
-    fullscreen: bool,
-    /// On which output should we map the window?
-    output: Option<String>,
-    /// On which specific workspace of the output should we map the window?
-    workspace: Option<usize>,
 }

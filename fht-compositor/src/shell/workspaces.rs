@@ -30,7 +30,7 @@ pub struct WorkspaceSet {
     pub(super) output: Output,
     pub workspaces: Vec<Workspace>,
     pub switch_animation: Option<WorkspaceSwitchAnimation>,
-    active_idx: AtomicUsize,
+    pub(super) active_idx: AtomicUsize,
 }
 
 impl WorkspaceSet {

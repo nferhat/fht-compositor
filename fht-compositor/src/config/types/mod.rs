@@ -1,6 +1,9 @@
 mod animation;
 mod decoration;
 mod input;
+mod rules;
+
+use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -9,6 +12,7 @@ use smithay::reexports::rustix::path::Arg;
 pub use self::animation::*;
 pub use self::decoration::*;
 pub use self::input::*;
+pub use self::rules::*;
 use crate::backend::render::BackendAllocator;
 use crate::input::{KeyAction, KeyPattern, MouseAction, MousePattern};
 
@@ -48,6 +52,10 @@ pub struct FhtConfig {
     #[serde(default)]
     pub animation: AnimationConfig,
 
+    /// Window rules.
+    #[serde(default)]
+    pub rules: HashMap<Vec<WindowRulePattern>, WindowMapSettings>,
+
     /// Configuration for the backend renderer.
     #[serde(default)]
     pub renderer: RenderConfig,
@@ -63,6 +71,7 @@ impl Default for FhtConfig {
             general: GeneralConfig::default(),
             decoration: DecorationConfig::default(),
             animation: AnimationConfig::default(),
+            rules: HashMap::new(),
             renderer: RenderConfig::default(),
         }
     }
