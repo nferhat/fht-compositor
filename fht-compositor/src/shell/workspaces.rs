@@ -966,17 +966,8 @@ impl Workspace {
         FhtWindowRenderElement<R>: RenderElement<R>,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = vec![];
-
         if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            elements.extend(inner.render_elements(
-                renderer,
-                scale,
-                alpha,
-                &self.output,
-                false,
-                true,
-            ));
+            return inner.render_elements(renderer, scale, alpha, false, true);
         }
 
         let mut windows = self
@@ -988,11 +979,12 @@ impl Workspace {
         windows.sort_unstable_by(|a, b| a.1.get_z_index().cmp(&b.1.get_z_index()));
         windows.reverse();
 
-        elements.extend(windows.into_iter().flat_map(|(is_focused, window)| {
-            window.render_elements(renderer, scale, alpha, &self.output, is_focused, false)
-        }));
-
-        elements
+        windows
+            .into_iter()
+            .flat_map(|(is_focused, w)| {
+                w.render_elements(renderer, scale, alpha, is_focused, false)
+            })
+            .collect()
     }
 }
 

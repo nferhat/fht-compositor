@@ -722,23 +722,33 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
         match self {
             Self::Toplevel(e) => {
-                if e.opaque_regions(scale).is_empty() {
-                    return vec![];
-                }
-                let radius = CONFIG.decoration.border.radius as f64;
-                let size = e.geometry(scale).size.to_f64();
-                vec![
-                    Rectangle::<f64, Physical>::from_extemities(
-                        (0.0, radius),
-                        (size.w, size.h - radius),
-                    )
-                    .to_i32_up(),
-                    Rectangle::<f64, Physical>::from_extemities(
-                        (radius, 0.0),
-                        (size.w - radius, size.h),
-                    )
-                    .to_i32_up(),
-                ]
+                // PERF: Write OR code.
+                vec![]
+                // let or = e.opaque_regions(scale);
+                // if or.is_empty() {
+                //     return or;
+                // }
+                // let or = or
+                //     .into_iter()
+                //     .fold(Rectangle::default(), |acc, r| acc.merge(r));
+                // let radius = CONFIG.decoration.border.radius as f64;
+                // let size = e.geometry(scale).size.to_f64();
+                // vec![
+                //     Rectangle::<f64, Physical>::from_extemities(
+                //         (0.0, radius),
+                //         (size.w, size.h - radius),
+                //     )
+                //     .to_i32_up()
+                //     .intersection(or)
+                //     .unwrap_or_default(),
+                //     Rectangle::<f64, Physical>::from_extemities(
+                //         (radius, 0.0),
+                //         (size.w - radius, size.h),
+                //     )
+                //     .to_i32_up()
+                //     .intersection(or)
+                //     .unwrap_or_default(),
+                // ]
             }
             Self::Subsurface(e) => e.opaque_regions(scale),
             Self::Shader(e) => e.opaque_regions(scale),
@@ -859,7 +869,6 @@ impl FhtWindow {
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
-        output: &Output,
         is_focused: bool,
         skip_border: bool,
     ) -> Vec<FhtWindowRenderElement<R>>
@@ -873,8 +882,11 @@ impl FhtWindow {
             return render_elements;
         };
 
-        let location = self.render_location().as_logical();
-        let p_location = location.to_physical_precise_round(scale);
+        let location = self.global_geometry().loc.as_logical();
+        let render_location = self
+            .render_location()
+            .as_logical()
+            .to_physical_precise_round(scale);
 
         let popup_render_elements = PopupManager::popups_for_surface(&wl_surface)
             .flat_map(|(p, offset)| {
@@ -884,7 +896,7 @@ impl FhtWindow {
                 render_elements_from_surface_tree(
                     renderer,
                     p.wl_surface(),
-                    p_location + offset,
+                    render_location + offset,
                     scale,
                     alpha,
                     Kind::Unspecified,
@@ -918,7 +930,7 @@ impl FhtWindow {
         let window_render_elements = render_elements_from_surface_tree(
             renderer,
             &wl_surface,
-            p_location,
+            render_location,
             scale,
             alpha,
             Kind::Unspecified,
