@@ -330,13 +330,17 @@ impl State {
                 };
             }
             KeyAction::SendFocusedWindowToWorkspace(idx) => {
-                dbg!("hi");
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
                 let window = active.remove_window(&window).unwrap();
+                let new_focus = active.focused().cloned();
                 let idx = idx.clamp(0, 9);
                 wset.workspaces[idx].insert_window(window);
+
+                if let Some(window) = new_focus {
+                    self.fht.focus_state.focus_target = Some(window.into())
+                }
             }
 
             _ => {}

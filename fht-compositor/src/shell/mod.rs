@@ -242,7 +242,15 @@ impl Fht {
                 let idx = idx.clamp(0, 8);
                 &mut wset.workspaces[idx]
             }
-            None => wset.active_mut(),
+            None => {
+                if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
+                    wset.switch_animation.as_ref()
+                {
+                    &mut wset.workspaces[*target_idx]
+                } else {
+                    wset.active_mut()
+                }
+            }
         };
 
         // Fullscreening logic in each workspace:
@@ -291,7 +299,10 @@ impl Fht {
             return;
         }
 
-        let mut outputs_geo = outputs_for_window.next().unwrap().geometry();
+        let mut outputs_geo = outputs_for_window
+            .next()
+            .unwrap_or_else(|| self.outputs().next().unwrap())
+            .geometry();
         for output in outputs_for_window {
             outputs_geo = outputs_geo.merge(output.geometry());
         }

@@ -595,6 +595,7 @@ impl Workspace {
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
         window.output_leave(&self.output);
         window.set_bounds(None);
+        self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
 
         self.refresh_window_geometries();
         Some(window)
@@ -687,6 +688,7 @@ impl Workspace {
             inner: window,
             last_known_idx: idx,
         });
+        self.focused_window_idx = self.focused_window_idx.saturating_sub(1);
         self.refresh_window_geometries();
     }
 
