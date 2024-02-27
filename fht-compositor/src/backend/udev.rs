@@ -773,6 +773,7 @@ impl UdevData {
     }
 }
 
+#[profiling::function]
 fn render_surface(
     surface: &mut Surface,
     gpu_manager: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
@@ -805,6 +806,7 @@ fn render_surface(
         .get::<PendingScreencopy>()
         .and_then(|scpy| scpy.borrow_mut().take())
     {
+        profiling::scope!("PendingScreencopy");
         // Mark entire buffer as damaged.
         let region = screencopy.region();
         if !res.is_empty {
