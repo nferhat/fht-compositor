@@ -280,6 +280,12 @@ impl Fht {
         }
 
         if CONFIG.general.focus_new_windows {
+            if CONFIG.general.cursor_warps {
+                let window_geo = window.global_geometry();
+                let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                self.loop_handle
+                    .insert_idle(move |state| state.move_pointer(center.to_f64()));
+            }
             self.focus_state.focus_target = Some(window.into());
         }
     }

@@ -333,12 +333,14 @@ impl Fht {
         self.workspaces.insert(output.clone(), workspace_set);
 
         // Focus output now.
-        let output_geo = output.geometry();
-        let center = output_geo.loc + output_geo.size.downscale(2).to_point();
+        if CONFIG.general.cursor_warps {
+            let output_geo = output.geometry();
+            let center = output_geo.loc + output_geo.size.downscale(2).to_point();
+            self.loop_handle.insert_idle(move |state| {
+                state.move_pointer(center.to_f64());
+            });
+        }
         self.focus_state.output = Some(output);
-        self.loop_handle.insert_idle(move |state| {
-            state.move_pointer(center.to_f64());
-        });
     }
 
     /// Unregister an output from the wayland state.

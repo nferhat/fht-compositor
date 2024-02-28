@@ -268,7 +268,7 @@ impl State {
             KeyAction::FocusNextWindow => {
                 let new_focus = active.focus_next_window().cloned();
                 if let Some(window) = new_focus {
-                    if CONFIG.general.warp_window_on_focus {
+                    if CONFIG.general.cursor_warps {
                         let window_geo = window.global_geometry();
                         let center = window_geo.loc + window_geo.size.downscale(2).to_point();
                         self.move_pointer(center.to_f64())
@@ -279,7 +279,7 @@ impl State {
             KeyAction::FocusPreviousWindow => {
                 let new_focus = active.focus_previous_window().cloned();
                 if let Some(window) = new_focus {
-                    if CONFIG.general.warp_window_on_focus {
+                    if CONFIG.general.cursor_warps {
                         let window_geo = window.global_geometry();
                         let center = window_geo.loc + window_geo.size.downscale(2).to_point();
                         self.fht.focus_state.focus_target = Some(window.into());
@@ -290,7 +290,7 @@ impl State {
             KeyAction::SwapWithNextWindow => {
                 active.swap_with_next_window();
                 if let Some(window) = active.focused().cloned() {
-                    if CONFIG.general.warp_window_on_focus {
+                    if CONFIG.general.cursor_warps {
                         let window_geo = window.global_geometry();
                         let center = window_geo.loc + window_geo.size.downscale(2).to_point();
                         self.move_pointer(center.to_f64())
@@ -301,7 +301,7 @@ impl State {
             KeyAction::SwapWithPreviousWindow => {
                 active.swap_with_previous_window();
                 if let Some(window) = active.focused().cloned() {
-                    if CONFIG.general.warp_window_on_focus {
+                    if CONFIG.general.cursor_warps {
                         let window_geo = window.global_geometry();
                         let center = window_geo.loc + window_geo.size.downscale(2).to_point();
                         self.move_pointer(center.to_f64())

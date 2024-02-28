@@ -86,7 +86,7 @@ pub struct GeneralConfig {
     ///
     /// NOTE: This doesn't work on the x11 backend.
     #[serde(default = "default_true")]
-    pub warp_window_on_focus: bool,
+    pub cursor_warps: bool,
 
     /// Should new windows be focused automatically
     #[serde(default = "default_true")]
