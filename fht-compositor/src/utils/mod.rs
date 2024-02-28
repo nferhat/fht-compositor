@@ -2,6 +2,7 @@ use std::mem::MaybeUninit;
 use std::os::unix::process::CommandExt;
 use std::process::Stdio;
 
+pub mod animation;
 pub mod drm;
 pub mod geometry;
 pub mod output;

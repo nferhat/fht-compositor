@@ -1,11 +1,9 @@
 use std::cmp::min;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::Duration;
 
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::utils::{
-    CropRenderElement, Relocate, RelocateRenderElement,
-};
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, RenderElement};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
@@ -15,7 +13,6 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::seat::WaylandFocus;
-use tween::{Tween, Tweener};
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
@@ -23,6 +20,7 @@ use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
+use crate::utils::animation::Animation;
 use crate::utils::geometry::{PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt};
 use crate::utils::output::OutputExt;
 
@@ -44,17 +42,6 @@ impl WorkspaceSet {
     }
 
     pub fn refresh(&mut self) {
-        let _ = self
-            .switch_animation
-            .take_if(|anim| anim.tweener.is_finished());
-        if let Some(animation) = self.switch_animation.as_mut() {
-            animation.advance();
-            if animation.tweener.is_finished() {
-                self.active_idx
-                    .store(animation.target_idx, Ordering::SeqCst);
-            }
-        }
-
         self.workspaces_mut().for_each(Workspace::refresh);
     }
 
@@ -207,7 +194,7 @@ impl WorkspaceSet {
         let Some(animation) = self.switch_animation.as_ref() else {
             unreachable!()
         };
-        if animation.tweener.is_finished() {
+        if animation.animation.is_finished() {
             self.active_idx
                 .store(animation.target_idx, Ordering::SeqCst);
         }
@@ -223,18 +210,18 @@ impl WorkspaceSet {
                 match CONFIG.animation.workspace_switch.direction {
                     WorkspaceSwitchAnimationDirection::Horizontal => {
                         let offset =
-                            (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
                         (
-                            Point::from(((offset - output_geo.size.w), 0)),
-                            Point::from(((offset), 0)),
+                            Point::from(((-offset), 0)),
+                            Point::from(((-offset + output_geo.size.w), 0)),
                         )
                     }
                     WorkspaceSwitchAnimationDirection::Vertical => {
                         let offset =
-                            (animation.current_offset * output_geo.size.h as f64).round() as i32;
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
                         (
-                            Point::from((0, (offset - output_geo.size.h))),
-                            Point::from((0, (offset))),
+                            Point::from((0, (-offset))),
+                            Point::from((0, (-offset + output_geo.size.h))),
                         )
                     }
                 }
@@ -246,18 +233,18 @@ impl WorkspaceSet {
                 match CONFIG.animation.workspace_switch.direction {
                     WorkspaceSwitchAnimationDirection::Horizontal => {
                         let offset =
-                            (animation.current_offset * output_geo.size.w as f64).round() as i32;
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
                         (
-                            Point::from((-offset + output_geo.size.w, 0)),
-                            Point::from((-offset, 0)),
+                            Point::from((offset, 0)),
+                            Point::from((offset - output_geo.size.w, 0)),
                         )
                     }
                     WorkspaceSwitchAnimationDirection::Vertical => {
                         let offset =
-                            (animation.current_offset * output_geo.size.h as f64).round() as i32;
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
                         (
-                            Point::from((0, (-offset + output_geo.size.h))),
-                            Point::from((0, (-offset))),
+                            Point::from((0, (offset))),
+                            Point::from((0, (offset - output_geo.size.h))),
                         )
                     }
                 }
@@ -287,46 +274,29 @@ impl WorkspaceSet {
 }
 
 pub struct WorkspaceSwitchAnimation {
-    // pub switch_animation: Option<(Tweener<f64, f64, Box<dyn Tween<f64>>>, Instant, usize, f64)>,
-    tweener: Tweener<f64, f64, Box<dyn Tween<f64>>>,
+    pub animation: Animation,
     direction: WorkspaceSwitchDirection,
-    current_offset: f64,
-    started_at: Instant,
     pub target_idx: usize,
 }
 
 impl WorkspaceSwitchAnimation {
     fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
-        // PERF: Uh, we won't speak about this.
-        let easing = CONFIG.animation.workspace_switch.easing;
-        let tween = Box::new(move |value_delta, percent| easing.tween(value_delta, percent))
-            as Box<dyn Tween<f64>>;
-
         // When going to the next workspace, the values describes the offset of the next workspace.
         // When going to the previous workspace, the values describe the offset of the current
         // workspace
 
-        let tweener = Tweener::new(1.0, 0.0, CONFIG.animation.workspace_switch.duration, tween);
+        let animation = Animation::new(
+            0.0,
+            1.0,
+            CONFIG.animation.workspace_switch.easing,
+            Duration::from_millis(CONFIG.animation.workspace_switch.duration),
+        );
 
         Self {
-            tweener,
+            animation,
             direction,
-            current_offset: 0.0,
-            started_at: Instant::now(),
             target_idx,
         }
-    }
-
-    /// Advance the animation.
-    #[profiling::function]
-    fn advance(&mut self) {
-        // Advance the tween by however much we need
-        // NOTE: The duration is in MILLISECONDS, and we should also prob add a blocker for
-        // animated clients.
-
-        self.current_offset = self
-            .tweener
-            .move_to(self.started_at.elapsed().as_millis() as f64);
     }
 }
 

@@ -5,6 +5,8 @@ pub mod grabs;
 pub mod window;
 pub mod workspaces;
 
+use std::time::Duration;
+
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind,
     WindowSurfaceType,
@@ -318,6 +320,21 @@ impl Fht {
                 .positioner
                 .get_unconstrained_geometry(target.as_logical());
         });
+    }
+
+    /// Advance all the active animations.
+    pub fn advance_animations(&mut self, current_time: Duration) {
+        for wset in self.workspaces.values_mut() {
+            if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
+                wset.switch_animation.take_if(|a| a.animation.is_finished())
+            {
+                wset.active_idx
+                    .store(target_idx, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(animation) = wset.switch_animation.as_mut() {
+                animation.animation.set_current_time(current_time);
+            }
+        }
     }
 }
 
