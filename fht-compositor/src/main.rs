@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         "Starting fht-compositor."
     );
 
-    #[cfg(feature = "profile")]
+    #[cfg(feature = "profile-with-puffin")]
     let _puffin_server = {
         profiling::register_thread!("Main Thread");
         let server_addr = format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT);
@@ -68,6 +68,12 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         info!(?server_addr, "Puffin profiler listening.");
         _puffin_server
     };
+
+    #[cfg(feature = "profile-with-tracy")]
+    {
+        profiling::register_thread!("Main Thread");
+        profiling::tracy_client::Client::start();
+    }
 
     // EventLoop + Wayland UNIX socket source so we can listen to clients
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;

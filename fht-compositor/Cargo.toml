@@ -32,7 +32,7 @@ puffin_http = { version = "0.16.0", optional = true }
 keyframe = { version = "1.1.1", default-features = false }
 
 [features]
-default = ["egl", "x11_backend", "udev_backend", "xwayland", "profile"]
+default = ["egl", "x11_backend", "udev_backend", "xwayland"]
 egl = ["smithay/use_system_lib", "smithay/backend_egl"]
 x11_backend = ["smithay/backend_x11", "x11rb", "smithay/renderer_glow", "smithay/backend_vulkan"]
 udev_backend = [
@@ -47,4 +47,5 @@ udev_backend = [
     "smithay/renderer_multi",
 ]
 xwayland = ["smithay/xwayland", "x11rb", "smithay/x11rb_event_source"]
-profile = ["profiling/profile-with-puffin", "puffin_http"]
+profile-with-puffin = ["profiling/profile-with-puffin", "puffin_http"]
+profile-with-tracy = ["profiling/profile-with-tracy"]
