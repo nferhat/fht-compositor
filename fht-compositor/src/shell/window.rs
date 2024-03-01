@@ -21,12 +21,14 @@ use smithay::backend::renderer::element::{Element, Kind, RenderElement};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::DamageSet;
 use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::utils::OutputPresentationFeedback;
-use smithay::desktop::{PopupManager, Window, WindowSurfaceType};
+use smithay::desktop::{PopupManager, Window, WindowSurface, WindowSurfaceType};
 use smithay::input::keyboard::KeyboardTarget;
 use smithay::input::pointer::PointerTarget;
+use smithay::input::touch::TouchTarget;
 use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
@@ -511,7 +513,11 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::MotionEvent,
     ) {
-        PointerTarget::enter(&self.0, seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => PointerTarget::enter(w.wl_surface(), seat, data, event),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::enter(x, seat, data, event),
+        }
     }
 
     fn motion(
@@ -520,7 +526,11 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::MotionEvent,
     ) {
-        self.0.motion(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => PointerTarget::motion(w.wl_surface(), seat, data, event),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::motion(x, seat, data, event),
+        }
     }
 
     fn relative_motion(
@@ -529,7 +539,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::RelativeMotionEvent,
     ) {
-        self.0.relative_motion(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::relative_motion(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::relative_motion(x, seat, data, event),
+        }
     }
 
     fn button(
@@ -538,7 +554,11 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::ButtonEvent,
     ) {
-        self.0.button(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => PointerTarget::button(w.wl_surface(), seat, data, event),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::button(x, seat, data, event),
+        }
     }
 
     fn axis(
@@ -547,11 +567,19 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         frame: smithay::input::pointer::AxisFrame,
     ) {
-        self.0.axis(seat, data, frame)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => PointerTarget::axis(w.wl_surface(), seat, data, frame),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::axis(x, seat, data, frame),
+        }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        self.0.frame(seat, data)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => PointerTarget::frame(w.wl_surface(), seat, data),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::frame(x, seat, data),
+        }
     }
 
     fn gesture_swipe_begin(
@@ -560,7 +588,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GestureSwipeBeginEvent,
     ) {
-        self.0.gesture_swipe_begin(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_swipe_begin(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_swipe_begin(x, seat, data, event),
+        }
     }
 
     fn gesture_swipe_update(
@@ -569,7 +603,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GestureSwipeUpdateEvent,
     ) {
-        self.0.gesture_swipe_update(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_swipe_update(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_swipe_update(x, seat, data, event),
+        }
     }
 
     fn gesture_swipe_end(
@@ -578,7 +618,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GestureSwipeEndEvent,
     ) {
-        self.0.gesture_swipe_end(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_swipe_end(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_swipe_end(x, seat, data, event),
+        }
     }
 
     fn gesture_pinch_begin(
@@ -587,7 +633,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GesturePinchBeginEvent,
     ) {
-        self.0.gesture_pinch_begin(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_pinch_begin(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_pinch_begin(x, seat, data, event),
+        }
     }
 
     fn gesture_pinch_update(
@@ -596,7 +648,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GesturePinchUpdateEvent,
     ) {
-        self.0.gesture_pinch_update(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_pinch_update(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_pinch_update(x, seat, data, event),
+        }
     }
 
     fn gesture_pinch_end(
@@ -605,7 +663,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GesturePinchEndEvent,
     ) {
-        self.0.gesture_pinch_end(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_pinch_end(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_pinch_end(x, seat, data, event),
+        }
     }
 
     fn gesture_hold_begin(
@@ -614,7 +678,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GestureHoldBeginEvent,
     ) {
-        self.0.gesture_hold_begin(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_hold_begin(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_hold_begin(x, seat, data, event),
+        }
     }
 
     fn gesture_hold_end(
@@ -623,7 +693,13 @@ impl PointerTarget<State> for FhtWindow {
         data: &mut State,
         event: &smithay::input::pointer::GestureHoldEndEvent,
     ) {
-        self.0.gesture_hold_end(seat, data, event)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::gesture_hold_end(w.wl_surface(), seat, data, event)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::gesture_hold_end(x, seat, data, event),
+        }
     }
 
     fn leave(
@@ -633,7 +709,105 @@ impl PointerTarget<State> for FhtWindow {
         serial: smithay::utils::Serial,
         time: u32,
     ) {
-        PointerTarget::leave(&self.0, seat, data, serial, time)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                PointerTarget::leave(w.wl_surface(), seat, data, serial, time)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => PointerTarget::leave(x, seat, data, serial, time),
+        }
+    }
+}
+
+impl TouchTarget<State> for FhtWindow {
+    fn down(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &smithay::input::touch::DownEvent,
+        seq: smithay::utils::Serial,
+    ) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => TouchTarget::down(w.wl_surface(), seat, data, event, seq),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::down(x, seat, data, event, seq),
+        }
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &smithay::input::touch::UpEvent,
+        seq: smithay::utils::Serial,
+    ) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => TouchTarget::up(w.wl_surface(), seat, data, event, seq),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::up(x, seat, data, event, seq),
+        }
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &smithay::input::touch::MotionEvent,
+        seq: smithay::utils::Serial,
+    ) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                TouchTarget::motion(w.wl_surface(), seat, data, event, seq)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::motion(x, seat, data, event, seq),
+        }
+    }
+
+    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: smithay::utils::Serial) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => TouchTarget::frame(w.wl_surface(), seat, data, seq),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::frame(x, seat, data, seq),
+        }
+    }
+
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: smithay::utils::Serial) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => TouchTarget::cancel(w.wl_surface(), seat, data, seq),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::cancel(x, seat, data, seq),
+        }
+    }
+
+    fn shape(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &smithay::input::touch::ShapeEvent,
+        seq: smithay::utils::Serial,
+    ) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => TouchTarget::shape(w.wl_surface(), seat, data, event, seq),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::shape(x, seat, data, event, seq),
+        }
+    }
+
+    fn orientation(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &smithay::input::touch::OrientationEvent,
+        seq: smithay::utils::Serial,
+    ) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                TouchTarget::orientation(w.wl_surface(), seat, data, event, seq)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => TouchTarget::orientation(x, seat, data, event, seq),
+        }
     }
 }
 
@@ -645,11 +819,21 @@ impl KeyboardTarget<State> for FhtWindow {
         keys: Vec<smithay::input::keyboard::KeysymHandle<'_>>,
         serial: smithay::utils::Serial,
     ) {
-        KeyboardTarget::enter(&self.0, seat, data, keys, serial)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                KeyboardTarget::enter(w.wl_surface(), seat, data, keys, serial)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => KeyboardTarget::enter(x, seat, data, keys, serial),
+        }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
-        KeyboardTarget::leave(&self.0, seat, data, serial)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => KeyboardTarget::leave(w.wl_surface(), seat, data, serial),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => KeyboardTarget::leave(x, seat, data, serial),
+        }
     }
 
     fn key(
@@ -661,7 +845,13 @@ impl KeyboardTarget<State> for FhtWindow {
         serial: smithay::utils::Serial,
         time: u32,
     ) {
-        self.0.key(seat, data, key, state, serial, time)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                KeyboardTarget::key(w.wl_surface(), seat, data, key, state, serial, time)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => KeyboardTarget::key(x, seat, data, key, state, serial, time),
+        }
     }
 
     fn modifiers(
@@ -671,7 +861,13 @@ impl KeyboardTarget<State> for FhtWindow {
         modifiers: smithay::input::keyboard::ModifiersState,
         serial: smithay::utils::Serial,
     ) {
-        self.0.modifiers(seat, data, modifiers, serial)
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(w) => {
+                KeyboardTarget::modifiers(w.wl_surface(), seat, data, modifiers, serial)
+            }
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x) => KeyboardTarget::modifiers(x, seat, data, modifiers, serial),
+        }
     }
 }
 
@@ -749,7 +945,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Toplevel(e) => e.damage_since(scale, commit),
             Self::Subsurface(e) => e.damage_since(scale, commit),

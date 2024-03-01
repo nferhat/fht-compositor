@@ -6,7 +6,7 @@ use smithay::input::pointer::{
 };
 use smithay::utils::{Logical, Point};
 
-use super::{FhtWindow, FocusTarget};
+use super::{FhtWindow, PointerFocusTarget};
 use crate::state::State;
 use crate::utils::geometry::{Global, PointExt};
 
@@ -21,7 +21,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _: Option<(FocusTarget, Point<i32, Logical>)>,
+        _: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab handle is active, no client should have focus, otherwise bad stuff WILL
@@ -49,7 +49,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(FocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         handle.relative_motion(data, focus, event);

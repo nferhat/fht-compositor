@@ -5,7 +5,7 @@ use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::utils::Serial;
 
 use crate::config::CONFIG;
-use crate::shell::FocusTarget;
+use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 
@@ -413,7 +413,7 @@ impl State {
 
         match action {
             MouseAction::MoveWindow { floating_only } => {
-                if let Some((FocusTarget::Window(window), _)) =
+                if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
                     if window.is_tiled() && floating_only {

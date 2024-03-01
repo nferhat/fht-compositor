@@ -24,7 +24,7 @@ use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurf
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
-use crate::shell::FocusTarget;
+use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
@@ -248,7 +248,7 @@ impl State {
                     .fht
                     .focus_target_under(pointer_loc)
                     .and_then(|(ft, _)| {
-                        if let FocusTarget::Window(w) = ft {
+                        if let PointerFocusTarget::Window(w) = ft {
                             let wl_surface = w.wl_surface()?;
                             self.fht
                                 .seat

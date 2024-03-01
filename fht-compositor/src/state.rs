@@ -51,7 +51,7 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
-use crate::shell::{FhtWindow, FocusTarget};
+use crate::shell::{FhtWindow, KeyboardFocusTarget};
 use crate::utils::geometry::Global;
 use crate::utils::output::OutputExt;
 
@@ -572,5 +572,5 @@ impl ClientData for ClientState {
 #[derive(Default, Debug)]
 pub struct FocusState {
     pub output: Option<Output>,
-    pub focus_target: Option<FocusTarget>,
+    pub focus_target: Option<KeyboardFocusTarget>,
 }

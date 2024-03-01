@@ -6,6 +6,7 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, RenderElement};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::DamageSet;
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SpaceElement;
@@ -374,7 +375,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Normal(e) => e.damage_since(scale, commit),
             Self::Switching(e) => e.damage_since(scale, commit),

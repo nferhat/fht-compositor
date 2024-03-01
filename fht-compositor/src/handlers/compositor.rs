@@ -129,7 +129,7 @@ impl CompositorHandler for State {
                     }
                 }
             }
-        })
+        });
     }
 
     #[profiling::function]

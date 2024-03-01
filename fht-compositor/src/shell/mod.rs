@@ -20,7 +20,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgShellHandler};
 
-pub use self::focus_target::FocusTarget;
+pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
 pub use self::window::FhtWindow;
 pub use self::workspaces::FullscreenSurface;
@@ -43,7 +43,7 @@ impl Fht {
     pub fn focus_target_under(
         &self,
         point: Point<f64, Logical>,
-    ) -> Option<(FocusTarget, Point<i32, Logical>)> {
+    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
         let output = self.focus_state.output.as_ref()?;
         let active_ws = self.wset_for(output).active();
         let output_geometry = output.geometry().as_logical();

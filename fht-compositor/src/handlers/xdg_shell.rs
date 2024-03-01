@@ -15,7 +15,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::shell::window::FhtWindow;
-use crate::shell::FocusTarget;
+use crate::shell::KeyboardFocusTarget;
 use crate::state::State;
 
 impl XdgShellHandler for State {
@@ -50,7 +50,7 @@ impl XdgShellHandler for State {
             self.fht
                 .find_window(&root)
                 .cloned()
-                .map(FocusTarget::Window)
+                .map(KeyboardFocusTarget::Window)
                 .or_else(|| {
                     self.fht
                         .outputs()
@@ -59,7 +59,7 @@ impl XdgShellHandler for State {
                                 .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
                                 .cloned()
                         })
-                        .map(FocusTarget::LayerSurface)
+                        .map(KeyboardFocusTarget::LayerSurface)
                 })
         }) {
             let grab = self.fht.popups.grab_popup(root, popup_kind, &seat, serial);

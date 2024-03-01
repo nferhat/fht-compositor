@@ -6,15 +6,20 @@ resolver = "2"
 egui = "0.23"
 egui_glow = "0.23"
 egui_extras = "0.23"
+profiling = "1.0.14"
 
 [workspace.dependencies.smithay]
-git = "https://github.com/Smithay/Smithay"
-rev = "7f9e6d5"
+# git = "https://github.com/Smithay/Smithay"
+# rev = "7f9e6d5"
+git = "https://github.com/cmeissl/smithay"
+branch = "perf/reduce_mem_allocations"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
-git = "https://github.com/smithay/smithay"
-rev = "91e61f1"
+# git = "https://github.com/smithay/smithay"
+# rev = "7f9e6d5"
+git = "https://github.com/cmeissl/smithay"
+branch = "perf/reduce_mem_allocations"
 
 [build]
 rustflags = [
@@ -22,9 +27,9 @@ rustflags = [
     "-Z", "threads=8"
 ]
 
-[profile.release]
-codegen-units = 1
-lto = "fat"
+# [profile.release]
+# codegen-units = 1
+# lto = "fat"
 
 [profile.dev]
 opt-level = 3
