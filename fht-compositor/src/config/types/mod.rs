@@ -110,7 +110,7 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            warp_window_on_focus: true,
+            cursor_warps: true,
             focus_new_windows: true,
             cursor: CursorConfig::default(),
             outer_gaps: 0,
