@@ -569,7 +569,7 @@ impl UdevData {
 
         let start = Instant::now();
 
-        fht.advance_animations(fht.clock.now().into());
+        fht.advance_animations(&surface.output, fht.clock.now().into());
         let result = render_surface(surface, &mut self.gpu_manager, self.primary_gpu, fht);
 
         let reschedule = match &result {

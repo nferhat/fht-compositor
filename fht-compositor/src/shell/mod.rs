@@ -328,18 +328,17 @@ impl Fht {
         });
     }
 
-    /// Advance all the active animations.
-    pub fn advance_animations(&mut self, current_time: Duration) {
-        for wset in self.workspaces.values_mut() {
-            if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
-                wset.switch_animation.take_if(|a| a.animation.is_finished())
-            {
-                wset.active_idx
-                    .store(target_idx, std::sync::atomic::Ordering::SeqCst);
-            }
-            if let Some(animation) = wset.switch_animation.as_mut() {
-                animation.animation.set_current_time(current_time);
-            }
+    /// Advance all the active animations for this given output
+    pub fn advance_animations(&mut self, output: &Output, current_time: Duration) {
+        let wset = self.wset_mut_for(output);
+        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
+            wset.switch_animation.take_if(|a| a.animation.is_finished())
+        {
+            wset.active_idx
+                .store(target_idx, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(animation) = wset.switch_animation.as_mut() {
+            animation.animation.set_current_time(current_time);
         }
     }
 }
