@@ -399,20 +399,11 @@ impl EguiState {
             }
             renderer.unbind()?;
 
-            let used = self.ctx.used_rect();
-            let margin = self.ctx.style().visuals.clip_rect_margin.ceil() as i32;
-            let window_shadow = self.ctx.style().visuals.window_shadow.extrusion.ceil() as i32;
-            let popup_shadow = self.ctx.style().visuals.popup_shadow.extrusion.ceil() as i32;
-            let offset = margin + Ord::max(window_shadow, popup_shadow);
+            // TODO: Better damage tracking?
+            // Without this it leaves weird artifacts from previous frames
             Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Logical>::from_extemities(
-                (
-                    (used.min.x.floor() as i32).saturating_sub(offset),
-                    (used.min.y.floor() as i32).saturating_sub(offset),
-                ),
-                (
-                    (used.max.x.ceil() as i32) + (offset * 2),
-                    (used.max.y.ceil() as i32) + (offset * 2),
-                ),
+                (0, 0),
+                (output_size.w, output_size.h),
             )
             .to_buffer(int_scale, Transform::Flipped180, &inner.size)])
         })?;
