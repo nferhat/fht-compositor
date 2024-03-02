@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -52,7 +54,7 @@ use crate::config::CONFIG;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::{FhtWindow, KeyboardFocusTarget};
-use crate::utils::geometry::Global;
+use crate::utils::geometry::{Global, SizeExt};
 use crate::utils::output::OutputExt;
 
 pub struct State {
@@ -159,7 +161,6 @@ pub struct Fht {
     pub pending_windows: Vec<(FhtWindow, Output)>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
-    pub egui: EguiState,
 
     pub last_config_error: Option<anyhow::Error>,
 
@@ -279,8 +280,6 @@ impl Fht {
             pending_layers: vec![],
             pending_windows: vec![],
             popups: PopupManager::default(),
-            // who cares about this size we just need a way to show messages
-            egui: EguiState::new(Rectangle::from_loc_and_size((0, 0), (800, 800))),
 
             last_config_error: None,
 
@@ -332,9 +331,16 @@ impl Fht {
         let workspace_set = WorkspaceSet::new(output.clone());
         self.workspaces.insert(output.clone(), workspace_set);
 
+        let output_geo = output.geometry();
+        output.user_data().insert_if_missing(|| {
+            OutputUserData::new(RefCell::new(OutputState {
+                egui: EguiState::new(output_geo.size.as_logical()),
+                egui_disabled: true,
+            }))
+        });
+
         // Focus output now.
         if CONFIG.general.cursor_warps {
-            let output_geo = output.geometry();
             let center = output_geo.loc + output_geo.size.downscale(2).to_point();
             self.loop_handle.insert_idle(move |state| {
                 state.move_pointer(center.to_f64());
@@ -567,6 +573,13 @@ impl ClientData for ClientState {
         _reason: smithay::reexports::wayland_server::backend::DisconnectReason,
     ) {
     }
+}
+
+pub type OutputUserData = Rc<RefCell<OutputState>>;
+
+pub struct OutputState {
+    pub egui: EguiState,
+    pub egui_disabled: bool,
 }
 
 #[derive(Default, Debug)]

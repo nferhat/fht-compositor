@@ -25,7 +25,7 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
 use crate::shell::PointerFocusTarget;
-use crate::state::State;
+use crate::state::{OutputUserData, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
@@ -177,8 +177,14 @@ impl State {
 
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        let mut output = self.fht.focus_state.output.clone().unwrap();
+        let output_state = output.user_data().get::<OutputUserData>().unwrap().clone();
+        let output_state = output_state.borrow();
+
         match event {
             InputEvent::DeviceAdded { device } => {
+                // Even egui is disabled this doesn't hurt to handle.
+                output_state.egui.handle_device_added(&device);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     self.fht.seat.tablet_seat().add_tablet::<State>(
                         &self.fht.display_handle,
@@ -188,6 +194,8 @@ impl State {
                 // TODO: Handle touch devices.
             }
             InputEvent::DeviceRemoved { device } => {
+                // Even egui is disabled this doesn't hurt to handle.
+                output_state.egui.handle_device_removed(&device);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     let tablet_seat = self.fht.seat.tablet_seat();
                     tablet_seat.remove_tablet(&TabletDescriptor::from(&device));
@@ -321,7 +329,7 @@ impl State {
             InputEvent::PointerMotion { event } => {
                 let pointer = self.fht.pointer.clone();
                 let mut pointer_location = pointer.current_location();
-                let under = self.fht.focus_target_under(pointer_location);
+                let mut under = self.fht.focus_target_under(pointer_location);
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let mut pointer_locked = false;
@@ -375,7 +383,7 @@ impl State {
                 pointer_location += event.delta();
                 pointer_location = self.clamp_coords(pointer_location);
 
-                let output = self
+                let maybe_new_output = self
                     .fht
                     .outputs()
                     .find(|output| {
@@ -385,13 +393,14 @@ impl State {
                             .contains(pointer_location.as_global())
                     })
                     .cloned();
-
-                if output
-                    .as_ref()
-                    .is_some_and(|o| Some(o) == self.fht.focus_state.output.as_ref())
-                {
-                    self.fht.focus_state.output = output;
+                if let Some(new_output) = maybe_new_output {
+                    self.fht.focus_state.output = Some(new_output.clone());
+                    output = new_output;
                 }
+                let geo = output.geometry();
+                // Redeclare since the output may have changed
+                let output_state = output.user_data().get::<OutputUserData>().unwrap().clone();
+                let output_state = output_state.borrow();
 
                 let new_under = self.fht.focus_target_under(pointer_location);
 
@@ -409,6 +418,19 @@ impl State {
                             pointer.frame(self);
                             return;
                         }
+                    }
+                }
+
+                if !output_state.egui_disabled {
+                    output_state.egui.handle_pointer_motion(
+                        pointer_location
+                            .to_i32_round()
+                            .as_global()
+                            .to_local(&output)
+                            .as_logical(),
+                    );
+                    if output_state.egui.wants_pointer() {
+                        under = Some((output_state.egui.clone().into(), geo.loc.as_logical()))
                     }
                 }
 
@@ -454,7 +476,21 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let pointer = self.fht.pointer.clone();
-                let under = self.fht.focus_target_under(relative_pos);
+                let mut under = self.fht.focus_target_under(relative_pos);
+
+                if !output_state.egui_disabled {
+                    output_state.egui.handle_pointer_motion(
+                        relative_pos
+                            .to_i32_round()
+                            .as_global()
+                            .to_local(&output)
+                            .as_logical(),
+                    );
+                    if output_state.egui.wants_pointer() {
+                        under = Some((output_state.egui.clone().into(), output_geo.loc))
+                    }
+                }
+
                 pointer.motion(
                     self,
                     under,
@@ -472,15 +508,25 @@ impl State {
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
 
+                if !output_state.egui_disabled && output_state.egui.wants_pointer() {
+                    if let Some(button) = event.button() {
+                        output_state.egui.handle_pointer_button(
+                            button,
+                            state == wl_pointer::ButtonState::Pressed,
+                        );
+                    }
+                    return;
+                }
+
                 if state == wl_pointer::ButtonState::Pressed {
                     self.update_keyboard_focus();
 
-                    let mouse_pattern = MousePattern(
-                        self.fht.keyboard.modifier_state().into(),
-                        event.button().unwrap().into(),
-                    );
-                    if let Some(action) = CONFIG.mousebinds.get(&mouse_pattern).cloned() {
-                        self.process_mouse_action(action, serial);
+                    if let Some(button) = event.button() {
+                        let mouse_pattern =
+                            MousePattern(self.fht.keyboard.modifier_state().into(), button.into());
+                        if let Some(action) = CONFIG.mousebinds.get(&mouse_pattern).cloned() {
+                            self.process_mouse_action(action, serial);
+                        }
                     }
                 }
 

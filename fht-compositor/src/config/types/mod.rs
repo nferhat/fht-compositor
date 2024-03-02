@@ -28,6 +28,10 @@ pub struct FhtConfig {
     #[serde(default)]
     pub autostart: Vec<String>,
 
+    /// Whether to show a greeting message.
+    #[serde(default)]
+    pub greet: bool,
+
     /// Keybinds, table of key patterns bound to key actions.
     #[serde(default)]
     pub keybinds: IndexMap<KeyPattern, KeyAction>,
@@ -65,6 +69,7 @@ impl Default for FhtConfig {
     fn default() -> Self {
         Self {
             autostart: Vec::new(),
+            greet: false,
             keybinds: IndexMap::new(),
             mousebinds: IndexMap::new(),
             input: InputConfig::default(),
@@ -210,6 +215,10 @@ pub struct RenderConfig {
     #[cfg(feature = "udev_backend")]
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
+
+    /// Whether to show a debug overlay for each output.
+    #[serde(default)]
+    pub debug_overlay: bool,
 }
 
 impl Default for RenderConfig {
@@ -222,6 +231,7 @@ impl Default for RenderConfig {
             disable_overlay_planes: default_disable_overlay_planes(),
             #[cfg(feature = "udev_backend")]
             render_node: default_render_node(),
+            debug_overlay: false,
         }
     }
 }

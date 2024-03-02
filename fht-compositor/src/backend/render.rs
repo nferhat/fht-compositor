@@ -1,4 +1,7 @@
-use egui::RichText;
+use std::sync::atomic::AtomicBool;
+
+use egui::{Color32, RichText};
+use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
@@ -17,10 +20,11 @@ use smithay::wayland::shell::wlr_layer::Layer;
 
 #[cfg(feature = "udev_backend")]
 use super::udev::{UdevFrame, UdevRenderError, UdevRenderer};
+use crate::config::CONFIG;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
-use crate::state::Fht;
+use crate::state::{Fht, OutputUserData};
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::output::OutputExt;
 
@@ -329,12 +333,7 @@ where
     // 6. Bottom layer shells
     // 7. Background layer shells
 
-    if let Some(egui) = state
-        .focus_state
-        .output
-        .as_ref()
-        .and_then(|o| egui_elements(renderer.glow_renderer_mut(), o, &state))
-    {
+    if let Some(egui) = egui_elements(renderer.glow_renderer_mut(), output, &state) {
         elements.push(FhtRenderElement::Egui(egui))
     }
 
@@ -478,55 +477,147 @@ where
     elements
 }
 
-const EGUI_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(21, 17, 16);
-const EGUI_FOREGROUND: egui::Color32 = egui::Color32::from_rgb(227, 226, 232);
-const CONFIG_ERROR_ACCENT: egui::Color32 = egui::Color32::from_rgb(233, 91, 97);
-
 #[profiling::function]
 fn egui_elements(
     renderer: &mut GlowRenderer,
     output: &Output,
     state: &Fht,
 ) -> Option<TextureRenderElement<GlesTexture>> {
-    // WARN: If egui gets nothing rendered inside that closure down below it will use i32::min as
-    // dimensions. Dont ask me why.
-    if state.last_config_error.is_none() {
+    let show_greet =
+        CONFIG.greet && !RUNTIME_HIDE_GREETING_MESSAGE.load(std::sync::atomic::Ordering::Relaxed);
+    let mut output_state = output
+        .user_data()
+        .get::<OutputUserData>()
+        .unwrap()
+        .borrow_mut();
+    if !CONFIG.renderer.debug_overlay && !show_greet && state.last_config_error.is_none() {
+        // PERF: Make sure we are not rendering EGUI for nothing
+        output_state.egui_disabled = true;
         return None;
     }
+    output_state.egui_disabled = false;
 
-    state
+    let is_focused = state
+        .focus_state
+        .output
+        .as_ref()
+        .is_some_and(|o| o == output);
+
+    output_state
         .egui
         .render(
             |ctx| {
-                if let Some(err) = state.last_config_error.as_ref() {
-                    egui_config_error(ctx, err);
+                if is_focused && show_greet {
+                    egui_greeting_message(ctx);
+                }
+
+                if is_focused {
+                    if let Some(err) = state.last_config_error.as_ref() {
+                        egui_config_error(ctx, err);
+                    }
                 }
             },
             renderer,
-            output.geometry().as_logical(),
+            output.geometry().as_logical().loc,
             output.current_scale().fractional_scale(),
             1.0,
         )
         .ok()
 }
 
+#[profiling::function]
 fn egui_config_error(context: &egui::Context, error: &anyhow::Error) {
-    let area = egui::Area::new("config_error").anchor(egui::Align2::CENTER_TOP, (10.0, 10.0));
+    let area = egui::Window::new("Failed to reload config!")
+        .anchor(egui::Align2::CENTER_TOP, (0.0, 10.0))
+        .resizable(false)
+        .collapsible(false)
+        .movable(true);
     area.show(context, |ui| {
         egui::Frame::none()
-            .fill(EGUI_BACKGROUND)
+            .fill(context.style().visuals.window_fill)
             .inner_margin(10.0)
             .stroke(egui::Stroke {
                 width: 2.0,
-                color: CONFIG_ERROR_ACCENT,
+                color: context.style().visuals.error_fg_color,
             })
             .show(ui, |ui| {
                 ui.heading(
                     RichText::new("fht-compositor failed to reload your config!")
-                        .color(CONFIG_ERROR_ACCENT),
+                        .color(context.style().visuals.error_fg_color),
                 );
-                ui.label(RichText::new(error.root_cause().to_string()).color(EGUI_FOREGROUND));
+                ui.label(error.root_cause().to_string());
             })
+    });
+}
+
+const USEFUL_DEFAULT_KEYBINDS: [(&str, &str); 8] = [
+    ("Mod+Return", "Spawn alacritty"),
+    ("Mod+P", "Launch `wofi --show drun`"),
+    ("Mod+Q", "Exit the compositor"),
+    ("Mod+Ctrl+R", "Reload the configuration"),
+    ("Mod+J", "Focus the next window"),
+    ("Mod+K", "Focus the previous window"),
+    ("Mod+1-9", "Focus the nth workspace"),
+    (
+        "Mod+Shift+1-9",
+        "Send the focused window to the nth workspace",
+    ),
+];
+
+pub static RUNTIME_HIDE_GREETING_MESSAGE: AtomicBool = AtomicBool::new(false);
+
+#[profiling::function]
+fn egui_greeting_message(context: &egui::Context) {
+    let area = egui::Window::new("Welcome to fht-compositor")
+        .resizable(false)
+        .collapsible(false);
+    area.show(context, |ui| {
+        ui.label("If you are seeing this message, that means you successfully installed and ran the compositor with no issues! Congratulations!");
+
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("The compositor should have now copied a starter configuration to the following path:");
+            ui.code("$XDG_CONFIG_HOME/.config/fht/compositor.ron");
+        });
+
+        ui.add_space(8.0);
+        ui.label("You can disable this message temporarily by clicking the following button, or set greet to false in your configuration");
+        ui.vertical_centered(|ui| {
+            if ui.button("Disable message").clicked() {
+                RUNTIME_HIDE_GREETING_MESSAGE.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+
+        ui.add_space(12.0);
+        ui.heading("Warning notice");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label("Bear in mind that fht-compositor is STILL an alpha-quality software, and breaking changes can and will happen. ");
+            ui.label("If you encounter any issues, or want to contribute, feel free to check out the ");
+            ui.hyperlink_to("github page.", "https://github.com/nferhat/fht-shell/blob/main/fht-compositor/");
+        });
+
+        ui.add_space(12.0);
+        ui.label("Some useful keybinds to know that are in this default config:");
+        egui_extras::TableBuilder::new(ui)
+            .column(Column::exact(100.0))
+            .column(Column::remainder())
+            .striped(true)
+            .header(15.0, |mut header_row| {
+                header_row.col(|ui| { ui.label("Key pattern"); });
+                header_row.col(|ui| { ui.label("Description"); });
+            })
+            .body(|mut body| {
+                for (key_pattern, description) in USEFUL_DEFAULT_KEYBINDS {
+                    body.row(15.0, |mut row| {
+                        row.col(|ui| { ui.code(key_pattern); });
+                        row.col(|ui| { ui.label(description); });
+                    });
+                }
+            });
+
+        ui.separator();
+        ui.label(RichText::new("NOTE: set greet to false to disable this message").color(Color32::DARK_GRAY))
     });
 }
 
