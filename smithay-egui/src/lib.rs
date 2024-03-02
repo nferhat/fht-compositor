@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use egui::{Context, Event, FullOutput, PlatformOutput, Pos2, RawInput, Rect, Vec2};
+use egui::{Context, Event, FullOutput, Pos2, RawInput, Rect, Vec2};
 use egui_glow::Painter;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::{ButtonState, Device, DeviceCapability, KeyState, MouseButton};
@@ -14,9 +14,6 @@ use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Frame, Offscreen, Renderer, Unbind};
-use smithay::desktop::space::RenderZindex;
-#[cfg(feature = "desktop_integration")]
-use smithay::desktop::space::SpaceElement;
 use smithay::input::keyboard::{KeyboardTarget, KeysymHandle, ModifiersState};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
@@ -24,7 +21,7 @@ use smithay::input::pointer::{
     GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
 };
 use smithay::input::{Seat, SeatHandler};
-use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Serial, Size, Transform};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, Transform};
 use xkbcommon::xkb::Keycode;
 
 mod input;
@@ -47,15 +44,13 @@ impl PartialEq for EguiState {
 struct EguiInner {
     pointers: usize,
     last_pointer_position: Point<i32, Logical>,
-    area: Rectangle<i32, Logical>,
+    size: Size<i32, Logical>,
+    needs_new_buffer: bool,
     last_modifiers: ModifiersState,
-    last_output: Option<PlatformOutput>,
     pressed: Vec<(Option<egui::Key>, Keycode)>,
     focused: bool,
     events: Vec<Event>,
     kbd: Option<input::KbdInternal>,
-    #[cfg(feature = "desktop_integration")]
-    z_index: u8,
 }
 
 impl fmt::Debug for EguiInner {
@@ -63,18 +58,13 @@ impl fmt::Debug for EguiInner {
         let mut d = f.debug_struct("EguiInner");
         d.field("pointers", &self.pointers)
             .field("last_pointer_position", &self.last_pointer_position)
-            .field("area", &self.area)
+            .field("area", &self.size)
+            .field("needs_new_buffer", &self.needs_new_buffer)
             .field("last_modifiers", &self.last_modifiers)
-            .field("last_output", &self.last_output.as_ref().map(|_| "..."))
             .field("pressed", &self.pressed)
             .field("focused", &self.focused)
             .field("events", &self.events)
             .field("kbd", &self.kbd);
-
-        #[cfg(feature = "desktop_integration")]
-        {
-            d.field("z_index", &self.z_index);
-        }
 
         d.finish()
     }
@@ -90,16 +80,16 @@ type UserDataType = Rc<RefCell<GlState>>;
 
 impl EguiState {
     /// Creates a new `EguiState`
-    pub fn new(area: Rectangle<i32, Logical>) -> EguiState {
+    pub fn new(size: Size<i32, Logical>) -> EguiState {
         EguiState {
             ctx: Context::default(),
             start_time: Instant::now(),
             inner: Arc::new(Mutex::new(EguiInner {
                 pointers: 0,
                 last_pointer_position: (0, 0).into(),
-                area,
+                size,
+                needs_new_buffer: false,
                 last_modifiers: ModifiersState::default(),
-                last_output: None,
                 events: Vec::new(),
                 focused: false,
                 pressed: Vec::new(),
@@ -110,12 +100,11 @@ impl EguiState {
                         None
                     }
                 },
-                #[cfg(feature = "desktop_integration")]
-                z_index: RenderZindex::Overlay as u8,
             })),
         }
     }
 
+    /// Get the unique identifier of this [`EguiState`]
     fn id(&self) -> usize {
         Arc::as_ptr(&self.inner) as usize
     }
@@ -246,13 +235,49 @@ impl EguiState {
         self.inner.lock().unwrap().focused = focused;
     }
 
+    /// Resize the area of the egui context.
+    pub fn resize(&self, area: Size<i32, Logical>) {
+        let mut inner = self.inner.lock().unwrap();
+        let old_size = inner.size;
+        inner.size = area;
+        inner.needs_new_buffer = old_size != area;
+    }
+
     // TODO: touch inputs
+
+    /// Run the inner context for one frame.
+    pub fn run(&self, ui: impl FnOnce(&Context), scale: f64) {
+        let int_scale = scale.ceil() as i32;
+        let mut inner = self.inner.lock().unwrap();
+        let output_size = inner.size.to_physical(int_scale);
+
+        let input = RawInput {
+            screen_rect: Some(Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 {
+                    x: output_size.w as f32,
+                    y: output_size.h as f32,
+                },
+            }),
+            pixels_per_point: Some(int_scale as f32),
+            time: Some(self.start_time.elapsed().as_secs_f64()),
+            predicted_dt: 1.0 / 60.0,
+            modifiers: convert_modifiers(inner.last_modifiers),
+            events: inner.events.drain(..).collect(),
+            hovered_files: Vec::with_capacity(0),
+            dropped_files: Vec::with_capacity(0),
+            focused: inner.focused,
+            max_texture_side: None, // TODO query from GlState somehow
+        };
+
+        let _ = self.context().run(input, ui);
+    }
 
     /// Produce a new frame of egui. Returns a [`RenderElement`]
     ///
     /// - `ui` is your drawing function
     /// - `renderer` is a [`GlowRenderer`]
-    /// - `area` limits the space egui will be using and offsets the result
+    /// - `location` limits the location of the final Egui output
     /// - `scale` is the scale egui should render in
     /// - `alpha` applies (additional) transparency to the whole ui
     /// - `start_time` need to be a fixed point in time before the first `run` call to measure
@@ -262,18 +287,19 @@ impl EguiState {
         &self,
         ui: impl FnOnce(&Context),
         renderer: &mut GlowRenderer,
-        area: Rectangle<i32, Logical>,
+        location: Point<i32, Logical>,
         scale: f64,
         alpha: f32,
     ) -> Result<TextureRenderElement<GlesTexture>, GlesError> {
+        let mut inner = self.inner.lock().unwrap();
         let int_scale = scale.ceil() as i32;
+        let output_size = inner.size.to_physical(int_scale);
+        let buffer_size = inner.size.to_buffer(int_scale, Transform::Normal);
+
         let user_data = renderer.egl_context().user_data();
         if user_data.get::<UserDataType>().is_none() {
             let painter = {
-                let mut frame = renderer.render(
-                    area.size.to_physical(int_scale),
-                    smithay::utils::Transform::Normal,
-                )?;
+                let mut frame = renderer.render(output_size, Transform::Normal)?;
                 frame
                     .with_context(|context| Painter::new(context.clone(), "", None))?
                     .map_err(|_| GlesError::ShaderCompileError)?
@@ -288,7 +314,6 @@ impl EguiState {
             });
         }
 
-        let mut inner = self.inner.lock().unwrap();
         let gl_state = renderer
             .egl_context()
             .user_data()
@@ -304,11 +329,7 @@ impl EguiState {
 
         let render_buffer = render_buffers.entry(self.id()).or_insert_with(|| {
             let render_texture = renderer
-                .create_buffer(
-                    Fourcc::Abgr8888,
-                    area.size
-                        .to_buffer(int_scale, smithay::utils::Transform::Normal),
-                )
+                .create_buffer(Fourcc::Abgr8888, buffer_size)
                 .expect("Failed to create buffer");
             TextureRenderBuffer::from_texture(
                 renderer,
@@ -319,13 +340,26 @@ impl EguiState {
             )
         });
 
-        let screen_size: Size<i32, Physical> = area.size.to_physical(int_scale);
+        if inner.needs_new_buffer {
+            inner.needs_new_buffer = false;
+            *render_buffer = {
+                let render_texture = renderer.create_buffer(Fourcc::Abgr8888, buffer_size)?;
+                TextureRenderBuffer::from_texture(
+                    renderer,
+                    render_texture,
+                    int_scale,
+                    Transform::Flipped180,
+                    None,
+                )
+            };
+        }
+
         let input = RawInput {
             screen_rect: Some(Rect {
                 min: Pos2 { x: 0.0, y: 0.0 },
                 max: Pos2 {
-                    x: screen_size.w as f32,
-                    y: screen_size.h as f32,
+                    x: output_size.w as f32,
+                    y: output_size.h as f32,
                 },
             }),
             pixels_per_point: Some(int_scale as f32),
@@ -340,41 +374,24 @@ impl EguiState {
         };
 
         let FullOutput {
-            platform_output,
             shapes,
             textures_delta,
             ..
         } = self.ctx.run(input.clone(), ui);
-        inner.last_output = Some(platform_output);
-
-        let needs_recreate = inner.area != area;
-        inner.area = area;
-
-        if needs_recreate {
-            *render_buffer = {
-                let render_texture = renderer.create_buffer(
-                    Fourcc::Abgr8888,
-                    area.size
-                        .to_buffer(int_scale, smithay::utils::Transform::Normal),
-                )?;
-                TextureRenderBuffer::from_texture(
-                    renderer,
-                    render_texture,
-                    int_scale,
-                    Transform::Flipped180,
-                    None,
-                )
-            };
-        }
 
         render_buffer.render().draw(|tex| {
             renderer.bind(tex.clone())?;
-            let physical_area = area.to_physical(int_scale);
             {
-                let mut frame = renderer.render(physical_area.size, Transform::Normal)?;
-                frame.clear([0.0, 0.0, 0.0, 0.0], &[physical_area])?;
+                let mut frame = renderer.render(output_size, Transform::Normal)?;
+                frame.clear(
+                    [0.0, 0.0, 0.0, 0.0],
+                    &[Rectangle::from_loc_and_size(
+                        location.to_physical(int_scale),
+                        output_size,
+                    )],
+                )?;
                 painter.paint_and_update_textures(
-                    [physical_area.size.w as u32, physical_area.size.h as u32],
+                    [output_size.w as u32, output_size.h as u32],
                     int_scale as f32,
                     &self.ctx.tessellate(shapes),
                     &textures_delta,
@@ -397,11 +414,11 @@ impl EguiState {
                     (used.max.y.ceil() as i32) + (offset * 2),
                 ),
             )
-            .to_buffer(int_scale, Transform::Flipped180, &area.size)])
+            .to_buffer(int_scale, Transform::Flipped180, &inner.size)])
         })?;
 
         Ok(TextureRenderElement::from_texture_render_buffer(
-            area.loc.to_f64().to_physical(scale),
+            location.to_f64().to_physical(scale),
             &render_buffer,
             Some(alpha),
             None,
@@ -421,7 +438,7 @@ impl EguiState {
         if user_data.get::<UserDataType>().is_none() {
             let painter = {
                 let mut frame = renderer
-                    .render((1, 1).into(), smithay::utils::Transform::Normal)
+                    .render((1, 1).into(), Transform::Normal)
                     .map_err(|err| format!("{}", err))?;
                 frame
                     .with_context(|context| Painter::new(context.clone(), "", None))
@@ -462,7 +479,7 @@ impl EguiState {
         if user_data.get::<UserDataType>().is_none() {
             let painter = {
                 let mut frame = renderer
-                    .render((1, 1).into(), smithay::utils::Transform::Normal)
+                    .render((1, 1).into(), Transform::Normal)
                     .map_err(|err| format!("{}", err))?;
                 frame
                     .with_context(|context| Painter::new(context.clone(), "", None))
@@ -502,19 +519,6 @@ impl EguiState {
         let state_ref = state.borrow();
         let img = state_ref.images.get(name)?;
         Some(closure(img, &self.ctx))
-    }
-
-    /// Sets the z_index as reported by [`SpaceElement::z_index`].
-    ///
-    /// The default is [`RenderZindex::Overlay`].
-    #[cfg(feature = "desktop_integration")]
-    pub fn set_zindex(&self, idx: u8) {
-        self.inner.lock().unwrap().z_index = idx;
-    }
-
-    /// Returns the egui [`PlatformOutput`] generated by the last [`Self::render`] call
-    pub fn last_output(&self) -> Option<PlatformOutput> {
-        self.inner.lock().unwrap().last_output.take()
     }
 }
 
@@ -655,30 +659,5 @@ impl<D: SeatHandler> KeyboardTarget<D> for EguiState {
         _serial: Serial,
     ) {
         self.inner.lock().unwrap().last_modifiers = modifiers;
-    }
-}
-
-#[cfg(feature = "desktop_integration")]
-impl SpaceElement for EguiState {
-    fn bbox(&self) -> Rectangle<i32, Logical> {
-        self.inner.lock().unwrap().area
-    }
-
-    fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        let pos: Point<i32, _> = point.to_i32_round();
-        let last_pos = self.inner.lock().unwrap().last_pointer_position;
-        if (pos.x - last_pos.x) + (pos.y - last_pos.y) < 10 {
-            self.wants_pointer()
-        } else {
-            false
-        }
-    }
-
-    fn set_activate(&self, _activated: bool) {}
-    fn output_enter(&self, _output: &smithay::output::Output, _overlap: Rectangle<i32, Logical>) {}
-    fn output_leave(&self, _output: &smithay::output::Output) {}
-
-    fn z_index(&self) -> u8 {
-        self.inner.lock().unwrap().z_index as u8
     }
 }
