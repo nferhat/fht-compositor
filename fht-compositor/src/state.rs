@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -331,16 +330,9 @@ impl Fht {
         let workspace_set = WorkspaceSet::new(output.clone());
         self.workspaces.insert(output.clone(), workspace_set);
 
-        let output_geo = output.geometry();
-        output.user_data().insert_if_missing(|| {
-            OutputUserData::new(RefCell::new(OutputState {
-                egui: EguiState::new(output_geo.size.as_logical()),
-                egui_disabled: true,
-            }))
-        });
-
         // Focus output now.
         if CONFIG.general.cursor_warps {
+            let output_geo = output.geometry();
             let center = output_geo.loc + output_geo.size.downscale(2).to_point();
             self.loop_handle.insert_idle(move |state| {
                 state.move_pointer(center.to_f64());
@@ -391,6 +383,15 @@ impl Fht {
 
         wset.refresh();
         wset.arrange();
+    }
+
+    /// Get the active output, generally the one with the cursor on it, fallbacking to the first
+    /// available output.
+    pub fn active_output(&self) -> Output {
+        self.focus_state
+            .output
+            .clone()
+            .unwrap_or_else(|| self.outputs().next().unwrap().clone())
     }
 
     /// List all the outputs and a reference to their associated workspace set.
@@ -575,11 +576,14 @@ impl ClientData for ClientState {
     }
 }
 
-pub type OutputUserData = Rc<RefCell<OutputState>>;
-
-pub struct OutputState {
-    pub egui: EguiState,
-    pub egui_disabled: bool,
+/// Retrieve the [`EguiState`] for a given [`Output`]
+///
+/// If none existed before a new [`EguiState`] will be created for this output
+pub fn egui_state_for_output(output: &Output) -> Rc<EguiState> {
+    output
+        .user_data()
+        .get_or_insert(|| Rc::new(EguiState::new(output.geometry().size.as_logical())))
+        .clone()
 }
 
 #[derive(Default, Debug)]

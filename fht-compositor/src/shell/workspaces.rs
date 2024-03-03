@@ -12,7 +12,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SpaceElement;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
+use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::window::FhtWindowRenderElement;
@@ -22,7 +22,9 @@ use crate::backend::render::AsGlowRenderer;
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
 use crate::utils::animation::Animation;
-use crate::utils::geometry::{PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{
+    Global, PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
+};
 use crate::utils::output::OutputExt;
 
 pub struct WorkspaceSet {
@@ -271,6 +273,159 @@ impl WorkspaceSet {
             active.fullscreen.is_some() || target.fullscreen.is_some(),
             elements,
         )
+    }
+
+    /// Get the current fullscreen window and it's location in global coordinate space.
+    ///
+    /// This function also accounts for workspace switch animations.
+    #[profiling::function]
+    pub fn current_fullscreen(&self) -> Option<(&FhtWindow, Point<i32, Global>)> {
+        if self.switch_animation.is_none() {
+            // It's just the active one, so no need to do additional calculations.
+            return self
+                .active()
+                .fullscreen
+                .as_ref()
+                .map(|f| (&f.inner, f.inner.render_location()));
+        }
+
+        let animation = self.switch_animation.as_ref().unwrap();
+        let output_geo = self.output.geometry();
+
+        let (current_offset, target_offset) = match animation.direction {
+            WorkspaceSwitchDirection::Next => {
+                // Focusing the next offset.
+                // For the active, how much should we *remove* from the current position
+                // For the target, how much should we add to the current position
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from(((-offset), 0)),
+                            Point::from(((-offset + output_geo.size.w), 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (-offset))),
+                            Point::from((0, (-offset + output_geo.size.h))),
+                        )
+                    }
+                }
+            }
+            WorkspaceSwitchDirection::Previous => {
+                // Focusing a previous workspace
+                // For the active, how much should we add to tyhe current position
+                // For the target, how much should we remove from the current position.
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from((offset, 0)),
+                            Point::from((offset - output_geo.size.w, 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (offset))),
+                            Point::from((0, (offset - output_geo.size.h))),
+                        )
+                    }
+                }
+            }
+        };
+
+        self.active()
+            .fullscreen
+            .as_ref()
+            .map(|f| (&f.inner, f.inner.render_location() + current_offset))
+            .or_else(|| {
+                self.workspaces[animation.target_idx]
+                    .fullscreen
+                    .as_ref()
+                    .map(|f| (&f.inner, f.inner.render_location() + target_offset))
+            })
+    }
+
+    /// Get the window in under the cursor and it's location in global coordinate space.
+    ///
+    /// This function also accounts for workspace switch animations.
+    #[profiling::function]
+    pub fn window_under(
+        &self,
+        point: Point<f64, Global>,
+    ) -> Option<(&FhtWindow, Point<i32, Global>)> {
+        if self.switch_animation.is_none() {
+            // It's just the active one, so no need to do additional calculations.
+            return self.active().window_under(point);
+        }
+
+        let animation = self.switch_animation.as_ref().unwrap();
+        let output_geo = self.output.geometry();
+
+        let (current_offset, target_offset) = match animation.direction {
+            WorkspaceSwitchDirection::Next => {
+                // Focusing the next offset.
+                // For the active, how much should we *remove* from the current position
+                // For the target, how much should we add to the current position
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from(((-offset), 0)),
+                            Point::from(((-offset + output_geo.size.w), 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (-offset))),
+                            Point::from((0, (-offset + output_geo.size.h))),
+                        )
+                    }
+                }
+            }
+            WorkspaceSwitchDirection::Previous => {
+                // Focusing a previous workspace
+                // For the active, how much should we add to tyhe current position
+                // For the target, how much should we remove from the current position.
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from((offset, 0)),
+                            Point::from((offset - output_geo.size.w, 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (offset))),
+                            Point::from((0, (offset - output_geo.size.h))),
+                        )
+                    }
+                }
+            }
+        };
+
+        self.active()
+            .window_under(point + current_offset.to_f64())
+            .map(|(ft, loc)| (ft, loc + current_offset))
+            .or_else(|| {
+                self.workspaces[animation.target_idx]
+                    .window_under(point + target_offset.to_f64())
+                    .map(|(ft, loc)| (ft, loc + target_offset))
+            })
     }
 }
 
@@ -890,10 +1045,10 @@ impl Workspace {
     #[profiling::function]
     pub fn window_under(
         &self,
-        point: Point<f64, Logical>,
-    ) -> Option<(&FhtWindow, Point<i32, Logical>)> {
+        point: Point<f64, Global>,
+    ) -> Option<(&FhtWindow, Point<i32, Global>)> {
         if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            return Some((inner, inner.render_location().as_logical()));
+            return Some((inner, inner.render_location()));
         }
 
         let mut windows = self.windows.iter().collect::<Vec<_>>();
@@ -901,10 +1056,10 @@ impl Workspace {
 
         windows
             .iter()
-            .filter(|w| w.global_bbox().to_f64().as_logical().contains(point))
+            .filter(|w| w.global_bbox().to_f64().contains(point))
             .find_map(|w| {
-                let render_location = w.render_location().as_logical();
-                if w.is_in_input_region(&(point - render_location.to_f64())) {
+                let render_location = w.render_location();
+                if w.is_in_input_region(&(point - render_location.to_f64()).as_logical()) {
                     Some((*w, render_location))
                 } else {
                     None

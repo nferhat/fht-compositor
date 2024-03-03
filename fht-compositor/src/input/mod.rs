@@ -14,7 +14,7 @@ use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::{FilterResult, Keysym};
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Point, SERIAL_COUNTER};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
@@ -25,7 +25,7 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
 use crate::shell::PointerFocusTarget;
-use crate::state::{OutputUserData, State};
+use crate::state::{egui_state_for_output, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
@@ -51,17 +51,17 @@ impl State {
             return;
         };
 
-        let pointer_loc = pointer.current_location();
+        let pointer_loc = pointer.current_location().as_global();
         let layer_map = layer_map_for_output(output);
         let wset = self.fht.wset_mut_for(output);
         let active = wset.active_mut();
 
-        if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc) {
+        if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc.as_logical()) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.as_global().to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -73,7 +73,7 @@ impl State {
         } else if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
             if fullscreen
                 .surface_under(
-                    pointer_loc.as_global().to_local(output).as_logical(),
+                    pointer_loc.to_local(output).as_logical(),
                     WindowSurfaceType::ALL,
                 )
                 .is_some()
@@ -81,12 +81,12 @@ impl State {
                 self.fht.focus_state.focus_target = Some(fullscreen.clone().into());
                 return;
             }
-        } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
+        } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc.as_logical()) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.as_global().to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -110,14 +110,14 @@ impl State {
             active.raise_window(&window);
             self.fht.focus_state.focus_target = Some(window.clone().into());
         } else if let Some(layer) = layer_map
-            .layer_under(Layer::Bottom, pointer_loc)
-            .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc))
+            .layer_under(Layer::Bottom, pointer_loc.as_logical())
+            .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc.as_logical()))
         {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.as_global().to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -131,11 +131,16 @@ impl State {
 
     pub fn move_pointer(&mut self, point: Point<f64, Global>) {
         let pointer = self.fht.pointer.clone();
-        let under = self.fht.focus_target_under(point.as_logical());
+        let under = self.fht.focus_target_under(point);
+
+        if let Some(output) = self.fht.focus_state.output.as_ref() {
+            let position = point.to_i32_round().to_local(output).as_logical();
+            egui_state_for_output(output).handle_pointer_motion(position);
+        }
 
         pointer.motion(
             self,
-            under,
+            under.map(|(ft, loc)| (ft, loc.as_logical())),
             &MotionEvent {
                 location: point.as_logical(),
                 serial: SERIAL_COUNTER.next_serial(),
@@ -154,7 +159,7 @@ impl State {
         }
     }
 
-    fn clamp_coords(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
+    fn clamp_coords(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
         let (pos_x, pos_y) = pos.into();
         let max_x = self
             .fht
@@ -177,14 +182,10 @@ impl State {
 
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
-        let mut output = self.fht.focus_state.output.clone().unwrap();
-        let output_state = output.user_data().get::<OutputUserData>().unwrap().clone();
-        let output_state = output_state.borrow();
+        let mut output = self.fht.active_output();
 
         match event {
             InputEvent::DeviceAdded { device } => {
-                // Even egui is disabled this doesn't hurt to handle.
-                output_state.egui.handle_device_added(&device);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     self.fht.seat.tablet_seat().add_tablet::<State>(
                         &self.fht.display_handle,
@@ -192,10 +193,9 @@ impl State {
                     );
                 }
                 // TODO: Handle touch devices.
+                egui_state_for_output(&output).handle_device_added(&device);
             }
             InputEvent::DeviceRemoved { device } => {
-                // Even egui is disabled this doesn't hurt to handle.
-                output_state.egui.handle_device_removed(&device);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     let tablet_seat = self.fht.seat.tablet_seat();
                     tablet_seat.remove_tablet(&TabletDescriptor::from(&device));
@@ -204,6 +204,7 @@ impl State {
                         tablet_seat.clear_tools();
                     }
                 }
+                egui_state_for_output(&output).handle_device_removed(&device);
             }
             InputEvent::Keyboard { event } => {
                 let keycode = event.key_code();
@@ -251,10 +252,10 @@ impl State {
                     }
                 }
 
-                let pointer_loc = self.fht.pointer.current_location();
+                let pointer_location = self.fht.pointer.current_location().as_global();
                 let inhibited = self
                     .fht
-                    .focus_target_under(pointer_loc)
+                    .focus_target_under(pointer_location)
                     .and_then(|(ft, _)| {
                         if let PointerFocusTarget::Window(w) = ft {
                             let wl_surface = w.wl_surface()?;
@@ -328,8 +329,8 @@ impl State {
             }
             InputEvent::PointerMotion { event } => {
                 let pointer = self.fht.pointer.clone();
-                let mut pointer_location = pointer.current_location();
-                let mut under = self.fht.focus_target_under(pointer_location);
+                let mut pointer_location = pointer.current_location().as_global();
+                let under = self.fht.focus_target_under(pointer_location);
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let mut pointer_locked = false;
@@ -346,7 +347,10 @@ impl State {
                                 // Constraint basically useless if not within region/doesn't have a
                                 // defined region
                                 if !constraint.region().map_or(true, |region| {
-                                    region.contains(pointer_location.to_i32_round() - *surface_loc)
+                                    region.contains(
+                                        (pointer_location.to_i32_round() - *surface_loc)
+                                            .as_logical(),
+                                    )
                                 }) {
                                     return;
                                 }
@@ -366,7 +370,7 @@ impl State {
 
                 pointer.relative_motion(
                     self,
-                    under.clone(),
+                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
                     &RelativeMotionEvent {
                         delta: event.delta(),
                         delta_unaccel: event.delta_unaccel(),
@@ -380,29 +384,19 @@ impl State {
                     return;
                 }
 
-                pointer_location += event.delta();
+                pointer_location += event.delta().as_global();
                 pointer_location = self.clamp_coords(pointer_location);
+                let new_under = self.fht.focus_target_under(pointer_location);
 
                 let maybe_new_output = self
                     .fht
                     .outputs()
-                    .find(|output| {
-                        output
-                            .geometry()
-                            .to_f64()
-                            .contains(pointer_location.as_global())
-                    })
+                    .find(|output| output.geometry().to_f64().contains(pointer_location))
                     .cloned();
                 if let Some(new_output) = maybe_new_output {
                     self.fht.focus_state.output = Some(new_output.clone());
                     output = new_output;
                 }
-                let geo = output.geometry();
-                // Redeclare since the output may have changed
-                let output_state = output.user_data().get::<OutputUserData>().unwrap().clone();
-                let output_state = output_state.borrow();
-
-                let new_under = self.fht.focus_target_under(pointer_location);
 
                 // Confine pointer if possible.
                 if pointer_confined {
@@ -413,7 +407,7 @@ impl State {
                             return;
                         }
                         if confine_region.is_some_and(|region| {
-                            region.contains(pointer_location.to_i32_round() - *loc)
+                            region.contains((pointer_location.to_i32_round() - *loc).as_logical())
                         }) {
                             pointer.frame(self);
                             return;
@@ -421,29 +415,24 @@ impl State {
                     }
                 }
 
-                if !output_state.egui_disabled {
-                    output_state.egui.handle_pointer_motion(
-                        pointer_location
-                            .to_i32_round()
-                            .as_global()
-                            .to_local(&output)
-                            .as_logical(),
-                    );
-                    if output_state.egui.wants_pointer() {
-                        under = Some((output_state.egui.clone().into(), geo.loc.as_logical()))
-                    }
-                }
-
                 pointer.motion(
                     self,
-                    under,
+                    under.map(|(ft, loc)| (ft, loc.as_logical())),
                     &MotionEvent {
-                        location: pointer_location,
+                        location: pointer_location.as_logical(),
                         serial,
                         time: event.time_msec(),
                     },
                 );
                 pointer.frame(self);
+
+                {
+                    let location = pointer_location
+                        .to_local(&output)
+                        .to_i32_round()
+                        .as_logical();
+                    egui_state_for_output(&output).handle_pointer_motion(location);
+                }
 
                 // If pointer is now in a constraint region, activate it
                 // TODO: Anywhere else pointer is moved needs to do this (in the self.move_pointer
@@ -456,7 +445,7 @@ impl State {
                             let point = pointer_location.to_i32_round() - surface_location;
                             if constraint
                                 .region()
-                                .map_or(true, |region| region.contains(point))
+                                .map_or(true, |region| region.contains(point.as_logical()))
                             {
                                 constraint.activate();
                             }
@@ -466,36 +455,28 @@ impl State {
                 }
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                // NOTE: On X11 backend we know that the only output we can have is the one for the
-                // window
-                let output = self.fht.focus_state.output.clone().unwrap();
                 let output_geo = output.geometry().as_logical();
-
-                let relative_pos =
-                    event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+                let pointer_location = (event.position_transformed(output_geo.size)
+                    + output_geo.loc.to_f64())
+                .as_global();
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let pointer = self.fht.pointer.clone();
-                let mut under = self.fht.focus_target_under(relative_pos);
+                let under = self.fht.focus_target_under(pointer_location);
 
-                if !output_state.egui_disabled {
-                    output_state.egui.handle_pointer_motion(
-                        relative_pos
-                            .to_i32_round()
-                            .as_global()
-                            .to_local(&output)
-                            .as_logical(),
-                    );
-                    if output_state.egui.wants_pointer() {
-                        under = Some((output_state.egui.clone().into(), output_geo.loc))
-                    }
+                {
+                    let local_pos = pointer_location
+                        .to_i32_round()
+                        .to_local(&output)
+                        .as_logical();
+                    egui_state_for_output(&output).handle_pointer_motion(local_pos);
                 }
 
                 pointer.motion(
                     self,
-                    under,
+                    under.map(|(ft, loc)| (ft, loc.as_logical())),
                     &MotionEvent {
-                        location: relative_pos,
+                        location: pointer_location.as_logical(),
                         serial,
                         time: event.time_msec(),
                     },
@@ -508,14 +489,17 @@ impl State {
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
 
-                if !output_state.egui_disabled && output_state.egui.wants_pointer() {
-                    if let Some(button) = event.button() {
-                        output_state.egui.handle_pointer_button(
+                {
+                    let egui = egui_state_for_output(&output);
+                    if egui.wants_pointer()
+                        && let Some(button) = event.button()
+                    {
+                        egui.handle_pointer_button(
                             button,
                             state == wl_pointer::ButtonState::Pressed,
                         );
+                        return;
                     }
-                    return;
                 }
 
                 if state == wl_pointer::ButtonState::Pressed {
@@ -585,6 +569,14 @@ impl State {
                         }
                     }
 
+                    {
+                        let egui = egui_state_for_output(&output);
+                        if egui.wants_pointer() {
+                            egui.handle_pointer_axis(horizontal_amount, vertical_amount);
+                            return;
+                        }
+                    }
+
                     let pointer = self.fht.pointer.clone();
                     pointer.axis(self, frame);
                     pointer.frame(self);
@@ -602,8 +594,9 @@ impl State {
                     return;
                 };
 
-                let pointer_location =
-                    event.position_transformed(output_geometry.size) + output_geometry.loc.to_f64();
+                let pointer_location = (event.position_transformed(output_geometry.size)
+                    + output_geometry.loc.to_f64())
+                .as_global();
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
@@ -612,9 +605,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone(),
+                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
                     &MotionEvent {
-                        location: pointer_location,
+                        location: pointer_location.as_logical(),
                         serial: SERIAL_COUNTER.next_serial(),
                         time: 0,
                     },
@@ -641,8 +634,8 @@ impl State {
                     }
 
                     tool.motion(
-                        pointer_location,
-                        under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc))),
+                        pointer_location.as_logical(),
+                        under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc.as_logical()))),
                         &tablet,
                         SERIAL_COUNTER.next_serial(),
                         event.time_msec(),
@@ -666,8 +659,9 @@ impl State {
                 let tool = event.tool();
                 tablet_seat.add_tool::<Self>(&self.fht.display_handle, &tool);
 
-                let pointer_location =
-                    event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+                let pointer_location = (event.position_transformed(output_geo.size)
+                    + output_geo.loc.to_f64())
+                .as_global();
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
@@ -676,9 +670,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone(),
+                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
                     &MotionEvent {
-                        location: pointer_location,
+                        location: pointer_location.as_logical(),
                         serial: SERIAL_COUNTER.next_serial(),
                         time: 0,
                     },
@@ -686,13 +680,13 @@ impl State {
                 pointer.frame(self);
 
                 if let (Some(under), Some(tablet), Some(tool)) = (
-                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc))),
+                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc.as_logical()))),
                     tablet,
                     tool,
                 ) {
                     match event.state() {
                         ProximityState::In => tool.proximity_in(
-                            pointer_location,
+                            pointer_location.as_logical(),
                             under,
                             &tablet,
                             SERIAL_COUNTER.next_serial(),

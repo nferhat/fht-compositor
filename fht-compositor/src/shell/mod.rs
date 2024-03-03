@@ -15,7 +15,7 @@ use smithay::input::pointer::Focus;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Serial};
+use smithay::utils::{Point, Serial};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgShellHandler};
@@ -27,7 +27,7 @@ pub use self::workspaces::FullscreenSurface;
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
-use crate::utils::geometry::{PointExt, PointGlobalExt, RectGlobalExt};
+use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
 impl Fht {
@@ -42,34 +42,30 @@ impl Fht {
     /// - [`Background`] layer shells.
     pub fn focus_target_under(
         &self,
-        point: Point<f64, Logical>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
+        point: Point<f64, Global>,
+    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
         let output = self.focus_state.output.as_ref()?;
-        let active_ws = self.wset_for(output).active();
-        let output_geometry = output.geometry().as_logical();
+        let wset = self.wset_for(output);
         let layer_map = layer_map_for_output(output);
 
         let mut under = None;
 
-        if let Some(layer) = layer_map.layer_under(Layer::Overlay, point) {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
-            under = Some((layer.clone().into(), output_geometry.loc + layer_loc))
-        } else if let Some(fullscreen) = active_ws.fullscreen.as_ref().map(|f| &f.inner) {
-            under = Some((
-                fullscreen.clone().into(),
-                output.geometry().loc.as_logical(),
-            ))
-        } else if let Some(layer) = layer_map.layer_under(Layer::Top, point) {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
-            under = Some((layer.clone().into(), output_geometry.loc + layer_loc))
-        } else if let Some((window, loc)) = active_ws.window_under(point) {
+        if let Some(layer) = layer_map.layer_under(Layer::Overlay, point.as_logical()) {
+            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
+            under = Some((layer.clone().into(), layer_loc.to_global(output)))
+        } else if let Some((fullscreen, loc)) = wset.current_fullscreen() {
+            under = Some((fullscreen.clone().into(), loc))
+        } else if let Some(layer) = layer_map.layer_under(Layer::Top, point.as_logical()) {
+            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
+            under = Some((layer.clone().into(), layer_loc.to_global(output)))
+        } else if let Some((window, loc)) = wset.window_under(point) {
             under = Some((window.clone().into(), loc))
         } else if let Some(layer) = layer_map
-            .layer_under(Layer::Bottom, point)
-            .or_else(|| layer_map.layer_under(Layer::Background, point))
+            .layer_under(Layer::Bottom, point.as_logical())
+            .or_else(|| layer_map.layer_under(Layer::Background, point.as_logical()))
         {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
-            under = Some((layer.clone().into(), output_geometry.loc + layer_loc))
+            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
+            under = Some((layer.clone().into(), layer_loc.to_global(output)))
         }
 
         under

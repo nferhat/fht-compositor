@@ -100,7 +100,6 @@ pub use self::types::{
     KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings, WindowRulePattern,
     WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
 };
-use crate::backend::render::RUNTIME_HIDE_GREETING_MESSAGE;
 
 // To avoid mutable static madness just use an private unsafe cell with one getter and setter.
 // Dont show this to the user though
@@ -167,9 +166,6 @@ impl crate::state::State {
         unsafe {
             *CONFIG.0.get() = new_config;
         }
-
-        // I mean yeah, its not optimal but it works...
-        RUNTIME_HIDE_GREETING_MESSAGE.store(!CONFIG.greet, std::sync::atomic::Ordering::Relaxed);
 
         // the [`CursorThemeManager`] automatically checks for changes.
         self.fht.cursor_theme_manager.reload();

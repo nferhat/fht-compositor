@@ -7,6 +7,7 @@ use smithay::utils::Serial;
 use crate::config::CONFIG;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
+use crate::utils::geometry::PointExt;
 use crate::utils::output::OutputExt;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -409,7 +410,7 @@ pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 impl State {
     #[profiling::function]
     pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
-        let pointer_loc = self.fht.pointer.current_location();
+        let pointer_loc = self.fht.pointer.current_location().as_global();
 
         match action {
             MouseAction::MoveWindow { floating_only } => {

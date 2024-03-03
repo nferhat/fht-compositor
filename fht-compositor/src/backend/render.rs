@@ -1,5 +1,3 @@
-use std::sync::atomic::AtomicBool;
-
 use egui::{Color32, RichText};
 use egui_extras::Column;
 use serde::{Deserialize, Serialize};
@@ -24,7 +22,7 @@ use crate::config::CONFIG;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
-use crate::state::{Fht, OutputUserData};
+use crate::state::{egui_state_for_output, Fht};
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::output::OutputExt;
 
@@ -483,31 +481,26 @@ fn egui_elements(
     output: &Output,
     state: &Fht,
 ) -> Option<TextureRenderElement<GlesTexture>> {
-    let show_greet =
-        CONFIG.greet && !RUNTIME_HIDE_GREETING_MESSAGE.load(std::sync::atomic::Ordering::Relaxed);
-    let mut output_state = output
-        .user_data()
-        .get::<OutputUserData>()
-        .unwrap()
-        .borrow_mut();
-    if !CONFIG.renderer.debug_overlay && !show_greet && state.last_config_error.is_none() {
-        // PERF: Make sure we are not rendering EGUI for nothing
-        output_state.egui_disabled = true;
+    let scale = output.current_scale().fractional_scale();
+    let egui = egui_state_for_output(output);
+    if !CONFIG.renderer.debug_overlay && !CONFIG.greet && state.last_config_error.is_none() {
+        // Even if we are rendering nothing, make sure egui understands we are really doing
+        // nothing, because not running the context will make it use the last frame it was rendered
+        // with, so the one with the windows and whatnot
+        //
+        // It's also so we dispatch input events that we collected during the last frame
+        egui.run(|_| (), scale);
         return None;
-    }
-    output_state.egui_disabled = false;
+    } else {
+        let is_focused = state
+            .focus_state
+            .output
+            .as_ref()
+            .is_some_and(|o| o == output);
 
-    let is_focused = state
-        .focus_state
-        .output
-        .as_ref()
-        .is_some_and(|o| o == output);
-
-    output_state
-        .egui
-        .render(
+        egui.render(
             |ctx| {
-                if is_focused && show_greet {
+                if is_focused && CONFIG.greet {
                     egui_greeting_message(ctx);
                 }
 
@@ -519,10 +512,11 @@ fn egui_elements(
             },
             renderer,
             output.geometry().as_logical().loc,
-            output.current_scale().fractional_scale(),
+            scale,
             1.0,
         )
         .ok()
+    }
 }
 
 #[profiling::function]
@@ -533,20 +527,8 @@ fn egui_config_error(context: &egui::Context, error: &anyhow::Error) {
         .collapsible(false)
         .movable(true);
     area.show(context, |ui| {
-        egui::Frame::none()
-            .fill(context.style().visuals.window_fill)
-            .inner_margin(10.0)
-            .stroke(egui::Stroke {
-                width: 2.0,
-                color: context.style().visuals.error_fg_color,
-            })
-            .show(ui, |ui| {
-                ui.heading(
-                    RichText::new("fht-compositor failed to reload your config!")
-                        .color(context.style().visuals.error_fg_color),
-                );
-                ui.label(error.root_cause().to_string());
-            })
+        ui.label(error.to_string());
+        ui.label(error.root_cause().to_string());
     });
 }
 
@@ -564,13 +546,9 @@ const USEFUL_DEFAULT_KEYBINDS: [(&str, &str); 8] = [
     ),
 ];
 
-pub static RUNTIME_HIDE_GREETING_MESSAGE: AtomicBool = AtomicBool::new(false);
-
 #[profiling::function]
 fn egui_greeting_message(context: &egui::Context) {
-    let area = egui::Window::new("Welcome to fht-compositor")
-        .resizable(false)
-        .collapsible(false);
+    let area = egui::Window::new("Welcome to fht-compositor").resizable(false);
     area.show(context, |ui| {
         ui.label("If you are seeing this message, that means you successfully installed and ran the compositor with no issues! Congratulations!");
 
@@ -581,12 +559,7 @@ fn egui_greeting_message(context: &egui::Context) {
         });
 
         ui.add_space(8.0);
-        ui.label("You can disable this message temporarily by clicking the following button, or set greet to false in your configuration");
-        ui.vertical_centered(|ui| {
-            if ui.button("Disable message").clicked() {
-                RUNTIME_HIDE_GREETING_MESSAGE.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        });
+        ui.label("You can disable this message by setting greet to false in your config file!");
 
         ui.add_space(12.0);
         ui.heading("Warning notice");
