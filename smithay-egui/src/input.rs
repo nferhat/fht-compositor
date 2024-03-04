@@ -1,14 +1,12 @@
 // This file is a light wrapper around libxkbcommon, see the other file for usage
 
-use egui::{Key, Modifiers, PointerButton};
-use smithay::{
-    backend::input::MouseButton,
-    input::keyboard::{Keysym as KeysymU32, ModifiersState},
-};
-use xkbcommon::xkb;
-pub use xkbcommon::xkb::{keysyms, Keycode, Keysym};
-
 use std::convert::TryFrom;
+
+use egui::{Key, Modifiers, PointerButton};
+use smithay::backend::input::MouseButton;
+use smithay::input::keyboard::{Keysym as KeysymU32, ModifiersState};
+use xkbcommon::xkb;
+pub use xkbcommon::xkb::{Keycode, Keysym};
 
 pub struct KbdInternal {
     keymap: xkb::Keymap,
