@@ -21,7 +21,7 @@ use smithay::input::pointer::{
     GestureSwipeUpdateEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
 };
 use smithay::input::{Seat, SeatHandler};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, Transform};
+use smithay::utils::{Buffer, IsAlive, Logical, Point, Rectangle, Serial, Size, Transform};
 use xkbcommon::xkb::Keycode;
 
 mod input;
@@ -397,11 +397,10 @@ impl EguiState {
 
             // TODO: Better damage tracking?
             // Without this it leaves weird artifacts from previous frames
-            Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Logical>::from_extemities(
+            Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Buffer>::from_loc_and_size(
                 (0, 0),
-                (output_size.w, output_size.h),
-            )
-            .to_buffer(int_scale, Transform::Flipped180, &inner.size)])
+                (buffer_size.w, buffer_size.h),
+            )])
         })?;
 
         Ok(TextureRenderElement::from_texture_render_buffer(
@@ -409,7 +408,7 @@ impl EguiState {
             &render_buffer,
             Some(alpha),
             None,
-            None,
+            Some(inner.size),
             Kind::Unspecified,
         ))
     }
