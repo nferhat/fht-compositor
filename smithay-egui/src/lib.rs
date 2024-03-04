@@ -43,7 +43,6 @@ impl PartialEq for EguiState {
 
 struct EguiInner {
     pointers: usize,
-    last_pointer_position: Point<i32, Logical>,
     size: Size<i32, Logical>,
     needs_new_buffer: bool,
     last_modifiers: ModifiersState,
@@ -57,7 +56,6 @@ impl fmt::Debug for EguiInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("EguiInner");
         d.field("pointers", &self.pointers)
-            .field("last_pointer_position", &self.last_pointer_position)
             .field("area", &self.size)
             .field("needs_new_buffer", &self.needs_new_buffer)
             .field("last_modifiers", &self.last_modifiers)
@@ -86,7 +84,6 @@ impl EguiState {
             start_time: Instant::now(),
             inner: Arc::new(Mutex::new(EguiInner {
                 pointers: 0,
-                last_pointer_position: (0, 0).into(),
                 size,
                 needs_new_buffer: false,
                 last_modifiers: ModifiersState::default(),
@@ -192,7 +189,6 @@ impl EguiState {
     /// Pass new pointer coordinates to `EguiState`
     pub fn handle_pointer_motion(&self, position: Point<i32, Logical>) {
         let mut inner = self.inner.lock().unwrap();
-        inner.last_pointer_position = position;
         inner.events.push(Event::PointerMoved(Pos2::new(
             position.x as f32,
             position.y as f32,
@@ -207,10 +203,10 @@ impl EguiState {
     pub fn handle_pointer_button(&self, button: MouseButton, pressed: bool) {
         if let Some(button) = convert_button(button) {
             let mut inner = self.inner.lock().unwrap();
-            let last_pos = inner.last_pointer_position;
             let modifiers = convert_modifiers(inner.last_modifiers);
             inner.events.push(Event::PointerButton {
-                pos: Pos2::new(last_pos.x as f32, last_pos.y as f32),
+                // SAFETY: We don't support touch here, so this should always be Some
+                pos: self.ctx.pointer_latest_pos().unwrap(),
                 button,
                 pressed,
                 modifiers,
