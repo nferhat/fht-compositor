@@ -1,0 +1,244 @@
+#![enable(implicit_some)]
+FhtConfig(
+    // A NON EXHAUSTIVE configuration for fht-compositor, that you can use as a starting point.
+    //
+    // implicit_some is a ron feature extension that basically adds implicitly a Some around values when
+    // the expected type is a Option<T>, really useful
+
+    // ---
+
+    greet: true,
+    // A list of programs, or to be more precise, command lines, to spawn when the compositor starts.
+    //
+    // You have to note that these are spawned with `/bin/sh`, so you profit from shell expansions like
+    // `~` for `$HOME` or glob-style patterns.
+    autostart: [
+        "swaybg -i ~/.config/theme/yoru-edit/wallpaper.jpg",
+        "/usr/libexec/polkit-gnome-authentication-agent-1",
+        "gentoo-pipewire-launcher",
+    ],
+
+    // General configuration for the compositor.
+    general: (
+        // Should the compositor warp the cursor arbitrarily (for example when focusing window,
+        // when an output is added, etc...)
+        cursor_warps: true,
+
+        // Should the compositor focus new windows, or just insert it without focusing.
+        focus_new_windows: true,
+
+        // Layout settings.
+        //
+        // fht-compositor operates on a dynamic layout system, inspired by dwm.
+        // This sytem relies on 4 variables, or parameters
+        // - Inner and outer gaps
+        // - The master width factor (mwfact)
+        // - The number of master clients.
+        //
+        // The latter two are controlled in runtime with the ChangeMasterWidthFactor and
+        // ChangeNmaster key actions. The 2 former are set here.
+        outer_gaps: 8,
+        inner_gaps: 8,
+
+        // Cursor rendering.
+        //
+        // If these are not set, the compositor tries to fallback on `XCURSOR_THEME` and
+        // `XCURSOR_SIZE` environment variables, and if not set, use a basic cursor included in
+        // the compositor files
+        cursor: (name: "Vimix", size: 32),
+    ),
+
+    // Decorations for windows.
+    decoration: (
+        // A simple border that's drawn around windows.
+        // I think the settings are pretty obvious.
+        border: (
+            thickness: 2,
+            radius: 8,
+            focused_color: "#6791c9",
+            normal_color: "#44474f",
+        ),
+
+        // Should we allow clients to draw client-side decorations?
+        //
+        // This is basically the switch for allowing/disawolling windows to draw their own
+        // titlebars, shadows, etc.
+        //
+        // You are recommended to set this to false, though GNOME applications (and thus also
+        // libadwaita applications) don't respect this setting.
+        allow_csd: false,
+    ),
+
+    // Animations (since we are hyprland v-1)
+    animation: (
+        // Animation for a workspace switch, or a transition, similar to what is available on GNOME
+        // and Windows 10 desktop switches.
+        workspace_switch: (
+            duration: 350,
+            easing: EaseOut,
+            direction: Horizontal,
+        ),
+    ),
+
+    // Key bindings.
+    //
+    // This is a table, where the left side represents the key *pattern*, while the right side, or
+    // the value, represents the action.
+    //
+    // You should be able to get a somewhat good feel of how to write your own keybinds with the
+    // following examples.
+    keybinds: {
+        // Quit the compositor, or reload the configuration (auto-reload soon!)
+        ([SUPER], "q"): Quit,
+        ([CTRL, SUPER], "r"): ReloadConfig,
+
+        // Spawning programs (that are again, run using /bin/sh)
+        ([SUPER], "Return"): RunCommand("alacritty"),
+        ([SUPER], "p"): RunCommand("wofi --show drun"),
+        ([SUPER, SHIFT], "s"): RunCommand("grim -g \"`slurp`\""),
+
+        // Window management and layout management.
+        ([SUPER], "j"):            FocusNextWindow,
+        ([SUPER], "k"):            FocusPreviousWindow,
+        ([SUPER, SHIFT], "j"):     SwapWithPreviousWindow,
+        ([SUPER, SHIFT], "k"):     SwapWithNextWindow,
+        ([SHIFT, SUPER], "c"):     CloseFocusedWindow,
+        ([SUPER], "Space"):        SelectNextLayout,
+        ([SUPER, SHIFT], "Space"): SelectPreviousLayout,
+        ([SUPER, CTRL], "Space"):  ToggleFloating,
+        ([SUPER, CTRL], "s"):      CenterFocusedWindow,
+        ([SUPER, CTRL], "p"):      PinFocusedWindow,
+        ([SUPER],       "f"):      FullscreenFocusedWindow,
+        ([SUPER],       "m"):      ToggleMaximizeOnFocusedWindow,
+        ([SUPER], "h"):            ChangeMwfact(-0.05),
+        ([SUPER], "l"):            ChangeMwfact(0.05),
+        ([SUPER, SHIFT], "h"):     ChangeNmaster(1),
+        ([SUPER, SHIFT], "l"):     ChangeNmaster(-1),
+
+        // Workspaces. (you probably don't wanna touch this)
+        ([SUPER], "1"): FocusWorkspace(0),
+        ([SUPER], "2"): FocusWorkspace(1),
+        ([SUPER], "3"): FocusWorkspace(2),
+        ([SUPER], "4"): FocusWorkspace(3),
+        ([SUPER], "5"): FocusWorkspace(4),
+        ([SUPER], "6"): FocusWorkspace(5),
+        ([SUPER], "7"): FocusWorkspace(6),
+        ([SUPER], "8"): FocusWorkspace(7),
+        ([SUPER], "9"): FocusWorkspace(8),
+        ([SUPER, SHIFT], "1"): SendFocusedWindowToWorkspace(0),
+        ([SUPER, SHIFT], "2"): SendFocusedWindowToWorkspace(1),
+        ([SUPER, SHIFT], "3"): SendFocusedWindowToWorkspace(2),
+        ([SUPER, SHIFT], "4"): SendFocusedWindowToWorkspace(3),
+        ([SUPER, SHIFT], "5"): SendFocusedWindowToWorkspace(4),
+        ([SUPER, SHIFT], "6"): SendFocusedWindowToWorkspace(5),
+        ([SUPER, SHIFT], "7"): SendFocusedWindowToWorkspace(6),
+        ([SUPER, SHIFT], "8"): SendFocusedWindowToWorkspace(7),
+        ([SUPER, SHIFT], "9"): SendFocusedWindowToWorkspace(8),
+    },
+
+    // Mouse bindings.
+    //
+    // The same logic from the key bindings. (But there's only MoveWindow right now...)
+    mousebinds: {
+        ([SUPER], Left): MoveWindow(floating_only: false),
+    },
+
+    // Input configuration.
+    input: (
+        keyboard: (
+            // Keyboard XKB settings. Refer to XKB documentations for what to put inside these strings.
+            rules: "",
+            model: "",
+            layout: "us",
+            variant: "",
+            options: "",
+            // Repeat rate, in hertz, and repeat delay, in milliseconds.
+            repeat_rate: 50,
+            repeat_delay: 250,
+        ),
+
+        // You can also set configuration on a per-device basis.
+        // You can either use the pretty name, or the dev name (see libinput doc for what are these)
+        per_device: {
+            "SynPS/2 Synaptics TouchPad": (
+                // disable: false, // pretty obvious
+                mouse: (
+                    natural_scrolling: false,
+                    acceleration_speed: 1.0,
+                    tap_to_click: true
+                ),
+                keyboard: () // same as `input.keyboard`
+            ),
+        }
+    ),
+
+    // Window rules.
+    //
+    // They *should* work, (well I need more testing). These are directly ripped from my own config
+    // so you can see what you can do.
+    //
+    // `app_id` is the same as WM_CLASS on X.org
+    // `title` is the title string (TODO: Regex)
+    //
+    // TODO: More rules
+    rules: {
+        [
+            // Floating windows.
+            (app_id: "nvidia-settings"),
+            (app_id: "org.keepassxc.KeePassXC"),
+            (app_id: "nwg-look"),
+            (app_id: "Virt-Manager"),
+            (app_id: "pinentry-qt"),
+            (app_id: "file_progress"),
+            (app_id: "confirm"),
+            (app_id: "dialog"),
+            (app_id: "download"),
+            (app_id: "notification"),
+            (app_id: "error"),
+            (app_id: "splash"),
+            (app_id: "confirmreset"),
+        ]: (
+            floating: true,
+            centered: true,
+        ),
+
+        [
+            // Web browsers, all on 2nd workspace.
+            (app_id: "LibreWolf"),
+            (app_id: "Firefox"),
+            (app_id: "qutebrowser"),
+        ]: (
+            workspace: 1,
+            fullscreen: true,
+        ),
+
+        [
+            // Chat clients
+            (app_id: "Discord"),
+            (app_id: "Element"),
+            (title: ".*Telegram.*"),
+        ]: (
+            workspace: 2,
+        ),
+
+        [
+            // Games.
+            (workspace: 5),
+            (app_id: "Celeste.bin.x86_64"),
+            (app_id: "osu!.exe"),
+            (app_id: "Grapejuice"),
+            (app_id: "Etterna"),
+            (app_id: "Quaver"),
+            (app_id: "Steam"),
+            (app_id: "org.prismlauncher.PrismLauncher"),
+            (app_id: "love") // olympus for celeste.
+        ]: (
+            workspace: 5,
+            floating: true
+        )
+    },
+
+    // If for whatever obscure reason, your output is not 10-bit, or you just need to forcibly
+    // disable 10-bit, here you go:
+    renderer: ( disable_10bit: false ),
+)

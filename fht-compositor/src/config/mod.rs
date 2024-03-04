@@ -87,12 +87,15 @@
 mod types;
 
 use std::cell::SyncUnsafeCell;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::sync::LazyLock;
 
 use anyhow::Context;
 use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
 use xdg::BaseDirectories;
+
+const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
 
 #[allow(unused_imports)]
 pub use self::types::{
@@ -139,15 +142,28 @@ pub fn load_config() -> anyhow::Result<FhtConfigInner> {
         .place_config_file("fht/compositor.ron")
         .context("Failed to get config file!")?;
 
-    let config: FhtConfigInner = ron::de::from_reader(
-        OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(config_file_path)
-            .context("Failed to open config file!")?,
-    )
-    .context("Malformed config file!")?;
+    let reader = OpenOptions::new()
+        .read(true)
+        .write(false)
+        .open(&config_file_path);
+    let reader = match reader {
+        Ok(reader) => reader,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            // Create config file for user
+            let mut file = File::create_new(&config_file_path).unwrap();
+            writeln!(&mut file, "{}", DEFAULT_CONFIG).unwrap();
+            OpenOptions::new()
+                .read(true)
+                .write(false)
+                .open(&config_file_path)
+                .unwrap()
+        }
+        Err(err) => {
+            anyhow::bail!("Failed to open config file: {}", err)
+        }
+    };
 
+    let config: FhtConfigInner = ron::de::from_reader(reader).context("Malformed config file!")?;
     Ok(config)
 }
 
