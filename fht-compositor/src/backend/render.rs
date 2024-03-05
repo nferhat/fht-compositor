@@ -1,4 +1,4 @@
-use egui::{Color32, RichText};
+use egui::Color32;
 use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::{
@@ -21,9 +21,10 @@ use super::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::CONFIG;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
-use crate::shell::workspaces::WorkspaceSetRenderElement;
+use crate::shell::workspaces::{WorkspaceSetRenderElement, WorkspaceSwitchAnimation};
 use crate::state::{egui_state_for_output, Fht};
-use crate::utils::geometry::RectGlobalExt;
+use crate::utils::fps::Fps;
+use crate::utils::geometry::{PointExt, PointGlobalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
 /// Helper trait to get around a borrow checker/trait checker limitations (e0277.
@@ -309,6 +310,7 @@ pub fn output_elements<R>(
     renderer: &mut R,
     output: &Output,
     state: &mut Fht,
+    fps: &mut Fps,
 ) -> Vec<FhtRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -331,7 +333,7 @@ where
     // 6. Bottom layer shells
     // 7. Background layer shells
 
-    if let Some(egui) = egui_elements(renderer.glow_renderer_mut(), output, &state) {
+    if let Some(egui) = egui_elements(renderer.glow_renderer_mut(), output, &state, fps) {
         elements.push(FhtRenderElement::Egui(egui))
     }
 
@@ -480,6 +482,7 @@ fn egui_elements(
     renderer: &mut GlowRenderer,
     output: &Output,
     state: &Fht,
+    fps: &mut Fps,
 ) -> Option<TextureRenderElement<GlesTexture>> {
     let scale = output.current_scale().fractional_scale();
     let egui = egui_state_for_output(output);
@@ -500,6 +503,10 @@ fn egui_elements(
 
         egui.render(
             |ctx| {
+                if CONFIG.renderer.debug_overlay {
+                    egui_debug_overlay(ctx, output, state, fps);
+                }
+
                 if is_focused && CONFIG.greet {
                     egui_greeting_message(ctx);
                 }
@@ -517,6 +524,101 @@ fn egui_elements(
         )
         .ok()
     }
+}
+
+#[profiling::function]
+fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps: &mut Fps) {
+    let area = egui::Window::new(output.name())
+        .resizable(false)
+        .collapsible(false)
+        .movable(true);
+    let mode = output.current_mode().unwrap();
+    let scale = output.current_scale().fractional_scale();
+    let pointer_loc = state
+        .pointer
+        .current_location()
+        .as_global()
+        .to_local(output);
+    let geo = output.geometry();
+    let wset = state.wset_for(output);
+
+    let active_idx_str = if let Some(WorkspaceSwitchAnimation { ref target_idx, .. }) =
+        wset.switch_animation.as_ref()
+    {
+        format!(
+            "{active_idx} => {target_idx}",
+            active_idx = wset.get_active_idx()
+        )
+    } else {
+        wset.get_active_idx().to_string()
+    };
+
+    let (max_rendertime, min_rendertime, avg_rendertime, avg_fps) = (
+        fps.max_frametime().as_secs_f64() * 1_000.0,
+        fps.min_frametime().as_secs_f64() * 1_000.0,
+        fps.avg_frametime().as_secs_f64() * 1_000.0,
+        fps.avg_fps(),
+    );
+    let avg_rendertime = fps.avg_rendertime(5).as_secs_f64();
+
+    let format_info = |ui: &mut egui::Ui, name, data| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label(format!("{name}: "));
+            ui.code(data);
+        });
+    };
+
+    area.show(context, |ui| {
+        ui.collapsing("Framerate information", |ui| {
+            format_info(ui, "FPS", format!("{:0>07.3}", avg_fps));
+            format_info(
+                ui,
+                "Average rendertime",
+                format!("{:0>07.3}", avg_rendertime),
+            );
+            format_info(
+                ui,
+                "Minimum frametime",
+                format!("{:0>07.3}", min_rendertime),
+            );
+            format_info(
+                ui,
+                "Average frametime",
+                format!("{:0>07.3}", avg_rendertime),
+            );
+            format_info(
+                ui,
+                "Maximum frametime",
+                format!("{:0>07.3}", max_rendertime),
+            );
+        });
+
+        ui.collapsing("Mode information", |ui| {
+            format_info(ui, "Refresh rate", format!("{}", mode.refresh / 1_000));
+            format_info(
+                ui,
+                "Size in pixels",
+                format!("{}x{}", mode.size.w, mode.size.h),
+            );
+            format_info(
+                ui,
+                "Current location",
+                format!("({}, {})", geo.loc.x, geo.loc.y),
+            );
+            format_info(ui, "Current scale", format!("{:0>04.2}", scale))
+        });
+
+        ui.collapsing("Misc information", |ui| {
+            format_info(
+                ui,
+                "Pointer location",
+                format!("({:0>09.4}, {:0>09.4})", pointer_loc.x, pointer_loc.y),
+            );
+            format_info(ui, "Active workspace idx", active_idx_str);
+            format_info(ui, "Animations ongoing", format!("Figure this out"));
+        });
+    });
 }
 
 #[profiling::function]
@@ -588,9 +690,6 @@ fn egui_greeting_message(context: &egui::Context) {
                     });
                 }
             });
-
-        ui.separator();
-        ui.label(RichText::new("NOTE: set greet to false to disable this message").color(Color32::DARK_GRAY))
     });
 }
 

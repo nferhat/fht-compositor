@@ -28,6 +28,7 @@ use super::render::BackendAllocator;
 use crate::config::CONFIG;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
 use crate::state::{Fht, State};
+use crate::utils::fps::Fps;
 
 pub struct X11Data {
     surface_pending: bool,
@@ -37,6 +38,7 @@ pub struct X11Data {
     damage_tracker: OutputDamageTracker,
     render_ping: Ping,
     output: Output,
+    fps: Fps,
     _egl_display: EGLDisplay,
     _dmabuf_global: DmabufGlobal,
     _dmabuf_default_feedback: DmabufFeedback,
@@ -186,6 +188,7 @@ pub fn init(state: &mut State) -> anyhow::Result<()> {
         damage_tracker,
         render_ping,
         output,
+        fps: Fps::new(),
         _egl_display: egl_display,
         _dmabuf_global: dmabuf_global,
         _dmabuf_default_feedback: dmabuf_default_feedback,
@@ -269,7 +272,7 @@ impl X11Data {
             .context("Failed to allocate buffer!")?;
 
         let render_elements =
-            super::render::output_elements(&mut self.renderer, &self.output, state);
+            super::render::output_elements(&mut self.renderer, &self.output, state, &mut self.fps);
         self.renderer
             .bind(buffer)
             .context("Failed to bind dmabuf!")?;
@@ -286,6 +289,7 @@ impl X11Data {
                 self.surface
                     .submit()
                     .context("Failed to submit buffer to X11Surface!")?;
+                self.fps.displayed();
                 state.send_frames(&self.output, &states, None);
                 if damage.is_some() {
                     let mut output_presentation_feedback =

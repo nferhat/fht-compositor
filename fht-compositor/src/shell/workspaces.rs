@@ -67,6 +67,10 @@ impl WorkspaceSet {
         self.workspaces[target_idx].focused().cloned()
     }
 
+    pub fn get_active_idx(&self) -> usize {
+        self.active_idx.load(Ordering::SeqCst)
+    }
+
     pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
         self.workspaces.iter()
     }

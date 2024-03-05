@@ -67,6 +67,7 @@ use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
+use crate::utils::fps::Fps;
 
 // The compositor can't just pick the first format available since some formats even if supported
 // make so sense to use since they lose information or are not fun to work with.
@@ -448,6 +449,7 @@ impl UdevData {
         let surface = Surface {
             render_node: device.render_node,
             output: output.clone(),
+            fps: Fps::new(),
             output_global,
             compositor,
             dmabuf_feedback,
@@ -657,6 +659,8 @@ impl UdevData {
             return;
         };
 
+        surface.fps.displayed();
+
         let should_schedule = match surface
             .compositor
             .frame_submitted()
@@ -719,9 +723,6 @@ impl UdevData {
             return;
         }
 
-        let Some(output_refresh) = surface.output.current_mode().map(|m| m.refresh) else {
-            return;
-        };
         // What are we trying to solve by introducing a delay here:
         //
         // Basically it is all about latency of client provided buffers.
@@ -757,8 +758,7 @@ impl UdevData {
             trace!("scheduling repaint timer immediately on {:?}", crtc);
             Duration::ZERO
         } else {
-            let repaint_delay =
-                Duration::from_millis(((1_000_000f32 / output_refresh as f32) * 0.6f32) as u64);
+            let repaint_delay = surface.fps.avg_rendertime(5);
             trace!(
                 "scheduling repaint timer with delay {:?} on {:?}",
                 repaint_delay,
@@ -789,7 +789,12 @@ fn render_surface(
     }
     .unwrap();
 
-    let elements = super::render::output_elements(&mut renderer, &surface.output, fht);
+    surface.fps.start();
+
+    let elements =
+        super::render::output_elements(&mut renderer, &surface.output, fht, &mut surface.fps);
+    surface.fps.elements();
+
     let res = surface
         .compositor
         .render_frame(&mut renderer, &elements, [0.1, 0.1, 0.1, 1.0])
@@ -800,6 +805,7 @@ fn render_surface(
             }
             _ => unreachable!(),
         })?;
+    surface.fps.render();
 
     if let Some(mut screencopy) = surface
         .output
@@ -869,6 +875,7 @@ fn render_surface(
         }
         // Mark screencopy frame as successful.
         screencopy.submit();
+        surface.fps.screencopy();
     }
 
     if res.needs_sync() {
@@ -1171,6 +1178,7 @@ pub struct Device {
 pub struct Surface {
     render_node: DrmNode,
     output: Output,
+    fps: Fps,
     output_global: GlobalId,
     compositor: GbmDrmCompositor,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,

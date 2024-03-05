@@ -4,6 +4,7 @@ use std::process::Stdio;
 
 pub mod animation;
 pub mod drm;
+pub mod fps;
 pub mod geometry;
 pub mod output;
 
