@@ -1009,6 +1009,25 @@ pub fn init(state: &mut State) -> anyhow::Result<()> {
                     let led_state = state.fht.keyboard.led_state();
                     device.led_update(led_state.into());
                 }
+
+                let device_config = CONFIG
+                    .input
+                    .per_device
+                    .get(device.name())
+                    .or_else(|| CONFIG.input.per_device.get(device.sysname()));
+                let mouse_config =
+                    device_config.map_or_else(|| &CONFIG.input.mouse, |cfg| &cfg.mouse);
+                let keyboard_config =
+                    device_config.map_or_else(|| &CONFIG.input.keyboard, |cfg| &cfg.keyboard);
+                let disabled = device_config.map_or(false, |cfg| cfg.disable);
+
+                crate::config::apply_libinput_settings(
+                    device,
+                    mouse_config,
+                    keyboard_config,
+                    disabled,
+                );
+
                 state.fht.devices.push(device.clone());
             } else if let InputEvent::DeviceRemoved { ref device } = event {
                 state.fht.devices.retain(|d| d != device);
