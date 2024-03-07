@@ -62,7 +62,10 @@ pub struct State {
 }
 
 impl State {
-    /// Creates a new instance of the state, auto-selecting the backend to use.
+    /// Creates a new instance of the state.
+    ///
+    /// For backend initialization, use a module from [`crate::backend`] or use
+    /// [`crate::backend::init_backend_auto`] to initiate an appropriate one.
     pub fn new(
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
@@ -129,6 +132,7 @@ impl State {
         Ok(())
     }
 
+    /// Create a new Wayland client state for a client stream bound to the WAYLAND_DISPLAY
     pub fn new_client_state(&self) -> ClientState {
         ClientState {
             compositor: CompositorClientState::default(),
@@ -308,6 +312,10 @@ impl Fht {
     }
 
     /// Register an output to the wayland state.
+    ///
+    /// # PANICS
+    ///
+    /// Trying to add the same output twice causes an assertion fail.
     pub fn add_output(&mut self, output: Output) {
         assert!(
             self.workspaces.get(&output).is_none(),
@@ -342,6 +350,10 @@ impl Fht {
     }
 
     /// Unregister an output from the wayland state.
+    ///
+    /// # PANICS
+    ///
+    /// Trying remove a non-existent output causes an assertion fail.
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output.");
         let removed_wset = self
@@ -425,23 +437,16 @@ impl Fht {
             .get_mut(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
     }
-
-    /// Get the size of the global space that emcompasses all the outputs.
-    pub fn global_space(&self) -> Rectangle<i32, Global> {
-        self.outputs()
-            .fold(
-                Option::<Rectangle<i32, Global>>::None,
-                |maybe_geo, output| match maybe_geo {
-                    Some(rect) => Some(rect.merge(output.geometry())),
-                    None => Some(output.geometry()),
-                },
-            )
-            .unwrap_or_else(Rectangle::default)
-    }
 }
 
 impl Fht {
     /// Send frame events to [`WlSurface`]s after submitting damage to the backend buffer.
+    ///
+    /// This function handles primary scanout outputs (so that [`WlSurface`]s send frames
+    /// immediatly to a specific render surface, the one in [`RenderElementStates`])
+    ///
+    /// This function also, if you provide one, sends render and scanout feedbacks to
+    /// [`WlSurface`]s
     #[profiling::function]
     pub fn send_frames(
         &self,

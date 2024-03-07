@@ -112,6 +112,7 @@ pub struct UdevData {
 }
 
 impl UdevData {
+    /// Import this dmabuf buffer to the primary renderer.
     pub fn dmabuf_imported(&mut self, dmabuf: Dmabuf, notifier: ImportNotifier) {
         if self
             .gpu_manager
@@ -126,12 +127,14 @@ impl UdevData {
         }
     }
 
+    // Early import this [`WlSurface`] to the [`GpuManager`]
     pub fn early_import(&mut self, surface: &WlSurface) {
         if let Err(err) = self.gpu_manager.early_import(self.primary_gpu, surface) {
             warn!(?err, "Failed to early import buffer!");
         }
     }
 
+    /// Register a device to the udev backend.
     fn device_added(&mut self, device_id: dev_t, path: &Path, fht: &mut Fht) -> anyhow::Result<()> {
         // Get the DRM device from device ID, if any.
         let device_node = DrmNode::from_dev_id(device_id)?;
@@ -204,6 +207,7 @@ impl UdevData {
         Ok(())
     }
 
+    /// Update a device if already registered.
     fn device_changed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
         let device_node = DrmNode::from_dev_id(device_id)?;
         let Some(device) = self.devices.get_mut(&device_node) else {
@@ -244,6 +248,7 @@ impl UdevData {
         Ok(())
     }
 
+    /// Remove a device from the backend if found.
     fn device_removed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
         let device_node = DrmNode::from_dev_id(device_id)?;
         let Some(mut device) = self.devices.remove(&device_node) else {
@@ -277,6 +282,9 @@ impl UdevData {
         Ok(())
     }
 
+    /// Connect a new CRTC connector.
+    ///
+    /// This handles creating the output, GBM compositor, and dmabuf globals for this connector.
     fn connector_connected(
         &mut self,
         device_node: DrmNode,
@@ -464,6 +472,7 @@ impl UdevData {
         Ok(())
     }
 
+    /// Disconnect this connector, if found.
     fn connector_disconnected(
         &mut self,
         device_node: DrmNode,
@@ -517,6 +526,7 @@ impl UdevData {
         Ok(())
     }
 
+    /// Request the backend to schedule a next frame for this output.
     #[profiling::function]
     pub fn schedule_render(
         &mut self,
@@ -550,6 +560,7 @@ impl UdevData {
         Ok(())
     }
 
+    /// Render the surface associated with this device and CRTC connector.
     #[profiling::function]
     pub fn render(&mut self, device_node: DrmNode, crtc: CrtcHandle, fht: &mut Fht) {
         let Some(device) = self.devices.get_mut(&device_node) else {
@@ -634,6 +645,9 @@ impl UdevData {
         profiling::finish_frame!();
     }
 
+    /// Handle a DRM VBlank event
+    ///
+    /// This submits the frame to the comnpositor and schedules a next one if necessary.
     #[profiling::function]
     fn on_vblank(
         &mut self,
@@ -774,6 +788,9 @@ impl UdevData {
     }
 }
 
+/// Render a surface.
+///
+/// This uses the surface render_node, falling back the primary gpu if necessary.
 #[profiling::function]
 fn render_surface(
     surface: &mut Surface,
@@ -903,6 +920,7 @@ fn render_surface(
     Ok(!res.is_empty)
 }
 
+/// Initiate the backend
 pub fn init(state: &mut State) -> anyhow::Result<()> {
     // Intialize a session with using libseat to communicate with the seatd daemon.
     let (session, notifier) = LibSeatSession::new()
@@ -1210,6 +1228,7 @@ pub type GbmDrmCompositor = DrmCompositor<
     DrmDeviceFd,
 >;
 
+/// Get the surface dmabuf feedback with the primary_gpu and render_node.
 fn get_surface_dmabuf_feedback(
     primary_gpu: DrmNode,
     render_node: DrmNode,

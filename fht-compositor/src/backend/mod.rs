@@ -18,6 +18,11 @@ pub enum Backend {
 }
 
 impl Backend {
+    /// Access the underlying X11 backend, if any.
+    ///
+    /// # PANICS
+    ///
+    /// This panics if the current backend is not X11.
     #[cfg(feature = "x11_backend")]
     pub fn x11(&mut self) -> &mut x11::X11Data {
         if let Self::X11(data) = self {
@@ -26,6 +31,11 @@ impl Backend {
         unreachable!("Tried to get x11 backend data on non-x11 backend!");
     }
 
+    /// Access the underlying udev backend, if any.
+    ///
+    /// # PANICS
+    ///
+    /// This panics if the current backend is not udev.
     #[cfg(feature = "udev_backend")]
     pub fn udev(&mut self) -> &mut udev::UdevData {
         if let Self::Udev(data) = self {
@@ -34,6 +44,10 @@ impl Backend {
         unreachable!("Tried to get udev backend data on non-udev backend!");
     }
 
+    /// Request the backend to schedule a next frame for this output.
+    ///
+    /// The backend is free to oblige or discard your request, based on internal state like Vblank
+    /// state, or if a frame has already been scheduled.
     #[profiling::function]
     pub fn schedule_render_output(
         &mut self,
@@ -57,6 +71,11 @@ impl Backend {
     }
 }
 
+/// Automatically initiates a backend based on environment variables.
+///
+/// - If `FHTC_BACKEND` is set, try to use the named backend
+/// - If `DISPLAY` or `WAYLAND_DISPLAY` is set, try to initiate the X11 backend
+/// - Try to initiate the udev backend
 pub fn init_backend_auto(state: &mut State) {
     if let Ok(backend_name) = std::env::var("FHTC_BACKEND") {
         match backend_name.trim().to_lowercase().as_str() {

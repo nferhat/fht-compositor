@@ -1,4 +1,3 @@
-use egui::Color32;
 use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::{
@@ -367,6 +366,7 @@ where
     elements
 }
 
+/// Generate the layer shell elements for a given layer for a given output layer map.
 #[profiling::function]
 pub fn layer_elements<R>(
     renderer: &mut R,
@@ -424,6 +424,7 @@ where
     elements
 }
 
+/// Generate cursor elements for a given output.
 #[profiling::function]
 pub fn cursor_elements<R>(
     state: &Fht,
@@ -477,6 +478,14 @@ where
     elements
 }
 
+/// Generate the egui elements for a given [`Output`]
+///
+/// However, this function does more than simply render egui, due to how smithay-egui works (the
+/// integration of egui for smithay), calling the render function also runs the underlying context
+/// and sends events to it.
+///
+/// This doesn't render anything if it figures that it's useless, but still dispatchs events to
+/// egui.
 #[profiling::function]
 fn egui_elements(
     renderer: &mut GlowRenderer,
@@ -526,6 +535,7 @@ fn egui_elements(
     }
 }
 
+/// Render the egui debug overlay for this output.
 #[profiling::function]
 fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps: &mut Fps) {
     let area = egui::Window::new(output.name())
@@ -553,7 +563,7 @@ fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps
         wset.get_active_idx().to_string()
     };
 
-    let (max_rendertime, min_rendertime, avg_rendertime, avg_fps) = (
+    let (max_frametime, min_frametime, avg_frametime, avg_fps) = (
         fps.max_frametime().as_secs_f64() * 1_000.0,
         fps.min_frametime().as_secs_f64() * 1_000.0,
         fps.avg_frametime().as_secs_f64() * 1_000.0,
@@ -577,21 +587,9 @@ fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps
                 "Average rendertime",
                 format!("{:0>07.3}", avg_rendertime),
             );
-            format_info(
-                ui,
-                "Minimum frametime",
-                format!("{:0>07.3}", min_rendertime),
-            );
-            format_info(
-                ui,
-                "Average frametime",
-                format!("{:0>07.3}", avg_rendertime),
-            );
-            format_info(
-                ui,
-                "Maximum frametime",
-                format!("{:0>07.3}", max_rendertime),
-            );
+            format_info(ui, "Minimum frametime", format!("{:0>07.3}", min_frametime));
+            format_info(ui, "Average frametime", format!("{:0>07.3}", avg_frametime));
+            format_info(ui, "Maximum frametime", format!("{:0>07.3}", max_frametime));
         });
 
         ui.collapsing("Mode information", |ui| {
@@ -621,6 +619,7 @@ fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps
     });
 }
 
+/// Render the config error notification for this output
 #[profiling::function]
 fn egui_config_error(context: &egui::Context, error: &anyhow::Error) {
     let area = egui::Window::new("Failed to reload config!")
@@ -648,6 +647,7 @@ const USEFUL_DEFAULT_KEYBINDS: [(&str, &str); 8] = [
     ),
 ];
 
+/// Render the greeting message for this output.
 #[profiling::function]
 fn egui_greeting_message(context: &egui::Context) {
     let area = egui::Window::new("Welcome to fht-compositor").resizable(false);
