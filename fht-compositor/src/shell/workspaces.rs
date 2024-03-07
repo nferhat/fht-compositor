@@ -28,13 +28,26 @@ use crate::utils::geometry::{
 use crate::utils::output::OutputExt;
 
 pub struct WorkspaceSet {
+    /// The output of this set.
     pub(super) output: Output,
+
+    /// All the workspaces of this set.
     pub workspaces: Vec<Workspace>,
+
+    /// The current switch animation, of any.
     pub switch_animation: Option<WorkspaceSwitchAnimation>,
+
+    /// The active workspace index.
     pub(super) active_idx: AtomicUsize,
 }
 
+#[allow(dead_code)]
 impl WorkspaceSet {
+    /// Create a new [`WorkspaceSet`] for this output.
+    ///
+    /// This function creates  9 workspaces, indexed from 0 to 8, each with independent layout
+    /// window list. It's up to whatever manages this set to ensure focusing happens correctly, and
+    /// that windows are getting mapped to the right set.
     pub fn new(output: Output) -> Self {
         Self {
             output: output.clone(),
@@ -44,58 +57,90 @@ impl WorkspaceSet {
         }
     }
 
+    /// Refresh internal state of the [`WorkspaceSet`]
+    ///
+    /// Preferably call this before flushing clients.
     pub fn refresh(&mut self) {
         self.workspaces_mut().for_each(Workspace::refresh);
     }
 
-    pub fn set_active_idx(&mut self, target_idx: usize) -> Option<FhtWindow> {
+    /// Set the active workspace index for this [`WorkspaceSet`], returning the possible focus
+    /// candidate that the compositor should focus.
+    ///
+    /// Animations are opt-in, set `animate` to true if its needed.
+    pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<FhtWindow> {
         let target_idx = target_idx.clamp(0, 9);
+        if !animate {
+            self.active_idx.store(target_idx, Ordering::SeqCst);
+            return self.workspaces[target_idx].focused().cloned();
+        }
+
         let active_idx = self.active_idx.load(Ordering::SeqCst);
         if target_idx == active_idx || self.switch_animation.is_some() {
             return None;
         }
 
-        self.switch_animation = Some(WorkspaceSwitchAnimation::new(
-            target_idx,
-            if target_idx > active_idx {
-                WorkspaceSwitchDirection::Next
-            } else {
-                WorkspaceSwitchDirection::Previous
-            },
-        ));
+        self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
 
         self.workspaces[target_idx].focused().cloned()
     }
 
+    /// Get the active workspace index of this [`WorkspaceSet`]
+    ///
+    /// If there's a switch animation going on, use the target index and not the currently active
+    /// one.
     pub fn get_active_idx(&self) -> usize {
-        self.active_idx.load(Ordering::SeqCst)
+        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
+            *target_idx
+        } else {
+            self.active_idx.load(Ordering::SeqCst)
+        }
     }
 
+    /// Get a reference to the active workspace.
+    ///
+    /// If there's a switch animation going on, use the target workspace and not the currently
+    /// active one.
+    pub fn active(&self) -> &Workspace {
+        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
+            &self.workspaces[*target_idx]
+        } else {
+            &self.workspaces[self.active_idx.load(Ordering::SeqCst)]
+        }
+    }
+
+    /// Get a mutable reference to the active workspace.
+    ///
+    /// If there's a switch animation going on, use the target workspace and not the currently
+    /// active one.
+    pub fn active_mut(&mut self) -> &mut Workspace {
+        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
+            &mut self.workspaces[*target_idx]
+        } else {
+            &mut self.workspaces[self.active_idx.load(Ordering::SeqCst)]
+        }
+    }
+
+    /// Get an iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
     pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
         self.workspaces.iter()
     }
 
+    /// Get a mutable iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
     pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> {
         self.workspaces.iter_mut()
     }
 
-    pub fn active(&self) -> &Workspace {
-        &self.workspaces[self.active_idx.load(Ordering::SeqCst)]
-    }
-
-    pub fn active_mut(&mut self) -> &mut Workspace {
-        &mut self.workspaces[self.active_idx.load(Ordering::SeqCst)]
-    }
-
-    pub fn all_windows(&mut self) -> impl Iterator<Item = &FhtWindow> {
-        self.workspaces().flat_map(|ws| &ws.windows)
-    }
-
+    /// Arrange the [`Workspace`]s and their windows.
+    ///
+    /// You need to call this when this [`WorkspaceSet`] output changes geometry to ensure that
+    /// the tiled window geometries actually fill the output space.
     pub fn arrange(&self) {
         self.workspaces()
             .for_each(Workspace::refresh_window_geometries)
     }
 
+    /// Find the window associated with this [`WlSurface`]
     pub fn find_window(&self, surface: &WlSurface) -> Option<&FhtWindow> {
         self.workspaces().find_map(|ws| {
             if let Some(FullscreenSurface { inner, .. }) = ws
@@ -112,6 +157,7 @@ impl WorkspaceSet {
         })
     }
 
+    /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.workspaces().find(|ws| {
             ws.windows
@@ -120,6 +166,7 @@ impl WorkspaceSet {
         })
     }
 
+    /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
         self.workspaces_mut().find(|ws| {
             ws.windows
@@ -128,6 +175,7 @@ impl WorkspaceSet {
         })
     }
 
+    /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
     pub fn find_window_and_workspace(
         &self,
         surface: &WlSurface,
@@ -141,16 +189,7 @@ impl WorkspaceSet {
         })
     }
 
-    pub fn ws_for(&self, window: &FhtWindow) -> Option<&Workspace> {
-        self.workspaces()
-            .find(|ws| ws.windows.iter().any(|w| w == window))
-    }
-
-    pub fn ws_mut_for(&mut self, window: &FhtWindow) -> Option<&mut Workspace> {
-        self.workspaces_mut()
-            .find(|ws| ws.windows.iter().any(|w| w == window))
-    }
-
+    /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
     pub fn find_window_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
@@ -165,118 +204,16 @@ impl WorkspaceSet {
         })
     }
 
-    #[profiling::function]
-    pub fn render_elements<R>(
-        &self,
-        renderer: &mut R,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: 'static,
+    /// Get a reference to the [`Workspace`] holding this window, if any.
+    pub fn ws_for(&self, window: &FhtWindow) -> Option<&Workspace> {
+        self.workspaces()
+            .find(|ws| ws.windows.iter().any(|w| w == window))
+    }
 
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    {
-        let mut elements = vec![];
-        let active = self.active();
-        let output_geo: Rectangle<i32, Physical> = self
-            .output
-            .geometry()
-            .as_logical()
-            .to_physical_precise_round(scale);
-
-        if self.switch_animation.is_none() {
-            let active_elements = active.render_elements(renderer, scale, alpha);
-            elements.extend(
-                active_elements
-                    .into_iter()
-                    .map(WorkspaceSetRenderElement::Normal),
-            );
-
-            return (active.fullscreen.is_some(), elements);
-        }
-
-        let Some(animation) = self.switch_animation.as_ref() else {
-            unreachable!()
-        };
-        if animation.animation.is_finished() {
-            self.active_idx
-                .store(animation.target_idx, Ordering::SeqCst);
-        }
-        let active_elements = active.render_elements(renderer, scale, alpha);
-        let target = &self.workspaces[animation.target_idx];
-        let target_elements = target.render_elements(renderer, scale, alpha);
-
-        let (current_offset, target_offset) = match animation.direction {
-            WorkspaceSwitchDirection::Next => {
-                // Focusing the next offset.
-                // For the active, how much should we *remove* from the current position
-                // For the target, how much should we add to the current position
-                match CONFIG.animation.workspace_switch.direction {
-                    WorkspaceSwitchAnimationDirection::Horizontal => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
-                        (
-                            Point::from(((-offset), 0)),
-                            Point::from(((-offset + output_geo.size.w), 0)),
-                        )
-                    }
-                    WorkspaceSwitchAnimationDirection::Vertical => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
-                        (
-                            Point::from((0, (-offset))),
-                            Point::from((0, (-offset + output_geo.size.h))),
-                        )
-                    }
-                }
-            }
-            WorkspaceSwitchDirection::Previous => {
-                // Focusing a previous workspace
-                // For the active, how much should we add to tyhe current position
-                // For the target, how much should we remove from the current position.
-                match CONFIG.animation.workspace_switch.direction {
-                    WorkspaceSwitchAnimationDirection::Horizontal => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
-                        (
-                            Point::from((offset, 0)),
-                            Point::from((offset - output_geo.size.w, 0)),
-                        )
-                    }
-                    WorkspaceSwitchAnimationDirection::Vertical => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
-                        (
-                            Point::from((0, (offset))),
-                            Point::from((0, (offset - output_geo.size.h))),
-                        )
-                    }
-                }
-            }
-        };
-
-        elements.extend(active_elements.into_iter().filter_map(|element| {
-            let relocate =
-                RelocateRenderElement::from_element(element, current_offset, Relocate::Relative);
-            // FIXME: This makes the border look funky. Should go figure out why
-            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
-            Some(WorkspaceSetRenderElement::Switching(relocate))
-        }));
-        elements.extend(target_elements.into_iter().filter_map(|element| {
-            let relocate =
-                RelocateRenderElement::from_element(element, target_offset, Relocate::Relative);
-            // FIXME: This makes the border look funky. Should go figure out why
-            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
-            Some(WorkspaceSetRenderElement::Switching(relocate))
-        }));
-
-        (
-            active.fullscreen.is_some() || target.fullscreen.is_some(),
-            elements,
-        )
+    /// Get a mutable reference to the [`Workspace`] holding this window, if any.
+    pub fn ws_mut_for(&mut self, window: &FhtWindow) -> Option<&mut Workspace> {
+        self.workspaces_mut()
+            .find(|ws| ws.windows.iter().any(|w| w == window))
     }
 
     /// Get the current fullscreen window and it's location in global coordinate space.
@@ -296,8 +233,8 @@ impl WorkspaceSet {
         let animation = self.switch_animation.as_ref().unwrap();
         let output_geo = self.output.geometry();
 
-        let (current_offset, target_offset) = match animation.direction {
-            WorkspaceSwitchDirection::Next => {
+        let (current_offset, target_offset) =
+            if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
                 // Focusing the next offset.
                 // For the active, how much should we *remove* from the current position
                 // For the target, how much should we add to the current position
@@ -319,8 +256,7 @@ impl WorkspaceSet {
                         )
                     }
                 }
-            }
-            WorkspaceSwitchDirection::Previous => {
+            } else {
                 // Focusing a previous workspace
                 // For the active, how much should we add to tyhe current position
                 // For the target, how much should we remove from the current position.
@@ -342,8 +278,7 @@ impl WorkspaceSet {
                         )
                     }
                 }
-            }
-        };
+            };
 
         self.active()
             .fullscreen
@@ -373,8 +308,8 @@ impl WorkspaceSet {
         let animation = self.switch_animation.as_ref().unwrap();
         let output_geo = self.output.geometry();
 
-        let (current_offset, target_offset) = match animation.direction {
-            WorkspaceSwitchDirection::Next => {
+        let (current_offset, target_offset) =
+            if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
                 // Focusing the next offset.
                 // For the active, how much should we *remove* from the current position
                 // For the target, how much should we add to the current position
@@ -396,8 +331,7 @@ impl WorkspaceSet {
                         )
                     }
                 }
-            }
-            WorkspaceSwitchDirection::Previous => {
+            } else {
                 // Focusing a previous workspace
                 // For the active, how much should we add to tyhe current position
                 // For the target, how much should we remove from the current position.
@@ -419,8 +353,7 @@ impl WorkspaceSet {
                         )
                     }
                 }
-            }
-        };
+            };
 
         self.active()
             .window_under(point + current_offset.to_f64())
@@ -431,16 +364,141 @@ impl WorkspaceSet {
                     .map(|(ft, loc)| (ft, loc + target_offset))
             })
     }
+
+    /// Render all the elements in this workspace set, returning them and whether it currently
+    /// holds a fullscreen window.
+    #[profiling::function]
+    pub fn render_elements<R>(
+        &self,
+        renderer: &mut R,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        <R as Renderer>::TextureId: 'static,
+
+        FhtWindowRenderElement<R>: RenderElement<R>,
+        WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    {
+        let mut elements = vec![];
+        let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
+        let output_geo: Rectangle<i32, Physical> = self
+            .output
+            .geometry()
+            .as_logical()
+            .to_physical_precise_round(scale);
+
+        // No switch, just give what's active.
+        let active_elements = active.render_elements(renderer, scale, alpha);
+        if self.switch_animation.is_none() {
+            elements.extend(
+                active_elements
+                    .into_iter()
+                    .map(WorkspaceSetRenderElement::Normal),
+            );
+
+            return (active.fullscreen.is_some(), elements);
+        }
+
+        // Switching
+        let animation = self.switch_animation.as_ref().unwrap();
+        let target = &self.workspaces[animation.target_idx];
+        let target_elements = target.render_elements(renderer, scale, alpha);
+
+        // Switch finished, avoid blank frame and return target elements immediatly
+        if animation.animation.is_finished() {
+            self.active_idx
+                .store(animation.target_idx, Ordering::SeqCst);
+            elements.extend(
+                target_elements
+                    .into_iter()
+                    .map(WorkspaceSetRenderElement::Normal),
+            );
+            return (target.fullscreen.is_some(), elements);
+        }
+
+        // Otherwise to computations
+        let (current_offset, target_offset) =
+            if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
+                // Focusing the next offset.
+                // For the active, how much should we *remove* from the current position
+                // For the target, how much should we add to the current position
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from(((-offset), 0)),
+                            Point::from(((-offset + output_geo.size.w), 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (-offset))),
+                            Point::from((0, (-offset + output_geo.size.h))),
+                        )
+                    }
+                }
+            } else {
+                // Focusing a previous workspace
+                // For the active, how much should we add to tyhe current position
+                // For the target, how much should we remove from the current position.
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from((offset, 0)),
+                            Point::from((offset - output_geo.size.w, 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (offset))),
+                            Point::from((0, (offset - output_geo.size.h))),
+                        )
+                    }
+                }
+            };
+
+        elements.extend(active_elements.into_iter().filter_map(|element| {
+            let relocate =
+                RelocateRenderElement::from_element(element, current_offset, Relocate::Relative);
+            // FIXME: This makes the border look funky. Should go figure out why
+            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(relocate))
+        }));
+        elements.extend(target_elements.into_iter().filter_map(|element| {
+            let relocate =
+                RelocateRenderElement::from_element(element, target_offset, Relocate::Relative);
+            // FIXME: This makes the border look funky. Should go figure out why
+            // let crop = CropRenderElement::from_element(relocate, scale, output_geo)?;
+            Some(WorkspaceSetRenderElement::Switching(relocate))
+        }));
+
+        (
+            active.fullscreen.is_some() || target.fullscreen.is_some(),
+            elements,
+        )
+    }
 }
 
+/// An active workspace switching animation
 pub struct WorkspaceSwitchAnimation {
+    /// The underlying animation tweener to generate values
     pub animation: Animation,
-    direction: WorkspaceSwitchDirection,
+    /// Which workspace are we going to focus.
     pub target_idx: usize,
 }
 
 impl WorkspaceSwitchAnimation {
-    fn new(target_idx: usize, direction: WorkspaceSwitchDirection) -> Self {
+    /// Create a new [`WorkspaceSwitchAnimation`]
+    fn new(target_idx: usize) -> Self {
         // When going to the next workspace, the values describes the offset of the next workspace.
         // When going to the previous workspace, the values describe the offset of the current
         // workspace
@@ -454,15 +512,9 @@ impl WorkspaceSwitchAnimation {
 
         Self {
             animation,
-            direction,
             target_idx,
         }
     }
-}
-
-enum WorkspaceSwitchDirection {
-    Next,
-    Previous,
 }
 
 #[derive(Debug)]
@@ -614,19 +666,47 @@ impl<'a> RenderElement<UdevRenderer<'a>> for WorkspaceSetRenderElement<UdevRende
     }
 }
 
+/// A single workspace.
+///
+/// This workspace should not stand on it's own, and it's preferred you use it with a
+/// [`WorkspaceSet`], but nothing stops you from doing whatever you want with it like assigning it
+/// to a single output.
 #[derive(Debug)]
 pub struct Workspace {
+    /// The output for this workspace
     output: Output,
 
+    /// The window this workspace contains.
+    ///
+    /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
+    /// logic will PANIC.
     pub windows: Vec<FhtWindow>,
-    pub fullscreen: Option<FullscreenSurface>,
+
+    /// The focused window index.
     pub focused_window_idx: usize,
 
+    /// The currently fullscreened window, if any.
+    ///
+    /// How [`Workspace`]s handle fullscreening is a bit "weird" and "unconventional":
+    /// Only one window per workspace can be fullscreened at a time.
+    ///
+    /// When that window is fullscreened, it's removed from the window list so that it can be
+    /// rendered exclusively on this workspace, so that we can profit from direct scan-out of
+    /// fullscreen window, very useful for game performance.
+    ///
+    /// Doing actions such as using focus_next_window/focus_previous_window will remove the
+    /// fullscreen and insert it back at the last index it was at.
+    pub fullscreen: Option<FullscreenSurface>,
+
+    /// The layouts list for this workspace.
     pub layouts: Vec<WorkspaceLayout>,
+
+    /// The active layout index.
     pub active_layout_idx: usize,
 }
 
 impl Workspace {
+    /// Create a new [`Workspace`] for this output.
     pub fn new(output: Output) -> Self {
         Self {
             output,
@@ -649,6 +729,9 @@ impl Workspace {
         }
     }
 
+    /// Refresh internal state of the [`Workspace`]
+    ///
+    /// Preferably call this before flushing clients.
     #[profiling::function]
     pub fn refresh(&mut self) {
         let mut should_refresh_geometries = false;
@@ -688,18 +771,38 @@ impl Workspace {
         }
 
         // Refresh internal state of windows
+        let output_geometry = self.output.geometry();
         for (idx, window) in self.windows.iter().enumerate() {
             window.set_activate(idx == self.focused_window_idx);
+
+            let bbox = window.global_bbox();
+            if let Some(mut overlap) = output_geometry.intersection(bbox) {
+                // output_enter excepts the overlap to be relative to the element, weird choice but
+                // I comply.
+                overlap.loc -= bbox.loc;
+                window.output_enter(&self.output, overlap.as_logical());
+            }
+
             window.refresh();
         }
     }
 
+    /// Return the focused window, giving priority to the fullscreen window first, then the
+    /// possible active non-fullscreen window.
     pub fn focused(&self) -> Option<&FhtWindow> {
-        self.windows
-            .get(self.focused_window_idx)
-            .or_else(|| self.fullscreen.as_ref().map(|f| &f.inner))
+        self.fullscreen
+            .as_ref()
+            .map(|f| &f.inner)
+            .or_else(|| self.windows.get(self.focused_window_idx))
     }
 
+    /// Insert a window in this [`Workspace`]
+    ///
+    /// This function does additional configuration of the window before inserting it in the window
+    /// list, mainly setting the bounds of the window, and notifying it of entering this
+    /// [`Workspace`] output.
+    ///
+    /// This doesn't reinsert a window if it's already inserted.
     pub fn insert_window(&mut self, window: FhtWindow) {
         if self.windows.contains(&window) {
             return;
@@ -716,6 +819,9 @@ impl Workspace {
         self.refresh_window_geometries();
     }
 
+    /// Removes a window from this [`Workspace`], returning it if it was found.
+    ///
+    /// This function also undones the configuration that was done in [`Self::insert_window`]
     pub fn remove_window(&mut self, window: &FhtWindow) -> Option<FhtWindow> {
         let Some(idx) = self.windows.iter().position(|w| w == window) else {
             return None;
@@ -731,6 +837,7 @@ impl Workspace {
         Some(window)
     }
 
+    /// Focus a given window, if this [`Workspace`] contains it.
     pub fn focus_window(&mut self, window: &FhtWindow) {
         if let Some(idx) = self.windows.iter().position(|w| w == window) {
             self.focused_window_idx = idx;
@@ -738,9 +845,16 @@ impl Workspace {
         }
     }
 
+    /// Focus the next available window, cycling back to the first one if needed.
     pub fn focus_next_window(&mut self) -> Option<&FhtWindow> {
         if self.windows.is_empty() {
             return None;
+        }
+
+        if let Some(fullscreen) = self.remove_current_fullscreen() {
+            fullscreen.set_fullscreen(false, None);
+            // refresh window geos will send a configure req for us.
+            self.refresh_window_geometries();
         }
 
         let windows_len = self.windows.len();
@@ -756,9 +870,16 @@ impl Workspace {
         Some(window)
     }
 
+    /// Focus the previous available window, cyclying all the way to the last window if needed.
     pub fn focus_previous_window(&mut self) -> Option<&FhtWindow> {
         if self.windows.is_empty() {
             return None;
+        }
+
+        if let Some(fullscreen) = self.remove_current_fullscreen() {
+            fullscreen.set_fullscreen(false, None);
+            // refresh window geos will send a configure req for us.
+            self.refresh_window_geometries();
         }
 
         let windows_len = self.windows.len();
@@ -772,6 +893,8 @@ impl Workspace {
         Some(window)
     }
 
+    /// Swap the current window with the next window.
+    /// TODO: This DOES NOT work.
     pub fn swap_with_next_window(&mut self) {
         if self.windows.is_empty() {
             return;
@@ -791,6 +914,8 @@ impl Workspace {
         self.windows.swap(last_focused_idx, new_focused_idx);
     }
 
+    /// Swap the current window with the previous window.
+    /// TODO: This DOES NOT work.
     pub fn swap_with_previous_window(&mut self) {
         if self.windows.is_empty() {
             return;
@@ -808,6 +933,9 @@ impl Workspace {
         self.windows.swap(last_focused_idx, new_focused_idx);
     }
 
+    /// Fullscreen a given window, if this [`Workspace`] contains it.
+    ///
+    /// NOTE: You still have to configure the window for it to know that it's fullscreened.
     pub fn fullscreen_window(&mut self, window: &FhtWindow) {
         let Some(idx) = self.windows.iter().position(|w| w == window) else {
             return;
@@ -822,6 +950,25 @@ impl Workspace {
         self.refresh_window_geometries();
     }
 
+    /// Remove the current fullscreened window, if any.
+    ///
+    /// NOTE: You still have to configure the window for it to know that it's not fullscreened
+    /// anymore.
+    pub fn remove_current_fullscreen(&mut self) -> Option<&FhtWindow> {
+        let FullscreenSurface {
+            inner,
+            mut last_known_idx,
+        } = self.fullscreen.take()?;
+        last_known_idx = last_known_idx.clamp(0, self.windows.len());
+        self.windows.insert(last_known_idx, inner);
+        Some(&self.windows[last_known_idx])
+    }
+
+    /// Refresh the geometries of the windows contained in this [`Workspace`].
+    ///
+    /// This assures the fullscreen windows take the full output geometry, maximized use
+    /// non-exclusive layer shell areas, and arrange the rest of the tiled windows based on the
+    /// active workspace layout.
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
         let active_layout = self.layouts[self.active_layout_idx];
@@ -840,6 +987,9 @@ impl Workspace {
         let output_geo = self.output.geometry();
         if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
             window.set_geometry(output_geo);
+            if let Some(toplevel) = window.0.toplevel() {
+                toplevel.send_pending_configure();
+            }
         }
 
         let usable_geo = layer_map_for_output(&self.output)
@@ -995,6 +1145,8 @@ impl Workspace {
         }
     }
 
+    /// Select the next available layout in this [`Workspace`], cycling back to the first one if
+    /// needed.
     pub fn select_next_layout(&mut self) {
         let layouts_len = self.layouts.len();
         let new_active_idx = self.active_layout_idx + 1;
@@ -1008,6 +1160,8 @@ impl Workspace {
         self.refresh_window_geometries();
     }
 
+    /// Select the previous available layout in this [`Workspace`], cycling all the way back to the
+    /// last layout if needed.
     pub fn select_previous_layout(&mut self) {
         let layouts_len = self.layouts.len();
         let new_active_idx = match self.active_layout_idx.checked_sub(1) {
@@ -1019,6 +1173,9 @@ impl Workspace {
         self.refresh_window_geometries();
     }
 
+    /// Change the master_width_factor of the active [`WorkspaceLayout`]
+    ///
+    /// This clamps the value between (0.0..=0.95).
     pub fn change_mwfact(&mut self, delta: f32) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile {
@@ -1036,16 +1193,23 @@ impl Workspace {
         self.refresh_window_geometries();
     }
 
+    /// Change the nmaster of the active [`WorkspaceLayout`]
+    ///
+    /// This clamps the value between (1.0, +inf).
     pub fn change_nmaster(&mut self, delta: i32) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile { nmaster, .. }
         | WorkspaceLayout::BottomStack { nmaster, .. } = active_layout
         {
-            *nmaster = nmaster.saturating_add_signed(delta as isize);
+            let new_nmaster = nmaster
+                .saturating_add_signed(delta as isize)
+                .clamp(1, usize::MAX);
+            *nmaster = new_nmaster;
         }
         self.refresh_window_geometries();
     }
 
+    /// Get the window under the pointer in this workspace.
     #[profiling::function]
     pub fn window_under(
         &self,
@@ -1071,6 +1235,7 @@ impl Workspace {
             })
     }
 
+    /// Raise the given window above all other windows, if found.
     #[profiling::function]
     pub fn raise_window(&self, window: &FhtWindow) {
         if !self.windows.contains(window) {
@@ -1084,6 +1249,7 @@ impl Workspace {
         }
     }
 
+    /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
     pub fn render_elements<R>(
         &self,
@@ -1132,16 +1298,30 @@ impl PartialEq for FullscreenSurface {
     }
 }
 
+/// All layouts [`Workspace`]s can use.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WorkspaceLayout {
+    /// The classic Master-Tile layout, also known as Master-Slave layout, or TileLeft.
+    ///
+    /// You have `nmaster` windows on the left side, and the other windows are in the stack, or the
+    /// right side, and they share the height equally.
+    ///
+    /// How the master side and the stack side are proportioned is decided by the
+    /// `master_width_factor` parameter, a float ranging in (0.0..1.0)
     Tile {
         nmaster: usize,
         master_width_factor: f32,
     },
+    /// A twist on the [`Tile`] layout, where the master window(s) are on the top, and the stack is
+    /// on the bottom half of the screen.
+    ///
+    /// Every logic from the [`Tile`] layout applies here, but windows share width space equally,
+    /// rather than height.
     BottomStack {
         nmaster: usize,
         master_width_factor: f32,
     },
+    /// Floating layout, basically do nothing to arrange the windows.
     Floating,
 }
 

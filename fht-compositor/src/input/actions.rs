@@ -326,7 +326,7 @@ impl State {
                 }
             }
             KeyAction::FocusWorkspace(idx) => {
-                if let Some(window) = wset.set_active_idx(idx) {
+                if let Some(window) = wset.set_active_idx(idx, true) {
                     self.fht.focus_state.focus_target = Some(window.into());
                 };
             }
