@@ -14,10 +14,11 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::LayerSurfaceAttributes;
 use smithay::wayland::shell::xdg::{
-    ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
+    XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
 };
 
-use crate::state::State;
+use crate::shell::FhtWindow;
+use crate::state::{Fht, State};
 
 /// Ensures that the [`WlSurface`] has a render buffer
 fn has_render_buffer(surface: &WlSurface) -> bool {
@@ -26,22 +27,28 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false)
 }
 
-/// Ensures that the initial configure event is sent for a toplevel, returning whether it was
-/// already sent or not.
-fn toplevel_ensure_initial_configure(toplevel: &ToplevelSurface) -> bool {
-    let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .initial_configure_sent
-    });
-    if !initial_configure_sent {
-        toplevel.send_configure();
+impl State {
+    /// Ensures that the initial configure event is sent for a toplevel, returning whether it was
+    /// already sent or not.
+    fn toplevel_ensure_initial_configure(window: &FhtWindow, state: &mut Fht) -> bool {
+        let Some(toplevel) = window.0.toplevel() else {
+            return false;
+        };
+
+        // Map the window
+        state.map_window(window);
+
+        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
+            states
+                .data_map
+                .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .initial_configure_sent
+        });
+        initial_configure_sent
     }
-    initial_configure_sent
 }
 
 /// Ensures that the initial configure event is sent for a popup.
@@ -157,13 +164,13 @@ impl CompositorHandler for State {
                 .map(|(w, _)| w)
                 .unwrap()
                 .clone();
-            if let Some(toplevel) = window.0.toplevel() {
-                if toplevel_ensure_initial_configure(toplevel) && has_render_buffer(surface) {
-                    window.0.on_commit();
-                    self.fht.map_window(&window);
-                } else {
-                    return;
-                }
+            if State::toplevel_ensure_initial_configure(&window, &mut self.fht)
+                && has_render_buffer(surface)
+            {
+                window.0.on_commit();
+                self.fht.map_window(&window);
+            } else {
+                return;
             }
         }
 
