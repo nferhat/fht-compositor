@@ -37,6 +37,10 @@ pub trait RectExt<C: Coordinate> {
     fn as_local(self) -> Rectangle<C, Local>;
 }
 
+pub trait RectCenterExt<C: Coordinate, Kind> {
+    fn center(self) -> Point<C, Kind>;
+}
+
 pub trait RectGlobalExt<C: Coordinate> {
     fn to_local(self, output: &Output) -> Rectangle<C, Local>;
     fn as_logical(self) -> Rectangle<C, Logical>;
@@ -123,6 +127,18 @@ impl<C: Coordinate> RectExt<C> for Rectangle<C, Logical> {
 
     fn as_local(self) -> Rectangle<C, Local> {
         Rectangle::from_loc_and_size(self.loc.as_local(), (self.size.w, self.size.h))
+    }
+}
+
+impl<Kind> RectCenterExt<i32, Kind> for Rectangle<i32, Kind> {
+    fn center(self) -> Point<i32, Kind> {
+        self.loc + self.size.downscale(2).to_point()
+    }
+}
+
+impl<Kind> RectCenterExt<f64, Kind> for Rectangle<f64, Kind> {
+    fn center(self) -> Point<f64, Kind> {
+        self.loc + self.size.downscale(2.0).to_point()
     }
 }
 

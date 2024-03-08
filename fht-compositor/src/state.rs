@@ -53,7 +53,7 @@ use crate::config::CONFIG;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::{FhtWindow, KeyboardFocusTarget};
-use crate::utils::geometry::{Global, SizeExt};
+use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 
 pub struct State {
@@ -340,8 +340,7 @@ impl Fht {
 
         // Focus output now.
         if CONFIG.general.cursor_warps {
-            let output_geo = output.geometry();
-            let center = output_geo.loc + output_geo.size.downscale(2).to_point();
+            let center = output.geometry().center();
             self.loop_handle.insert_idle(move |state| {
                 state.move_pointer(center.to_f64());
             });

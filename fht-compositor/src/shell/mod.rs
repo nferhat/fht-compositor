@@ -32,7 +32,7 @@ use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
 use crate::utils::geometry::{
-    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt, SizeExt,
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectGlobalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -336,8 +336,7 @@ impl Fht {
         // natural when the window gets focus, even if focus_new_windows is none.
         if (CONFIG.general.focus_new_windows || is_switching) && is_active {
             if CONFIG.general.cursor_warps {
-                let window_geo = window.global_geometry();
-                let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                let center = window.global_geometry().center();
                 self.loop_handle
                     .insert_idle(move |state| state.move_pointer(center.to_f64()));
             }

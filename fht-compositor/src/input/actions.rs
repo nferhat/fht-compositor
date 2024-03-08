@@ -7,7 +7,7 @@ use smithay::utils::Serial;
 use crate::config::CONFIG;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::PointExt;
+use crate::utils::geometry::{PointExt, RectCenterExt};
 use crate::utils::output::OutputExt;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -270,8 +270,7 @@ impl State {
                 let new_focus = active.focus_next_window().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let window_geo = window.global_geometry();
-                        let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                        let center = window.global_geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -281,8 +280,7 @@ impl State {
                 let new_focus = active.focus_previous_window().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let window_geo = window.global_geometry();
-                        let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                        let center = window.global_geometry().center();
                         self.fht.focus_state.focus_target = Some(window.into());
                         self.move_pointer(center.to_f64())
                     }
@@ -292,8 +290,7 @@ impl State {
                 active.swap_with_next_window();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let window_geo = window.global_geometry();
-                        let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                        let center = window.global_geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -303,8 +300,7 @@ impl State {
                 active.swap_with_previous_window();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let window_geo = window.global_geometry();
-                        let center = window_geo.loc + window_geo.size.downscale(2).to_point();
+                        let center = window.global_geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
