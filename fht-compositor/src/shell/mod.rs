@@ -327,10 +327,14 @@ impl Fht {
             workspace.fullscreen_window(&window);
         }
 
+        let is_switching = wset.switch_animation.is_some();
+        let is_active = map_settings
+            .workspace
+            .map_or(true, |idx| idx == wset.get_active_idx());
+
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
-        let is_switching = wset.switch_animation.is_some();
-        if CONFIG.general.focus_new_windows || is_switching {
+        if (CONFIG.general.focus_new_windows || is_switching) && is_active {
             if CONFIG.general.cursor_warps {
                 let window_geo = window.global_geometry();
                 let center = window_geo.loc + window_geo.size.downscale(2).to_point();
