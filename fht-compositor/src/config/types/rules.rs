@@ -47,8 +47,18 @@ pub struct WindowMapSettings {
     pub floating: bool,
 
     /// Should the window be fullscreen?
+    ///
+    /// NOTE: If this is set, all of location, size, and centered options will be ignored.
     #[serde(default)]
     pub fullscreen: bool,
+
+    /// Window coordinates relative to the output it's getting mapped on.
+    ///
+    /// NOTE: If this is set, centered will have no effect.
+    pub location: Option<(i32, i32)>,
+
+    /// Window size, width and height.
+    pub size: Option<(i32, i32)>,
 
     /// If the window is floating, should we center it?
     #[serde(default = "default_true")]
@@ -68,6 +78,8 @@ impl Default for WindowMapSettings {
         Self {
             floating: false,
             fullscreen: false,
+            location: None,
+            size: None,
             centered: true,
             output: None,
             workspace: None,

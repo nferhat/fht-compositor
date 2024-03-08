@@ -5,8 +5,10 @@ pub mod grabs;
 pub mod window;
 pub mod workspaces;
 
+use std::sync::Mutex;
 use std::time::Duration;
 
+use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind,
     WindowSurfaceType,
@@ -15,19 +17,23 @@ use smithay::input::pointer::Focus;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Point, Serial};
+use smithay::utils::{Point, Rectangle, Serial, Size};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
-use smithay::wayland::shell::xdg::{PopupSurface, XdgShellHandler};
+use smithay::wayland::shell::xdg::{
+    PopupSurface, SurfaceCachedState, XdgToplevelSurfaceRoleAttributes,
+};
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
 pub use self::window::FhtWindow;
-pub use self::workspaces::FullscreenSurface;
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
-use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
+use crate::utils::geometry::{
+    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt, SizeExt,
+};
 use crate::utils::output::OutputExt;
 
 impl Fht {
@@ -203,6 +209,10 @@ impl Fht {
         };
 
         let (window, mut output) = self.pending_windows.remove(idx);
+        let wl_surface = window.wl_surface().unwrap();
+        let dh = self.display_handle.clone();
+
+        // Get the window map setting/rule
         let workspace_idx = self
             .wset_for(&output)
             .active_idx
@@ -213,18 +223,8 @@ impl Fht {
             .find(|(rules, _)| rules.iter().any(|r| r.matches(&window, workspace_idx)))
             .map(|(_, settings)| settings.clone())
             .unwrap_or_default();
-        if map_settings.floating {
-            window.set_tiled(false);
-            if map_settings.centered {
-                let mut geo = window.global_geometry();
-                let output_geo = output.geometry();
-                geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
-                geo.loc -= geo.size.downscale(2).to_point();
-                window.set_geometry(geo);
-            }
-        } else {
-            window.set_tiled(true);
-        }
+        // Have to set it here for layouts
+        window.set_tiled(!map_settings.floating);
 
         if let Some(target_output) = map_settings
             .output
@@ -240,42 +240,97 @@ impl Fht {
                 let idx = idx.clamp(0, 8);
                 &mut wset.workspaces[idx]
             }
-            None => {
-                if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
-                    wset.switch_animation.as_ref()
-                {
-                    &mut wset.workspaces[*target_idx]
-                } else {
-                    wset.active_mut()
-                }
-            }
+            None => wset.active_mut(),
         };
 
-        // Fullscreening logic in each workspace:
-        //
-        // If we insert a new window, then take it out and put it at it's last known idx.
-        // If we want another window to be fullscreened, then remove the current one and put the
-        // new one there
-        if workspace.fullscreen.is_some() {
-            let FullscreenSurface {
-                inner,
-                last_known_idx,
-            } = workspace.fullscreen.take().unwrap();
-            let last_known_idx = last_known_idx.clamp(0, workspace.windows.len().saturating_sub(1));
-            workspace.windows.insert(last_known_idx, inner);
+        if let Some(fullscreen) = workspace.remove_current_fullscreen() {
+            fullscreen.set_fullscreen(false, None);
+            if let Some(toplevel) = fullscreen.0.toplevel() {
+                toplevel.send_pending_configure();
+            }
+        }
+
+        // Send initial configure so the window starts to acknowledge it's mapped
+        if let Some(toplevel) = window.0.toplevel() {
+            let initial_configure_sent = with_states(&wl_surface, |states| {
+                states
+                    .data_map
+                    .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+            if !initial_configure_sent {
+                toplevel.send_configure();
+            }
+        }
+
+        if map_settings.fullscreen {
+            let mut wl_output = None;
+            let client = dh.get_client(wl_surface.id()).unwrap();
+            for wl_output_2 in output.client_outputs(&client) {
+                wl_output = Some(wl_output_2);
+            }
+            window.set_fullscreen(true, wl_output);
+        } else if map_settings.floating {
+            let mut window_geo: Rectangle<i32, Global> = Rectangle::default();
+
+            if let Some(size) = map_settings.size.map(Into::into) {
+                window_geo.size = size;
+            } else {
+                // We just sent a initial configure message, the window may not have set a surface
+                // size yet, so we take chances and check by this order
+                //
+                // 1. Pending commit size
+                // 2. Requested minimum size
+                // 3. SpaceElement::geometry size
+                let min_size = with_states(&wl_surface, |states| {
+                    states.cached_state.current::<SurfaceCachedState>().min_size
+                });
+                let space_element_size = window.geometry().size;
+                let maybe_pending_size = window
+                    .0
+                    .toplevel()
+                    .and_then(|t| t.with_pending_state(|state| state.size));
+
+                if let Some(pending_size) = maybe_pending_size {
+                    window_geo.size = pending_size.as_global();
+                } else if min_size != Size::default() {
+                    window_geo.size = min_size.as_global();
+                } else if space_element_size != Size::default() {
+                    window_geo.size = space_element_size.as_global();
+                }
+            }
+
+            if let Some(loc) = map_settings.location.map(Into::<Point<i32, Local>>::into) {
+                window_geo.loc = loc.to_global(&output);
+            } else if map_settings.centered {
+                let output_geo = output.geometry();
+                window_geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
+                window_geo.loc -= window_geo.size.downscale(2).to_point();
+            }
+
+            window.set_geometry(window_geo);
+        }
+
+        // Apply changes, if any
+        if let Some(toplevel) = window.0.toplevel() {
+            toplevel.send_pending_configure();
         }
 
         workspace.insert_window(window.clone());
+        if map_settings.floating {
+            workspace.raise_window(&window); // you prob wanna see it right?
+        }
         if map_settings.fullscreen {
             workspace.fullscreen_window(&window);
         }
-        if map_settings.floating {
-            // I assume you want to see the window when it's floating, above existing tiled
-            // windows.
-            workspace.raise_window(&window);
-        }
 
-        if CONFIG.general.focus_new_windows {
+        // From using the compositor opening a window when a switch is being done feels more
+        // natural when the window gets focus, even if focus_new_windows is none.
+        let is_switching = wset.switch_animation.is_some();
+        if CONFIG.general.focus_new_windows || is_switching {
             if CONFIG.general.cursor_warps {
                 let window_geo = window.global_geometry();
                 let center = window_geo.loc + window_geo.size.downscale(2).to_point();
