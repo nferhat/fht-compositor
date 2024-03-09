@@ -35,9 +35,6 @@ impl State {
             return false;
         };
 
-        // Map the window
-        state.map_window(window);
-
         let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
             states
                 .data_map
@@ -47,7 +44,19 @@ impl State {
                 .unwrap()
                 .initial_configure_sent
         });
-        initial_configure_sent
+        if initial_configure_sent {
+            return true;
+        }
+
+        // Prepare the window for mapping.
+        //
+        // This ensures it's inside pending_windows with appropriate window rules
+        state.prepare_map_window(window);
+
+        toplevel.send_configure();
+        toplevel.send_pending_configure();
+
+        false
     }
 }
 
@@ -155,15 +164,9 @@ impl CompositorHandler for State {
             .fht
             .pending_windows
             .iter()
-            .position(|(w, _)| w.wl_surface().as_ref() == Some(surface))
+            .position(|(w, _, _)| w.wl_surface().as_ref() == Some(surface))
         {
-            let window = self
-                .fht
-                .pending_windows
-                .get(idx)
-                .map(|(w, _)| w)
-                .unwrap()
-                .clone();
+            let (window, _, _) = self.fht.pending_windows.get(idx).cloned().unwrap();
             if State::toplevel_ensure_initial_configure(&window, &mut self.fht)
                 && has_render_buffer(surface)
             {

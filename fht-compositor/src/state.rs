@@ -52,7 +52,7 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
-use crate::shell::{FhtWindow, KeyboardFocusTarget};
+use crate::shell::{FhtWindow, KeyboardFocusTarget, WindowMapSettingsInternal};
 use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 
@@ -161,7 +161,7 @@ pub struct Fht {
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet>,
     pub pending_layers: Vec<(LayerSurface, Output)>,
-    pub pending_windows: Vec<(FhtWindow, Output)>,
+    pub pending_windows: Vec<(FhtWindow, Output, Option<WindowMapSettingsInternal>)>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
 

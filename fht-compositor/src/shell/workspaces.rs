@@ -808,7 +808,15 @@ impl Workspace {
             return;
         }
 
+        if let Some(fullscreen) = self.remove_current_fullscreen() {
+            fullscreen.set_fullscreen(false, None);
+            if let Some(toplevel) = fullscreen.0.toplevel() {
+                toplevel.send_pending_configure();
+            }
+        }
+
         // Configure the window for insertion
+        // refresh_window_geometries send a configure message for us
         window.output_enter(&self.output, window.bbox());
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
 
@@ -971,8 +979,7 @@ impl Workspace {
     /// active workspace layout.
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
-        let active_layout = self.layouts[self.active_layout_idx];
-        if self.windows.is_empty() || active_layout == WorkspaceLayout::Floating {
+        if self.windows.is_empty() {
             return;
         }
 
@@ -1006,142 +1013,14 @@ impl Workspace {
             }
         }
 
-        if tiled_windows.is_empty() {
-            return;
-        }
-
-        match active_layout {
-            WorkspaceLayout::Tile {
-                nmaster,
-                master_width_factor,
-            } => {
-                // A lone master window in a workspace will basically appear the same as a
-                // maximized window, so it's logical to start from there
-                let mut master_geo = maximized_geo;
-                master_geo.size.h -=
-                    inner_gaps * (min(tiled_windows_len, nmaster).saturating_sub(1)) as i32;
-
-                let mut stack_geo = maximized_geo;
-                stack_geo.size.h -=
-                    inner_gaps * tiled_windows_len.saturating_sub(nmaster + 1) as i32;
-
-                if tiled_windows_len > nmaster {
-                    master_geo.size.w = ((master_geo.size.w - inner_gaps) as f32
-                        * master_width_factor)
-                        .round() as i32;
-                    stack_geo.size.w -= master_geo.size.w + inner_gaps;
-                    stack_geo.loc.x += master_geo.size.w + inner_gaps;
-                };
-
-                let LayoutFacts {
-                    master_factor,
-                    stack_factor,
-                    master_rest,
-                    stack_rest,
-                } = getfacts(
-                    tiled_windows_len,
-                    nmaster,
-                    master_geo.size.h,
-                    stack_geo.size.h,
-                );
-
-                for (idx, window) in tiled_windows.iter().enumerate() {
-                    if idx < nmaster {
-                        let mut master_height =
-                            (master_geo.size.h as f32 / master_factor).round() as i32;
-                        master_height += ((idx as f32) < master_rest) as i32;
-
-                        window.set_geometry(Rectangle::from_loc_and_size(
-                            master_geo.loc,
-                            (master_geo.size.w, master_height),
-                        ));
-
-                        master_geo.loc.y += master_height + inner_gaps;
-                    } else {
-                        let mut stack_height =
-                            (stack_geo.size.h as f32 / stack_factor).round() as i32;
-                        stack_height += ((idx as f32) < stack_rest) as i32;
-
-                        window.set_geometry(Rectangle::from_loc_and_size(
-                            stack_geo.loc,
-                            (stack_geo.size.w, stack_height),
-                        ));
-
-                        stack_geo.loc.y += stack_height + inner_gaps;
-                    }
-
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
-                }
-            }
-            WorkspaceLayout::BottomStack {
-                nmaster,
-                master_width_factor,
-            } => {
-                // A lone master window in a workspace will basically appear the same as a
-                // maximized window, so it's logical to start from there
-                let mut master_geo = maximized_geo;
-                master_geo.size.w -=
-                    inner_gaps * (min(tiled_windows_len, nmaster).saturating_sub(1)) as i32;
-
-                let mut stack_geo = maximized_geo;
-                stack_geo.size.w -=
-                    inner_gaps * tiled_windows_len.saturating_sub(nmaster + 1) as i32;
-
-                if tiled_windows_len > nmaster {
-                    stack_geo.size.h = ((stack_geo.size.h - inner_gaps) as f32
-                        * (1f32 - master_width_factor))
-                        .round() as i32;
-                    master_geo.size.h -= stack_geo.size.h + inner_gaps;
-                    stack_geo.loc.y += master_geo.size.h + inner_gaps;
-                };
-
-                let LayoutFacts {
-                    master_factor,
-                    stack_factor,
-                    master_rest,
-                    stack_rest,
-                } = getfacts(
-                    tiled_windows_len,
-                    nmaster,
-                    master_geo.size.w,
-                    stack_geo.size.w,
-                );
-
-                for (idx, window) in tiled_windows.iter().enumerate() {
-                    if idx < nmaster {
-                        let mut master_width =
-                            (master_geo.size.w as f32 / master_factor).round() as i32;
-                        master_width += ((idx as f32) < master_rest) as i32;
-
-                        window.set_geometry(Rectangle::from_loc_and_size(
-                            master_geo.loc,
-                            (master_width, master_geo.size.h),
-                        ));
-
-                        master_geo.loc.x += master_width + inner_gaps;
-                    } else {
-                        let mut stack_width =
-                            (stack_geo.size.w as f32 / stack_factor).round() as i32;
-                        stack_width += ((idx as f32) < stack_rest) as i32;
-
-                        window.set_geometry(Rectangle::from_loc_and_size(
-                            stack_geo.loc,
-                            (stack_width, stack_geo.size.h),
-                        ));
-
-                        stack_geo.loc.x += stack_width + inner_gaps;
-                    }
-
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
-                }
-            }
-            WorkspaceLayout::Floating => {
-                // Let the windows be free
-            }
+        if !tiled_windows.is_empty() {
+            let windows_len = tiled_windows.len();
+            self.layouts[self.active_layout_idx].tile_windows(
+                tiled_windows.into_iter(),
+                windows_len,
+                maximized_geo,
+                inner_gaps,
+            );
         }
     }
 
@@ -1323,6 +1202,144 @@ pub enum WorkspaceLayout {
     },
     /// Floating layout, basically do nothing to arrange the windows.
     Floating,
+}
+
+impl WorkspaceLayout {
+    /// Tile `windows` inside `tile_area` while letting `inner_gaps` between them.
+    pub fn tile_windows<'a>(
+        &'a self,
+        windows: impl Iterator<Item = &'a FhtWindow>,
+        windows_len: usize,
+        tile_area: Rectangle<i32, Global>,
+        inner_gaps: i32,
+    ) {
+        match *self {
+            WorkspaceLayout::Tile {
+                nmaster,
+                master_width_factor,
+            } => {
+                // A lone master window in a workspace will basically appear the same as a
+                // maximized window, so it's logical to start from there
+                let mut master_geo = tile_area;
+                master_geo.size.h -=
+                    inner_gaps * (min(windows_len, nmaster).saturating_sub(1)) as i32;
+
+                let mut stack_geo = tile_area;
+                stack_geo.size.h -= inner_gaps * windows_len.saturating_sub(nmaster + 1) as i32;
+
+                if windows_len > nmaster {
+                    master_geo.size.w = ((master_geo.size.w - inner_gaps) as f32
+                        * master_width_factor)
+                        .round() as i32;
+                    stack_geo.size.w -= master_geo.size.w + inner_gaps;
+                    stack_geo.loc.x += master_geo.size.w + inner_gaps;
+                };
+
+                let LayoutFacts {
+                    master_factor,
+                    stack_factor,
+                    master_rest,
+                    stack_rest,
+                } = getfacts(windows_len, nmaster, master_geo.size.h, stack_geo.size.h);
+
+                for (idx, window) in windows.enumerate() {
+                    if idx < nmaster {
+                        let mut master_height =
+                            (master_geo.size.h as f32 / master_factor).round() as i32;
+                        master_height += ((idx as f32) < master_rest) as i32;
+
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height),
+                        ));
+
+                        master_geo.loc.y += master_height + inner_gaps;
+                    } else {
+                        let mut stack_height =
+                            (stack_geo.size.h as f32 / stack_factor).round() as i32;
+                        stack_height += ((idx as f32) < stack_rest) as i32;
+
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            stack_geo.loc,
+                            (stack_geo.size.w, stack_height),
+                        ));
+
+                        stack_geo.loc.y += stack_height + inner_gaps;
+                    }
+
+                    if let Some(toplevel) = window.0.toplevel() {
+                        toplevel.send_pending_configure();
+                    }
+                }
+            }
+            WorkspaceLayout::BottomStack {
+                nmaster,
+                master_width_factor,
+            } => {
+                // A lone master window in a workspace will basically appear the same as a
+                // maximized window, so it's logical to start from there
+                let mut master_geo = tile_area;
+                master_geo.size.w -=
+                    inner_gaps * (min(windows_len, nmaster).saturating_sub(1)) as i32;
+
+                let mut stack_geo = tile_area;
+                stack_geo.size.w -= inner_gaps * windows_len.saturating_sub(nmaster + 1) as i32;
+
+                if windows_len > nmaster {
+                    stack_geo.size.h = ((stack_geo.size.h - inner_gaps) as f32
+                        * (1f32 - master_width_factor))
+                        .round() as i32;
+                    master_geo.size.h -= stack_geo.size.h + inner_gaps;
+                    stack_geo.loc.y += master_geo.size.h + inner_gaps;
+                };
+
+                let LayoutFacts {
+                    master_factor,
+                    stack_factor,
+                    master_rest,
+                    stack_rest,
+                } = getfacts(windows_len, nmaster, master_geo.size.w, stack_geo.size.w);
+
+                for (idx, window) in windows.enumerate() {
+                    if idx < nmaster {
+                        let mut master_width =
+                            (master_geo.size.w as f32 / master_factor).round() as i32;
+                        master_width += ((idx as f32) < master_rest) as i32;
+
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            master_geo.loc,
+                            (master_width, master_geo.size.h),
+                        ));
+
+                        master_geo.loc.x += master_width + inner_gaps;
+                    } else {
+                        let mut stack_width =
+                            (stack_geo.size.w as f32 / stack_factor).round() as i32;
+                        stack_width += ((idx as f32) < stack_rest) as i32;
+
+                        window.set_geometry(Rectangle::from_loc_and_size(
+                            stack_geo.loc,
+                            (stack_width, stack_geo.size.h),
+                        ));
+
+                        stack_geo.loc.x += stack_width + inner_gaps;
+                    }
+
+                    if let Some(toplevel) = window.0.toplevel() {
+                        toplevel.send_pending_configure();
+                    }
+                }
+            }
+            WorkspaceLayout::Floating => {
+                // Let the windows be free
+                for window in windows {
+                    if let Some(toplevel) = window.0.toplevel() {
+                        toplevel.send_pending_configure();
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub struct LayoutFacts {

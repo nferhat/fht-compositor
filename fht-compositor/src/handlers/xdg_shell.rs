@@ -26,7 +26,7 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         let window = FhtWindow::new_wayland(toplevel);
         let output = self.fht.focus_state.output.clone().unwrap();
-        self.fht.pending_windows.push((window, output));
+        self.fht.pending_windows.push((window, output, None));
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
