@@ -534,7 +534,7 @@ where
 
 impl<R> Element for WorkspaceSetRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem,
     <R as Renderer>::TextureId: 'static,
 
     FhtWindowRenderElement<R>: RenderElement<R>,
