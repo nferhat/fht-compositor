@@ -342,6 +342,20 @@ impl Fht {
                 windows_len + 1,
                 maximized_geo,
                 inner_gaps,
+                |_idx, w, new_geo| {
+                    if w != &window {
+                        // Not our current window: Set with configure
+                        w.set_geometry(new_geo);
+                        if let Some(toplevel) = w.0.toplevel() {
+                            toplevel.send_pending_configure();
+                        }
+                    } else {
+                        // Not current window that we are preparing
+                        // Don't send configure since we are going to send an initial one with
+                        // these settings.
+                        w.set_geometry(new_geo);
+                    }
+                },
             );
         }
 
