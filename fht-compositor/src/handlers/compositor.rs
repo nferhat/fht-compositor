@@ -1,23 +1,22 @@
+use std::collections::hash_map::Entry;
 use std::sync::Mutex;
 
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
-use smithay::desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType};
+use smithay::desktop::{layer_map_for_output, PopupKind};
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorHandler,
-    SurfaceAttributes,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
+    BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
-use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::LayerSurfaceAttributes;
 use smithay::wayland::shell::xdg::{
-    XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
+    ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
 };
 
-use crate::shell::FhtWindow;
 use crate::state::{Fht, State};
 
 /// Ensures that the [`WlSurface`] has a render buffer
@@ -27,36 +26,78 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false)
 }
 
+/// Returns whether this [`Toplevel`] initial configure was sent.
+fn initial_configure_sent(toplevel: &ToplevelSurface) -> bool {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .initial_configure_sent
+    })
+}
+
 impl State {
-    /// Ensures that the initial configure event is sent for a toplevel, returning whether it was
-    /// already sent or not.
-    fn toplevel_ensure_initial_configure(window: &FhtWindow, state: &mut Fht) -> bool {
-        let Some(toplevel) = window.0.toplevel() else {
-            return false;
+    /// Process a commit request for a root surface.
+    fn maybe_map_pending_window(surface: &WlSurface, state: &mut Fht) {
+        // First check: the pending window may be a pending one, needing both an initial configure
+        // call and a prepapring before mapping.
+        let Entry::Occupied(entry) = state.pending_windows.entry(surface.clone()) else {
+            return;
         };
 
-        let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
+        let window = entry.get().clone();
+        window.0.on_commit();
+
+        // We don't have a render buffer, send initial configure to window so it acknowledges it
+        // needs one and send additional data with it.
+        if !has_render_buffer(surface) {
+            state.loop_handle.insert_idle(move |state| {
+                if let Some(toplevel) = window.0.toplevel().filter(|t| t.alive()) {
+                    if !initial_configure_sent(toplevel) {
+                        state.fht.prepare_map_window(&window);
+                        toplevel.send_configure();
+                    }
+                }
+            });
+
+            return;
+        }
+
+        // We are now prepared, map as normal.
+        let window = entry.remove();
+        state.map_window(window);
+    }
+
+    /// Process a potential commit request for a layer shell
+    fn maybe_map_pending_layer_shell(surface: &WlSurface, state: &mut Fht) {
+        let Entry::Occupied(entry) = state.pending_layers.entry(surface.clone()) else {
+            return;
+        };
+
+        // Goofy process but we need it before
+        let (layer_surface, _) = entry.get();
+        let initial_configure_sent = with_states(layer_surface.wl_surface(), |states| {
             states
                 .data_map
-                .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                .get::<Mutex<LayerSurfaceAttributes>>()
                 .unwrap()
                 .lock()
                 .unwrap()
                 .initial_configure_sent
         });
-        if initial_configure_sent {
-            return true;
+        if !initial_configure_sent {
+            layer_surface.layer_surface().send_configure();
+            return;
         }
 
-        // Prepare the window for mapping.
-        //
-        // This ensures it's inside pending_windows with appropriate window rules
-        state.prepare_map_window(window);
-
-        toplevel.send_configure();
-        toplevel.send_pending_configure();
-
-        false
+        let (layer_surface, output) = entry.remove();
+        if let Err(err) = layer_map_for_output(&output).map_layer(&layer_surface) {
+            warn!(?err, "Failed to map layer surface!");
+        };
+        state.wset_for(&output).arrange();
     }
 }
 
@@ -79,24 +120,6 @@ fn popup_ensure_initial_configure(popup: &PopupKind) {
         // NOTE: A popup initial configure should never fail
         popup.send_configure().expect("Initial configure failed!");
     }
-}
-
-/// Ensures that the initial configure event is sent for a layer surface, returning whether it was
-/// already sent or not.
-fn layer_surface_ensure_initial_configure(surface: &LayerSurface) -> bool {
-    let initial_configure_sent = with_states(surface.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<Mutex<LayerSurfaceAttributes>>()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .initial_configure_sent
-    });
-    if !initial_configure_sent {
-        surface.layer_surface().send_configure();
-    }
-    initial_configure_sent
 }
 
 impl CompositorHandler for State {
@@ -160,68 +183,33 @@ impl CompositorHandler for State {
             data.early_import(surface);
         }
 
-        if let Some(idx) = self
-            .fht
-            .pending_windows
-            .iter()
-            .position(|(w, _, _)| w.wl_surface().as_ref() == Some(surface))
-        {
-            let (window, _, _) = self.fht.pending_windows.get(idx).cloned().unwrap();
-            if State::toplevel_ensure_initial_configure(&window, &mut self.fht)
-                && has_render_buffer(surface)
-            {
-                window.0.on_commit();
-                self.fht.map_window(&window);
-            } else {
-                return;
-            }
+        // We are already synced, why bother going additional computations
+        if is_sync_subsurface(surface) {
+            return;
         }
 
-        if let Some(idx) = self
-            .fht
-            .pending_layers
-            .iter()
-            .position(|(l, _)| l.wl_surface() == surface)
-        {
-            let (layer_surface, output) = self.fht.pending_layers.get(idx).unwrap();
-            if layer_surface_ensure_initial_configure(layer_surface) {
-                if let Err(err) = layer_map_for_output(&output).map_layer(layer_surface) {
-                    warn!(?err, "Failed to map layer surface!");
-                };
-                let (_, output) = self.fht.pending_layers.remove(idx);
-                self.fht.wset_for(&output).arrange();
-            } else {
-                return;
-            }
+        let mut root_surface = surface.clone();
+        while let Some(new_parent) = get_parent(&root_surface) {
+            root_surface = new_parent;
         }
 
-        if let Some(popup) = self.fht.popups.find_popup(surface) {
-            popup_ensure_initial_configure(&popup);
+        if surface == &root_surface {
+            State::maybe_map_pending_window(&surface, &mut self.fht);
+            State::maybe_map_pending_layer_shell(&surface, &mut self.fht);
         }
 
+        // Maybe commiting a mapped window.
         if let Some(window) = self.fht.find_window(surface).filter(|w| w.is_wayland()) {
             window.0.on_commit();
         }
 
+        // Or maybe a popup/subsurface
+        if let Some(popup) = self.fht.popups.find_popup(surface) {
+            popup_ensure_initial_configure(&popup);
+        }
         self.fht.popups.commit(surface);
 
-        let layer_output = self
-            .fht
-            .outputs()
-            .find(|o| {
-                let layer_map = layer_map_for_output(o);
-                layer_map
-                    .layer_for_surface(surface, WindowSurfaceType::ALL)
-                    .is_some()
-            })
-            .cloned();
-        if let Some(output) = layer_output {
-            let has_arranged = layer_map_for_output(&output).arrange();
-            if has_arranged {
-                self.fht.wset_for(&output).arrange();
-            }
-        }
-
+        // Try to redraw the output
         if let Some(output) = self.fht.visible_output_for_surface(surface) {
             self.backend
                 .schedule_render_output(output, &self.fht.loop_handle);

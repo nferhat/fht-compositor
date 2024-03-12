@@ -18,24 +18,24 @@ impl WlrLayerShellHandler for State {
         _layer: wlr_layer::Layer,
         namespace: String,
     ) {
+        // We don't map layer surfaces immediatly, rather, they get pushed to `pending_layers`
+        // before mapping. The compositors waits for the initial configure of the layer surface
+        // before mapping so we are sure it have dimensions and a render buffer
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| self.fht.workspaces.keys().next().unwrap().clone());
+        let wl_surface = surface.wl_surface().clone();
         let layer_surface = LayerSurface::new(surface, namespace);
-        let layer_surface = (layer_surface, output);
-        self.fht.pending_layers.push(layer_surface);
+        self.fht
+            .pending_layers
+            .insert(wl_surface, (layer_surface, output));
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
-        if let Some(idx) = self
-            .fht
-            .pending_layers
-            .iter()
-            .position(|(s, _)| s.layer_surface() == &surface)
-        {
-            let ret = self.fht.pending_layers.remove(idx);
-            std::mem::drop(ret);
+        if let Some((layer_surface, _)) = self.fht.pending_layers.remove(surface.wl_surface()) {
+            // This was a pending layer, it was not mapped, just close it.
+            layer_surface.layer_surface().send_close();
         } else if let Some((mut layer_map, layer)) = self.fht.outputs().find_map(|o| {
             let layer_map = layer_map_for_output(o);
             let layer = layer_map
@@ -44,7 +44,9 @@ impl WlrLayerShellHandler for State {
                 .cloned();
             layer.map(|l| (layer_map, l))
         }) {
-            layer_map.unmap_layer(&layer)
+            // Otherwise, it was already mapped, unmap it then close
+            layer_map.unmap_layer(&layer);
+            layer.layer_surface().send_close();
         }
     }
 }

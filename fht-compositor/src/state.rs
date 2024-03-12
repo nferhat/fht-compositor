@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -52,7 +52,7 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
-use crate::shell::{FhtWindow, KeyboardFocusTarget, WindowMapSettingsInternal};
+use crate::shell::{FhtWindow, KeyboardFocusTarget};
 use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 
@@ -160,8 +160,8 @@ pub struct Fht {
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet>,
-    pub pending_layers: Vec<(LayerSurface, Output)>,
-    pub pending_windows: Vec<(FhtWindow, Output, Option<WindowMapSettingsInternal>)>,
+    pub pending_layers: HashMap<WlSurface, (LayerSurface, Output)>,
+    pub pending_windows: HashMap<WlSurface, FhtWindow>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
 
@@ -280,8 +280,8 @@ impl Fht {
             dnd_icon: None,
             cursor_theme_manager,
             workspaces: IndexMap::new(),
-            pending_layers: vec![],
-            pending_windows: vec![],
+            pending_layers: HashMap::new(),
+            pending_windows: HashMap::new(),
             popups: PopupManager::default(),
 
             last_config_error: None,
