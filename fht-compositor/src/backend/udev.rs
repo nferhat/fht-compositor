@@ -876,7 +876,7 @@ fn render_surface(
             // Copy offscreen buffer's content to the SHM buffer.
             shm::with_buffer_contents_mut(shm_buffer, |shm_buffer_ptr, shm_len, buffer_data| {
                 // Ensure SHM buffer is in an acceptable format.
-                if dbg!(buffer_data.format) != wl_shm::Format::Argb8888
+                if buffer_data.format != wl_shm::Format::Argb8888
                     || buffer_data.stride != region.size.w * 4
                     || buffer_data.height != region.size.h
                     || shm_len as i32 != buffer_data.stride * buffer_data.height

@@ -1019,7 +1019,6 @@ impl Workspace {
 
         if !tiled_windows.is_empty() {
             let windows_len = tiled_windows.len();
-            dbg!(maximized_geo);
             self.layouts[self.active_layout_idx].tile_windows(
                 tiled_windows.into_iter(),
                 windows_len,
