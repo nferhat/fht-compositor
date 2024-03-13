@@ -1163,7 +1163,9 @@ impl Workspace {
 
         windows
             .into_iter()
-            .flat_map(|(is_focused, w)| w.render_elements(renderer, scale, 0.25, is_focused, false))
+            .flat_map(|(is_focused, w)| {
+                w.render_elements(renderer, scale, alpha, is_focused, false)
+            })
             .collect()
     }
 }
