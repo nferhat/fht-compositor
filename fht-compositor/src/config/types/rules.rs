@@ -67,6 +67,14 @@ pub struct WindowMapSettings {
     /// On which output should we map the window?
     pub output: Option<String>,
 
+    /// The border settings of this window.
+    ///
+    /// This will override `config.decoration.border` for this window.
+    pub border: Option<super::decoration::BorderConfig>,
+
+    /// Whether to allow this window to draw client-side decorations
+    pub allow_csd: Option<bool>,
+
     /// On which specific workspace of the output should we map the window?
     ///
     /// NOTE: This is the workspace *index*
@@ -82,6 +90,8 @@ impl Default for WindowMapSettings {
             size: None,
             centered: true,
             output: None,
+            border: None,
+            allow_csd: None,
             workspace: None,
         }
     }

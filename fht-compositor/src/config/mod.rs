@@ -99,9 +99,10 @@ const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
 
 #[allow(unused_imports)]
 pub use self::types::{
-    AnimationConfig, CursorConfig, Easing, FhtConfig as FhtConfigInner, GeneralConfig, InputConfig,
-    KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings, WindowRulePattern,
-    WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
+    AnimationConfig, BorderConfig, CursorConfig, Easing, FhtConfig as FhtConfigInner,
+    GeneralConfig, InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
+    WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
+    WorkspaceSwitchAnimationDirection,
 };
 
 // To avoid mutable static madness just use an private unsafe cell with one getter and setter.

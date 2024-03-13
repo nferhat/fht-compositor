@@ -45,12 +45,13 @@ use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::xwayland::X11Surface;
 
 use super::decorations::{RoundedOutlineShader, RoundedOutlineShaderSettings, RoundedQuadShader};
+use super::WindowMapSettingsInternal;
 #[cfg(feature = "udev_backend")]
 use crate::backend::render::AsGlowFrame;
 use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
-use crate::config::CONFIG;
+use crate::config::{BorderConfig, CONFIG};
 use crate::state::State;
 #[cfg(feature = "xwayland")]
 use crate::utils::geometry::RectGlobalExt;
@@ -149,12 +150,20 @@ impl FhtWindow {
         bbox
     }
 
+    /// Get the specific border settings for this window, using the global settings as a fallback.
+    pub fn get_border_config(&self) -> BorderConfig {
+        self.user_data()
+            .get::<WindowMapSettingsInternal>()
+            .and_then(|map_settings| map_settings.user.border)
+            .unwrap_or(CONFIG.decoration.border)
+    }
+
     /// Set the geometry of this window.
     ///
     /// You can use `remove_border` to account for this window border size.
     pub fn set_geometry(&self, mut geometry: Rectangle<i32, Global>, remove_border: bool) {
         if remove_border {
-            let border_thickness = CONFIG.decoration.border.thickness as i32;
+            let border_thickness = self.get_border_config().thickness as i32;
             geometry.loc += (border_thickness, border_thickness).into();
             geometry.size -= (2 * border_thickness, 2 * border_thickness).into();
         }
@@ -1213,7 +1222,7 @@ impl FhtWindow {
         render_elements.extend(popup_render_elements);
 
         if !skip_border {
-            let border_config = &CONFIG.decoration.border;
+            let border_config = self.get_border_config();
             let settings = RoundedOutlineShaderSettings {
                 thickness: border_config.thickness,
                 radius: border_config.radius,

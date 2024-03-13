@@ -33,7 +33,7 @@ mod border {
         10.0
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
     pub struct BorderConfig {
         /// The border color for the focused window.
         #[serde(serialize_with = "serialize_focused_color")]

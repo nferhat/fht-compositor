@@ -21,6 +21,7 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, SurfaceCachedState};
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
@@ -310,6 +311,21 @@ impl Fht {
                 },
             );
         }
+
+        // Client side-decorations
+        let allow_csd = map_settings
+            .allow_csd
+            .unwrap_or(CONFIG.decoration.allow_csd);
+        if let Some(toplevel) = window.0.toplevel() {
+            toplevel.with_pending_state(|state| {
+                if allow_csd {
+                    state.decoration_mode = Some(DecorationMode::ClientSide)
+                } else {
+                    state.decoration_mode = Some(DecorationMode::ServerSide)
+                }
+            });
+        }
+        // NOTE: We can't do much on x11...
 
         let map_settings = WindowMapSettingsInternal {
             output,
