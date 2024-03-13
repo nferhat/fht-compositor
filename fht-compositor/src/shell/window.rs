@@ -1,12 +1,10 @@
 //! A custom shell window.
 //!
-//! [`FhtWindow`] is a tagged union struct for other high level window abstractions from Smithay
-//! (respectively a wayland [`Window`] or a Xwayland [`X11Surface`]), it has additional data
-//! attached to it in a form of user data stored inside the [`UserDataMap`] of the underlying
-//! constructs
+//! [`FhtWindow`] is a wrapper around the [`Window`] type provided by Smithay. It allows me to add
+//! some abstractions around state for this compositor stored in [`FhtWindowData`].
 //!
-//! For rendering the [`FhtWindowRenderElement`] separates between the toplevel surface, any
-//! subsurfaces (like popups), and the window border.
+//! The window is self-contained, meaning that, independent from how you use it, has it's own
+//! geometry (loc+size), border, rendering, etc.
 
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
@@ -58,6 +56,7 @@ use crate::state::State;
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, RectExt, SizeExt};
 
+/// Additional compositor-specific data to store inside a [`Window`] user data map.
 pub struct FhtWindowData {
     /// NOTE: The window doesn't manage this in any way, it's up to the workspace it's on to manage
     /// the Z-index relative to other windows.
@@ -67,7 +66,9 @@ pub struct FhtWindowData {
     pub last_floating_geometry: Option<Rectangle<i32, Global>>,
 }
 
-/// An abstraction over smithay's builtin [`Window`] type.
+pub type FhtWindowUserData = RefCell<FhtWindowData>;
+
+/// An abstraction over Smithay's builtin [`Window`] type.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct FhtWindow(pub Window);
 
@@ -77,10 +78,11 @@ pub struct FhtWindow(pub Window);
 pub struct X11SurfaceTiled(AtomicBool);
 
 impl FhtWindow {
+    /// Create a new Wayland-based window using the xdg_shell protocol.
     pub fn new_wayland(surface: ToplevelSurface) -> Self {
         let window = Window::new_wayland_window(surface);
         window.user_data().insert_if_missing(|| {
-            RefCell::new(FhtWindowData {
+            FhtWindowUserData::new(FhtWindowData {
                 z_index: Arc::new((smithay::desktop::space::RenderZindex::Shell as u32).into()),
                 last_floating_geometry: None,
                 location: Point::default(),
@@ -90,11 +92,12 @@ impl FhtWindow {
         FhtWindow(window)
     }
 
+    /// Create a new X11 window managed by the running Xwayland/X11wm instance.
     #[cfg(feature = "xwayland")]
     pub fn new_x11(surface: X11Surface) -> Self {
         let window = Window::new_x11_window(surface);
         window.user_data().insert_if_missing(|| {
-            RefCell::new(FhtWindowData {
+            FhtWindowUserData::new(FhtWindowData {
                 z_index: Arc::new((smithay::desktop::space::RenderZindex::Shell as u32).into()),
                 last_floating_geometry: None,
                 location: Point::default(),
@@ -110,35 +113,51 @@ impl FhtWindow {
         FhtWindow(window)
     }
 
+    /// Get the global location of the window.
     pub fn location(&self) -> Point<i32, Global> {
         self.user_data()
-            .get::<RefCell<FhtWindowData>>()
+            .get::<FhtWindowUserData>()
             .unwrap()
             .borrow()
             .location
     }
 
+    /// Get the render location of this window. This may or may not be the same as it's location.
+    ///
+    /// The different is that the render location offsets for decorations (shadows, titlebars) that
+    /// the window may set.
     pub fn render_location(&self) -> Point<i32, Global> {
         self.location() - self.geometry().loc.as_global()
     }
 
+    /// Get the global geometry of this window, size falling back to the gloal bbox of the window.
+    ///
+    /// NOTE: The rectangle location is from [`Self::location`]
     pub fn global_geometry(&self) -> Rectangle<i32, Global> {
         let mut geo = self.geometry().as_global();
         geo.loc = self.location();
         geo
     }
 
+    /// Get the global bounding box of this window.
+    ///
+    /// Almost the same as [`Self::global_geometry`], but the size wraps around the whole window
+    /// and it's subsurfaces.
     pub fn global_bbox(&self) -> Rectangle<i32, Global> {
         let mut bbox = self.bbox().as_global();
         bbox.loc += self.location() - self.geometry().loc.as_global();
         bbox
     }
 
-    pub fn set_geometry(&self, mut geometry: Rectangle<i32, Global>) {
-        // Offset for border
-        let border_thickness = CONFIG.decoration.border.thickness as i32;
-        geometry.loc += (border_thickness, border_thickness).into();
-        geometry.size -= (2 * border_thickness, 2 * border_thickness).into();
+    /// Set the geometry of this window.
+    ///
+    /// You can use `remove_border` to account for this window border size.
+    pub fn set_geometry(&self, mut geometry: Rectangle<i32, Global>, remove_border: bool) {
+        if remove_border {
+            let border_thickness = CONFIG.decoration.border.thickness as i32;
+            geometry.loc += (border_thickness, border_thickness).into();
+            geometry.size -= (2 * border_thickness, 2 * border_thickness).into();
+        }
 
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| s.size = Some(geometry.size.as_logical()));
@@ -150,7 +169,7 @@ impl FhtWindow {
 
         let mut window_data = self
             .user_data()
-            .get::<RefCell<FhtWindowData>>()
+            .get::<FhtWindowUserData>()
             .unwrap()
             .borrow_mut();
         window_data.location = geometry.loc;
@@ -159,6 +178,9 @@ impl FhtWindow {
         }
     }
 
+    /// Return whether the window is fullscreened or not.
+    ///
+    /// NOTE: This returns the pending state.
     pub fn is_fullscreen(&self) -> bool {
         if let Some(toplevel) = self.0.toplevel() {
             return toplevel
@@ -173,6 +195,10 @@ impl FhtWindow {
         unreachable!("What is this window?")
     }
 
+    /// Set whether the window is fullscreened or not.
+    ///
+    /// NOTE: In case this window is a Wayland window, you still have to send a configure message
+    /// to the underyling [`ToplevelSurface`]
     pub fn set_fullscreen(&self, fullscreen: bool, wl_output: Option<WlOutput>) {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| {
@@ -192,6 +218,9 @@ impl FhtWindow {
         }
     }
 
+    /// Return whether the window is maximized or not.
+    ///
+    /// NOTE: This returns the pending state.
     pub fn is_maximized(&self) -> bool {
         if let Some(toplevel) = self.0.toplevel() {
             return toplevel.with_pending_state(|s| s.states.contains(XdgToplevelState::Maximized));
@@ -205,6 +234,10 @@ impl FhtWindow {
         unreachable!("What is this window?")
     }
 
+    /// Set whether the window is maximized or not.
+    ///
+    /// NOTE: In case this window is a Wayland window, you still have to send a configure message
+    /// to the underyling [`ToplevelSurface`]
     pub fn set_maximized(&self, maximized: bool) {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| {
@@ -222,6 +255,9 @@ impl FhtWindow {
         }
     }
 
+    /// Return whether the window is tiled or not.
+    ///
+    /// NOTE: This returns the pending state.
     pub fn is_tiled(&self) -> bool {
         if let Some(toplevel) = self.0.toplevel() {
             return toplevel.with_pending_state(|s| s.states.contains(XdgToplevelState::TiledLeft));
@@ -236,6 +272,13 @@ impl FhtWindow {
         unreachable!("What is this window?")
     }
 
+    /// Set whether the window is tiled or not.
+    ///
+    /// Setting this to true will also (for some windows) disable client side decorations such as
+    /// shadows.
+    ///
+    /// NOTE: In case this window is a Wayland window, you still have to send a configure message
+    /// to the underyling [`ToplevelSurface`]
     pub fn set_tiled(&self, tiled: bool) {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| {
@@ -256,22 +299,30 @@ impl FhtWindow {
         if !tiled {
             let maybe_last_floating_geometry = self
                 .user_data()
-                .get::<RefCell<FhtWindowData>>()
+                .get::<FhtWindowUserData>()
                 .unwrap()
                 .borrow()
                 .last_floating_geometry;
             if let Some(last_floating_geometry) = maybe_last_floating_geometry {
-                self.set_geometry(last_floating_geometry);
+                self.set_geometry(last_floating_geometry, false);
             }
         }
     }
 
+    /// Set the bounds of this window
+    ///
+    /// NOTE: This only affects Wayland windows
+    /// NOTE: You still have to send a configure message to the underyling [`ToplevelSurface`]
     pub fn set_bounds(&self, bounds: Option<Size<i32, Logical>>) {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| s.bounds = bounds)
         }
     }
 
+    /// Return the app_id of this window.
+    ///
+    /// This also has other common name such as the window class, or the WM_CLASS atom on X11
+    /// windows.
     pub fn app_id(&self) -> String {
         #[cfg(feature = "xwayland")]
         if let Some(x11_surface) = self.0.x11_surface() {
@@ -291,6 +342,7 @@ impl FhtWindow {
         })
     }
 
+    /// Return the title of this window.
     pub fn title(&self) -> String {
         #[cfg(feature = "xwayland")]
         if let Some(x11_surface) = self.0.x11_surface() {
@@ -310,24 +362,32 @@ impl FhtWindow {
         })
     }
 
+    /// Return the Z-index of this window.
+    ///
+    /// This literally does NOTHING if whatever you are managing the window with (for example your
+    /// workspace, or something...) does not account for this.
     pub fn get_z_index(&self) -> u32 {
         self.user_data()
-            .get::<RefCell<FhtWindowData>>()
+            .get::<FhtWindowUserData>()
             .unwrap()
             .borrow()
             .z_index
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Set the Z-index of this window.
     pub fn set_z_index(&self, z_index: u32) {
         self.user_data()
-            .get::<RefCell<FhtWindowData>>()
+            .get::<FhtWindowUserData>()
             .unwrap()
             .borrow()
             .z_index
             .store(z_index, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Return whether this window owns this [`WlSurface`] with surface type [`WindowSurfaceType`]
+    ///
+    /// You can with this check if a window owns a popup, for example.
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
         let Some(self_surface) = self.wl_surface() else {
             return false;
@@ -362,6 +422,10 @@ impl FhtWindow {
         false
     }
 
+    /// Return the topmost surface owned by this window under this point.
+    ///
+    /// NOTE: This function expects `point` to be relative to the window origin. You can achieve
+    /// this by offseting it by [`Self::render_location`]
     pub fn surface_under(
         &self,
         point: Point<f64, Logical>,
@@ -370,6 +434,7 @@ impl FhtWindow {
         self.0.surface_under(point, surface_type)
     }
 
+    /// Run a closure on all the window surfaces.
     pub fn with_surfaces<F>(&self, processor: F)
     where
         F: FnMut(&WlSurface, &WlSurfaceData),
@@ -377,6 +442,7 @@ impl FhtWindow {
         self.0.with_surfaces(processor)
     }
 
+    /// Send frame callbacks to all surfaces of this window.
     pub fn send_frame<T, F>(
         &self,
         output: &Output,
@@ -391,6 +457,7 @@ impl FhtWindow {
             .send_frame(output, time, throttle, primary_scan_out_output)
     }
 
+    /// Send dmabuf feedback to all surfaces of this window.
     pub fn send_dmabuf_feedback<'a, P, F>(
         &self,
         output: &Output,
@@ -420,6 +487,7 @@ impl FhtWindow {
         )
     }
 
+    /// Close this window.
     pub fn close(&self) {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.send_close();
@@ -432,15 +500,18 @@ impl FhtWindow {
         }
     }
 
+    /// Return whether this window is a Wayland window.
     pub fn is_wayland(&self) -> bool {
         self.0.is_wayland()
     }
 
+    /// Return whether this window is a X11 window.
     #[cfg(feature = "xwayland")]
     pub fn is_x11(&self) -> bool {
         self.0.is_x11()
     }
 
+    /// Return whether this window is a X11 override-redirect window.
     #[cfg(feature = "xwayland")]
     pub fn is_x11_override_redirect(&self) -> bool {
         if let Some(x11_surface) = self.0.x11_surface() {
@@ -449,6 +520,8 @@ impl FhtWindow {
 
         false
     }
+
+    /// Get access to this window [`UserDataMap`]
     pub fn user_data(&self) -> &UserDataMap {
         self.0.user_data()
     }

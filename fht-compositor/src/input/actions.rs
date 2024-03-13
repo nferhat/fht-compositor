@@ -250,7 +250,7 @@ impl State {
                     let output_geo = output.geometry();
                     geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
                     geo.loc -= geo.size.downscale(2).to_point();
-                    window.set_geometry(geo);
+                    window.set_geometry(geo, true);
                 }
             }
             KeyAction::FullscreenFocusedWindow => {

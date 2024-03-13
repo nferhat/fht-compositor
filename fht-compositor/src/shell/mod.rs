@@ -238,11 +238,7 @@ impl Fht {
         // TODO: Logic here....
         if map_settings.fullscreen {
             // Use output geometry, and account for window borders.
-            let mut window_geo = output.geometry();
-            let border_thickness = CONFIG.decoration.border.thickness as i32;
-            window_geo.loc -= (border_thickness, border_thickness).into();
-            window_geo.size += (2 * border_thickness, 2 * border_thickness).into();
-            window.set_geometry(window_geo);
+            window.set_geometry(output.geometry(), false);
 
             let mut wl_output = None;
             let client = dh.get_client(wl_surface.id()).unwrap();
@@ -274,7 +270,7 @@ impl Fht {
 
             let output_geo = output.geometry();
             if let Some(window) = workspace.fullscreen.as_ref().map(|f| &f.inner) {
-                window.set_geometry(output_geo);
+                window.set_geometry(output_geo, false);
                 if let Some(toplevel) = window.0.toplevel() {
                     toplevel.send_pending_configure();
                 }
@@ -288,7 +284,7 @@ impl Fht {
             maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
             maximized_geo.loc += (outer_gaps, outer_gaps).into();
             for window in maximized_windows {
-                window.set_geometry(maximized_geo);
+                window.set_geometry(maximized_geo, true);
                 if let Some(toplevel) = window.0.toplevel() {
                     toplevel.send_pending_configure();
                 }
@@ -303,7 +299,7 @@ impl Fht {
                 maximized_geo,
                 inner_gaps,
                 |_idx, w, new_geo| {
-                    w.set_geometry(new_geo);
+                    w.set_geometry(new_geo, true);
                     if w != window {
                         // Do not send a configure for the prepared window since we are sending
                         // changes with an initial configure call
@@ -385,7 +381,7 @@ impl Fht {
                 window_geo.loc -= window_geo.size.downscale(2).to_point();
             }
 
-            window.set_geometry(window_geo);
+            window.set_geometry(window_geo, true);
         }
 
         // Not fullscreen, insert as normal

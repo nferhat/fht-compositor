@@ -42,7 +42,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
 
         let mut new_geo = self.window.global_geometry();
         new_geo.loc = new_location.to_i32_round();
-        self.window.set_geometry(new_geo);
+        self.window.set_geometry(new_geo, true);
     }
 
     fn relative_motion(

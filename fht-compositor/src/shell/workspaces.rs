@@ -991,13 +991,8 @@ impl Workspace {
         let outer_gaps = CONFIG.general.outer_gaps;
         let border_width = CONFIG.decoration.border.thickness as i32;
 
-        let output_geo = self.output.geometry();
         if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
-            let mut fullscreen_geo = output_geo;
-            // since set_geometry always remove border width
-            fullscreen_geo.loc -= (border_width, border_width).into();
-            fullscreen_geo.size += (2 * border_width, 2 * border_width).into();
-            window.set_geometry(fullscreen_geo);
+            window.set_geometry(self.output.geometry(), false);
             if let Some(toplevel) = window.0.toplevel() {
                 toplevel.send_pending_configure();
             }
@@ -1011,7 +1006,7 @@ impl Workspace {
         maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
         maximized_geo.loc += (outer_gaps, outer_gaps).into();
         for window in maximized_windows {
-            window.set_geometry(maximized_geo);
+            window.set_geometry(maximized_geo, true);
             if let Some(toplevel) = window.0.toplevel() {
                 toplevel.send_pending_configure();
             }
@@ -1025,7 +1020,7 @@ impl Workspace {
                 maximized_geo,
                 inner_gaps,
                 |_idx, window, new_geo| {
-                    window.set_geometry(new_geo);
+                    window.set_geometry(new_geo, true);
                     if let Some(toplevel) = window.0.toplevel() {
                         toplevel.send_pending_configure();
                     }
