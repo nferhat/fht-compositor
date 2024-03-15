@@ -17,6 +17,7 @@ use smithay::wayland::shell::xdg::{
     ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
 };
 
+use crate::shell::WindowMapSettingsInternal;
 use crate::state::{Fht, State};
 
 /// Ensures that the [`WlSurface`] has a render buffer
@@ -53,12 +54,19 @@ impl State {
 
         // We don't have a render buffer, send initial configure to window so it acknowledges it
         // needs one and send additional data with it.
-        if !has_render_buffer(surface) {
+        if !has_render_buffer(surface)
+            || window
+                .user_data()
+                .get::<WindowMapSettingsInternal>()
+                .is_none()
+        {
             state.loop_handle.insert_idle(move |state| {
                 if let Some(toplevel) = window.0.toplevel().filter(|t| t.alive()) {
+                    state.fht.prepare_map_window(&window);
                     if !initial_configure_sent(toplevel) {
-                        state.fht.prepare_map_window(&window);
                         toplevel.send_configure();
+                    } else {
+                        toplevel.send_pending_configure();
                     }
                 }
             });
