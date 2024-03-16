@@ -185,14 +185,14 @@ impl WaylandFocus for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => w.wl_surface(),
             Self::Window(w) => w.wl_surface(),
-            Self::Egui(e) => None,
+            Self::Egui(_) => None,
         }
     }
     fn same_client_as(&self, object_id: &wayland_backend::server::ObjectId) -> bool {
         match self {
             Self::WlSurface(w) => w.same_client_as(object_id),
             Self::Window(w) => w.same_client_as(object_id),
-            Self::Egui(e) => false,
+            Self::Egui(_) => false,
         }
     }
 }
@@ -375,7 +375,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::down(w, seat, data, event, seq),
             Self::Window(w) => TouchTarget::down(w, seat, data, event, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -389,7 +389,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::up(w, seat, data, event, seq),
             Self::Window(w) => TouchTarget::up(w, seat, data, event, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -403,7 +403,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::motion(w, seat, data, event, seq),
             Self::Window(w) => TouchTarget::motion(w, seat, data, event, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -411,7 +411,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::frame(w, seat, data, seq),
             Self::Window(w) => TouchTarget::frame(w, seat, data, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -419,7 +419,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::cancel(w, seat, data, seq),
             Self::Window(w) => TouchTarget::cancel(w, seat, data, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -433,7 +433,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::shape(w, seat, data, event, seq),
             Self::Window(w) => TouchTarget::shape(w, seat, data, event, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 
@@ -447,7 +447,7 @@ impl TouchTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => TouchTarget::orientation(w, seat, data, event, seq),
             Self::Window(w) => TouchTarget::orientation(w, seat, data, event, seq),
-            Self::Egui(e) => (),
+            Self::Egui(_) => (),
         }
     }
 }
