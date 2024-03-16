@@ -13,11 +13,11 @@ use smithay::backend::drm::{
     DrmNode, NodeType,
 };
 use smithay::backend::egl::context::ContextPriority;
-use smithay::backend::egl::{EGLDevice, EGLDisplay};
+use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::Error as OutputDamageTrackerError;
-use smithay::backend::renderer::gles::GlesTexture;
+use smithay::backend::renderer::gles::{Capability, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
@@ -955,8 +955,24 @@ pub fn init(state: &mut State) -> anyhow::Result<()> {
     };
     info!(?primary_gpu, "Found primary GPU for rendering!");
 
-    let gpu_manager = GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High))
-        .expect("Failed to initialize GPU manager!");
+    let gpu_manager = GbmGlesBackend::with_factory(|egl_display: &EGLDisplay| {
+        let egl_context = EGLContext::new_with_priority(egl_display, ContextPriority::High)?;
+
+        // Thank you cmeissl for guiding me here, this helps with drawing egui since we don't have
+        // to create a shadow buffer anymore (atleast if this is false)
+        let renderer = if CONFIG.renderer.enable_color_transformations {
+            unsafe { GlesRenderer::new(egl_context)? }
+        } else {
+            let capabilities = unsafe { GlesRenderer::supported_capabilities(&egl_context) }?
+                .into_iter()
+                .filter(|c| *c != Capability::ColorTransformations);
+            unsafe { GlesRenderer::with_capabilities(egl_context, capabilities)? }
+        };
+
+        Ok(renderer)
+    });
+
+    let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
 
     let mut data = UdevData {
         primary_gpu,
