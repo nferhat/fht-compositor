@@ -187,8 +187,10 @@ impl crate::state::State {
         // the [`CursorThemeManager`] automatically checks for changes.
         self.fht.cursor_theme_manager.reload();
 
-        // refresh window geometries if layouts/gaps hav changed.
-        self.fht.arrange();
+        let outputs = self.fht.outputs().cloned().collect::<Vec<_>>();
+        for output in outputs {
+            self.fht.output_resized(&output);
+        }
 
         if CONFIG.input.keyboard != old_config.input.keyboard {
             if let Err(err) = self

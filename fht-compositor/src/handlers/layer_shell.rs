@@ -33,20 +33,26 @@ impl WlrLayerShellHandler for State {
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
+        let mut layer_output = None;
         if let Some((layer_surface, _)) = self.fht.pending_layers.remove(surface.wl_surface()) {
             // This was a pending layer, it was not mapped, just close it.
             layer_surface.layer_surface().send_close();
-        } else if let Some((mut layer_map, layer)) = self.fht.outputs().find_map(|o| {
+        } else if let Some((mut layer_map, layer, output)) = self.fht.outputs().find_map(|o| {
             let layer_map = layer_map_for_output(o);
             let layer = layer_map
                 .layers()
                 .find(|&layer| layer.layer_surface() == &surface)
                 .cloned();
-            layer.map(|l| (layer_map, l))
+            layer.map(|l| (layer_map, l, o.clone()))
         }) {
             // Otherwise, it was already mapped, unmap it then close
             layer_map.unmap_layer(&layer);
             layer.layer_surface().send_close();
+            layer_output = Some(output);
+        }
+
+        if let Some(output) = layer_output {
+            self.fht.output_resized(&output);
         }
     }
 }

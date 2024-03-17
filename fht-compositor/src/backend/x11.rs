@@ -230,7 +230,7 @@ pub fn init(state: &mut State) -> anyhow::Result<()> {
                         .output
                         .change_current_state(Some(new_mode), None, None, None);
                     backend.output.set_preferred(mode);
-                    state.fht.arrange();
+                    state.fht.output_resized(&backend.output);
 
                     backend.surface_dirty = true;
                     if !backend.surface_pending {

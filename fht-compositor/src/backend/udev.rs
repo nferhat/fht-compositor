@@ -243,8 +243,6 @@ impl UdevData {
             }
         }
 
-        fht.arrange();
-
         Ok(())
     }
 
@@ -276,8 +274,6 @@ impl UdevData {
 
         self.gpu_manager.as_mut().remove_node(&device.render_node);
         fht.loop_handle.remove(device.drm_registration_token);
-
-        fht.arrange();
 
         Ok(())
     }

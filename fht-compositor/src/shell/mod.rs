@@ -100,16 +100,6 @@ impl Fht {
             .find_map(|(_, wset)| wset.ws_mut_for(window))
     }
 
-    /// Arrange the shell elements.
-    ///
-    /// This should be called whenever output geometry changes.
-    pub fn arrange(&self) {
-        self.workspaces().for_each(|(output, wset)| {
-            layer_map_for_output(output).arrange();
-            wset.arrange();
-        });
-    }
-
     /// Find the first output where this [`WlSurface`] is visible.
     ///
     /// This checks everything from layer shells to windows to override redirect windows etc.

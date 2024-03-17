@@ -396,6 +396,15 @@ impl Fht {
         wset.arrange();
     }
 
+    /// Arrange the output workspaces, layer shells, and inform IPC about changes.
+    ///
+    /// You are expected to call this after you applied your changes to the output, like changing
+    /// the current mode, mapping a layer shell, etc.
+    pub fn output_resized(&mut self, output: &Output) {
+        self.wset_mut_for(output).arrange();
+        layer_map_for_output(output).arrange();
+    }
+
     /// Get the active output, generally the one with the cursor on it, fallbacking to the first
     /// available output.
     pub fn active_output(&self) -> Output {

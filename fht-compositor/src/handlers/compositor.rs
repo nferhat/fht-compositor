@@ -105,7 +105,7 @@ impl State {
         if let Err(err) = layer_map_for_output(&output).map_layer(&layer_surface) {
             warn!(?err, "Failed to map layer surface!");
         };
-        state.wset_for(&output).arrange();
+        state.output_resized(&output);
     }
 }
 
