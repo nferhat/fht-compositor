@@ -230,6 +230,7 @@ impl Fht {
         if map_settings.fullscreen {
             // Use output geometry, and account for window borders.
             window.set_geometry(output.geometry(), false);
+            window.set_tiled(!map_settings.floating);
 
             let mut wl_output = None;
             let client = dh.get_client(wl_surface.id()).unwrap();
@@ -284,7 +285,7 @@ impl Fht {
             // Can't check whether we are empty cause we are always not gonna be empty
             // (we are inserting a window, soo the iterator has always one item)
             let windows_len = tiled_windows.len();
-            workspace.layouts[workspace.active_layout_idx].tile_windows(
+            workspace.get_active_layout().tile_windows(
                 tiled_windows.into_iter().chain(std::iter::once(window)),
                 windows_len + 1,
                 maximized_geo,

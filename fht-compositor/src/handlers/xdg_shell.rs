@@ -169,8 +169,10 @@ impl XdgShellHandler for State {
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         // Workspaces handle automatically if we disable this, including refreshing window
         // geometries etc.
-        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+        if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
             window.set_fullscreen(false, None);
+            let workspace = self.fht.ws_mut_for(&window).unwrap();
+            workspace.remove_current_fullscreen();
         }
 
         surface.send_configure();

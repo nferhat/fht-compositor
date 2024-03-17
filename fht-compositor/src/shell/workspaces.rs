@@ -212,8 +212,10 @@ impl WorkspaceSet {
 
     /// Get a mutable reference to the [`Workspace`] holding this window, if any.
     pub fn ws_mut_for(&mut self, window: &FhtWindow) -> Option<&mut Workspace> {
-        self.workspaces_mut()
-            .find(|ws| ws.windows.iter().any(|w| w == window))
+        self.workspaces_mut().find(|ws| {
+            ws.fullscreen.as_ref().is_some_and(|f| &f.inner == window)
+                || ws.windows.iter().any(|w| w == window)
+        })
     }
 
     /// Get the current fullscreen window and it's location in global coordinate space.
@@ -969,6 +971,8 @@ impl Workspace {
         } = self.fullscreen.take()?;
         last_known_idx = last_known_idx.clamp(0, self.windows.len());
         self.windows.insert(last_known_idx, inner);
+        self.refresh_window_geometries();
+
         Some(&self.windows[last_known_idx])
     }
 
@@ -979,6 +983,13 @@ impl Workspace {
     /// active workspace layout.
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
+        if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
+            window.set_geometry(self.output.geometry(), false);
+            if let Some(toplevel) = window.0.toplevel() {
+                toplevel.send_pending_configure();
+            }
+        }
+
         if self.windows.is_empty() {
             return;
         }
@@ -989,14 +1000,6 @@ impl Workspace {
 
         let inner_gaps = CONFIG.general.inner_gaps;
         let outer_gaps = CONFIG.general.outer_gaps;
-        let border_width = CONFIG.decoration.border.thickness as i32;
-
-        if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
-            window.set_geometry(self.output.geometry(), false);
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel.send_pending_configure();
-            }
-        }
 
         let usable_geo = layer_map_for_output(&self.output)
             .non_exclusive_zone()
@@ -1014,7 +1017,7 @@ impl Workspace {
 
         if !tiled_windows.is_empty() {
             let windows_len = tiled_windows.len();
-            self.layouts[self.active_layout_idx].tile_windows(
+            self.get_active_layout().tile_windows(
                 tiled_windows.into_iter(),
                 windows_len,
                 maximized_geo,
@@ -1027,6 +1030,11 @@ impl Workspace {
                 },
             );
         }
+    }
+
+    /// Get the active layout that windows use for tiling.
+    pub fn get_active_layout(&self) -> WorkspaceLayout {
+        self.layouts[self.active_layout_idx]
     }
 
     /// Select the next available layout in this [`Workspace`], cycling back to the first one if
