@@ -29,6 +29,7 @@ mod backend;
 mod config;
 mod handlers;
 mod input;
+mod ipc;
 mod protocols;
 mod shell;
 mod state;
@@ -119,6 +120,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 
         (dh, socket_name)
     };
+
+    ipc::start(&loop_handle).expect("Failed to start IPC connection!");
 
     let mut state = State::new(
         &dh,

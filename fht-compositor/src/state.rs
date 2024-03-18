@@ -18,7 +18,7 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{LoopHandle, LoopSignal};
+use smithay::reexports::calloop::{self, LoopHandle, LoopSignal};
 use smithay::reexports::input;
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
@@ -50,9 +50,11 @@ use smithay_egui::EguiState;
 
 use crate::backend::Backend;
 use crate::config::CONFIG;
+use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::{FhtWindow, KeyboardFocusTarget};
+use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 
@@ -311,6 +313,16 @@ impl Fht {
         self.workspaces.keys()
     }
 
+    /// Handle an IPC output request.
+    fn handle_ipc_output_request(&mut self, req: IpcOutputRequest, output: &Output) {
+        match req {
+            IpcOutputRequest::SetActiveWorkspaceIndex { index } => {
+                self.wset_mut_for(output)
+                    .set_active_idx(index as usize, true);
+            }
+        }
+    }
+
     /// Register an output to the wayland state.
     ///
     /// # PANICS
@@ -335,8 +347,27 @@ impl Fht {
         trace!(?x, y = 0, "Using fallback output location.");
         output.change_current_state(None, None, None, Some((x, 0).into()));
 
-        let workspace_set = WorkspaceSet::new(output.clone());
+        let workspace_set = WorkspaceSet::new(output.clone(), self.loop_handle.clone());
         self.workspaces.insert(output.clone(), workspace_set);
+
+        {
+            let output = output.clone();
+            let (ipc_output, ipc_path, from_ipc_channel) = IpcOutput::new(&output);
+
+            self.loop_handle
+                .insert_source(from_ipc_channel, move |event, _, state| {
+                    let calloop::channel::Event::Msg(req) = event else {
+                        return;
+                    };
+                    state.fht.handle_ipc_output_request(req, &output);
+                })
+                .expect("Failed to insert output IPC source!");
+
+            assert!(DBUS_CONNECTION
+                .object_server()
+                .at(ipc_path, ipc_output)
+                .unwrap());
+        }
 
         // Focus output now.
         if CONFIG.general.cursor_warps {
@@ -375,14 +406,16 @@ impl Fht {
         // moved to their respective workspace on the first available wset.
         let wset = self.workspaces.first_mut().unwrap().1;
 
-        for (old_workspace, new_workspace) in
+        for (mut old_workspace, new_workspace) in
             std::iter::zip(removed_wset.workspaces, wset.workspaces_mut())
         {
             // Little optimizaztion, to avoid recalculating window geometries each time
             //
             // Due to how we manage windows, a window can't be in two workspaces at a time, let
             // alone from different outputs
-            new_workspace.windows.extend(old_workspace.windows);
+            new_workspace
+                .windows
+                .extend(old_workspace.windows.drain(..));
             new_workspace.refresh_window_geometries();
         }
 
@@ -390,6 +423,21 @@ impl Fht {
         // the output is gone.
         for layer in layer_map_for_output(output).layers() {
             layer.layer_surface().send_close()
+        }
+
+        // Unregister from IPC.
+        {
+            let path = format!(
+                "/fht/desktop/Compositor/Output/{}",
+                output.name().replace("-", "_")
+            );
+            match DBUS_CONNECTION
+                .object_server()
+                .remove::<crate::ipc::IpcOutput, _>(path)
+            {
+                Err(err) => warn!(?err, "Failed to de-adversite output to IPC!"),
+                Ok(destroyed) => assert!(destroyed),
+            }
         }
 
         wset.refresh();
@@ -403,6 +451,64 @@ impl Fht {
     pub fn output_resized(&mut self, output: &Output) {
         self.wset_mut_for(output).arrange();
         layer_map_for_output(output).arrange();
+
+        let geometry = output.geometry();
+        let refresh_rate = output.current_mode().unwrap().refresh as f32 / 1_000.0;
+        let scale = output.current_scale();
+        let (int_scale, frac_scale) = (scale.integer_scale(), scale.fractional_scale());
+        {
+            let path = format!(
+                "/fht/desktop/Compositor/Output/{}",
+                output.name().replace("-", "_")
+            );
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcOutput>(path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+
+                if iface.location != (geometry.loc.x, geometry.loc.y) {
+                    iface.location = (geometry.loc.x, geometry.loc.y);
+                    iface
+                        .location_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                }
+
+                if iface.size != (geometry.size.w, geometry.size.h) {
+                    iface.size = (geometry.size.w, geometry.size.h);
+                    iface
+                        .size_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                }
+
+                if iface.refresh_rate != refresh_rate {
+                    iface.refresh_rate = refresh_rate;
+                    iface
+                        .refresh_rate_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                }
+
+                if iface.integer_scale != int_scale {
+                    iface.integer_scale = int_scale;
+                    iface
+                        .integer_scale_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                }
+
+                if iface.fractional_scale != frac_scale {
+                    iface.fractional_scale = frac_scale;
+                    iface
+                        .fractional_scale_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                }
+            });
+        }
     }
 
     /// Get the active output, generally the one with the cursor on it, fallbacking to the first
@@ -412,6 +518,15 @@ impl Fht {
             .output
             .clone()
             .unwrap_or_else(|| self.outputs().next().unwrap().clone())
+    }
+
+    /// Get the output with this name, if any.
+    pub fn output_named(&self, name: &str) -> Option<Output> {
+        if name == "active" {
+            Some(self.active_output())
+        } else {
+            self.outputs().find(|o| &o.name() == name).cloned()
+        }
     }
 
     /// List all the outputs and a reference to their associated workspace set.

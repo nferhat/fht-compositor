@@ -11,6 +11,7 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SpaceElement;
 use smithay::output::Output;
+use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
 use smithay::wayland::seat::WaylandFocus;
@@ -21,9 +22,12 @@ use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
+use crate::ipc::{IpcOutput, IpcWorkspace, IpcWorkspaceRequest};
+use crate::state::State;
 use crate::utils::animation::Animation;
+use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::{
-    Global, PointGlobalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
+    Global, PointGlobalExt, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -48,10 +52,21 @@ impl WorkspaceSet {
     /// This function creates  9 workspaces, indexed from 0 to 8, each with independent layout
     /// window list. It's up to whatever manages this set to ensure focusing happens correctly, and
     /// that windows are getting mapped to the right set.
-    pub fn new(output: Output) -> Self {
+    pub fn new(output: Output, loop_handle: LoopHandle<'static, State>) -> Self {
+        let mut workspaces = vec![];
+        let name = output.name().replace("-", "_");
+        let path_base = format!("/fht/desktop/Compositor/Output/{name}");
+
+        for index in 0..9 {
+            let output = output.clone();
+            let loop_handle = loop_handle.clone();
+            let ipc_path = format!("{path_base}/Workspaces/{index}");
+            workspaces.push(Workspace::new(output, loop_handle, index == 0, ipc_path));
+        }
+
         Self {
             output: output.clone(),
-            workspaces: (0..9).map(|_| Workspace::new(output.clone())).collect(),
+            workspaces,
             switch_animation: None,
             active_idx: 0.into(),
         }
@@ -78,6 +93,24 @@ impl WorkspaceSet {
         let active_idx = self.active_idx.load(Ordering::SeqCst);
         if target_idx == active_idx || self.switch_animation.is_some() {
             return None;
+        }
+
+        {
+            let name = self.output.name().replace("-", "_");
+            let path = format!("/fht/desktop/Compositor/Output/{name}");
+            let target_idx = target_idx as u8;
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcOutput>(path)
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.active_workspace_index = target_idx;
+                iface
+                    .active_workspace_index_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
         }
 
         self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
@@ -682,10 +715,13 @@ pub struct Workspace {
     ///
     /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
     /// logic will PANIC.
+    ///
+    /// WARNING: We shouldn't expose this to keep the dbus interface in sync, but here its symbol
+    /// to drain the windows when deleting an output, soo it should be fine
     pub windows: Vec<FhtWindow>,
 
     /// The focused window index.
-    pub focused_window_idx: usize,
+    focused_window_idx: usize,
 
     /// The currently fullscreened window, if any.
     ///
@@ -704,12 +740,60 @@ pub struct Workspace {
     pub layouts: Vec<WorkspaceLayout>,
 
     /// The active layout index.
-    pub active_layout_idx: usize,
+    active_layout_idx: usize,
+
+    pub ipc_path: String,
+    ipc_token: RegistrationToken,
+    loop_handle: LoopHandle<'static, State>,
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        // When dropping thw workspace, we also want to close the MPSC channel opened with it to
+        // communicate with the async dbus api.
+        //
+        // Dropping the dbus object path should drop the `IpcWorkspace` struct that holds the
+        // sender, removing the ipc token from the event loop removes the callback and with it the
+        // receiver, and thus dropping our channel
+
+        match DBUS_CONNECTION
+            .object_server()
+            .remove::<IpcWorkspace, _>(self.ipc_path.as_str())
+        {
+            Err(err) => warn!(?err, "Failed to unadvertise workspace from IPC!"),
+            Ok(destroyed) => assert!(destroyed),
+        }
+
+        // Make sure to drop the useless channel.
+        self.loop_handle.remove(self.ipc_token);
+    }
 }
 
 impl Workspace {
     /// Create a new [`Workspace`] for this output.
-    pub fn new(output: Output) -> Self {
+    pub fn new(
+        output: Output,
+        loop_handle: LoopHandle<'static, State>,
+        active: bool,
+        ipc_path: String,
+    ) -> Self {
+        // IPC stuff.
+        let (ipc_workspace, channel) = IpcWorkspace::new(active, "bstack".into());
+        assert!(DBUS_CONNECTION
+            .object_server()
+            .at(ipc_path.as_str(), ipc_workspace)
+            .unwrap());
+
+        let ipc_path_2 = ipc_path.clone();
+        let ipc_token = loop_handle
+            .insert_source(channel, move |event, (), state| {
+                let calloop::channel::Event::Msg(req) = event else {
+                    return;
+                };
+                state.handle_workspace_ipc_request(&ipc_path_2, req);
+            })
+            .expect("Failed to insert workspace IPC source!");
+
         Self {
             output,
 
@@ -728,6 +812,10 @@ impl Workspace {
                 },
             ],
             active_layout_idx: 0,
+
+            ipc_path,
+            ipc_token,
+            loop_handle,
         }
     }
 
@@ -754,17 +842,53 @@ impl Workspace {
             if let Some(toplevel) = inner.0.toplevel() {
                 toplevel.send_pending_configure();
             }
+            {
+                async_io::block_on(async {
+                    let iface_ref = DBUS_CONNECTION
+                        .object_server()
+                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .unwrap();
+                    let mut iface = iface_ref.get_mut();
+                    iface.fullscreen = None;
+                    iface
+                        .fullscreen_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                });
+            }
 
             self.windows.insert(last_known_idx, inner);
         }
 
         // Clean dead/zombie windows
-        // Also ensure that we dont try to access out of bounds indexes.
-        let old_len = self.windows.len();
-        self.windows.retain(FhtWindow::alive);
+        // Also ensure that we dont try to access out of bounds indexes, and sync up the IPC.
+        let mut removed_ids = vec![];
+        self.windows.retain(|window| {
+            if !window.alive() {
+                removed_ids.push(window.uid());
+                false
+            } else {
+                true
+            }
+        });
         let new_len = self.windows.len();
-        if new_len != old_len {
+        if !removed_ids.is_empty() {
             should_refresh_geometries = true;
+
+            {
+                async_io::block_on(async {
+                    let iface_ref = DBUS_CONNECTION
+                        .object_server()
+                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .unwrap();
+                    let mut iface = iface_ref.get_mut();
+                    iface.windows.retain(|uid| !removed_ids.contains(uid));
+                    iface
+                        .windows_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                });
+            }
         }
 
         if should_refresh_geometries {
@@ -822,6 +946,21 @@ impl Workspace {
         window.output_enter(&self.output, window.bbox());
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
 
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.windows.push(window.uid());
+                iface
+                    .windows_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
+
         self.windows.push(window);
         if CONFIG.general.focus_new_windows {
             self.focused_window_idx = self.windows.len() - 1;
@@ -843,6 +982,22 @@ impl Workspace {
         window.set_bounds(None);
         self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
 
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                let window_id = window.uid();
+                iface.windows.retain(|uid| *uid != window_id);
+                iface
+                    .windows_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
+
         self.refresh_window_geometries();
         Some(window)
     }
@@ -851,6 +1006,22 @@ impl Workspace {
     pub fn focus_window(&mut self, window: &FhtWindow) {
         if let Some(idx) = self.windows.iter().position(|w| w == window) {
             self.focused_window_idx = idx;
+
+            {
+                async_io::block_on(async {
+                    let iface_ref = DBUS_CONNECTION
+                        .object_server()
+                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .unwrap();
+                    let mut iface = iface_ref.get_mut();
+                    iface.focused_window_index = idx as u8;
+                    iface
+                        .focused_window_changed(iface_ref.signal_context())
+                        .await
+                        .unwrap();
+                });
+            }
+
             self.refresh();
         }
     }
@@ -875,6 +1046,21 @@ impl Workspace {
             new_focused_idx
         };
 
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.focused_window_index = self.focused_window_idx as u8;
+                iface
+                    .focused_window_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
+
         let window = &self.windows[self.focused_window_idx];
         self.raise_window(window);
         Some(window)
@@ -897,6 +1083,21 @@ impl Workspace {
             Some(idx) => idx,
             None => windows_len - 1,
         };
+
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.focused_window_index = self.focused_window_idx as u8;
+                iface
+                    .focused_window_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
 
         let window = &self.windows[self.focused_window_idx];
         self.raise_window(window);
@@ -952,10 +1153,33 @@ impl Workspace {
         };
 
         let window = self.windows.remove(idx);
+
+        {
+            let window_uid = window.uid();
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.fullscreen = Some(window_uid);
+                iface
+                    .fullscreen_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+                iface.windows.retain(|uid| *uid != window_uid);
+                iface
+                    .windows_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
+
         self.fullscreen = Some(FullscreenSurface {
             inner: window,
             last_known_idx: idx,
         });
+
         self.focused_window_idx = self.focused_window_idx.saturating_sub(1);
         self.refresh_window_geometries();
     }
@@ -970,8 +1194,29 @@ impl Workspace {
             mut last_known_idx,
         } = self.fullscreen.take()?;
         last_known_idx = last_known_idx.clamp(0, self.windows.len());
+        let window_uid = inner.uid();
         self.windows.insert(last_known_idx, inner);
         self.refresh_window_geometries();
+
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.fullscreen = None;
+                iface
+                    .fullscreen_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+                iface.windows.insert(last_known_idx, window_uid);
+                iface
+                    .windows_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
 
         Some(&self.windows[last_known_idx])
     }
@@ -1049,6 +1294,22 @@ impl Workspace {
         };
 
         self.active_layout_idx = new_active_idx;
+
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.active_layout = self.layouts[self.active_layout_idx].to_string();
+                iface
+                    .active_layout_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
+
         self.refresh_window_geometries();
     }
 
@@ -1060,6 +1321,21 @@ impl Workspace {
             Some(idx) => idx,
             None => layouts_len - 1,
         };
+
+        {
+            async_io::block_on(async {
+                let iface_ref = DBUS_CONNECTION
+                    .object_server()
+                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .unwrap();
+                let mut iface = iface_ref.get_mut();
+                iface.active_layout = self.layouts[self.active_layout_idx].to_string();
+                iface
+                    .active_layout_changed(iface_ref.signal_context())
+                    .await
+                    .unwrap();
+            });
+        }
 
         self.active_layout_idx = new_active_idx;
         self.refresh_window_geometries();
@@ -1215,6 +1491,16 @@ pub enum WorkspaceLayout {
     },
     /// Floating layout, basically do nothing to arrange the windows.
     Floating,
+}
+
+impl ToString for WorkspaceLayout {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Tile { .. } => "tile".into(),
+            Self::BottomStack { .. } => "bstack".into(),
+            Self::Floating => "floating".into(),
+        }
+    }
 }
 
 impl WorkspaceLayout {
@@ -1396,6 +1682,54 @@ impl WorkspaceLayout {
                     if let Some(toplevel) = window.0.toplevel() {
                         toplevel.send_pending_configure();
                     }
+                }
+            }
+        }
+    }
+}
+
+impl State {
+    #[profiling::function]
+    fn handle_workspace_ipc_request(&mut self, ipc_path: &str, req: IpcWorkspaceRequest) {
+        let wset = self
+            .fht
+            .workspaces
+            .values_mut()
+            .find(|wset| wset.workspaces().any(|ws| &ws.ipc_path == ipc_path))
+            .unwrap();
+        let active_idx = wset.get_active_idx();
+        let (idx, workspace) = wset
+            .workspaces_mut()
+            .enumerate()
+            .find(|(_, ws)| &ws.ipc_path == ipc_path)
+            .unwrap();
+        let is_active = active_idx == idx;
+
+        match req {
+            IpcWorkspaceRequest::ChangeNmaster { delta } => workspace.change_nmaster(delta),
+            IpcWorkspaceRequest::ChangeMasterWidthFactor { delta } => {
+                workspace.change_mwfact(delta)
+            }
+            IpcWorkspaceRequest::SelectNextLayout => workspace.select_next_layout(),
+            IpcWorkspaceRequest::SelectPreviousLayout => workspace.select_next_layout(),
+            IpcWorkspaceRequest::FocusNextWindow => {
+                let new_focus = workspace.focus_next_window().cloned();
+                if is_active && let Some(window) = new_focus {
+                    if CONFIG.general.cursor_warps {
+                        let center = window.global_geometry().center();
+                        self.move_pointer(center.to_f64())
+                    }
+                    self.fht.focus_state.focus_target = Some(window.into());
+                }
+            }
+            IpcWorkspaceRequest::FocusPreviousWindow => {
+                let new_focus = workspace.focus_previous_window().cloned();
+                if is_active && let Some(window) = new_focus {
+                    if CONFIG.general.cursor_warps {
+                        let center = window.global_geometry().center();
+                        self.move_pointer(center.to_f64())
+                    }
+                    self.fht.focus_state.focus_target = Some(window.into());
                 }
             }
         }

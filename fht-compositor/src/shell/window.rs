@@ -65,6 +65,8 @@ pub struct FhtWindowData {
 
     pub location: Point<i32, Global>,
     pub last_floating_geometry: Option<Rectangle<i32, Global>>,
+
+    pub ipc_uid: u64,
 }
 
 pub type FhtWindowUserData = RefCell<FhtWindowData>;
@@ -82,11 +84,14 @@ impl FhtWindow {
     /// Create a new Wayland-based window using the xdg_shell protocol.
     pub fn new_wayland(surface: ToplevelSurface) -> Self {
         let window = Window::new_wayland_window(surface);
+        // The first half is the important one.
+        let (ipc_uid, _) = uuid::Uuid::new_v4().as_u64_pair();
         window.user_data().insert_if_missing(|| {
             FhtWindowUserData::new(FhtWindowData {
                 z_index: Arc::new((smithay::desktop::space::RenderZindex::Shell as u32).into()),
                 last_floating_geometry: None,
                 location: Point::default(),
+                ipc_uid,
             })
         });
 
@@ -97,11 +102,14 @@ impl FhtWindow {
     #[cfg(feature = "xwayland")]
     pub fn new_x11(surface: X11Surface) -> Self {
         let window = Window::new_x11_window(surface);
+        // The first half is the important one.
+        let (ipc_uid, _) = uuid::Uuid::new_v4().as_u64_pair();
         window.user_data().insert_if_missing(|| {
             FhtWindowUserData::new(FhtWindowData {
                 z_index: Arc::new((smithay::desktop::space::RenderZindex::Shell as u32).into()),
                 last_floating_geometry: None,
                 location: Point::default(),
+                ipc_uid,
             })
         });
 
@@ -112,6 +120,15 @@ impl FhtWindow {
         }
 
         FhtWindow(window)
+    }
+
+    /// Get the unique if for this window.
+    pub fn uid(&self) -> u64 {
+        self.user_data()
+            .get::<FhtWindowUserData>()
+            .unwrap()
+            .borrow()
+            .ipc_uid
     }
 
     /// Get the global location of the window.

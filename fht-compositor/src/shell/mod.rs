@@ -465,6 +465,13 @@ impl Fht {
             animation.animation.set_current_time(current_time);
         }
     }
+
+    /// Get an interator over all the windows registered in the compositor.
+    pub fn all_windows(&self) -> impl Iterator<Item = &FhtWindow> + '_ {
+        self.workspaces
+            .values()
+            .flat_map(|wset| wset.workspaces.iter().flat_map(|ws| &ws.windows))
+    }
 }
 
 impl State {

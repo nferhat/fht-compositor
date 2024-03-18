@@ -3,6 +3,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Stdio;
 
 pub mod animation;
+pub mod dbus;
 pub mod drm;
 pub mod fps;
 pub mod geometry;
