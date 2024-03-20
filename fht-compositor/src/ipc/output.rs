@@ -42,8 +42,8 @@ impl Output {
     pub fn new(
         output: &smithay::output::Output,
     ) -> (Self, String, calloop::channel::Channel<Request>) {
-        let name = output.name().replace("-", "_");
-        let path = format!("/fht/desktop/Compositor/Output/{name}");
+        let name = output.name();
+        let path = format!("/fht/desktop/Compositor/Output/{}", name.replace("-", "_"));
 
         let geometry = output.geometry();
         let physical_properties = output.physical_properties();
