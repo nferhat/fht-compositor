@@ -902,7 +902,7 @@ where
 
     fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
         match self {
-            Self::Toplevel(e) => {
+            Self::Toplevel(_) => {
                 // PERF: Write OR code.
                 vec![]
                 // let or = e.opaque_regions(scale);

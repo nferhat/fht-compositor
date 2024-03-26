@@ -24,7 +24,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Monotonic, Point, Rectangle, SERIAL_COUNTER};
+use smithay::utils::{Clock, IsAlive, Monotonic, Point, SERIAL_COUNTER};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
