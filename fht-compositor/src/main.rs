@@ -30,6 +30,7 @@ mod config;
 mod handlers;
 mod input;
 mod ipc;
+mod portals;
 mod protocols;
 mod shell;
 mod state;
@@ -122,6 +123,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     };
 
     ipc::start(&loop_handle).expect("Failed to start IPC connection!");
+    portals::start(&loop_handle).expect("Failed to setup portal!");
 
     let mut state = State::new(
         &dh,

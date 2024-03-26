@@ -1,5 +1,5 @@
 [workspace]
-members = ["fht-compositor", "smithay-egui"]
+members = ["fht-compositor", "fht-share-picker", "smithay-egui"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -7,6 +7,9 @@ egui = "0.23"
 egui_glow = "0.23"
 egui_extras = "0.23"
 profiling = "1.0.14"
+serde = { version = "1.0.196", features = ["derive"] }
+zbus = "4.1.2"
+zvariant = { version = "4.0.0", features = ["option-as-array"] }
 
 [workspace.dependencies.smithay]
 # git = "https://github.com/Smithay/Smithay"

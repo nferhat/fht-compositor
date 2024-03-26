@@ -2,6 +2,7 @@ use std::cmp::min;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use async_std::task::block_on;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, RenderElement};
@@ -99,7 +100,7 @@ impl WorkspaceSet {
             let name = self.output.name().replace("-", "_");
             let path = format!("/fht/desktop/Compositor/Output/{name}");
             let target_idx = target_idx as u8;
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcOutput>(path)
@@ -843,7 +844,7 @@ impl Workspace {
                 toplevel.send_pending_configure();
             }
             {
-                async_io::block_on(async {
+                block_on(async {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
                         .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -876,7 +877,7 @@ impl Workspace {
             should_refresh_geometries = true;
 
             {
-                async_io::block_on(async {
+                block_on(async {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
                         .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -947,7 +948,7 @@ impl Workspace {
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -983,7 +984,7 @@ impl Workspace {
         self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1008,7 +1009,7 @@ impl Workspace {
             self.focused_window_idx = idx;
 
             {
-                async_io::block_on(async {
+                block_on(async {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
                         .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1047,7 +1048,7 @@ impl Workspace {
         };
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1085,7 +1086,7 @@ impl Workspace {
         };
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1156,7 +1157,7 @@ impl Workspace {
 
         {
             let window_uid = window.uid();
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1199,7 +1200,7 @@ impl Workspace {
         self.refresh_window_geometries();
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1296,7 +1297,7 @@ impl Workspace {
         self.active_layout_idx = new_active_idx;
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
@@ -1323,7 +1324,7 @@ impl Workspace {
         };
 
         {
-            async_io::block_on(async {
+            block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcWorkspace>(self.ipc_path.as_str())

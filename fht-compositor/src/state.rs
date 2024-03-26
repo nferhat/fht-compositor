@@ -57,6 +57,8 @@ use crate::shell::{FhtWindow, KeyboardFocusTarget};
 use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
+#[cfg(feature = "xdg-screencast-portal")]
+use crate::utils::pipewire::PipeWire;
 
 pub struct State {
     pub fht: Fht,
@@ -168,6 +170,13 @@ pub struct Fht {
     pub popups: PopupManager,
 
     pub last_config_error: Option<anyhow::Error>,
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    // We can't start PipeWire immediatly since pipewire may not be running yet, but when the
+    // ScreenCast application starts it should be started by then.
+    pub pipewire_initialised: std::sync::Once,
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub pipewire: Option<PipeWire>,
 
     pub compositor_state: CompositorState,
     pub data_control_state: DataControlState,
@@ -287,6 +296,11 @@ impl Fht {
             popups: PopupManager::default(),
 
             last_config_error: None,
+
+            #[cfg(feature = "xdg-screencast-portal")]
+            pipewire_initialised: std::sync::Once::new(),
+            #[cfg(feature = "xdg-screencast-portal")]
+            pipewire: None,
 
             compositor_state,
             data_control_state,
@@ -461,7 +475,7 @@ impl Fht {
                 "/fht/desktop/Compositor/Output/{}",
                 output.name().replace("-", "_")
             );
-            async_io::block_on(async {
+            async_std::task::block_on(async {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
                     .interface::<_, IpcOutput>(path.as_str())

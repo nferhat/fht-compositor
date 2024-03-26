@@ -17,8 +17,6 @@ mod pointer_gestures;
 mod presentation;
 mod primary_selection;
 mod relative_pointer;
-#[cfg(feature = "udev_backend")]
-pub mod screencopy;
 mod seat;
 mod security_context;
 mod selection;
@@ -28,3 +26,5 @@ mod virtual_keyboard;
 mod xdg_activation;
 mod xdg_decoration;
 mod xdg_shell;
+#[cfg(feature = "xwayland")]
+mod xwayland_keyboard_grab;

@@ -8,6 +8,8 @@ pub mod drm;
 pub mod fps;
 pub mod geometry;
 pub mod output;
+#[cfg(feature = "xdg-screencast-portal")]
+pub mod pipewire;
 
 /// Spawn a given command line using `/bin/sh`, double-forking it in order to avoid zombie
 /// process even after fht-compositor dies.

@@ -15,7 +15,7 @@ struct PendingFrame {
     start: Instant,
     duration_elements: Option<Duration>,
     duration_render: Option<Duration>,
-    duration_screencopy: Option<Duration>,
+    duration_screencast: Option<Duration>,
     duration_displayed: Option<Duration>,
 }
 
@@ -38,13 +38,6 @@ impl Frame {
             + self.duration_render
             + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
     }
-
-    fn time_to_display(&self) -> Duration {
-        self.duration_elements
-            + self.duration_render
-            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
-            + self.duration_displayed
-    }
 }
 
 impl From<PendingFrame> for Frame {
@@ -53,7 +46,7 @@ impl From<PendingFrame> for Frame {
             start: pending.start,
             duration_elements: pending.duration_elements.unwrap_or(Duration::ZERO),
             duration_render: pending.duration_render.unwrap_or(Duration::ZERO),
-            duration_screencopy: pending.duration_screencopy,
+            duration_screencopy: pending.duration_screencast,
             duration_displayed: pending.duration_displayed.unwrap_or(Duration::ZERO),
         }
     }
@@ -67,7 +60,7 @@ impl Fps {
             start: Instant::now(),
             duration_elements: None,
             duration_render: None,
-            duration_screencopy: None,
+            duration_screencast: None,
             duration_displayed: None,
         });
     }
@@ -87,9 +80,10 @@ impl Fps {
         }
     }
 
-    pub fn screencopy(&mut self) {
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub fn screencast(&mut self) {
         if let Some(frame) = self.pending_frame.as_mut() {
-            frame.duration_screencopy = Some(
+            frame.duration_screencast = Some(
                 Instant::now().duration_since(frame.start)
                     - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
                     - frame.duration_render.clone().unwrap_or(Duration::ZERO),
@@ -103,7 +97,7 @@ impl Fps {
                 Instant::now().duration_since(frame.start)
                     - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
                     - frame.duration_render.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_screencopy.clone().unwrap_or(Duration::ZERO),
+                    - frame.duration_screencast.clone().unwrap_or(Duration::ZERO),
             );
 
             self.frames.push_back(frame.into());

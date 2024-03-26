@@ -1,0 +1,5 @@
+[portal]
+DBusName=fht.desktop.Compositor
+Interfaces=org.freedesktop.impl.portal.ScreenCast
+UseIn=fht-compositor
+

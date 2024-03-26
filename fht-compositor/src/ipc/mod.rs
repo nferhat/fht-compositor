@@ -3,7 +3,6 @@
 mod output;
 mod workspace;
 
-use async_channel::Sender;
 pub use output::{Output as IpcOutput, Request as IpcOutputRequest};
 use smithay::reexports::calloop::{self, LoopHandle};
 use smithay::reexports::wayland_protocols::wp::fullscreen_shell;
@@ -21,7 +20,7 @@ pub struct Ipc {
     /// Sender to the compositor state for it process the request.
     to_compositor: calloop::channel::Sender<IpcRequest>,
     /// Receiver from the compositor to get back the response.
-    from_compositor: async_channel::Receiver<IpcResponse>,
+    from_compositor: async_std::channel::Receiver<IpcResponse>,
 }
 
 pub enum IpcRequest {
@@ -278,7 +277,7 @@ pub fn start(loop_handle: &LoopHandle<'static, State>) -> zbus::Result<()> {
     // - going from the compositor to the IPC, so we can send the response back to the dbus client
     //   calling us. Same reason apply here (no access to the [`State`]), + dbus should be
     //   asynchronous, compared to wayland synchronous system.
-    let (to_ipc, from_compositor) = async_channel::unbounded::<IpcResponse>();
+    let (to_ipc, from_compositor) = async_std::channel::unbounded::<IpcResponse>();
 
     // Now create the dbus connection.
     //
@@ -310,7 +309,11 @@ pub fn start(loop_handle: &LoopHandle<'static, State>) -> zbus::Result<()> {
 impl State {
     /// Process a given IPC request.
     #[profiling::function]
-    fn handle_ipc_request(&mut self, req: IpcRequest, to_ipc: &Sender<IpcResponse>) {
+    fn handle_ipc_request(
+        &mut self,
+        req: IpcRequest,
+        to_ipc: &async_std::channel::Sender<IpcResponse>,
+    ) {
         match req {
             IpcRequest::ReloadConfig => self.reload_config(),
             IpcRequest::ListOutputs => {
