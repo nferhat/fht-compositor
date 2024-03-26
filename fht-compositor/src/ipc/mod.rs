@@ -5,7 +5,6 @@ mod workspace;
 
 pub use output::{Output as IpcOutput, Request as IpcOutputRequest};
 use smithay::reexports::calloop::{self, LoopHandle};
-use smithay::reexports::wayland_protocols::wp::fullscreen_shell;
 use smithay::wayland::shell::xdg::XdgShellHandler;
 pub use workspace::{Request as IpcWorkspaceRequest, Workspace as IpcWorkspace};
 use zbus::{interface, zvariant};
@@ -203,11 +202,15 @@ impl Ipc {
         }
     }
 
-    async fn set_window_fullscreened(&self, window_id: u64, fullscreened: bool) -> zbus::fdo::Result<()> {
-        if let Err(err) = self
-            .to_compositor
-            .send(IpcRequest::SetWindowFullscreened { window_id, fullscreened })
-        {
+    async fn set_window_fullscreened(
+        &self,
+        window_id: u64,
+        fullscreened: bool,
+    ) -> zbus::fdo::Result<()> {
+        if let Err(err) = self.to_compositor.send(IpcRequest::SetWindowFullscreened {
+            window_id,
+            fullscreened,
+        }) {
             warn!(?err, "Failed to send IPC request to the compositor");
             return Err(zbus::fdo::Error::Failed(
                 "Failed to send request to the compositor!".to_string(),
@@ -236,10 +239,10 @@ impl Ipc {
     }
 
     async fn set_window_maximized(&self, window_id: u64, maximized: bool) -> zbus::fdo::Result<()> {
-        if let Err(err) = self
-            .to_compositor
-            .send(IpcRequest::SetWindowMaximized { window_id, maximized })
-        {
+        if let Err(err) = self.to_compositor.send(IpcRequest::SetWindowMaximized {
+            window_id,
+            maximized,
+        }) {
             warn!(?err, "Failed to send IPC request to the compositor");
             return Err(zbus::fdo::Error::Failed(
                 "Failed to send request to the compositor!".to_string(),
