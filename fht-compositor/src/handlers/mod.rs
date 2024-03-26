@@ -26,5 +26,3 @@ mod virtual_keyboard;
 mod xdg_activation;
 mod xdg_decoration;
 mod xdg_shell;
-#[cfg(feature = "xwayland")]
-mod xwayland_keyboard_grab;

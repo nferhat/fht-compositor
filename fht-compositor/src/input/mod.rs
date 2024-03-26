@@ -95,17 +95,7 @@ impl State {
                     return;
                 }
             }
-        } else if let Some(window) = active
-            .window_under(pointer_loc)
-            .filter(|(w, _)| {
-                // Don't focus override redirect windows
-                #[cfg(feature = "xwayland")]
-                return !w.is_x11_override_redirect();
-                #[cfg(not(feature = "xwayland"))]
-                return true;
-            })
-            .map(|(w, _)| w.clone())
-        {
+        } else if let Some(window) = active.window_under(pointer_loc).map(|(w, _)| w.clone()) {
             active.focus_window(&window);
             active.raise_window(&window);
             self.fht.focus_state.focus_target = Some(window.clone().into());

@@ -41,8 +41,6 @@ use smithay::wayland::compositor::{
 use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
-#[cfg(feature = "xwayland")]
-use smithay::xwayland::X11Surface;
 
 use super::decorations::{RoundedOutlineShader, RoundedOutlineShaderSettings, RoundedQuadShader};
 use super::WindowMapSettingsInternal;
@@ -53,8 +51,6 @@ use crate::backend::render::AsGlowRenderer;
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{BorderConfig, CONFIG};
 use crate::state::State;
-#[cfg(feature = "xwayland")]
-use crate::utils::geometry::RectGlobalExt;
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, RectExt, SizeExt};
 
 /// Additional compositor-specific data to store inside a [`Window`] user data map.
@@ -75,11 +71,6 @@ pub type FhtWindowUserData = RefCell<FhtWindowData>;
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct FhtWindow(pub Window);
 
-/// Since [`X11Surface`]s don't have a way to store whether they are tiled or not unlike wayland
-/// windows that do through the xdg-shell protocol
-#[cfg(feature = "xwayland")]
-pub struct X11SurfaceTiled(AtomicBool);
-
 impl FhtWindow {
     /// Create a new Wayland-based window using the xdg_shell protocol.
     pub fn new_wayland(surface: ToplevelSurface) -> Self {
@@ -94,30 +85,6 @@ impl FhtWindow {
                 ipc_uid,
             })
         });
-
-        FhtWindow(window)
-    }
-
-    /// Create a new X11 window managed by the running Xwayland/X11wm instance.
-    #[cfg(feature = "xwayland")]
-    pub fn new_x11(surface: X11Surface) -> Self {
-        let window = Window::new_x11_window(surface);
-        // The first half is the important one.
-        let (ipc_uid, _) = uuid::Uuid::new_v4().as_u64_pair();
-        window.user_data().insert_if_missing(|| {
-            FhtWindowUserData::new(FhtWindowData {
-                z_index: Arc::new((smithay::desktop::space::RenderZindex::Shell as u32).into()),
-                last_floating_geometry: None,
-                location: Point::default(),
-                ipc_uid,
-            })
-        });
-
-        if window.is_x11() {
-            window
-                .user_data()
-                .insert_if_missing(|| X11SurfaceTiled(false.into()));
-        }
 
         FhtWindow(window)
     }
@@ -188,10 +155,6 @@ impl FhtWindow {
         if let Some(toplevel) = self.0.toplevel() {
             toplevel.with_pending_state(|s| s.size = Some(geometry.size.as_logical()));
         }
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let _ = x11_surface.configure(Some(geometry.as_logical()));
-        }
 
         let mut window_data = self
             .user_data()
@@ -213,11 +176,6 @@ impl FhtWindow {
                 .with_pending_state(|s| s.states.contains(XdgToplevelState::Fullscreen));
         }
 
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            return x11_surface.is_fullscreen();
-        }
-
         unreachable!("What is this window?")
     }
 
@@ -237,11 +195,6 @@ impl FhtWindow {
                 }
             });
         }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let _ = x11_surface.set_fullscreen(fullscreen);
-        }
     }
 
     /// Return whether the window is maximized or not.
@@ -250,11 +203,6 @@ impl FhtWindow {
     pub fn is_maximized(&self) -> bool {
         if let Some(toplevel) = self.0.toplevel() {
             return toplevel.with_pending_state(|s| s.states.contains(XdgToplevelState::Maximized));
-        }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            return x11_surface.is_maximized();
         }
 
         unreachable!("What is this window?")
@@ -274,11 +222,6 @@ impl FhtWindow {
                 }
             });
         }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let _ = x11_surface.set_maximized(maximized);
-        }
     }
 
     /// Return whether the window is tiled or not.
@@ -287,12 +230,6 @@ impl FhtWindow {
     pub fn is_tiled(&self) -> bool {
         if let Some(toplevel) = self.0.toplevel() {
             return toplevel.with_pending_state(|s| s.states.contains(XdgToplevelState::TiledLeft));
-        }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let lock = x11_surface.user_data().get::<X11SurfaceTiled>().unwrap();
-            return lock.0.load(std::sync::atomic::Ordering::SeqCst);
         }
 
         unreachable!("What is this window?")
@@ -314,12 +251,6 @@ impl FhtWindow {
                     s.states.unset(XdgToplevelState::TiledLeft)
                 }
             });
-        }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let lock = x11_surface.user_data().get::<X11SurfaceTiled>().unwrap();
-            lock.0.store(tiled, std::sync::atomic::Ordering::SeqCst);
         }
 
         if !tiled {
@@ -350,11 +281,6 @@ impl FhtWindow {
     /// This also has other common name such as the window class, or the WM_CLASS atom on X11
     /// windows.
     pub fn app_id(&self) -> String {
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            return x11_surface.class();
-        }
-
         with_states(self.wl_surface().as_ref().unwrap(), |states| {
             states
                 .data_map
@@ -370,11 +296,6 @@ impl FhtWindow {
 
     /// Return the title of this window.
     pub fn title(&self) -> String {
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            return x11_surface.title();
-        }
-
         with_states(self.wl_surface().as_ref().unwrap(), |states| {
             states
                 .data_map
@@ -519,32 +440,11 @@ impl FhtWindow {
             toplevel.send_close();
             return;
         }
-
-        #[cfg(feature = "xwayland")]
-        if let Some(x11_surface) = self.0.x11_surface() {
-            let _ = x11_surface.close();
-        }
     }
 
     /// Return whether this window is a Wayland window.
     pub fn is_wayland(&self) -> bool {
         self.0.is_wayland()
-    }
-
-    /// Return whether this window is a X11 window.
-    #[cfg(feature = "xwayland")]
-    pub fn is_x11(&self) -> bool {
-        self.0.is_x11()
-    }
-
-    /// Return whether this window is a X11 override-redirect window.
-    #[cfg(feature = "xwayland")]
-    pub fn is_x11_override_redirect(&self) -> bool {
-        if let Some(x11_surface) = self.0.x11_surface() {
-            return x11_surface.is_override_redirect();
-        }
-
-        false
     }
 
     /// Get access to this window [`UserDataMap`]
@@ -614,8 +514,6 @@ impl PointerTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => PointerTarget::enter(w.wl_surface(), seat, data, event),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::enter(x, seat, data, event),
         }
     }
 
@@ -627,8 +525,6 @@ impl PointerTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => PointerTarget::motion(w.wl_surface(), seat, data, event),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::motion(x, seat, data, event),
         }
     }
 
@@ -642,8 +538,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::relative_motion(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::relative_motion(x, seat, data, event),
         }
     }
 
@@ -655,8 +549,6 @@ impl PointerTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => PointerTarget::button(w.wl_surface(), seat, data, event),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::button(x, seat, data, event),
         }
     }
 
@@ -668,16 +560,12 @@ impl PointerTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => PointerTarget::axis(w.wl_surface(), seat, data, frame),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::axis(x, seat, data, frame),
         }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => PointerTarget::frame(w.wl_surface(), seat, data),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::frame(x, seat, data),
         }
     }
 
@@ -691,8 +579,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_swipe_begin(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_swipe_begin(x, seat, data, event),
         }
     }
 
@@ -706,8 +592,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_swipe_update(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_swipe_update(x, seat, data, event),
         }
     }
 
@@ -721,8 +605,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_swipe_end(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_swipe_end(x, seat, data, event),
         }
     }
 
@@ -736,8 +618,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_pinch_begin(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_pinch_begin(x, seat, data, event),
         }
     }
 
@@ -751,8 +631,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_pinch_update(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_pinch_update(x, seat, data, event),
         }
     }
 
@@ -766,8 +644,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_pinch_end(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_pinch_end(x, seat, data, event),
         }
     }
 
@@ -781,8 +657,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_hold_begin(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_hold_begin(x, seat, data, event),
         }
     }
 
@@ -796,8 +670,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::gesture_hold_end(w.wl_surface(), seat, data, event)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::gesture_hold_end(x, seat, data, event),
         }
     }
 
@@ -812,8 +684,6 @@ impl PointerTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 PointerTarget::leave(w.wl_surface(), seat, data, serial, time)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => PointerTarget::leave(x, seat, data, serial, time),
         }
     }
 }
@@ -828,8 +698,6 @@ impl TouchTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => TouchTarget::down(w.wl_surface(), seat, data, event, seq),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::down(x, seat, data, event, seq),
         }
     }
 
@@ -842,8 +710,6 @@ impl TouchTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => TouchTarget::up(w.wl_surface(), seat, data, event, seq),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::up(x, seat, data, event, seq),
         }
     }
 
@@ -858,24 +724,18 @@ impl TouchTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 TouchTarget::motion(w.wl_surface(), seat, data, event, seq)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::motion(x, seat, data, event, seq),
         }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State, seq: smithay::utils::Serial) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => TouchTarget::frame(w.wl_surface(), seat, data, seq),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::frame(x, seat, data, seq),
         }
     }
 
     fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: smithay::utils::Serial) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => TouchTarget::cancel(w.wl_surface(), seat, data, seq),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::cancel(x, seat, data, seq),
         }
     }
 
@@ -888,8 +748,6 @@ impl TouchTarget<State> for FhtWindow {
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => TouchTarget::shape(w.wl_surface(), seat, data, event, seq),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::shape(x, seat, data, event, seq),
         }
     }
 
@@ -904,8 +762,6 @@ impl TouchTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 TouchTarget::orientation(w.wl_surface(), seat, data, event, seq)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => TouchTarget::orientation(x, seat, data, event, seq),
         }
     }
 }
@@ -922,16 +778,12 @@ impl KeyboardTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 KeyboardTarget::enter(w.wl_surface(), seat, data, keys, serial)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => KeyboardTarget::enter(x, seat, data, keys, serial),
         }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(w) => KeyboardTarget::leave(w.wl_surface(), seat, data, serial),
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => KeyboardTarget::leave(x, seat, data, serial),
         }
     }
 
@@ -948,8 +800,6 @@ impl KeyboardTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 KeyboardTarget::key(w.wl_surface(), seat, data, key, state, serial, time)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => KeyboardTarget::key(x, seat, data, key, state, serial, time),
         }
     }
 
@@ -964,8 +814,6 @@ impl KeyboardTarget<State> for FhtWindow {
             WindowSurface::Wayland(w) => {
                 KeyboardTarget::modifiers(w.wl_surface(), seat, data, modifiers, serial)
             }
-            #[cfg(feature = "xwayland")]
-            WindowSurface::X11(x) => KeyboardTarget::modifiers(x, seat, data, modifiers, serial),
         }
     }
 }
