@@ -1,0 +1,28 @@
+[package]
+name = "fht-share-picker"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.79"
+color-eyre = "0.6.2"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version ="1", features = ["fs"] }
+serde.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+
+[dependencies.iced]
+git = "https://github.com/pop-os/iced"
+rev = "6f92812"
+default-features = false
+features = [
+    "tokio",
+    "svg", "advanced",
+    "wayland",
+    "wayland-clipboard",
+    "wgpu",
+]
