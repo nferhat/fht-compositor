@@ -1,4 +1,0 @@
-# TODOs
-
-- Session lock
-- Xwayland

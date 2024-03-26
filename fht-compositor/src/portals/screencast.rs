@@ -73,9 +73,7 @@ pub enum Response {
 impl Portal {
     #[zbus(property)]
     pub fn available_source_types(&self) -> u32 {
-        // NOTE: We don't support window casting, but applications assume that window == area source
-        // so eh.
-        (SourceType::MONITOR | SourceType::WINDOW | SourceType::VIRTUAL).bits()
+        SourceType::MONITOR.bits()
     }
 
     #[zbus(property)]
