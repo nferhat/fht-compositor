@@ -37,6 +37,9 @@ FhtConfig(
         //
         // The latter two are controlled in runtime with the ChangeMasterWidthFactor and
         // ChangeNmaster key actions. The 2 former are set here.
+        layouts: [
+            Tile(nmaster: 1, master_width_factor: 0.5),
+        ],
         outer_gaps: 8,
         inner_gaps: 8,
 

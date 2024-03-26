@@ -179,6 +179,12 @@ impl crate::state::State {
             }
         };
 
+        if new_config.general.layouts.len() == 0 {
+            self.fht.last_config_error =
+                Some(anyhow::anyhow!("You have to specify at least one layout!"));
+            return;
+        }
+
         let old_config = CONFIG.clone();
         unsafe {
             *CONFIG.0.get() = new_config;
@@ -186,6 +192,9 @@ impl crate::state::State {
 
         // the [`CursorThemeManager`] automatically checks for changes.
         self.fht.cursor_theme_manager.reload();
+        self.fht
+            .workspaces_mut()
+            .for_each(|(_, wset)| wset.reload_config());
 
         let outputs = self.fht.outputs().cloned().collect::<Vec<_>>();
         for output in outputs {

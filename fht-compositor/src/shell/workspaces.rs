@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_std::task::block_on;
+use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, RenderElement};
@@ -78,6 +79,17 @@ impl WorkspaceSet {
     /// Preferably call this before flushing clients.
     pub fn refresh(&mut self) {
         self.workspaces_mut().for_each(Workspace::refresh);
+    }
+
+    /// Reload the configuration of the [`WorkspaceSet`]
+    pub fn reload_config(&mut self) {
+        let layouts = CONFIG.general.layouts.clone();
+        for workspace in &mut self.workspaces {
+            workspace.layouts = layouts.clone();
+            workspace.active_layout_idx = workspace
+                .active_layout_idx
+                .clamp(0, workspace.layouts.len() - 1);
+        }
     }
 
     /// Set the active workspace index for this [`WorkspaceSet`], returning the possible focus
@@ -802,16 +814,7 @@ impl Workspace {
             fullscreen: None,
             focused_window_idx: 0,
 
-            layouts: vec![
-                WorkspaceLayout::BottomStack {
-                    nmaster: 1,
-                    master_width_factor: 0.5,
-                },
-                WorkspaceLayout::Tile {
-                    nmaster: 1,
-                    master_width_factor: 0.5,
-                },
-            ],
+            layouts: CONFIG.general.layouts.clone(),
             active_layout_idx: 0,
 
             ipc_path,
@@ -1468,7 +1471,7 @@ impl PartialEq for FullscreenSurface {
 }
 
 /// All layouts [`Workspace`]s can use.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WorkspaceLayout {
     /// The classic Master-Tile layout, also known as Master-Slave layout, or TileLeft.
     ///

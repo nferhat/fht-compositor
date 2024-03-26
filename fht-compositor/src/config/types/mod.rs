@@ -15,9 +15,17 @@ pub use self::input::*;
 pub use self::rules::*;
 use crate::backend::render::BackendAllocator;
 use crate::input::{KeyAction, KeyPattern, MouseAction, MousePattern};
+use crate::shell::workspaces::WorkspaceLayout;
 
 const fn default_true() -> bool {
     true
+}
+
+fn default_layouts() -> Vec<WorkspaceLayout> {
+    vec![WorkspaceLayout::Tile {
+        nmaster: 1,
+        master_width_factor: 0.5,
+    }]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +111,10 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub cursor: CursorConfig,
 
+    /// Workspace layouts to use.
+    #[serde(default = "default_layouts")]
+    pub layouts: Vec<WorkspaceLayout>,
+
     /// Useless gap added around the output edge when tiling windows.
     #[serde(default)]
     pub outer_gaps: i32,
@@ -118,6 +130,10 @@ impl Default for GeneralConfig {
             cursor_warps: true,
             focus_new_windows: true,
             cursor: CursorConfig::default(),
+            layouts: vec![WorkspaceLayout::Tile {
+                nmaster: 1,
+                master_width_factor: 0.5,
+            }],
             outer_gaps: 0,
             inner_gaps: 0,
         }
