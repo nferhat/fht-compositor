@@ -1315,7 +1315,7 @@ fn render_screencopy<'a>(
             // FIXME: Hidden / embedded / metadata cursor
             let elements = elements.iter().rev();
 
-            if let Err(err) = render_to_dmabuf(renderer, dmabuf, size, scale, elements) {
+            if let Err(err) = render_to_dmabuf(renderer, dmabuf, size, scale, transform, elements) {
                 error!("error rendering to dmabuf: {err:?}");
                 continue;
             }
@@ -1340,13 +1340,14 @@ pub fn render_to_dmabuf<'a>(
     dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
     size: Size<i32, Physical>,
     scale: Scale<f64>,
+    transform: Transform,
     elements: impl Iterator<Item = &'a FhtRenderElement<UdevRenderer<'a>>>,
 ) -> anyhow::Result<()> {
     let output_rect = Rectangle::from_loc_and_size((0, 0), size);
 
     renderer.bind(dmabuf).context("error binding texture")?;
     let mut frame = renderer
-        .render(size, Transform::Normal)
+        .render(size, transform)
         .context("error starting frame")?;
 
     frame
