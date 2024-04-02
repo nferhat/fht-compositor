@@ -721,12 +721,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "calloop"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b99da2f8558ca23c71f4fd15dc57c906239752dd27ff3c00a1d56b685b7cbfec"
+dependencies = [
+ "bitflags 2.4.2",
+ "log",
+ "polling 3.5.0",
+ "rustix 0.38.31",
+ "slab",
+ "thiserror",
+]
+
+[[package]]
 name = "calloop-wayland-source"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f0ea9b9476c7fad82841a8dbb380e2eae480c21910feba80725b46931ed8f02"
 dependencies = [
- "calloop",
+ "calloop 0.12.4",
  "rustix 0.38.31",
  "wayland-backend",
  "wayland-client",
@@ -3768,12 +3782,12 @@ checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/cmeissl/smithay?branch=perf/reduce_mem_allocations#b418255ac53a14bd72b2b0e020f4fda374176c5d"
+source = "git+https://github.com/Smithay/Smithay?rev=e5f0068#e5f006818df7ebb92d206985f45e713ba1e9c1c9"
 dependencies = [
  "appendlist",
  "ash",
  "bitflags 2.4.2",
- "calloop",
+ "calloop 0.13.0",
  "cc",
  "cgmath",
  "cursor-icon",
@@ -3822,7 +3836,7 @@ source = "git+https://github.com/smithay/client-toolkit?rev=2e9bf9f#2e9bf9f31698
 dependencies = [
  "bitflags 2.4.2",
  "bytemuck",
- "calloop",
+ "calloop 0.12.4",
  "calloop-wayland-source",
  "cursor-icon",
  "libc",
@@ -3849,7 +3863,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922fd3eeab3bd820d76537ce8f582b1cf951eceb5475c28500c7457d9d17f53a"
 dependencies = [
  "bitflags 2.4.2",
- "calloop",
+ "calloop 0.12.4",
  "calloop-wayland-source",
  "cursor-icon",
  "libc",
@@ -3881,7 +3895,7 @@ dependencies = [
 [[package]]
 name = "smithay-drm-extras"
 version = "0.1.0"
-source = "git+https://github.com/cmeissl/smithay?branch=perf/reduce_mem_allocations#b418255ac53a14bd72b2b0e020f4fda374176c5d"
+source = "git+https://github.com/Smithay/Smithay?rev=e5f0068#e5f006818df7ebb92d206985f45e713ba1e9c1c9"
 dependencies = [
  "drm",
  "edid-rs",
@@ -5289,7 +5303,7 @@ dependencies = [
  "atomic-waker",
  "bitflags 2.4.2",
  "bytemuck",
- "calloop",
+ "calloop 0.12.4",
  "cfg_aliases 0.1.1",
  "core-foundation",
  "core-graphics",

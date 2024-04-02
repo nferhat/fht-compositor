@@ -12,17 +12,13 @@ zbus = "4.1.2"
 zvariant = { version = "4.0.0", features = ["option-as-array"] }
 
 [workspace.dependencies.smithay]
-# git = "https://github.com/Smithay/Smithay"
-# rev = "7f9e6d5"
-git = "https://github.com/cmeissl/smithay"
-branch = "perf/reduce_mem_allocations"
+git = "https://github.com/Smithay/Smithay"
+rev = "e5f0068"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
-# git = "https://github.com/smithay/smithay"
-# rev = "7f9e6d5"
-git = "https://github.com/cmeissl/smithay"
-branch = "perf/reduce_mem_allocations"
+git = "https://github.com/Smithay/Smithay"
+rev = "e5f0068"
 
 [build]
 rustflags = [

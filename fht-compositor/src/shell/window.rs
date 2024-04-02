@@ -19,7 +19,6 @@ use smithay::backend::renderer::element::{Element, Kind, RenderElement};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::DamageSet;
 use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::utils::OutputPresentationFeedback;
@@ -892,7 +891,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> DamageSet<i32, Physical> {
+    ) -> Vec<Rectangle<i32, Physical>> {
         match self {
             Self::Toplevel(e) => e.damage_since(scale, commit),
             Self::Subsurface(e) => e.damage_since(scale, commit),
