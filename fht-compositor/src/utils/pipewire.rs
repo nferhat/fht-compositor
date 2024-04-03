@@ -43,7 +43,7 @@ pub struct PipeWire {
 }
 
 pub struct Cast {
-    pub session_path: zvariant::OwnedObjectPath,
+    pub session_handle: zvariant::OwnedObjectPath,
     pub stream: Stream,
     _listener: pipewire::stream::StreamListener<()>,
     pub is_active: Rc<Cell<bool>>,
@@ -104,7 +104,7 @@ impl PipeWire {
         to_compositor: calloop::channel::Sender<ScreenCastRequest>,
         to_screencast: async_std::channel::Sender<ScreenCastResponse>,
         gbm: GbmDevice<DrmDeviceFd>,
-        session_path: zvariant::OwnedObjectPath,
+        session_handle: zvariant::OwnedObjectPath,
         source: SessionSource,
         source_type: SourceType,
     ) -> anyhow::Result<Cast> {
@@ -130,11 +130,11 @@ impl PipeWire {
 
         let stop_cast = {
             let to_compositor = to_compositor.clone();
-            let session_path = session_path.clone();
+            let session_handle = session_handle.clone();
             // cool trick with closure from niri
             move || {
-                let session_path = session_path.clone();
-                if let Err(err) = to_compositor.send(ScreenCastRequest::StopCast { session_path }) {
+                let session_handle = session_handle.clone();
+                if let Err(err) = to_compositor.send(ScreenCastRequest::StopCast { session_handle }) {
                     warn!(?err, "error sending StopCast to compositor");
                 }
             }
@@ -376,7 +376,7 @@ impl PipeWire {
             .context("error connecting stream")?;
 
         let cast = Cast {
-            session_path,
+            session_handle,
             stream,
             _listener: listener,
             is_active,

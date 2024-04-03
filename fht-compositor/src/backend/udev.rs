@@ -1295,7 +1295,7 @@ fn render_screencopy<'a>(
         }
 
         if cast.size.to_physical_precise_round(scale) != size {
-            casts_to_stop.push(cast.session_path.clone());
+            casts_to_stop.push(cast.session_handle.clone());
             continue;
         }
 
@@ -1303,7 +1303,10 @@ fn render_screencopy<'a>(
             let mut buffer = match cast.stream.dequeue_buffer() {
                 Some(buffer) => buffer,
                 None => {
-                    warn!("PipeWire stream out of buffers! Skipping frame.");
+                    debug!(
+                        session_handle = cast.session_handle.to_string(),
+                        "PipeWire stream out of buffers! Skipping frame."
+                    );
                     continue;
                 }
             };

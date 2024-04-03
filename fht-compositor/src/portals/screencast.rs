@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use smithay::reexports::calloop;
 use smithay::utils::Rectangle;
-use zbus::message::Header;
 use zbus::object_server::SignalContext;
 use zbus::{interface, ObjectServer};
 
@@ -49,13 +48,13 @@ pub struct Portal {
 
 pub enum Request {
     StartCast {
-        session_path: zvariant::OwnedObjectPath,
+        session_handle: zvariant::OwnedObjectPath,
         source: SessionSource,
         source_type: SourceType,
         cursor_mode: CursorMode,
     },
     StopCast {
-        session_path: zvariant::OwnedObjectPath,
+        session_handle: zvariant::OwnedObjectPath,
     },
 }
 
@@ -95,23 +94,45 @@ impl Portal {
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
         debug!(
-            ?request_handle,
-            ?session_handle,
+            request_handle = request_handle.to_string(),
+            session_handle = session_handle.to_string(),
             ?app_id,
             "Creating screencast session."
         );
 
         // Setup request and session
-        assert!(object_server.at(&request_handle, PRequest).await.unwrap());
+        let request = PRequest {
+            handle: request_handle.clone().into(),
+        };
+        if let Err(err) = object_server.at(&request_handle, request).await {
+            warn!(
+                ?err,
+                session_handle = session_handle.to_string(),
+                request_handle = request_handle.to_string(),
+                "Failed to create screencast request handle!"
+            );
+            return (1, HashMap::new());
+        };
         let session = Session {
             _app_id: app_id,
-            _request_path: request_handle.into(),
-            path: session_handle.clone().into(),
+            request_handle: request_handle.clone().into(),
+            handle: session_handle.clone().into(),
             cursor_mode: CursorMode::HIDDEN,
             source_type: SourceType::empty(),
             source: SessionSource::Unset,
         };
-        assert!(object_server.at(&session_handle, session).await.unwrap());
+        if let Err(err) = object_server.at(&session_handle, session).await {
+            let request_ref =object_server.interface::<_, PRequest>(&request_handle).await.unwrap();
+            let request = request_ref.get_mut().await;
+            request.close(object_server).await;
+
+            warn!(
+                ?err,
+                session_handle = session_handle.to_string(),
+                "Failed to create screencast session handle!"
+            );
+            return (1, HashMap::new());
+        };
 
         (0, HashMap::new())
     }
@@ -124,6 +145,12 @@ impl Portal {
         options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+        let session_ref = object_server
+            .interface::<_, Session>(&session_handle)
+            .await
+            .unwrap();
+        let mut session = session_ref.get_mut().await;
+
         let cursor_mode =
             CursorMode::from_bits(u32::try_from(options.get("cursor_mode").unwrap()).unwrap())
                 .unwrap();
@@ -145,63 +172,32 @@ impl Portal {
             .await
             .expect("Failed to spawn command!");
         if !output.status.success() {
-            warn!(
-                session_handle = session_handle.to_string(),
-                "Share picker exited unsuccessfully"
-            );
-            return (0, HashMap::new());
+            warn!(session_handle = session_handle.to_string(), "Share picker exited unsuccessfully");
+            session.close(object_server).await;
+            return (1, HashMap::new());
         }
         let stderr = std::str::from_utf8(&output.stderr).expect("stderr contained invalid bytes!");
-        let source = if stderr.contains(",") {
-            // Using slurp, the returned format is as follows:
-            // ```
-            // X,Y WxH
-            // ```
-            let mut iter = stderr.split_whitespace();
-
-            let mut coords = iter.next().unwrap().split(',');
-            let x: i32 = coords
-                .next()
-                .expect("Malformated output from slurp!")
-                .to_string()
-                .trim()
-                .parse()
-                .unwrap();
-            let y: i32 = coords
-                .next()
-                .expect("Malformated output from slurp!")
-                .to_string()
-                .trim()
-                .parse()
-                .unwrap();
-
-            let mut size = iter.next().unwrap().split('x');
-            let w: i32 = size
-                .next()
-                .expect("Malformated output from slurp!")
-                .to_string()
-                .trim()
-                .parse()
-                .unwrap();
-            let h: i32 = size
-                .next()
-                .expect("Malformated output from slurp!")
-                .to_string()
-                .trim()
-                .parse()
-                .unwrap();
-
+        let source = if let Some((x, y, w, h)) = stderr
+            .lines()
+            .find(|line| line.contains("[select-area]"))
+            .and_then(|line| {
+                let coords_str = line.split('/').skip(1).next()?;
+                let coords: (i32, i32, i32, i32) = ron::de::from_str(coords_str).ok()?;
+                Some(coords)
+            }) {
             SessionSource::Rectangle(Rectangle::from_loc_and_size((x, y), (w, h)), None)
+        } else if let Some(output_name) = stderr
+            .lines()
+            .find(|line| line.contains("[select-output]"))
+            .and_then(|line| line.split('/').skip(1).next())
+        {
+            SessionSource::Output(output_name.to_string(), None)
         } else {
-            // Ouptut name
-            SessionSource::Output(stderr.trim().to_string(), None)
+            warn!(session_handle = session_handle.to_string(), "Unable to select source for screencopy!");
+            session.close(object_server).await;
+            return (1, HashMap::new());
         };
 
-        let session_ref = object_server
-            .interface::<_, Session>(&session_handle)
-            .await
-            .unwrap();
-        let mut session = session_ref.get_mut().await;
         session.source_type = source_type;
         session.source = source;
         session.cursor_mode = cursor_mode;
@@ -211,7 +207,7 @@ impl Portal {
 
     async fn start(
         &self,
-        _handle: zvariant::ObjectPath<'_>,
+        _request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
         _app_id: String,
         _parent_window: String,
@@ -224,15 +220,17 @@ impl Portal {
             .await
             .unwrap();
         let session = session_ref.get_mut().await;
-        //
-        self.to_compositor
-            .send(Request::StartCast {
-                session_path: session_handle.into(),
-                source: session.source.clone(),
-                source_type: session.source_type,
-                cursor_mode: session.cursor_mode,
-            })
-            .unwrap();
+
+        if let Err(err) = self.to_compositor.send(Request::StartCast {
+            session_handle: session_handle.clone().into(),
+            source: session.source.clone(),
+            source_type: session.source_type,
+            cursor_mode: session.cursor_mode,
+        }) {
+            warn!(?err, "PipeWire failed to start cast!");
+            session.close(object_server).await;
+            return (1, HashMap::new());
+        }
 
         let (node_id, location, size, source_type) = match self.from_compositor.recv().await {
             Ok(Response::PipeWireStreamData {
@@ -243,7 +241,8 @@ impl Portal {
             }) => (node_id, location, size, source_type),
             Ok(Response::PipeWireFail) | Err(_) => {
                 error!("Pipewire failed to start cast!");
-                return (0, HashMap::new());
+                session.close(object_server).await;
+                return (1, HashMap::new());
             }
         };
 
@@ -299,8 +298,8 @@ impl SessionSource {
 
 pub struct Session {
     _app_id: String,
-    _request_path: zvariant::OwnedObjectPath,
-    path: zvariant::OwnedObjectPath,
+    request_handle: zvariant::OwnedObjectPath,
+    handle: zvariant::OwnedObjectPath,
     cursor_mode: CursorMode,
     // TODO: Multiple source support
     source_type: SourceType,
@@ -312,7 +311,12 @@ impl Session {
     async fn close(&self, #[zbus(object_server)] object_server: &ObjectServer) {
         // We should have this object if we are being called.
         assert!(object_server
-            .remove::<Session, _>(&self.path)
+            .remove::<Session, _>(&self.handle)
+            .await
+            .unwrap());
+        // And if we have a session we surely have the request too
+        assert!(object_server
+            .remove::<PRequest, _>(&self.request_handle)
             .await
             .unwrap());
     }
@@ -323,18 +327,18 @@ impl Session {
 
 /// Not to be confused with [`Request`]
 ///
-/// This is the Portal Request that is used to implement
-pub struct PRequest;
+/// This is the Portal Request that is used by the application requesting the screencast.
+pub struct PRequest {
+    handle: zvariant::OwnedObjectPath,
+}
 
 #[interface(name = "org.freedesktop.impl.Portal.Request")]
 impl PRequest {
     async fn close(
         &self,
-        #[zbus(header)] header: Header<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) {
-        let path = header.path().unwrap();
-        assert!(object_server.remove::<PRequest, _>(path).await.unwrap());
+        assert!(object_server.remove::<PRequest, _>(&self.handle).await.unwrap());
     }
 
     #[zbus(signal)]
@@ -350,7 +354,7 @@ impl State {
     ) {
         match req {
             Request::StartCast {
-                session_path,
+                session_handle,
                 mut source,
                 source_type,
                 .. // TODO: Take in account of cursor_mode
@@ -368,7 +372,7 @@ impl State {
                     return;
                 }
 
-                let Some(gbm_device) = data.devices.get(&data.primary_gpu).map(|d| d.gbm.clone())
+                let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
                 else {
                     warn!("No available GBM device!");
                     return;
@@ -378,15 +382,19 @@ impl State {
                     SessionSource::Unset => unreachable!(),
                     SessionSource::Output(name, output) => {
                         if output.is_none() {
+                            info!(output_name = name);
                             if let Some(o) = self.fht.output_named(&name) {
                                 *output = Some(o);
                             } else {
                                 warn!("Tried to start a screencast with an invalid output!");
+                                to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                                    return;
                             }
                         }
                     }
                     SessionSource::Rectangle(rec, output) => {
                         if output.is_none() {
+                            info!("Adding from rec");
                             if let Some(o) = self
                                 .fht
                                 .outputs()
@@ -396,6 +404,8 @@ impl State {
                                 *output = Some(o);
                             } else {
                                 warn!("Tried to start a screecast with an invalid region!");
+                                to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                                    return;
                             }
                         }
                     }
@@ -422,7 +432,7 @@ impl State {
                     to_compositor.clone(),
                     to_screencast.clone(),
                     gbm_device,
-                    session_path,
+                    session_handle,
                     source.clone(),
                     source_type,
                 ) {
@@ -442,7 +452,7 @@ impl State {
 
 impl Fht {
     #[profiling::function]
-    pub fn stop_cast(&mut self, session_path: zvariant::OwnedObjectPath) {
+    pub fn stop_cast(&mut self, session_handle: zvariant::OwnedObjectPath) {
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
         };
@@ -450,7 +460,7 @@ impl Fht {
         let Some(idx) = pipewire
             .casts
             .iter()
-            .position(|c| c.session_path == session_path)
+            .position(|c| c.session_handle == session_handle)
         else {
             warn!("Tried to stop an invalid cast!");
             return;
@@ -462,16 +472,16 @@ impl Fht {
         }
 
         let object_server = DBUS_CONNECTION.object_server();
-        let Ok(interface) = object_server.interface::<_, Session>(&session_path) else {
+        let Ok(interface) = object_server.interface::<_, Session>(&session_handle) else {
             warn!("Cast session doesn't exist!");
             return;
         };
         async_std::task::block_on(async {
-            interface.get().close(&object_server.inner()).await;
+            interface.get().close(object_server.inner()).await;
             if let Err(err) = interface.get().closed(interface.signal_context()).await {
                 warn!(?err, "Failed to send closed signal to screencast session!");
             };
-            debug!(?session_path, "Stopped cast!");
         });
+        debug!(session_handle = session_handle.to_string(), "Stopped cast!");
     }
 }

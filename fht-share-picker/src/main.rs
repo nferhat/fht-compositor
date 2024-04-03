@@ -146,7 +146,42 @@ impl iced::Application for ScreenCastSourcePicker {
                 // We only need the coordinates of the selected rectangle.
                 // The compositor part will parse the picker output and that's it really.
                 let out = std::str::from_utf8(&output.stdout).expect("Invalid bytes in stdout!");
-                eprintln!("{out}");
+
+                let mut iter = out.split_whitespace();
+
+                let mut coords = iter.next().unwrap().split(',');
+                let x: i32 = coords
+                    .next()
+                    .expect("Malformated output from slurp!")
+                    .to_string()
+                    .trim()
+                    .parse()
+                    .unwrap();
+                let y: i32 = coords
+                    .next()
+                    .expect("Malformated output from slurp!")
+                    .to_string()
+                    .trim()
+                    .parse()
+                    .unwrap();
+
+                let mut size = iter.next().unwrap().split('x');
+                let w: i32 = size
+                    .next()
+                    .expect("Malformated output from slurp!")
+                    .to_string()
+                    .trim()
+                    .parse()
+                    .unwrap();
+                let h: i32 = size
+                    .next()
+                    .expect("Malformated output from slurp!")
+                    .to_string()
+                    .trim()
+                    .parse()
+                    .unwrap();
+
+                eprintln!("[select-area]/({x}, {y}, {w}, {h})");
                 std::process::exit(0);
             }
             ScreenCastSourcePickerMessage::SelectOutput => {
@@ -191,7 +226,7 @@ impl iced::Application for ScreenCastSourcePicker {
             }
             ScreenCastSourcePickerMessage::SelectedOutput(name) => {
                 // The compositor part will parse the named output and that's it really.
-                eprintln!("{name}");
+                eprintln!("[select-output]/{name}");
                 std::process::exit(0);
             }
         }
