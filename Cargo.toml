@@ -26,9 +26,11 @@ rustflags = [
     "-Z", "threads=8"
 ]
 
-# [profile.release]
-# codegen-units = 1
-# lto = "fat"
+[profile.opt]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+opt-level = 3
 
 [profile.dev]
 opt-level = 3
