@@ -17,12 +17,6 @@ default-features = false
 git = "https://github.com/Smithay/Smithay"
 rev = "e5f0068"
 
-[build]
-rustflags = [
-    "-C", "link-arg=-fuse-ld=lld",
-    "-Z", "threads=8"
-]
-
 [profile.opt]
 inherits = "release"
 codegen-units = 1
