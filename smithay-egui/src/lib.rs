@@ -27,6 +27,11 @@ use xkbcommon::xkb::Keycode;
 mod input;
 pub use self::input::{convert_button, convert_key, convert_modifiers};
 
+// Reexport egui for dependencies to use it
+pub use egui;
+pub use egui_glow;
+pub use egui_extras;
+
 /// smithay-egui state object
 #[derive(Debug, Clone)]
 pub struct EguiState {

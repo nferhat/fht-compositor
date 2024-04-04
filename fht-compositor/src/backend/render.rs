@@ -1,4 +1,4 @@
-use egui_extras::Column;
+use smithay_egui::{egui, egui_extras};
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
@@ -674,8 +674,8 @@ fn egui_greeting_message(context: &egui::Context) {
         ui.add_space(12.0);
         ui.label("Some useful keybinds to know that are in this default config:");
         egui_extras::TableBuilder::new(ui)
-            .column(Column::exact(100.0))
-            .column(Column::remainder())
+            .column(egui_extras::Column::exact(100.0))
+            .column(egui_extras::Column::remainder())
             .striped(true)
             .header(15.0, |mut header_row| {
                 header_row.col(|ui| { ui.label("Key pattern"); });
