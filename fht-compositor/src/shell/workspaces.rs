@@ -975,6 +975,10 @@ impl Workspace {
     ///
     /// This function also undones the configuration that was done in [`Self::insert_window`]
     pub fn remove_window(&mut self, window: &FhtWindow) -> Option<FhtWindow> {
+        if let Some(fullscreen) = self.fullscreen.take_if(|f| &f.inner == window) {
+            return Some(fullscreen.inner);
+        }
+
         let Some(idx) = self.windows.iter().position(|w| w == window) else {
             return None;
         };
