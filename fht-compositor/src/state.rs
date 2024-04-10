@@ -76,10 +76,40 @@ impl State {
         loop_signal: LoopSignal,
         socket_name: String,
     ) -> Self {
-        Self {
-            fht: Fht::new(dh, loop_handle, loop_signal, socket_name),
-            backend: Backend::None,
-        }
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, socket_name);
+        let backend: crate::backend::Backend = if let Ok(backend_name) =
+            std::env::var("FHTC_BACKEND")
+        {
+            match backend_name.trim().to_lowercase().as_str() {
+                #[cfg(feature = "x11_backend")]
+                "x11" => crate::backend::x11::X11Data::new(&mut fht).unwrap().into(),
+                #[cfg(feature = "udev_backend")]
+                "kms" | "udev" => crate::backend::udev::UdevData::new(&mut fht)
+                    .unwrap()
+                    .into(),
+                x => unimplemented!("No such backend implemented!: {x}"),
+            }
+        } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
+            info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window.");
+            #[cfg(feature = "x11_backend")]
+            {
+                crate::backend::x11::X11Data::new(&mut fht).unwrap().into()
+            }
+            #[cfg(not(feature = "x11_backend"))]
+            panic!("X11 backend not enabled on this build! Enable the 'x11_backend' feature when building!");
+        } else {
+            info!("Running from TTY, initializing Udev backend.");
+            #[cfg(feature = "udev_backend")]
+            {
+                crate::backend::udev::UdevData::new(&mut fht)
+                    .unwrap()
+                    .into()
+            }
+            #[cfg(not(feature = "udev_backend"))]
+            panic!("Udev backend not enabled on this build! Enable the 'udev_backend' feature when building!");
+        };
+
+        Self { fht, backend }
     }
 
     /// Dispatch evenements from the wayland unix socket, have to be called on each evenement

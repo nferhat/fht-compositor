@@ -61,7 +61,6 @@ use smithay_drm_extras::edid::EdidInfo;
 use wayland_backend::server::GlobalId;
 
 use super::render::FhtRenderElement;
-use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
@@ -115,6 +114,258 @@ pub struct UdevData {
 }
 
 impl UdevData {
+    pub fn new(state: &mut Fht) -> anyhow::Result<Self> {
+        // Intialize a session with using libseat to communicate with the seatd daemon.
+        let (session, notifier) = LibSeatSession::new()
+        .context("Failed to create a libseat session! Maybe you should check out your system configuration...")?;
+        let seat_name = session.seat();
+
+        let udev_backend = UdevBackend::new(&seat_name).context("Failed to crate Udev backend!")?;
+        let udev_dispatcher =
+            Dispatcher::new(udev_backend, |event, (), state: &mut State| match event {
+                UdevEvent::Added { device_id, path } => {
+                    if let Err(err) =
+                        state
+                            .backend
+                            .udev()
+                            .device_added(device_id, &path, &mut state.fht)
+                    {
+                        error!(?err, "Failed to add device!");
+                    }
+                }
+                UdevEvent::Changed { device_id } => {
+                    if let Err(err) = state
+                        .backend
+                        .udev()
+                        .device_changed(device_id, &mut state.fht)
+                    {
+                        error!(?err, "Failed to update device!");
+                    }
+                }
+                UdevEvent::Removed { device_id } => {
+                    if let Err(err) = state
+                        .backend
+                        .udev()
+                        .device_removed(device_id, &mut state.fht)
+                    {
+                        error!(?err, "Failed to remove device!");
+                    }
+                }
+            });
+        let udev_token = state
+            .loop_handle
+            .register_dispatcher(udev_dispatcher.clone())
+            .unwrap();
+
+        // Initialize libinput so we can listen to events.
+        let mut libinput_context = Libinput::new_with_udev::<
+            LibinputSessionInterface<LibSeatSession>,
+        >(session.clone().into());
+        libinput_context.udev_assign_seat(&seat_name).unwrap();
+        let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
+
+        // Insert event sources inside the event loop
+        let libinput_token = state
+            .loop_handle
+            .insert_source(libinput_backend, move |mut event, _, state| {
+                if let InputEvent::DeviceAdded { device } = &mut event {
+                    if device.has_capability(DeviceCapability::Keyboard) {
+                        let led_state = state.fht.keyboard.led_state();
+                        device.led_update(led_state.into());
+                    }
+
+                    let device_config = CONFIG
+                        .input
+                        .per_device
+                        .get(device.name())
+                        .or_else(|| CONFIG.input.per_device.get(device.sysname()));
+                    let mouse_config =
+                        device_config.map_or_else(|| &CONFIG.input.mouse, |cfg| &cfg.mouse);
+                    let keyboard_config =
+                        device_config.map_or_else(|| &CONFIG.input.keyboard, |cfg| &cfg.keyboard);
+                    let disabled = device_config.map_or(false, |cfg| cfg.disable);
+
+                    crate::config::apply_libinput_settings(
+                        device,
+                        mouse_config,
+                        keyboard_config,
+                        disabled,
+                    );
+
+                    state.fht.devices.push(device.clone());
+                } else if let InputEvent::DeviceRemoved { ref device } = event {
+                    state.fht.devices.retain(|d| d != device);
+                }
+
+                state.process_input_event(event);
+            })
+            .map_err(|_| anyhow::anyhow!("Failed to insert libinput event source!"))?;
+
+        let session_token = state
+            .loop_handle
+            .insert_source(notifier, move |event, &mut (), state| match event {
+                SessionEvent::PauseSession => {
+                    info!("Pausing session!");
+                    libinput_context.suspend();
+
+                    for device in state.backend.udev().devices.values_mut() {
+                        device.drm.pause();
+                        device.active_leases.clear();
+                        if let Some(leasing_state) = device.lease_state.as_mut() {
+                            leasing_state.suspend();
+                        }
+                    }
+                }
+                SessionEvent::ActivateSession => {
+                    info!("Resuming session!");
+
+                    if let Err(err) = libinput_context.resume() {
+                        error!("Failed to resume libinput context: {:?}", err);
+                    }
+
+                    for device in &mut state.backend.udev().devices.values_mut() {
+                        // if we do not care about flicking (caused by modesetting) we could just
+                        // pass true for disable connectors here. this would make sure our drm
+                        // device is in a known state (all connectors and planes disabled).
+                        // but for demonstration we choose a more optimistic path by leaving the
+                        // state as is and assume it will just work. If this assumption fails
+                        // we will try to reset the state when trying to queue a frame.
+                        device.drm.activate(false).expect("Failed to activate DRM!");
+                        if let Some(leasing_state) = device.lease_state.as_mut() {
+                            leasing_state.resume::<State>();
+                        }
+                        for surface in device.surfaces.values_mut() {
+                            if let Err(err) = surface.compositor.reset_state() {
+                                warn!("Failed to reset drm surface state: {}", err);
+                            }
+                        }
+                    }
+
+                    for output in state.fht.outputs() {
+                        let _ = state.backend.udev().schedule_render(
+                            output,
+                            Duration::ZERO,
+                            &state.fht.loop_handle,
+                        );
+                    }
+                }
+            })
+            .map_err(|_| anyhow::anyhow!("Failed to insert libseat event source!"))?;
+
+        let gpu_manager = GbmGlesBackend::with_factory(|egl_display: &EGLDisplay| {
+            let egl_context = EGLContext::new_with_priority(egl_display, ContextPriority::High)?;
+
+            // Thank you cmeissl for guiding me here, this helps with drawing egui since we don't
+            // have to create a shadow buffer anymore (atleast if this is false)
+            let renderer = if CONFIG.renderer.enable_color_transformations {
+                unsafe { GlesRenderer::new(egl_context)? }
+            } else {
+                let capabilities = unsafe { GlesRenderer::supported_capabilities(&egl_context) }?
+                    .into_iter()
+                    .filter(|c| *c != Capability::ColorTransformations);
+                unsafe { GlesRenderer::with_capabilities(egl_context, capabilities)? }
+            };
+
+            Ok(renderer)
+        });
+
+        let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
+
+        let (primary_gpu, primary_node) =
+            if let Some(user_path) = &CONFIG.renderer.render_node.as_ref() {
+                let primary_gpu = DrmNode::from_path(user_path)
+                    .expect(&format!(
+                        "Please make sure that {} is a valid DRM node!",
+                        user_path.display()
+                    ))
+                    .node_with_type(NodeType::Render)
+                    .expect("Please make sure that {user_path} is a render node!")
+                    .expect("Please make sure that {user_path} is a render node!");
+                let primary_node = primary_gpu
+                    .node_with_type(NodeType::Primary)
+                    .expect("Unable to get primary node from primary gpu node!")
+                    .expect("Unable to get primary node from primary gpu node!");
+
+                (primary_gpu, primary_node)
+            } else {
+                let primary_node = udev::primary_gpu(&seat_name)
+                    .unwrap()
+                    .and_then(|path| DrmNode::from_path(path).ok())
+                    .expect("Failed to get primary gpu!");
+                let primary_gpu = primary_node
+                    .node_with_type(NodeType::Render)
+                    .expect("Failed to get primary gpu node from primary node!")
+                    .expect("Failed to get primary gpu node from primary node!");
+
+                (primary_gpu, primary_node)
+            };
+        info!(?primary_gpu, "Found primary GPU for rendering!");
+        info!(?primary_node);
+
+        let mut data = UdevData {
+            primary_gpu,
+            primary_node,
+            gpu_manager,
+            session,
+            devices: HashMap::new(),
+            dmabuf_global: None,
+            _registration_tokens: vec![udev_token, session_token, libinput_token],
+        };
+
+        // HACK: You want the wl_seat name to be the same as the libseat session name, so, eh...
+        // No clients should have connected to us by now, so we just delete and create one
+        // ourselves.
+        {
+            let seat_global = state.seat.global().unwrap();
+            state.display_handle.remove_global::<State>(seat_global);
+
+            let mut new_seat = state
+                .seat_state
+                .new_wl_seat(&state.display_handle, &seat_name);
+
+            let keyboard_config = &CONFIG.input.keyboard;
+            let res = new_seat.add_keyboard(
+                keyboard_config.get_xkb_config(),
+                keyboard_config.repeat_delay,
+                keyboard_config.repeat_rate,
+            );
+            let keyboard = match res {
+                Ok(k) => k,
+                Err(err) => {
+                    error!(?err, "Failed to add keyboard! Falling back to defaults");
+                    new_seat
+                        .add_keyboard(
+                            XkbConfig::default(),
+                            keyboard_config.repeat_delay,
+                            keyboard_config.repeat_rate,
+                        )
+                        .expect("The keyboard is not keyboarding")
+                }
+            };
+            let pointer = new_seat.add_pointer();
+
+            state.seat = new_seat;
+            state.keyboard = keyboard;
+            state.pointer = pointer;
+        }
+        RelativePointerManagerState::new::<State>(&state.display_handle);
+        PointerGesturesState::new::<State>(&state.display_handle);
+
+        for (device_id, path) in udev_dispatcher.as_source_ref().device_list() {
+            if let Err(err) = data.device_added(device_id, path, state) {
+                error!(?err, "Failed to add device!");
+            }
+        }
+
+        let mut renderer = data.gpu_manager.single_renderer(&primary_gpu).unwrap();
+        RoundedQuadShader::init(&mut renderer);
+        RoundedOutlineShader::init(&mut renderer);
+
+        state.shm_state.update_formats(renderer.shm_formats());
+
+        Ok(data)
+    }
+
     /// Import this dmabuf buffer to the primary renderer.
     pub fn dmabuf_imported(&mut self, dmabuf: Dmabuf, notifier: ImportNotifier) {
         if self
@@ -912,263 +1163,6 @@ fn render_surface(
     }
 
     Ok(!res.is_empty)
-}
-
-/// Initiate the backend
-pub fn init(state: &mut State) -> anyhow::Result<()> {
-    // Intialize a session with using libseat to communicate with the seatd daemon.
-    let (session, notifier) = LibSeatSession::new()
-        .context("Failed to create a libseat session! Maybe you should check out your system configuration...")?;
-    let seat_name = session.seat();
-
-    let udev_backend = UdevBackend::new(&seat_name).context("Failed to crate Udev backend!")?;
-    let udev_dispatcher =
-        Dispatcher::new(udev_backend, |event, (), state: &mut State| match event {
-            UdevEvent::Added { device_id, path } => {
-                if let Err(err) =
-                    state
-                        .backend
-                        .udev()
-                        .device_added(device_id, &path, &mut state.fht)
-                {
-                    error!(?err, "Failed to add device!");
-                }
-            }
-            UdevEvent::Changed { device_id } => {
-                if let Err(err) = state
-                    .backend
-                    .udev()
-                    .device_changed(device_id, &mut state.fht)
-                {
-                    error!(?err, "Failed to update device!");
-                }
-            }
-            UdevEvent::Removed { device_id } => {
-                if let Err(err) = state
-                    .backend
-                    .udev()
-                    .device_removed(device_id, &mut state.fht)
-                {
-                    error!(?err, "Failed to remove device!");
-                }
-            }
-        });
-    let udev_token = state
-        .fht
-        .loop_handle
-        .register_dispatcher(udev_dispatcher.clone())
-        .unwrap();
-
-    // Initialize libinput so we can listen to events.
-    let mut libinput_context =
-        Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
-    libinput_context.udev_assign_seat(&seat_name).unwrap();
-    let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
-
-    // Insert event sources inside the event loop
-    let libinput_token = state
-        .fht
-        .loop_handle
-        .insert_source(libinput_backend, move |mut event, _, state| {
-            if let InputEvent::DeviceAdded { device } = &mut event {
-                if device.has_capability(DeviceCapability::Keyboard) {
-                    let led_state = state.fht.keyboard.led_state();
-                    device.led_update(led_state.into());
-                }
-
-                let device_config = CONFIG
-                    .input
-                    .per_device
-                    .get(device.name())
-                    .or_else(|| CONFIG.input.per_device.get(device.sysname()));
-                let mouse_config =
-                    device_config.map_or_else(|| &CONFIG.input.mouse, |cfg| &cfg.mouse);
-                let keyboard_config =
-                    device_config.map_or_else(|| &CONFIG.input.keyboard, |cfg| &cfg.keyboard);
-                let disabled = device_config.map_or(false, |cfg| cfg.disable);
-
-                crate::config::apply_libinput_settings(
-                    device,
-                    mouse_config,
-                    keyboard_config,
-                    disabled,
-                );
-
-                state.fht.devices.push(device.clone());
-            } else if let InputEvent::DeviceRemoved { ref device } = event {
-                state.fht.devices.retain(|d| d != device);
-            }
-
-            state.process_input_event(event);
-        })
-        .map_err(|_| anyhow::anyhow!("Failed to insert libinput event source!"))?;
-
-    let session_token = state
-        .fht
-        .loop_handle
-        .insert_source(notifier, move |event, &mut (), state| match event {
-            SessionEvent::PauseSession => {
-                info!("Pausing session!");
-                libinput_context.suspend();
-
-                for device in state.backend.udev().devices.values_mut() {
-                    device.drm.pause();
-                    device.active_leases.clear();
-                    if let Some(leasing_state) = device.lease_state.as_mut() {
-                        leasing_state.suspend();
-                    }
-                }
-            }
-            SessionEvent::ActivateSession => {
-                info!("Resuming session!");
-
-                if let Err(err) = libinput_context.resume() {
-                    error!("Failed to resume libinput context: {:?}", err);
-                }
-
-                for device in &mut state.backend.udev().devices.values_mut() {
-                    // if we do not care about flicking (caused by modesetting) we could just
-                    // pass true for disable connectors here. this would make sure our drm
-                    // device is in a known state (all connectors and planes disabled).
-                    // but for demonstration we choose a more optimistic path by leaving the
-                    // state as is and assume it will just work. If this assumption fails
-                    // we will try to reset the state when trying to queue a frame.
-                    device.drm.activate(false).expect("Failed to activate DRM!");
-                    if let Some(leasing_state) = device.lease_state.as_mut() {
-                        leasing_state.resume::<State>();
-                    }
-                    for surface in device.surfaces.values_mut() {
-                        if let Err(err) = surface.compositor.reset_state() {
-                            warn!("Failed to reset drm surface state: {}", err);
-                        }
-                    }
-                }
-
-                for output in state.fht.outputs() {
-                    let _ = state.backend.udev().schedule_render(
-                        output,
-                        Duration::ZERO,
-                        &state.fht.loop_handle,
-                    );
-                }
-            }
-        })
-        .map_err(|_| anyhow::anyhow!("Failed to insert libseat event source!"))?;
-
-    let gpu_manager = GbmGlesBackend::with_factory(|egl_display: &EGLDisplay| {
-        let egl_context = EGLContext::new_with_priority(egl_display, ContextPriority::High)?;
-
-        // Thank you cmeissl for guiding me here, this helps with drawing egui since we don't have
-        // to create a shadow buffer anymore (atleast if this is false)
-        let renderer = if CONFIG.renderer.enable_color_transformations {
-            unsafe { GlesRenderer::new(egl_context)? }
-        } else {
-            let capabilities = unsafe { GlesRenderer::supported_capabilities(&egl_context) }?
-                .into_iter()
-                .filter(|c| *c != Capability::ColorTransformations);
-            unsafe { GlesRenderer::with_capabilities(egl_context, capabilities)? }
-        };
-
-        Ok(renderer)
-    });
-
-    let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
-
-    let (primary_gpu, primary_node) = if let Some(user_path) = &CONFIG.renderer.render_node.as_ref()
-    {
-        let primary_gpu = DrmNode::from_path(user_path)
-            .expect(&format!(
-                "Please make sure that {} is a valid DRM node!",
-                user_path.display()
-            ))
-            .node_with_type(NodeType::Render)
-            .expect("Please make sure that {user_path} is a render node!")
-            .expect("Please make sure that {user_path} is a render node!");
-        let primary_node = primary_gpu
-            .node_with_type(NodeType::Primary)
-            .expect("Unable to get primary node from primary gpu node!")
-            .expect("Unable to get primary node from primary gpu node!");
-
-        (primary_gpu, primary_node)
-    } else {
-        let primary_node = udev::primary_gpu(&seat_name)
-            .unwrap()
-            .and_then(|path| DrmNode::from_path(path).ok())
-            .expect("Failed to get primary gpu!");
-        let primary_gpu = primary_node
-            .node_with_type(NodeType::Render)
-            .expect("Failed to get primary gpu node from primary node!")
-            .expect("Failed to get primary gpu node from primary node!");
-
-        (primary_gpu, primary_node)
-    };
-    info!(?primary_gpu, "Found primary GPU for rendering!");
-    info!(?primary_node);
-
-    let mut data = UdevData {
-        primary_gpu,
-        primary_node,
-        gpu_manager,
-        session,
-        devices: HashMap::new(),
-        dmabuf_global: None,
-        _registration_tokens: vec![udev_token, session_token, libinput_token],
-    };
-
-    // HACK: You want the wl_seat name to be the same as the libseat session name, so, eh...
-    // No clients should have connected to us by now, so we just delete and create one ourselves.
-    {
-        let seat_global = state.fht.seat.global().unwrap();
-        state.fht.display_handle.remove_global::<State>(seat_global);
-
-        let mut new_seat = state
-            .fht
-            .seat_state
-            .new_wl_seat(&state.fht.display_handle, &seat_name);
-
-        let keyboard_config = &CONFIG.input.keyboard;
-        let res = new_seat.add_keyboard(
-            keyboard_config.get_xkb_config(),
-            keyboard_config.repeat_delay,
-            keyboard_config.repeat_rate,
-        );
-        let keyboard = match res {
-            Ok(k) => k,
-            Err(err) => {
-                error!(?err, "Failed to add keyboard! Falling back to defaults");
-                new_seat
-                    .add_keyboard(
-                        XkbConfig::default(),
-                        keyboard_config.repeat_delay,
-                        keyboard_config.repeat_rate,
-                    )
-                    .expect("The keyboard is not keyboarding")
-            }
-        };
-        let pointer = new_seat.add_pointer();
-
-        state.fht.seat = new_seat;
-        state.fht.keyboard = keyboard;
-        state.fht.pointer = pointer;
-    }
-    RelativePointerManagerState::new::<State>(&state.fht.display_handle);
-    PointerGesturesState::new::<State>(&state.fht.display_handle);
-
-    for (device_id, path) in udev_dispatcher.as_source_ref().device_list() {
-        if let Err(err) = data.device_added(device_id, path, &mut state.fht) {
-            error!(?err, "Failed to add device!");
-        }
-    }
-
-    let mut renderer = data.gpu_manager.single_renderer(&primary_gpu).unwrap();
-    RoundedQuadShader::init(&mut renderer);
-    RoundedOutlineShader::init(&mut renderer);
-
-    state.fht.shm_state.update_formats(renderer.shm_formats());
-
-    state.backend = Backend::Udev(data);
-
-    Ok(())
 }
 
 pub struct Device {

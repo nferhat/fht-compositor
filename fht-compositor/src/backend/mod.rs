@@ -10,11 +10,24 @@ pub mod udev;
 pub mod x11;
 
 pub enum Backend {
-    None,
     #[cfg(feature = "x11_backend")]
     X11(x11::X11Data),
     #[cfg(feature = "udev_backend")]
     Udev(udev::UdevData),
+}
+
+#[cfg(feature = "x11_backend")]
+impl From<x11::X11Data> for Backend {
+    fn from(value: x11::X11Data) -> Self {
+        Self::X11(value)
+    }
+}
+
+#[cfg(feature = "udev_backend")]
+impl From<udev::UdevData> for Backend {
+    fn from(value: udev::UdevData) -> Self {
+        Self::Udev(value)
+    }
 }
 
 impl Backend {
@@ -55,7 +68,6 @@ impl Backend {
         _loop_handle: &LoopHandle<'static, State>,
     ) {
         match self {
-            Self::None => panic!(),
             #[cfg(feature = "x11_backend")]
             Self::X11(ref mut data) => data.schedule_render(output),
             #[cfg(feature = "udev_backend")]
@@ -68,36 +80,5 @@ impl Backend {
                 // let _ = data.schedule_render(output, std::time::Duration::ZERO, loop_handle);
             }
         }
-    }
-}
-
-/// Automatically initiates a backend based on environment variables.
-///
-/// - If `FHTC_BACKEND` is set, try to use the named backend
-/// - If `DISPLAY` or `WAYLAND_DISPLAY` is set, try to initiate the X11 backend
-/// - Try to initiate the udev backend
-pub fn init_backend_auto(state: &mut State) {
-    if let Ok(backend_name) = std::env::var("FHTC_BACKEND") {
-        match backend_name.trim().to_lowercase().as_str() {
-            #[cfg(feature = "x11_backend")]
-            "x11" => x11::init(state).unwrap(),
-            #[cfg(feature = "udev_backend")]
-            "kms" | "udev" => udev::init(state).unwrap(),
-            x => unimplemented!("No such backend implemented!: {x}"),
-        }
-    }
-
-    if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
-        info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window.");
-        #[cfg(feature = "x11_backend")]
-        x11::init(state).unwrap();
-        #[cfg(not(feature = "x11_backend"))]
-        panic!("X11 backend not enabled on this build! Enable the 'x11_backend' feature when building!");
-    } else {
-        info!("Running from TTY, initializing Udev backend.");
-        #[cfg(feature = "udev_backend")]
-        udev::init(state).unwrap();
-        #[cfg(not(feature = "udev_backend"))]
-        panic!("Udev backend not enabled on this build! Enable the 'udev_backend' feature when building!");
     }
 }

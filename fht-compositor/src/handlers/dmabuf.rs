@@ -20,7 +20,6 @@ impl DmabufHandler for State {
             Backend::X11(ref mut data) => data.dmabuf_imported(&dmabuf, notifier),
             #[cfg(feature = "udev_backend")]
             Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
-            Backend::None => panic!("You really didnt want any backend"),
         };
     }
 }
