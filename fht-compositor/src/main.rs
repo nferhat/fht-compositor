@@ -130,7 +130,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         event_loop.get_signal(),
         socket_name.clone(),
     );
-    backend::init_backend_auto(&mut state);
 
     std::env::set_var("WAYLAND_DISPLAY", &socket_name);
     std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");

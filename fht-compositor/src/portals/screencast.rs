@@ -122,7 +122,10 @@ impl Portal {
             source: SessionSource::Unset,
         };
         if let Err(err) = object_server.at(&session_handle, session).await {
-            let request_ref =object_server.interface::<_, PRequest>(&request_handle).await.unwrap();
+            let request_ref = object_server
+                .interface::<_, PRequest>(&request_handle)
+                .await
+                .unwrap();
             let request = request_ref.get_mut().await;
             request.close(object_server).await;
 
@@ -172,7 +175,10 @@ impl Portal {
             .await
             .expect("Failed to spawn command!");
         if !output.status.success() {
-            warn!(session_handle = session_handle.to_string(), "Share picker exited unsuccessfully");
+            warn!(
+                session_handle = session_handle.to_string(),
+                "Share picker exited unsuccessfully"
+            );
             session.close(object_server).await;
             return (1, HashMap::new());
         }
@@ -193,7 +199,10 @@ impl Portal {
         {
             SessionSource::Output(output_name.to_string(), None)
         } else {
-            warn!(session_handle = session_handle.to_string(), "Unable to select source for screencopy!");
+            warn!(
+                session_handle = session_handle.to_string(),
+                "Unable to select source for screencopy!"
+            );
             session.close(object_server).await;
             return (1, HashMap::new());
         };
@@ -334,11 +343,11 @@ pub struct PRequest {
 
 #[interface(name = "org.freedesktop.impl.Portal.Request")]
 impl PRequest {
-    async fn close(
-        &self,
-        #[zbus(object_server)] object_server: &ObjectServer,
-    ) {
-        assert!(object_server.remove::<PRequest, _>(&self.handle).await.unwrap());
+    async fn close(&self, #[zbus(object_server)] object_server: &ObjectServer) {
+        assert!(object_server
+            .remove::<PRequest, _>(&self.handle)
+            .await
+            .unwrap());
     }
 
     #[zbus(signal)]
