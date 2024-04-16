@@ -355,8 +355,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     let workspace = self.fht.ws_for(window).unwrap();
-                    // SAFETY: The path should always be valid.
-                    let ipc_path = workspace.ipc_path.clone();
+                    let ipc_path = workspace.ipc_path.clone().as_ref().to_string();
                     to_ipc
                         .send_blocking(IpcResponse::WindowPropString(ipc_path))
                         .unwrap();

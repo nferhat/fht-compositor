@@ -1,8 +1,9 @@
 use std::cmp::min;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-use async_std::task::block_on;
+use async_std::task::spawn;
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
@@ -111,12 +112,14 @@ impl WorkspaceSet {
             let name = self.output.name().replace("-", "_");
             let path = format!("/fht/desktop/Compositor/Output/{name}");
             let target_idx = target_idx as u8;
-            block_on(async {
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
+                    .inner()
                     .interface::<_, IpcOutput>(path)
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
+                let mut iface = iface_ref.get_mut().await;
                 iface.active_workspace_index = target_idx;
                 iface
                     .active_workspace_index_changed(iface_ref.signal_context())
@@ -754,7 +757,11 @@ pub struct Workspace {
     /// The active layout index.
     active_layout_idx: usize,
 
-    pub ipc_path: String,
+    // Using an Arc is fine since workspaces are static to each output, so the ipc_path should
+    // never be able to change.
+    //
+    // Thank you logan smith for this simple tip.
+    pub ipc_path: Arc<str>,
     ipc_token: RegistrationToken,
     loop_handle: LoopHandle<'static, State>,
 }
@@ -767,17 +774,20 @@ impl Drop for Workspace {
         // Dropping the dbus object path should drop the `IpcWorkspace` struct that holds the
         // sender, removing the ipc token from the event loop removes the callback and with it the
         // receiver, and thus dropping our channel
-
-        match DBUS_CONNECTION
-            .object_server()
-            .remove::<IpcWorkspace, _>(self.ipc_path.as_str())
-        {
-            Err(err) => warn!(?err, "Failed to unadvertise workspace from IPC!"),
-            Ok(destroyed) => assert!(destroyed),
-        }
-
-        // Make sure to drop the useless channel.
         self.loop_handle.remove(self.ipc_token);
+
+        let ipc_path = self.ipc_path.clone();
+        async_std::task::spawn(async move {
+            match DBUS_CONNECTION
+                .object_server()
+                .inner()
+                .remove::<IpcWorkspace, _>(ipc_path.as_ref())
+                .await
+            {
+                Err(err) => warn!(?err, "Failed to unadvertise workspace from IPC!"),
+                Ok(destroyed) => assert!(destroyed),
+            }
+        });
     }
 }
 
@@ -816,7 +826,7 @@ impl Workspace {
             layouts: CONFIG.general.layouts.clone(),
             active_layout_idx: 0,
 
-            ipc_path,
+            ipc_path: ipc_path.as_str().into(),
             ipc_token,
             loop_handle,
         }
@@ -846,12 +856,15 @@ impl Workspace {
                 toplevel.send_pending_configure();
             }
             {
-                block_on(async {
+                let ipc_path = self.ipc_path.clone();
+                spawn(async move {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
-                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .inner()
+                        .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                        .await
                         .unwrap();
-                    let mut iface = iface_ref.get_mut();
+                    let mut iface = iface_ref.get_mut().await;
                     iface.fullscreen = None;
                     iface
                         .fullscreen_changed(iface_ref.signal_context())
@@ -879,12 +892,15 @@ impl Workspace {
             should_refresh_geometries = true;
 
             {
-                block_on(async {
+                let ipc_path = self.ipc_path.clone();
+                spawn(async move {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
-                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .inner()
+                        .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                        .await
                         .unwrap();
-                    let mut iface = iface_ref.get_mut();
+                    let mut iface = iface_ref.get_mut().await;
                     iface.windows.retain(|uid| !removed_ids.contains(uid));
                     iface
                         .windows_changed(iface_ref.signal_context())
@@ -950,13 +966,17 @@ impl Workspace {
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            let uid = window.uid();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                iface.windows.push(window.uid());
+                let mut iface = iface_ref.get_mut().await;
+                iface.windows.push(uid);
                 iface
                     .windows_changed(iface_ref.signal_context())
                     .await
@@ -990,13 +1010,16 @@ impl Workspace {
         self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            let window_id = window.uid();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                let window_id = window.uid();
+                let mut iface = iface_ref.get_mut().await;
                 iface.windows.retain(|uid| *uid != window_id);
                 iface
                     .windows_changed(iface_ref.signal_context())
@@ -1015,12 +1038,15 @@ impl Workspace {
             self.focused_window_idx = idx;
 
             {
-                block_on(async {
+                let ipc_path = self.ipc_path.clone();
+                spawn(async move {
                     let iface_ref = DBUS_CONNECTION
                         .object_server()
-                        .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                        .inner()
+                        .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                        .await
                         .unwrap();
-                    let mut iface = iface_ref.get_mut();
+                    let mut iface = iface_ref.get_mut().await;
                     iface.focused_window_index = idx as u8;
                     iface
                         .focused_window_changed(iface_ref.signal_context())
@@ -1054,13 +1080,17 @@ impl Workspace {
         };
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            let focused_window_idx = self.focused_window_idx as u8;
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                iface.focused_window_index = self.focused_window_idx as u8;
+                let mut iface = iface_ref.get_mut().await;
+                iface.focused_window_index = focused_window_idx;
                 iface
                     .focused_window_changed(iface_ref.signal_context())
                     .await
@@ -1092,13 +1122,17 @@ impl Workspace {
         };
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            let focused_window_idx = self.focused_window_idx as u8;
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                iface.focused_window_index = self.focused_window_idx as u8;
+                let mut iface = iface_ref.get_mut().await;
+                iface.focused_window_index = focused_window_idx;
                 iface
                     .focused_window_changed(iface_ref.signal_context())
                     .await
@@ -1163,12 +1197,15 @@ impl Workspace {
 
         {
             let window_uid = window.uid();
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
+                let mut iface = iface_ref.get_mut().await;
                 iface.fullscreen = Some(window_uid);
                 iface
                     .fullscreen_changed(iface_ref.signal_context())
@@ -1203,15 +1240,19 @@ impl Workspace {
         last_known_idx = last_known_idx.clamp(0, self.windows.len());
         let window_uid = inner.uid();
         self.windows.insert(last_known_idx, inner);
+        self.focused_window_idx = last_known_idx;
         self.refresh_window_geometries();
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
+                let mut iface = iface_ref.get_mut().await;
                 iface.fullscreen = None;
                 iface
                     .fullscreen_changed(iface_ref.signal_context())
@@ -1303,13 +1344,17 @@ impl Workspace {
         self.active_layout_idx = new_active_idx;
 
         {
-            block_on(async {
+            let ipc_path = self.ipc_path.clone();
+            let layout = self.layouts[self.active_layout_idx].to_string();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                iface.active_layout = self.layouts[self.active_layout_idx].to_string();
+                let mut iface = iface_ref.get_mut().await;
+                iface.active_layout = layout;
                 iface
                     .active_layout_changed(iface_ref.signal_context())
                     .await
@@ -1330,13 +1375,17 @@ impl Workspace {
         };
 
         {
-            block_on(async {
+            let layout = self.layouts[self.active_layout_idx].to_string();
+            let ipc_path = self.ipc_path.clone();
+            spawn(async move {
                 let iface_ref = DBUS_CONNECTION
                     .object_server()
-                    .interface::<_, IpcWorkspace>(self.ipc_path.as_str())
+                    .inner()
+                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+                    .await
                     .unwrap();
-                let mut iface = iface_ref.get_mut();
-                iface.active_layout = self.layouts[self.active_layout_idx].to_string();
+                let mut iface = iface_ref.get_mut().await;
+                iface.active_layout = layout;
                 iface
                     .active_layout_changed(iface_ref.signal_context())
                     .await
@@ -1702,13 +1751,13 @@ impl State {
             .fht
             .workspaces
             .values_mut()
-            .find(|wset| wset.workspaces().any(|ws| &ws.ipc_path == ipc_path))
+            .find(|wset| wset.workspaces().any(|ws| ws.ipc_path.as_ref() == ipc_path))
             .unwrap();
         let active_idx = wset.get_active_idx();
         let (idx, workspace) = wset
             .workspaces_mut()
             .enumerate()
-            .find(|(_, ws)| &ws.ipc_path == ipc_path)
+            .find(|(_, ws)| ws.ipc_path.as_ref() == ipc_path)
             .unwrap();
         let is_active = active_idx == idx;
 
