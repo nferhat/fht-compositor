@@ -1,4 +1,3 @@
-use smithay_egui::{egui, egui_extras};
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
@@ -13,6 +12,7 @@ use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
+use smithay_egui::{egui, egui_extras};
 
 #[cfg(feature = "udev_backend")]
 use super::udev::{UdevFrame, UdevRenderError, UdevRenderer};
@@ -440,6 +440,15 @@ where
     let mut cursor_guard = state.cursor_theme_manager.image_status.lock().unwrap();
     let mut elements = vec![];
 
+    if state
+        .focus_state
+        .output
+        .as_ref()
+        .is_some_and(|o| o != output)
+    {
+        return elements;
+    }
+
     let mut reset = false;
     if let CursorImageStatus::Surface(ref surface) = *cursor_guard {
         reset = !surface.alive();
@@ -450,7 +459,7 @@ where
     drop(cursor_guard); // since its used by render_cursor
 
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
-    let cursor_element_pos = state.pointer.current_location();
+    let cursor_element_pos = state.pointer.current_location() - output.current_location().to_f64();
     let cursor_element_pos_scaled = cursor_element_pos.to_physical(output_scale).to_i32_round();
 
     let cursor_scale = output.current_scale().integer_scale();
