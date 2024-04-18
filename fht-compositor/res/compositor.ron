@@ -176,14 +176,10 @@ FhtConfig(
     ),
 
     // Window rules.
-    //
-    // They *should* work, (well I need more testing). These are directly ripped from my own config
-    // so you can see what you can do.
-    //
+    // ---
     // `app_id` is the same as WM_CLASS on X.org
-    // `title` is the title string (TODO: Regex)
-    //
-    // TODO: More rules
+    // `title` is the title string.
+    // Both of these fields can be regexes.
     rules: {
         [
             // Floating windows.
