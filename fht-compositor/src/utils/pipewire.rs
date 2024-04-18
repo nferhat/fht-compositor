@@ -134,7 +134,8 @@ impl PipeWire {
             // cool trick with closure from niri
             move || {
                 let session_handle = session_handle.clone();
-                if let Err(err) = to_compositor.send(ScreenCastRequest::StopCast { session_handle }) {
+                if let Err(err) = to_compositor.send(ScreenCastRequest::StopCast { session_handle })
+                {
                     warn!(?err, "error sending StopCast to compositor");
                 }
             }
