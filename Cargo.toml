@@ -3,10 +3,20 @@ members = ["fht-compositor", "fht-share-picker", "smithay-egui"]
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = "1.0.79"
+async-std = "1.12.0"
 profiling = "1.0.14"
-serde = { version = "1.0.196", features = ["derive"] }
+# dbus IPC
 zbus = "4.1.2"
 zvariant = { version = "4.0.0", features = ["option-as-array"] }
+# Basic logging setup
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+color-eyre = "0.6.2"
+# Config file support
+xdg = "2.5.2"
+ron = "0.8.1"
+serde = { version = "1.0.196", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/Smithay"
@@ -16,6 +26,10 @@ default-features = false
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
 rev = "e5f0068"
+
+[workspace.dependencies.iced]
+git = "https://github.com/nferhat/iced"
+rev = "b70a0ca"
 
 [profile.opt]
 inherits = "release"

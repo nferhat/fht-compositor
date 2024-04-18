@@ -1,11 +1,9 @@
 use std::str::FromStr;
 
-use iced::{Application, Element};
-
 #[macro_use]
 extern crate tracing;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> iced::Result {
     // Logging.
     // color_eyre for pretty panics
     color_eyre::install().unwrap();
@@ -34,42 +32,36 @@ fn main() -> anyhow::Result<()> {
     match std::process::Command::new("slurp").spawn() {
         Ok(mut child) => child.kill().unwrap(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            error!("Make sure you have slurp in your $PATH!");
-            anyhow::bail!(err.to_string());
+            panic!("{}", format!("Make sure you have slurp in your $PATH!"));
         }
         Err(err) => {
-            error!(?err, "Failed to execute slop!");
-            anyhow::bail!(err.to_string());
+            panic!("{}", format!("Failed to execute slop! {err}"));
         }
     }
 
-    let initial_action = std::env::args()
-        .skip(1)
-        .next()
-        .and_then(|arg| match arg.as_str() {
-            "select_outputs" => Some(ScreenCastSourcePickerMessage::SelectOutput),
-            "select_area" => Some(ScreenCastSourcePickerMessage::SelectArea),
-            _ => None,
-        });
-
-    ScreenCastSourcePicker::run(iced::Settings {
-        antialiasing: true,
-        exit_on_close_request: true,
-        initial_surface: iced::wayland::InitialSurface::XdgWindow(
-            iced::wayland::actions::window::SctkWindowSettings {
-                app_id: Some("fht.desktop.ScreenCastSourcePicker".into()),
-                title: Some("Screen cast source picker.".into()),
-                client_decorations: false,
-                resizable: Some(2.0),
-                size: (510, 300),
-                transparent: false,
-                ..Default::default()
+    let size = iced::Size {
+        width: 510.0,
+        height: 300.0,
+    };
+    iced::program(
+        "Select screencast source",
+        ScreenCastSourcePicker::update,
+        ScreenCastSourcePicker::view,
+    )
+    .settings(iced::Settings {
+        window: iced::window::Settings {
+            decorations: false,
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: String::from("fht.desktop.ScreenCastSourcePicker"),
             },
-        ),
-        flags: initial_action,
+            size,
+            ..Default::default()
+        },
         ..Default::default()
     })
-    .map_err(|err| anyhow::anyhow!(err))
+    .theme(|_| iced::Theme::Dark)
+    .centered()
+    .run()
 }
 
 struct ScreenCastSourcePicker {
@@ -97,35 +89,34 @@ pub enum ScreenCastSourcePickerMessage {
     SelectedOutput(String),
 }
 
-impl iced::Application for ScreenCastSourcePicker {
-    type Executor = iced::executor::Default;
-    type Message = ScreenCastSourcePickerMessage;
-    type Theme = iced::Theme;
-    type Flags = Option<ScreenCastSourcePickerMessage>;
+impl Default for ScreenCastSourcePicker {
+    fn default() -> Self {
+        let initial_message = std::env::args()
+            .skip(1)
+            .next()
+            .and_then(|arg| match arg.as_str() {
+                "select_outputs" => Some(ScreenCastSourcePickerMessage::SelectOutput),
+                "select_area" => Some(ScreenCastSourcePickerMessage::SelectArea),
+                _ => None,
+            });
 
-    fn new(
-        initial_message: Option<ScreenCastSourcePickerMessage>,
-    ) -> (Self, iced::Command<Self::Message>) {
-        (
-            Self {
-                active_pane: Pane::default(),
-            },
-            match initial_message {
-                Some(action) => iced::Command::perform(async {}, |_| action),
-                None => iced::Command::none(),
-            },
-        )
+        let mut ret = Self {
+            active_pane: Pane::default(),
+        };
+
+        if let Some(initial_message) = initial_message {
+            let _ = ret.update(initial_message);
+        }
+
+        ret
     }
+}
 
-    fn theme(&self, _id: iced::window::Id) -> Self::Theme {
-        iced::Theme::Dark
-    }
-
-    fn title(&self, _id: iced::window::Id) -> String {
-        String::from("fht-compositor ScreenCast source picker")
-    }
-
-    fn update(&mut self, message: Self::Message) -> iced::Command<Self::Message> {
+impl ScreenCastSourcePicker {
+    fn update(
+        &mut self,
+        message: ScreenCastSourcePickerMessage,
+    ) -> iced::Command<ScreenCastSourcePickerMessage> {
         match message {
             ScreenCastSourcePickerMessage::SelectArea => {
                 let mut command = std::process::Command::new("slurp");
@@ -234,19 +225,27 @@ impl iced::Application for ScreenCastSourcePicker {
         iced::Command::none()
     }
 
-    fn view(
-        &self,
-        _id: iced::window::Id,
-    ) -> iced::Element<'_, Self::Message, Self::Theme, iced::Renderer> {
-        use iced::widget::{button, column, container, row, text};
+    fn view(&self) -> iced::Element<ScreenCastSourcePickerMessage> {
+        use iced::widget::{column, container};
 
         match &self.active_pane {
             Pane::SourceType => {
-                let content = column![row![area_button(), output_button()].spacing(10),];
+                let content = column![
+                    create_button(
+                        "Select area".into(),
+                        ScreenCastSourcePickerMessage::SelectArea
+                    ),
+                    create_button(
+                        "Select output".into(),
+                        ScreenCastSourcePickerMessage::SelectOutput
+                    ),
+                ]
+                .spacing(10);
+
                 container(content).padding(50).center_x().center_y().into()
             }
             Pane::Outputs(outputs) => {
-                let mut outputs_row = row![].spacing(10);
+                let mut outputs_row = column![].spacing(10);
                 for Output {
                     name,
                     location,
@@ -255,15 +254,11 @@ impl iced::Application for ScreenCastSourcePicker {
                 {
                     let content =
                         format!("Output {name} located on {location:?} with size {size:?}");
-                    let text = container(
-                        button(text(content))
-                            .on_press(ScreenCastSourcePickerMessage::SelectedOutput(name.clone())),
-                    )
-                    .center_x()
-                    .center_y()
-                    .width(410)
-                    .height(40);
-                    outputs_row = outputs_row.push(text);
+                    let content = create_button(
+                        content,
+                        ScreenCastSourcePickerMessage::SelectedOutput(name.clone()),
+                    );
+                    outputs_row = outputs_row.push(content);
                 }
 
                 container(outputs_row)
@@ -276,44 +271,16 @@ impl iced::Application for ScreenCastSourcePicker {
     }
 }
 
-static SELECTION_ICON_DATA: &[u8; 749] = include_bytes!("../res/selection.svg");
-
-fn area_button<'a>() -> Element<'a, ScreenCastSourcePickerMessage> {
-    use iced::widget::svg::Handle;
-    use iced::widget::{button, column, container, svg};
-
-    let svg_handle = Handle::from_memory(SELECTION_ICON_DATA);
-    let icon = svg(svg_handle).width(130).height(130);
-    let icon = container(icon).center_x().center_y().width(200).height(160);
-
-    let text = container("Select area")
-        .center_x()
-        .center_y()
-        .width(200)
-        .height(40);
-
-    button(container(column![text, icon]).width(200).height(200))
-        .on_press(ScreenCastSourcePickerMessage::SelectArea)
-        .into()
-}
-
-static DISPLAY_ICON_DATA: &[u8; 571] = include_bytes!("../res/display.svg");
-
-fn output_button<'a>() -> Element<'a, ScreenCastSourcePickerMessage> {
-    use iced::widget::svg::Handle;
-    use iced::widget::{button, column, container, svg};
-
-    let svg_handle = Handle::from_memory(DISPLAY_ICON_DATA);
-    let icon = svg(svg_handle).width(130).height(130);
-    let icon = container(icon).center_x().center_y().width(200).height(160);
-
-    let text = container("Select output")
-        .center_x()
-        .center_y()
-        .width(200)
-        .height(40);
-
-    button(container(column![text, icon]).width(200).height(200))
-        .on_press(ScreenCastSourcePickerMessage::SelectOutput)
-        .into()
+fn create_button<'a>(
+    content: String,
+    on_press: ScreenCastSourcePickerMessage,
+) -> iced::Element<'a, ScreenCastSourcePickerMessage> {
+    use iced::widget::{button, container, text};
+    container(
+        button(container(text(content)).center_x().center_y())
+            .width(410)
+            .height(40)
+            .on_press(on_press),
+    )
+    .into()
 }

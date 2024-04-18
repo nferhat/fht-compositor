@@ -10,6 +10,7 @@ use smithay::input::pointer::{
 };
 use smithay::input::touch::TouchTarget;
 use smithay::input::Seat;
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Serial};
 use smithay::wayland::seat::WaylandFocus;
@@ -52,7 +53,7 @@ impl WaylandFocus for KeyboardFocusTarget {
         }
     }
 
-    fn same_client_as(&self, object_id: &wayland_backend::server::ObjectId) -> bool {
+    fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
             Self::Window(w) => w.same_client_as(object_id),
             Self::LayerSurface(l) => l.same_client_as(object_id),
@@ -188,7 +189,7 @@ impl WaylandFocus for PointerFocusTarget {
             Self::Egui(_) => None,
         }
     }
-    fn same_client_as(&self, object_id: &wayland_backend::server::ObjectId) -> bool {
+    fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
             Self::WlSurface(w) => w.same_client_as(object_id),
             Self::Window(w) => w.same_client_as(object_id),

@@ -30,6 +30,7 @@ use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
+use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::user_data::UserDataMap;
@@ -493,7 +494,7 @@ impl WaylandFocus for FhtWindow {
         self.0.wl_surface()
     }
 
-    fn same_client_as(&self, object_id: &wayland_backend::server::ObjectId) -> bool {
+    fn same_client_as(&self, object_id: &ObjectId) -> bool {
         self.0.same_client_as(object_id)
     }
 }
