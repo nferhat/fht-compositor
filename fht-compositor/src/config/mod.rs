@@ -89,10 +89,14 @@ mod types;
 use std::cell::SyncUnsafeCell;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::Context;
+use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
+use smithay::reexports::rustix::path::Arg;
 use xdg::BaseDirectories;
 
 const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
@@ -104,6 +108,7 @@ pub use self::types::{
     WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
     WorkspaceSwitchAnimationDirection,
 };
+use crate::state::State;
 
 // To avoid mutable static madness just use an private unsafe cell with one getter and setter.
 // Dont show this to the user though
@@ -135,28 +140,28 @@ pub static CONFIG: LazyLock<FhtConfig> = LazyLock::new(|| {
     let inner = load_config().unwrap();
     FhtConfig(SyncUnsafeCell::new(inner))
 });
-pub static XDG_BASE_DIRECTORIES: LazyLock<BaseDirectories> =
-    LazyLock::new(|| BaseDirectories::new().unwrap());
+pub static CONFIG_PATH: LazyLock<String> = LazyLock::new(|| {
+    BaseDirectories::new()
+        .unwrap()
+        .place_config_file("fht/compositor.ron")
+        .expect("Failed to get config file!")
+        .to_string_lossy()
+        .to_string() // I know right genius
+});
 
 pub fn load_config() -> anyhow::Result<FhtConfigInner> {
-    let config_file_path = XDG_BASE_DIRECTORIES
-        .place_config_file("fht/compositor.ron")
-        .context("Failed to get config file!")?;
-
-    let reader = OpenOptions::new()
-        .read(true)
-        .write(false)
-        .open(&config_file_path);
+    let config_path = CONFIG_PATH.as_str();
+    let reader = OpenOptions::new().read(true).write(false).open(config_path);
     let reader = match reader {
         Ok(reader) => reader,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             // Create config file for user
-            let mut file = File::create_new(&config_file_path).unwrap();
+            let mut file = File::create_new(config_path).unwrap();
             writeln!(&mut file, "{}", DEFAULT_CONFIG).unwrap();
             OpenOptions::new()
                 .read(true)
                 .write(false)
-                .open(&config_file_path)
+                .open(config_path)
                 .unwrap()
         }
         Err(err) => {
@@ -168,7 +173,45 @@ pub fn load_config() -> anyhow::Result<FhtConfigInner> {
     Ok(config)
 }
 
-impl crate::state::State {
+pub fn init_config_file_watcher(
+    loop_handle: &LoopHandle<'static, State>,
+) -> anyhow::Result<RegistrationToken> {
+    // Unit as a dumb message for "reload config"
+    let (sender, channel) = calloop::channel::channel::<()>();
+    let watcher_token = loop_handle
+        .insert_source(channel, |event, (), state| {
+            let calloop::channel::Event::Msg(()) = event else {
+                return;
+            };
+            state.reload_config();
+        })
+        .map_err(|err| anyhow::anyhow!("Failed to insert config file watcher source! {err}"))?;
+
+    async_std::task::spawn(async move {
+        let path = PathBuf::from_str(&CONFIG_PATH).unwrap();
+        let mut last_mtime = path.metadata().and_then(|md| md.modified()).ok();
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if let Some(new_mtime) = path
+                .metadata()
+                .and_then(|md| md.modified())
+                .ok()
+                .filter(|mt| Some(mt) != last_mtime.as_ref())
+            {
+                trace!(?new_mtime, "Config file change detected.");
+                last_mtime = Some(new_mtime);
+                if let Err(err) = sender.send(()) {
+                    warn!(?err, "Failed to notify config file change!");
+                };
+            }
+        }
+    });
+
+    Ok(watcher_token)
+}
+
+impl State {
     #[profiling::function]
     pub fn reload_config(&mut self) {
         let new_config = match load_config() {
