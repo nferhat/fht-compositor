@@ -1146,9 +1146,8 @@ impl Workspace {
     }
 
     /// Swap the current window with the next window.
-    /// TODO: This DOES NOT work.
     pub fn swap_with_next_window(&mut self) {
-        if self.windows.is_empty() {
+        if self.windows.len() < 2{
             return;
         }
 
@@ -1164,12 +1163,12 @@ impl Workspace {
 
         self.focused_window_idx = new_focused_idx;
         self.windows.swap(last_focused_idx, new_focused_idx);
+        self.refresh_window_geometries();
     }
 
     /// Swap the current window with the previous window.
-    /// TODO: This DOES NOT work.
     pub fn swap_with_previous_window(&mut self) {
-        if self.windows.is_empty() {
+        if self.windows.len() < 2 {
             return;
         }
 
@@ -1183,6 +1182,7 @@ impl Workspace {
 
         self.focused_window_idx = new_focused_idx;
         self.windows.swap(last_focused_idx, new_focused_idx);
+        self.refresh_window_geometries();
     }
 
     /// Fullscreen a given window, if this [`Workspace`] contains it.

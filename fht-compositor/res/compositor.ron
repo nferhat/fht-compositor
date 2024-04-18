@@ -103,8 +103,8 @@ FhtConfig(
         // Window management and layout management.
         ([SUPER], "j"):            FocusNextWindow,
         ([SUPER], "k"):            FocusPreviousWindow,
-        ([SUPER, SHIFT], "j"):     SwapWithPreviousWindow,
-        ([SUPER, SHIFT], "k"):     SwapWithNextWindow,
+        ([SUPER, SHIFT], "j"):     SwapWithNextWindow,
+        ([SUPER, SHIFT], "k"):     SwapWithPreviousWindow,
         ([SHIFT, SUPER], "c"):     CloseFocusedWindow,
         ([SUPER], "Space"):        SelectNextLayout,
         ([SUPER, SHIFT], "Space"): SelectPreviousLayout,
