@@ -12,12 +12,10 @@ use smithay::wayland::compositor::{
     BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::LayerSurfaceAttributes;
-use smithay::wayland::shell::xdg::{
-    ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
-};
+use smithay::wayland::shell::xdg::XdgPopupSurfaceRoleAttributes;
 
-use crate::shell::WindowMapSettingsInternal;
 use crate::state::{Fht, State};
 
 /// Ensures that the [`WlSurface`] has a render buffer
@@ -27,56 +25,76 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false)
 }
 
-/// Returns whether this [`Toplevel`] initial configure was sent.
-fn initial_configure_sent(toplevel: &ToplevelSurface) -> bool {
-    with_states(toplevel.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .initial_configure_sent
-    })
-}
-
 impl State {
     /// Process a commit request for a root surface.
-    fn maybe_map_pending_window(surface: &WlSurface, state: &mut Fht) {
+    fn process_window_commit(surface: &WlSurface, state: &mut Fht) {
         // First check: the pending window may be a pending one, needing both an initial configure
         // call and a prepapring before mapping.
-        let Entry::Occupied(entry) = state.pending_windows.entry(surface.clone()) else {
-            return;
-        };
-
-        let window = entry.get().clone();
-        window.0.on_commit();
-
-        // We don't have a render buffer, send initial configure to window so it acknowledges it
-        // needs one and send additional data with it.
-        if !has_render_buffer(surface)
-            || window
-                .user_data()
-                .get::<WindowMapSettingsInternal>()
-                .is_none()
+        let possible_unmapped_window = state.unmapped_windows.iter().position(|(w, _, _)| {
+            w.wl_surface() == *surface
+        });
+        if let Some(idx) = state
+            .pending_windows
+            .iter()
+            .position(|w| w.wl_surface().as_ref() == Some(surface))
         {
-            state.loop_handle.insert_idle(move |state| {
-                if let Some(toplevel) = window.0.toplevel().filter(|t| t.alive()) {
-                    state.fht.prepare_map_window(&window);
-                    if !initial_configure_sent(toplevel) {
-                        toplevel.send_configure();
-                    } else {
-                        toplevel.send_pending_configure();
-                    }
-                }
-            });
+            let surface = surface.clone();
+            let window_surface = state.pending_windows[idx].clone();
+            window_surface.inner.on_commit();
+
+            // We don't have a render buffer, send initial configure to window so it acknowledges it
+            // needs one and send additional data with it.
+            if !has_render_buffer(&surface) || possible_unmapped_window.is_none() {
+                state.loop_handle.insert_idle(move |state| {
+                    let window_surface = state.fht.pending_windows.remove(idx);
+                    state.fht.prepare_pending_window(window_surface);
+                    // For some reason I have to commit this manually.
+                    state
+                        .fht
+                        .loop_handle
+                        .insert_idle(move |state| {
+                            state.fht.loop_handle.insert_idle(move |state| {
+                                state.commit(&surface)
+                            });
+                        });
+                });
+            }
 
             return;
         }
 
-        // We are now prepared, map as normal.
-        let window = entry.remove();
-        state.map_window(window);
+        // Other check: its an unmapped window.
+        if let Some(idx) = state
+            .unmapped_windows
+            .iter()
+            .position(|(w, _, _)| w.wl_surface() == *surface)
+        {
+            let (window, output, workspace_idx) = state.unmapped_windows.remove(idx);
+            window.surface.inner.on_commit();
+            state.map_window(window, output, workspace_idx);
+
+            return;
+        }
+
+        // Other check: its a mapped window.
+        if let Some((window, output)) = state.find_window_and_output(surface) {
+            let window = window.clone();
+            window.surface.inner.on_commit();
+            // Window got unmapped.
+            if !has_render_buffer(surface) {
+                let output = output.clone();
+                let (index, workspace) = state.wset_mut_for(&output)
+                    .workspaces
+                    .iter_mut()
+                    .enumerate()
+                    .find(|(_, workspace)| {
+                        workspace.windows.iter().any(|w| *w == window)
+                    })
+                    .unwrap();
+                let window = workspace.remove_window(&window).unwrap();
+                state.unmapped_windows.push((window, output, index));
+            }
+        }
     }
 
     /// Process a potential commit request for a layer shell
@@ -202,13 +220,8 @@ impl CompositorHandler for State {
         }
 
         if surface == &root_surface {
-            State::maybe_map_pending_window(&surface, &mut self.fht);
+            State::process_window_commit(&surface, &mut self.fht);
             State::maybe_map_pending_layer_shell(&surface, &mut self.fht);
-        }
-
-        // Maybe commiting a mapped window.
-        if let Some(window) = self.fht.find_window(surface).filter(|w| w.is_wayland()) {
-            window.0.on_commit();
         }
 
         // Or maybe a popup/subsurface

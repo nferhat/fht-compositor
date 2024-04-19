@@ -14,7 +14,7 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
-use crate::shell::window::FhtWindow;
+use crate::shell::window::FhtWindowSurface;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::State;
 
@@ -24,9 +24,10 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
-        let wl_surface = toplevel.wl_surface().clone();
-        let window = FhtWindow::new_wayland(toplevel);
-        self.fht.pending_windows.insert(wl_surface, window);
+        let surface = FhtWindowSurface {
+            inner: smithay::desktop::Window::new_wayland_window(toplevel),
+        };
+        self.fht.pending_windows.push(surface);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {

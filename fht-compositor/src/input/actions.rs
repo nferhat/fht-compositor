@@ -236,7 +236,7 @@ impl State {
             KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
             KeyAction::ToggleFloating => {
                 if let Some(window) = active.focused().cloned() {
-                    let new_tiled = !window.is_tiled();
+                    let new_tiled = !window.tiled();
                     window.set_tiled(new_tiled);
                     active.raise_window(&window);
                     active.refresh_window_geometries();
@@ -246,20 +246,19 @@ impl State {
                 todo!("PinFocusedWindow support");
             }
             KeyAction::CenterFocusedWindow => {
-                if let Some(window) = active.focused().filter(|w| !w.is_tiled()).cloned() {
-                    let mut geo = window.global_geometry();
+                if let Some(window) = active.focused().filter(|w| !w.tiled()).cloned() {
+                    let mut geo = window.geometry();
                     let output_geo = output.geometry();
                     geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
                     geo.loc -= geo.size.downscale(2).to_point();
-                    window.set_geometry(geo, true);
+                    window.set_geometry_with_border(geo);
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
                 if let Some(window) = active.focused().cloned() {
-                    if !window.is_fullscreen() {
-                        if let Some(toplevel) = window.0.toplevel().cloned() {
-                            self.fullscreen_request(toplevel, None);
-                        }
+                    if !window.fullscreen() {
+                        let toplevel = window.toplevel().clone();
+                        self.fullscreen_request(toplevel, None);
                     } else {
                         window.set_fullscreen(false, None);
                         let workspace = self.fht.ws_mut_for(&window).unwrap();
@@ -269,7 +268,7 @@ impl State {
             }
             KeyAction::MaximizeFocusedWindow => {
                 if let Some(window) = active.focused().cloned() {
-                    let new_maximized = !window.is_maximized();
+                    let new_maximized = !window.maximized();
                     window.set_maximized(new_maximized);
                     active.refresh_window_geometries();
                 }
@@ -278,7 +277,7 @@ impl State {
                 let new_focus = active.focus_next_window().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -288,7 +287,7 @@ impl State {
                 let new_focus = active.focus_previous_window().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.fht.focus_state.focus_target = Some(window.into());
                         self.move_pointer(center.to_f64())
                     }
@@ -298,7 +297,7 @@ impl State {
                 active.swap_with_next_window();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -308,7 +307,7 @@ impl State {
                 active.swap_with_previous_window();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -421,7 +420,7 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    if window.is_tiled() && floating_only {
+                    if window.tiled() && floating_only {
                         return;
                     }
                     self.fht.loop_handle.insert_idle(move |state| {

@@ -1,8 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::shell::FhtWindow;
-
 const fn default_true() -> bool {
     true
 }
@@ -85,7 +83,7 @@ fn regex_matches(regex_1: Option<&Regex>, regex_2: Option<&Regex>) -> bool {
 }
 
 impl WindowRulePattern {
-    pub fn matches(&self, window: &FhtWindow, workspace: usize) -> bool {
+    pub fn matches(&self, title: &str, app_id: &str, workspace: usize) -> bool {
         if self.workspace.as_ref().is_some_and(|ws| workspace == *ws) {
             return true;
         }
@@ -93,7 +91,7 @@ impl WindowRulePattern {
         if self
             .title
             .as_ref()
-            .is_some_and(|regex| regex.is_match(&window.title()))
+            .is_some_and(|regex| regex.is_match(title))
         {
             return true;
         }
@@ -101,7 +99,7 @@ impl WindowRulePattern {
         if self
             .app_id
             .as_ref()
-            .is_some_and(|regex| regex.is_match(&window.app_id()))
+            .is_some_and(|regex| regex.is_match(app_id))
         {
             return true;
         }

@@ -387,7 +387,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.is_tiled()))
+                        .send_blocking(IpcResponse::WindowPropBool(window.tiled()))
                         .unwrap();
                 } else {
                     to_ipc
@@ -402,9 +402,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     window.set_tiled(tiled);
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.toplevel().send_pending_configure();
                     self.fht.ws_for(window).unwrap().refresh_window_geometries();
                 }
             }
@@ -415,7 +413,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.is_maximized()))
+                        .send_blocking(IpcResponse::WindowPropBool(window.maximized()))
                         .unwrap();
                 } else {
                     to_ipc
@@ -433,9 +431,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     window.set_maximized(maximized);
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.toplevel().send_pending_configure();
                     self.fht.ws_for(window).unwrap().refresh_window_geometries();
                 }
             }
@@ -446,7 +442,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.is_fullscreen()))
+                        .send_blocking(IpcResponse::WindowPropBool(window.fullscreen()))
                         .unwrap();
                 } else {
                     to_ipc
@@ -465,9 +461,8 @@ impl State {
                     .cloned();
                 if let Some(window) = maybe_window {
                     if fullscreened {
-                        if let Some(toplevel) = window.0.toplevel().cloned() {
-                            self.fullscreen_request(toplevel, None);
-                        }
+                        let toplevel = window.toplevel().clone();
+                        self.fullscreen_request(toplevel, None);
                     } else {
                         window.set_fullscreen(false, None);
                         let workspace = self.fht.ws_mut_for(&window).unwrap();

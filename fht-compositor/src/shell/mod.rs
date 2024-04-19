@@ -2,12 +2,12 @@ pub mod cursor;
 pub mod decorations;
 pub mod focus_target;
 pub mod grabs;
+// pub mod window;
 pub mod window;
 pub mod workspaces;
 
 use std::time::Duration;
 
-use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind,
     WindowSurfaceType,
@@ -20,14 +20,15 @@ use smithay::utils::{Point, Rectangle, Serial, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
-use smithay::wayland::shell::xdg::{PopupSurface, SurfaceCachedState};
+use smithay::wayland::shell::xdg::{PopupSurface, SurfaceCachedState, XdgToplevelSurfaceData};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
 pub use self::window::FhtWindow;
-use self::workspaces::{FullscreenSurface, Workspace, WorkspaceSwitchAnimation};
-use crate::config::{WindowMapSettings, CONFIG};
+use self::window::FhtWindowSurface;
+use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
+use crate::config::CONFIG;
 use crate::state::{Fht, State};
 use crate::utils::geometry::{
     Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
@@ -151,7 +152,7 @@ impl Fht {
 
     /// Find every output where this window (and it's subsurfaces) is displayed.
     pub fn visible_outputs_for_window(&self, window: &FhtWindow) -> impl Iterator<Item = &Output> {
-        let window_geo = window.global_geometry();
+        let window_geo = window.geometry();
         self.outputs()
             .filter(move |o| o.geometry().intersection(window_geo).is_some())
     }
@@ -191,18 +192,40 @@ impl Fht {
     }
 
     /// Prepapre a pending window to be mapped.
-    pub fn prepare_map_window(&mut self, window: &FhtWindow) {
+    pub fn prepare_pending_window(&mut self, window_surface: FhtWindowSurface) {
         let mut output = self.focus_state.output.clone().unwrap();
-        let wl_surface = window.wl_surface().unwrap();
+        let wl_surface = window_surface.wl_surface().unwrap();
 
         // Get the matching mapping setting, if the user specified one.
         let workspace_idx = self.wset_for(&output).get_active_idx();
+        let (title, app_id) = with_states(&wl_surface, |states| {
+            let data = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            (
+                data.title.clone().unwrap_or_default(),
+                data.app_id.clone().unwrap_or_default(),
+            )
+        });
+
         let map_settings = CONFIG
             .rules
             .iter()
-            .find(|(rules, _)| rules.iter().any(|r| r.matches(&window, workspace_idx)))
+            .find(|(rules, _)| {
+                rules
+                    .iter()
+                    .any(|r| r.matches(&title, &app_id, workspace_idx))
+            })
             .map(|(_, settings)| settings.clone())
             .unwrap_or_default();
+
+        let window = FhtWindow::new(
+            window_surface,
+            map_settings.border,
+        );
 
         // Apply rules
         //
@@ -217,19 +240,18 @@ impl Fht {
             output = target_output;
         }
 
-        let workspace_idx = match map_settings.workspace {
-            None => self.wset_for(&output).get_active_idx(),
-            Some(idx) => idx.clamp(0, 9),
-        };
-
         let dh = self.display_handle.clone();
         let wset = self.wset_mut_for(&output);
+
+        let workspace_idx = match map_settings.workspace {
+            None => wset.get_active_idx(),
+            Some(idx) => idx.clamp(0, 9),
+        };
         let workspace = &mut wset.workspaces[workspace_idx];
 
-        // TODO: Logic here....
         if map_settings.fullscreen {
             // Use output geometry, and account for window borders.
-            window.set_geometry(output.geometry(), false);
+            window.set_geometry(output.geometry());
             window.set_tiled(!map_settings.floating);
 
             let mut wl_output = None;
@@ -240,123 +262,8 @@ impl Fht {
 
             window.set_fullscreen(true, wl_output);
         } else if map_settings.floating {
-            // Sadly we can't pre-compute the size for floating windows.
-            //
-            // Floating windows can take a `centered` rule, that needs the window size to be set,
-            // which only happens when sending the initial configure message. We take care of this
-            // in `Fht::map_window`
-            window.set_tiled(false);
-        } else {
-            window.set_tiled(true);
-
-            // The following code is adapted from refresh_window_geometries.
-            //
-            // It uses the workspace layout to pre-shape the window using tile_windows, since it
-            // accepts an iterator
-            let (maximized_windows, mut tiled_windows): (Vec<&FhtWindow>, Vec<&FhtWindow>) =
-                workspace.windows.iter().partition(|w| w.is_maximized());
-            tiled_windows.retain(|w| w.is_tiled());
-
-            let inner_gaps = CONFIG.general.inner_gaps;
-            let outer_gaps = CONFIG.general.outer_gaps;
-
-            let output_geo = output.geometry();
-            if let Some(window) = workspace.fullscreen.as_ref().map(|f| &f.inner) {
-                window.set_geometry(output_geo, false);
-                if let Some(toplevel) = window.0.toplevel() {
-                    toplevel.send_pending_configure();
-                }
-            }
-
-            let usable_geo = layer_map_for_output(&output)
-                .non_exclusive_zone()
-                .as_local()
-                .to_global(&output);
-            let mut maximized_geo = usable_geo;
-            maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-            maximized_geo.loc += (outer_gaps, outer_gaps).into();
-            for window in maximized_windows {
-                window.set_geometry(maximized_geo, true);
-                if let Some(toplevel) = window.0.toplevel() {
-                    toplevel.send_pending_configure();
-                }
-            }
-
-            // Can't check whether we are empty cause we are always not gonna be empty
-            // (we are inserting a window, soo the iterator has always one item)
-            let windows_len = tiled_windows.len();
-            workspace.get_active_layout().tile_windows(
-                tiled_windows.into_iter().chain(std::iter::once(window)),
-                windows_len + 1,
-                maximized_geo,
-                inner_gaps,
-                |_idx, w, new_geo| {
-                    w.set_geometry(new_geo, true);
-                    if w != window {
-                        // Do not send a configure for the prepared window since we are sending
-                        // changes with an initial configure call
-                        if let Some(toplevel) = w.0.toplevel() {
-                            toplevel.send_pending_configure();
-                        }
-                    }
-                },
-            );
-        }
-
-        // Client side-decorations
-        let allow_csd = map_settings
-            .allow_csd
-            .unwrap_or(CONFIG.decoration.allow_csd);
-        if let Some(toplevel) = window.0.toplevel() {
-            toplevel.with_pending_state(|state| {
-                if allow_csd {
-                    state.decoration_mode = Some(DecorationMode::ClientSide)
-                } else {
-                    state.decoration_mode = Some(DecorationMode::ServerSide)
-                }
-            });
-        }
-        // NOTE: We can't do much on x11...
-
-        let map_settings = WindowMapSettingsInternal {
-            output,
-            workspace_idx,
-            user: map_settings,
-        };
-
-        window.user_data().insert_if_missing(|| map_settings);
-        if let Some(toplevel) = window.0.toplevel() {
-            toplevel.send_configure();
-        }
-    }
-
-    /// Map a pending window, if it's found.
-    pub fn map_window(&mut self, window: FhtWindow) {
-        let settings = window
-            .user_data()
-            .get::<WindowMapSettingsInternal>()
-            .expect("Tried to map_window without prepare_map_window!");
-
-        let wl_surface = window.wl_surface().unwrap();
-        let wset = self.wset_mut_for(&settings.output);
-        let is_active = settings.workspace_idx == wset.get_active_idx();
-        let workspace = &mut wset.workspaces[settings.workspace_idx];
-
-        if settings.user.fullscreen {
-            // Fullscreen windows are not in the window vector, they must be inserted otherwise.
-            workspace.fullscreen = Some(FullscreenSurface {
-                inner: window.clone(),
-                last_known_idx: workspace.windows.len(),
-            });
-
-            if is_active {
-                self.focus_state.focus_target = Some(window.into())
-            }
-
-            return;
-        } else if settings.user.floating {
             let mut window_geo = Rectangle::default();
-            if let Some(size) = settings.user.size.map(Into::into) {
+            if let Some(size) = map_settings.size.map(Into::into) {
                 window_geo.size = size;
             } else {
                 let min_size = with_states(&wl_surface, |states| {
@@ -364,9 +271,9 @@ impl Fht {
                 });
                 let space_element_size = window.geometry().size;
                 let maybe_pending_size = window
-                    .0
+                    .surface
                     .toplevel()
-                    .and_then(|t| t.with_pending_state(|state| state.size))
+                    .with_pending_state(|s| s.size)
                     .filter(|&s| s != Size::default());
 
                 if let Some(pending_size) = maybe_pending_size {
@@ -380,37 +287,108 @@ impl Fht {
                 }
             }
 
-            if let Some(loc) = settings.user.location.map(Into::<Point<i32, Local>>::into) {
-                window_geo.loc = loc.to_global(&settings.output);
-            } else if settings.user.centered {
-                let output_geo = settings.output.geometry();
+            if let Some(loc) = map_settings.location.map(Into::<Point<i32, Local>>::into) {
+                window_geo.loc = loc.to_global(&output);
+            } else if map_settings.centered {
+                let output_geo = output.geometry();
                 window_geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
                 window_geo.loc -= window_geo.size.downscale(2).to_point();
             }
 
-            window.set_geometry(window_geo, true);
+            window.set_geometry_with_border(window_geo);
+        } else {
+            window.set_tiled(true);
+
+            // The following code is adapted from refresh_window_geometries.
+            //
+            // It uses the workspace layout to pre-shape the window using tile_windows, since it
+            // accepts an iterator
+            let (maximized_windows, mut tiled_windows): (Vec<&FhtWindow>, Vec<&FhtWindow>) =
+                workspace.windows.iter().partition(|w| w.maximized());
+            tiled_windows.retain(|w| w.tiled());
+
+            let inner_gaps = CONFIG.general.inner_gaps;
+            let outer_gaps = CONFIG.general.outer_gaps;
+
+            let output_geo = output.geometry();
+            if let Some(window) = workspace.fullscreen.as_ref().map(|f| &f.inner) {
+                window.set_geometry(output_geo);
+                window.toplevel().send_pending_configure();
+            }
+
+            let usable_geo = layer_map_for_output(&output)
+                .non_exclusive_zone()
+                .as_local()
+                .to_global(&output);
+            let mut maximized_geo = usable_geo;
+            maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
+            maximized_geo.loc += (outer_gaps, outer_gaps).into();
+            for window in maximized_windows {
+                window.set_geometry_with_border(maximized_geo);
+                window.toplevel().send_pending_configure();
+            }
+
+            // Can't check whether we are empty cause we are always not gonna be empty
+            // (we are inserting a window, soo the iterator has always one item)
+            let windows_len = tiled_windows.len();
+            workspace.get_active_layout().tile_windows(
+                tiled_windows.into_iter().chain(std::iter::once(&window)),
+                windows_len + 1,
+                maximized_geo,
+                inner_gaps,
+                |_idx, w, new_geo| {
+                    w.set_geometry_with_border(new_geo);
+                    w.toplevel().send_pending_configure();
+                },
+            );
         }
 
-        // Not fullscreen, insert as normal
-        workspace.insert_window(window.clone());
-        if settings.user.floating {
-            // You probably want to see the window you just inserted, right?
-            workspace.raise_window(&window);
+        // Client side-decorations
+        let allow_csd = map_settings
+            .allow_csd
+            .unwrap_or(CONFIG.decoration.allow_csd);
+        window.toplevel().with_pending_state(|state| {
+            if allow_csd {
+                state.decoration_mode = Some(DecorationMode::ClientSide)
+            } else {
+                state.decoration_mode = Some(DecorationMode::ServerSide)
+            }
+        });
+
+        window.toplevel().send_configure();
+        self.unmapped_windows.push((window, output, workspace_idx));
+    }
+
+    /// Map a pending window, if it's found.
+    pub fn map_window(&mut self, window: FhtWindow, output: Output, workspace_idx: usize) {
+        let wset = self.wset_mut_for(&output);
+        let is_active = workspace_idx == wset.get_active_idx();
+        let workspace = &mut wset.workspaces[workspace_idx];
+
+        if !window.tiled() {
+            // Raise the window so that it's visible and avoid confusion.
+            let z_index = workspace
+                .windows
+                .iter()
+                .map(FhtWindow::z_index)
+                .sum::<u32>()
+                + 1u32;
+            window.set_z_index(z_index);
         }
+        workspace.insert_window(window.clone());
 
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
         let is_switching = wset.switch_animation.is_some();
         let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
 
-        workspace.insert_window(window.clone());
         if should_focus {
             if CONFIG.general.cursor_warps {
-                let center = window.global_geometry().center();
+                let center = window.geometry().center();
                 self.loop_handle
                     .insert_idle(move |state| state.move_pointer(center.to_f64()));
             }
-            self.focus_state.focus_target = Some(window.into());
+            self.focus_state.focus_target = Some(window.clone().into());
         }
     }
 
@@ -443,7 +421,7 @@ impl Fht {
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = outputs_geo;
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
-        target.loc -= window.global_geometry().loc;
+        target.loc -= window.geometry().loc;
 
         popup.with_pending_state(|state| {
             state.geometry = state
@@ -490,9 +468,7 @@ impl State {
             return;
         };
 
-        let Some(wl_surface) = window.wl_surface() else {
-            return;
-        };
+        let wl_surface = window.wl_surface();
         // Make sure we are moving the same window
         if start_data.focus.is_none()
             || !start_data
@@ -505,18 +481,16 @@ impl State {
             return;
         }
 
-        let window_geo = window.global_geometry();
+        let window_geo = window.geometry();
         let mut initial_window_location = window_geo.loc;
 
         // Unmaximize/Unfullscreen if it already is.
-        let is_maximized = window.is_maximized();
-        let is_fullscreen = window.is_fullscreen();
+        let is_maximized = window.maximized();
+        let is_fullscreen = window.fullscreen();
         if is_maximized || is_fullscreen {
             window.set_maximized(false);
             window.set_fullscreen(false, None);
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel.send_configure();
-            }
+            window.toplevel().send_configure();
 
             // let pos = pointer.current_location().as_global();
             // let mut window_pos = pos - window_geo.to_f64().loc;
@@ -539,18 +513,4 @@ impl State {
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
-}
-
-/// Like [`WindowMapSettings`], but only holds concrete values.
-///
-/// As the suffix implies, this is for internal handling in [`Fht::map_window`]
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct WindowMapSettingsInternal {
-    /// The output the window is getting mapped on
-    output: Output,
-    /// The workspace index the window is getting mapped on.
-    workspace_idx: usize,
-    /// User-specified settings.
-    user: WindowMapSettings,
 }

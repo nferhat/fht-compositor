@@ -52,6 +52,7 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::shell::cursor::CursorThemeManager;
+use crate::shell::window::FhtWindowSurface;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::{FhtWindow, KeyboardFocusTarget};
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -195,7 +196,8 @@ pub struct Fht {
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet>,
     pub pending_layers: HashMap<WlSurface, (LayerSurface, Output)>,
-    pub pending_windows: HashMap<WlSurface, FhtWindow>,
+    pub pending_windows: Vec<FhtWindowSurface>,
+    pub unmapped_windows: Vec<(FhtWindow, Output, usize)>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
 
@@ -322,7 +324,8 @@ impl Fht {
             cursor_theme_manager,
             workspaces: IndexMap::new(),
             pending_layers: HashMap::new(),
-            pending_windows: HashMap::new(),
+            pending_windows: vec![],
+            unmapped_windows: vec![],
             popups: PopupManager::default(),
 
             last_config_error: None,

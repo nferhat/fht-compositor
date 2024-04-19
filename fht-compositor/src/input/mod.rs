@@ -248,7 +248,7 @@ impl State {
                     .focus_target_under(pointer_location)
                     .and_then(|(ft, _)| {
                         if let PointerFocusTarget::Window(w) = ft {
-                            let wl_surface = w.wl_surface()?;
+                            let wl_surface = w.wl_surface();
                             self.fht
                                 .seat
                                 .keyboard_shortcuts_inhibitor_for_surface(&wl_surface)

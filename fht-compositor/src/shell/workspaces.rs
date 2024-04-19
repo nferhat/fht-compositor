@@ -16,7 +16,6 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
-use smithay::wayland::seat::WaylandFocus;
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
@@ -194,33 +193,25 @@ impl WorkspaceSet {
             if let Some(FullscreenSurface { inner, .. }) = ws
                 .fullscreen
                 .as_ref()
-                .filter(|f| f.inner.wl_surface().as_ref() == Some(surface))
+                .filter(|f| f.inner.wl_surface() == *surface)
             {
                 Some(inner)
             } else {
-                ws.windows
-                    .iter()
-                    .find(|w| w.wl_surface().as_ref() == Some(surface))
+                ws.windows.iter().find(|w| w.wl_surface() == *surface)
             }
         })
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace> {
-        self.workspaces().find(|ws| {
-            ws.windows
-                .iter()
-                .any(|w| w.wl_surface().as_ref() == Some(surface))
-        })
+        self.workspaces()
+            .find(|ws| ws.windows.iter().any(|w| w.wl_surface() == *surface))
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
-        self.workspaces_mut().find(|ws| {
-            ws.windows
-                .iter()
-                .any(|w| w.wl_surface().as_ref() == Some(surface))
-        })
+        self.workspaces_mut()
+            .find(|ws| ws.windows.iter().any(|w| w.wl_surface() == *surface))
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
@@ -229,10 +220,7 @@ impl WorkspaceSet {
         surface: &WlSurface,
     ) -> Option<(&FhtWindow, &Workspace)> {
         self.workspaces().find_map(|ws| {
-            let window = ws
-                .windows
-                .iter()
-                .find(|w| w.wl_surface().as_ref() == Some(surface));
+            let window = ws.windows.iter().find(|w| w.wl_surface() == *surface);
             window.map(|w| (w, ws))
         })
     }
@@ -246,7 +234,7 @@ impl WorkspaceSet {
             let window = ws
                 .windows
                 .iter()
-                .find(|w| w.wl_surface().as_ref() == Some(surface))
+                .find(|w| w.wl_surface() == *surface)
                 .cloned();
             window.map(|w| (w, ws))
         })
@@ -844,7 +832,7 @@ impl Workspace {
             mut last_known_idx,
         }) = self
             .fullscreen
-            .take_if(|f| !f.inner.alive() || !f.inner.is_fullscreen())
+            .take_if(|f| !f.inner.alive() || !f.inner.fullscreen())
         {
             should_refresh_geometries = true;
             inner.set_fullscreen(false, None);
@@ -852,9 +840,8 @@ impl Workspace {
             // NOTE: I assume that if you call this function you don't have a handle to the inner
             // fullscreen window, so just make sure it understood theres no more fullscreen.
             inner.set_fullscreen(false, None);
-            if let Some(toplevel) = inner.0.toplevel() {
-                toplevel.send_pending_configure();
-            }
+            inner.toplevel().send_pending_configure();
+
             {
                 let ipc_path = self.ipc_path.clone();
                 spawn(async move {
@@ -916,19 +903,26 @@ impl Workspace {
         }
 
         // Refresh internal state of windows
+        //
+        if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
+            inner.set_activated(true);
+            inner.surface.refresh();
+        }
         let output_geometry = self.output.geometry();
         for (idx, window) in self.windows.iter().enumerate() {
-            window.set_activate(idx == self.focused_window_idx);
+            window.set_activated(idx == self.focused_window_idx);
 
-            let bbox = window.global_bbox();
+            let bbox = window.bbox();
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
                 // output_enter excepts the overlap to be relative to the element, weird choice but
                 // I comply.
                 overlap.loc -= bbox.loc;
-                window.output_enter(&self.output, overlap.as_logical());
+                window
+                    .surface
+                    .output_enter(&self.output, overlap.as_logical());
             }
 
-            window.refresh();
+            window.surface.refresh();
         }
     }
 
@@ -949,20 +943,23 @@ impl Workspace {
     ///
     /// This doesn't reinsert a window if it's already inserted.
     pub fn insert_window(&mut self, window: FhtWindow) {
-        if self.windows.contains(&window) {
+        if self.windows.contains(&window)
+            || self.fullscreen.as_ref().is_some_and(|f| f.inner == window)
+        {
             return;
         }
 
         if let Some(fullscreen) = self.remove_current_fullscreen() {
             fullscreen.set_fullscreen(false, None);
-            if let Some(toplevel) = fullscreen.0.toplevel() {
-                toplevel.send_pending_configure();
-            }
+            fullscreen.surface.toplevel().send_pending_configure();
         }
 
         // Configure the window for insertion
         // refresh_window_geometries send a configure message for us
-        window.output_enter(&self.output, window.bbox());
+        window.surface.output_enter(
+            &self.output,
+            window.bbox().to_local(&self.output).as_logical(),
+        );
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
 
         {
@@ -984,11 +981,15 @@ impl Workspace {
             });
         }
 
-        self.windows.push(window);
-        if CONFIG.general.focus_new_windows {
-            self.focused_window_idx = self.windows.len() - 1;
+        self.windows.push(window.clone());
+        if window.fullscreen() {
+            self.fullscreen_window(&window);
+        } else {
+            if CONFIG.general.focus_new_windows {
+                self.focused_window_idx = self.windows.len() - 1;
+            }
+            self.refresh_window_geometries();
         }
-        self.refresh_window_geometries();
     }
 
     /// Removes a window from this [`Workspace`], returning it if it was found.
@@ -1005,7 +1006,7 @@ impl Workspace {
 
         let window = self.windows.remove(idx);
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
-        window.output_leave(&self.output);
+        window.surface.output_leave(&self.output);
         window.set_bounds(None);
         self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
 
@@ -1147,7 +1148,7 @@ impl Workspace {
 
     /// Swap the current window with the next window.
     pub fn swap_with_next_window(&mut self) {
-        if self.windows.len() < 2{
+        if self.windows.len() < 2 {
             return;
         }
 
@@ -1277,10 +1278,8 @@ impl Workspace {
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
         if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
-            window.set_geometry(self.output.geometry(), false);
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel.send_pending_configure();
-            }
+            window.set_geometry(self.output.geometry());
+            window.toplevel().send_pending_configure();
         }
 
         if self.windows.is_empty() {
@@ -1288,8 +1287,8 @@ impl Workspace {
         }
 
         let (maximized_windows, mut tiled_windows): (Vec<&FhtWindow>, Vec<&FhtWindow>) =
-            self.windows.iter().partition(|w| w.is_maximized());
-        tiled_windows.retain(|w| w.is_tiled());
+            self.windows.iter().partition(|w| w.maximized());
+        tiled_windows.retain(|w| w.tiled());
 
         let inner_gaps = CONFIG.general.inner_gaps;
         let outer_gaps = CONFIG.general.outer_gaps;
@@ -1302,10 +1301,8 @@ impl Workspace {
         maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
         maximized_geo.loc += (outer_gaps, outer_gaps).into();
         for window in maximized_windows {
-            window.set_geometry(maximized_geo, true);
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel.send_pending_configure();
-            }
+            window.set_geometry_with_border(maximized_geo);
+            window.toplevel().send_pending_configure();
         }
 
         if !tiled_windows.is_empty() {
@@ -1316,10 +1313,8 @@ impl Workspace {
                 maximized_geo,
                 inner_gaps,
                 |_idx, window, new_geo| {
-                    window.set_geometry(new_geo, true);
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.set_geometry_with_border(new_geo);
+                    window.toplevel().send_pending_configure();
                 },
             );
         }
@@ -1444,14 +1439,16 @@ impl Workspace {
         }
 
         let mut windows = self.windows.iter().collect::<Vec<_>>();
-        windows.sort_by_key(|w| std::cmp::Reverse(w.get_z_index()));
+        windows.sort_by_key(|w| std::cmp::Reverse(w.z_index()));
 
         windows
             .iter()
-            .filter(|w| w.global_bbox().to_f64().contains(point))
+            .filter(|w| w.bbox().to_f64().contains(point))
             .find_map(|w| {
                 let render_location = w.render_location();
-                if w.is_in_input_region(&(point - render_location.to_f64()).as_logical()) {
+                if w.surface
+                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+                {
                     Some((*w, render_location))
                 } else {
                     None
@@ -1466,8 +1463,8 @@ impl Workspace {
             return;
         }
 
-        let old_z_index = window.get_z_index();
-        let max_z_index = self.windows.iter().map(FhtWindow::get_z_index).sum::<u32>();
+        let old_z_index = window.z_index();
+        let max_z_index = self.windows.iter().map(FhtWindow::z_index).sum::<u32>();
         if old_z_index <= max_z_index {
             window.set_z_index(max_z_index + 1);
         }
@@ -1489,23 +1486,16 @@ impl Workspace {
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
         if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            return inner.render_elements(renderer, scale, alpha, false, true);
+            return inner.render_elements(renderer, scale, alpha);
         }
 
-        let mut windows = self
-            .windows
-            .iter()
-            .enumerate()
-            .map(|(idx, window)| (idx == self.focused_window_idx, window))
-            .collect::<Vec<_>>();
-        windows.sort_unstable_by(|a, b| a.1.get_z_index().cmp(&b.1.get_z_index()));
+        let mut windows = self.windows.iter().collect::<Vec<_>>();
+        windows.sort_unstable_by(|a, b| a.z_index().cmp(&b.z_index()));
         windows.reverse();
 
         windows
             .into_iter()
-            .flat_map(|(is_focused, w)| {
-                w.render_elements(renderer, scale, alpha, is_focused, false)
-            })
+            .flat_map(|w| w.render_elements(renderer, scale, alpha))
             .collect()
     }
 }
@@ -1647,9 +1637,7 @@ impl WorkspaceLayout {
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
 
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.toplevel().send_pending_configure();
                 }
             }
             WorkspaceLayout::BottomStack {
@@ -1727,17 +1715,13 @@ impl WorkspaceLayout {
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
 
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.toplevel().send_pending_configure();
                 }
             }
             WorkspaceLayout::Floating => {
                 // Let the windows be free
                 for window in windows {
-                    if let Some(toplevel) = window.0.toplevel() {
-                        toplevel.send_pending_configure();
-                    }
+                    window.toplevel().send_pending_configure();
                 }
             }
         }
@@ -1772,7 +1756,7 @@ impl State {
                 let new_focus = workspace.focus_next_window().cloned();
                 if is_active && let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
@@ -1782,7 +1766,7 @@ impl State {
                 let new_focus = workspace.focus_previous_window().cloned();
                 if is_active && let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.global_geometry().center();
+                        let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.fht.focus_state.focus_target = Some(window.into());
