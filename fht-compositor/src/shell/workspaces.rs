@@ -10,7 +10,7 @@ use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement
 use smithay::backend::renderer::element::{Element, RenderElement};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
-use smithay::desktop::layer_map_for_output;
+use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::desktop::space::SpaceElement;
 use smithay::output::Output;
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
@@ -189,29 +189,19 @@ impl WorkspaceSet {
 
     /// Find the window associated with this [`WlSurface`]
     pub fn find_window(&self, surface: &WlSurface) -> Option<&FhtWindow> {
-        self.workspaces().find_map(|ws| {
-            if let Some(FullscreenSurface { inner, .. }) = ws
-                .fullscreen
-                .as_ref()
-                .filter(|f| f.inner.wl_surface() == *surface)
-            {
-                Some(inner)
-            } else {
-                ws.windows.iter().find(|w| w.wl_surface() == *surface)
-            }
-        })
+        self.workspaces().find_map(|ws| ws.find_window(surface))
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.workspaces()
-            .find(|ws| ws.windows.iter().any(|w| w.wl_surface() == *surface))
+            .find(|ws| ws.has_surface(surface))
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
         self.workspaces_mut()
-            .find(|ws| ws.windows.iter().any(|w| w.wl_surface() == *surface))
+            .find(|ws| ws.has_surface(surface))
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
@@ -220,8 +210,7 @@ impl WorkspaceSet {
         surface: &WlSurface,
     ) -> Option<(&FhtWindow, &Workspace)> {
         self.workspaces().find_map(|ws| {
-            let window = ws.windows.iter().find(|w| w.wl_surface() == *surface);
-            window.map(|w| (w, ws))
+            ws.find_window(surface).map(|w| (w, ws))
         })
     }
 
@@ -231,27 +220,20 @@ impl WorkspaceSet {
         surface: &WlSurface,
     ) -> Option<(FhtWindow, &mut Workspace)> {
         self.workspaces_mut().find_map(|ws| {
-            let window = ws
-                .windows
-                .iter()
-                .find(|w| w.wl_surface() == *surface)
-                .cloned();
-            window.map(|w| (w, ws))
+            ws.find_window(surface).cloned().map(|w| (w, ws))
         })
     }
 
     /// Get a reference to the [`Workspace`] holding this window, if any.
     pub fn ws_for(&self, window: &FhtWindow) -> Option<&Workspace> {
         self.workspaces()
-            .find(|ws| ws.windows.iter().any(|w| w == window))
+            .find(|ws| ws.has_window(window))
     }
 
     /// Get a mutable reference to the [`Workspace`] holding this window, if any.
     pub fn ws_mut_for(&mut self, window: &FhtWindow) -> Option<&mut Workspace> {
-        self.workspaces_mut().find(|ws| {
-            ws.fullscreen.as_ref().is_some_and(|f| &f.inner == window)
-                || ws.windows.iter().any(|w| w == window)
-        })
+        self.workspaces_mut()
+            .find(|ws| ws.has_window(window))
     }
 
     /// Get the current fullscreen window and it's location in global coordinate space.
@@ -924,6 +906,27 @@ impl Workspace {
 
             window.surface.refresh();
         }
+    }
+
+    /// Return whether this workspace has this window.
+    pub fn find_window(&self, surface: &WlSurface) -> Option<&FhtWindow> {
+        self.fullscreen.as_ref().filter(|f| f.inner.wl_surface() == *surface)
+            .map(|f| &f.inner)
+        .or_else(
+            || self.windows.iter().find(|w| w.wl_surface() == *surface)
+            )
+    }
+
+    /// Return whether this workspace has this window.
+    pub fn has_window(&self, window: &FhtWindow) -> bool {
+        self.fullscreen.as_ref().is_some_and(|f| f.inner == *window)
+            || self.windows.iter().any(|w| w == window)
+    }
+
+    /// Return whether this workspace has a window with this [`WlSurface`] as its toplevel surface.
+    pub fn has_surface(&self, surface: &WlSurface) -> bool {
+        self.fullscreen.as_ref().is_some_and(|f| f.inner.has_surface(surface, WindowSurfaceType::TOPLEVEL))
+            || self.windows.iter().any(|w| w.has_surface(surface, WindowSurfaceType::TOPLEVEL))
     }
 
     /// Return the focused window, giving priority to the fullscreen window first, then the

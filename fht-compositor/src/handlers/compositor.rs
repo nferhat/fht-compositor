@@ -84,10 +84,9 @@ impl State {
                 let output = output.clone();
                 let (index, workspace) = state
                     .wset_mut_for(&output)
-                    .workspaces
-                    .iter_mut()
+                    .workspaces_mut()
                     .enumerate()
-                    .find(|(_, workspace)| workspace.windows.iter().any(|w| *w == window))
+                    .find(|(_, ws)| ws.has_window(&window))
                     .unwrap();
                 let window = workspace.remove_window(&window).unwrap();
                 state.unmapped_windows.push((window, output, index));
