@@ -6,6 +6,7 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, Element, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 use smithay::backend::renderer::{Frame, ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::{layer_map_for_output, PopupManager};
 use smithay::input::pointer::CursorImageStatus;
@@ -145,7 +146,7 @@ where
         }
     }
 
-    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+    fn current_commit(&self) -> CommitCounter {
         match self {
             Self::Cursor(e) => e.current_commit(),
             Self::Egui(e) => e.current_commit(),
@@ -193,8 +194,8 @@ where
     fn damage_since(
         &self,
         scale: Scale<f64>,
-        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Cursor(e) => e.damage_since(scale, commit),
             Self::Egui(e) => e.damage_since(scale, commit),

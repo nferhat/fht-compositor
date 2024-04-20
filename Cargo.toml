@@ -20,12 +20,12 @@ serde = { version = "1.0.196", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/Smithay"
-rev = "e5f0068"
+rev = "c293ec7"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "e5f0068"
+rev = "c293ec7"
 
 [workspace.dependencies.iced]
 git = "https://github.com/nferhat/iced"

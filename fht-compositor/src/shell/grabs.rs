@@ -63,7 +63,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            handle.unset_grab(data, event.serial, event.time, true);
+            handle.unset_grab(self, data, event.serial, event.time, true);
             // NOTE: Unsetting the only button to notify that we also aren't clicking. This is
             // required for user-created grabs.
             handle.button(
@@ -164,4 +164,6 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     fn start_data(&self) -> &PointerGrabStartData<State> {
         &self.start_data
     }
+
+    fn unset(&mut self, _data: &mut State) {}
 }

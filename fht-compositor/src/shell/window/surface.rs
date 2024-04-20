@@ -7,7 +7,7 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::{RenderZindex, SpaceElement};
 use smithay::desktop::{PopupManager, Window, WindowSurface};
@@ -424,7 +424,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Rounded(e, _) => e.damage_since(scale, commit),
             Self::Normal(e) => e.damage_since(scale, commit),
@@ -561,7 +561,7 @@ impl FhtWindowSurface {
     )
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
         let surface = self.wl_surface().unwrap();

@@ -1143,7 +1143,9 @@ fn render_surface(
     if res.needs_sync() {
         if let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
             profiling::scope!("SyncPoint::wait");
-            element.sync.wait();
+            if let Err(err) = element.sync.wait() {
+                error!(?err, "Failed to wait for SyncPoint")
+            };
         }
     }
 

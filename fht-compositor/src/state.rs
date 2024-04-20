@@ -41,7 +41,7 @@ use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
-use smithay::wayland::tablet_manager::{TabletManagerState, TabletSeatTrait};
+use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
@@ -296,10 +296,6 @@ impl Fht {
         info!("Initialized wl_seat.");
 
         let cursor_theme_manager = CursorThemeManager::new();
-        let cursor_image_status_clone = cursor_theme_manager.image_status.clone();
-        seat.tablet_seat().on_cursor_surface(move |_, new_status| {
-            *cursor_image_status_clone.lock().unwrap() = new_status;
-        });
 
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 

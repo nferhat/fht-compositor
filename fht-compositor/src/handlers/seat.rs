@@ -3,10 +3,21 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
+use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::{delegate_seat, delegate_tablet_manager, delegate_text_input_manager};
 
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
+
+impl TabletSeatHandler for State {
+    fn tablet_tool_image(
+        &mut self,
+        _tool: &smithay::backend::input::TabletToolDescriptor,
+        image: smithay::input::pointer::CursorImageStatus,
+    ) {
+        *self.fht.cursor_theme_manager.image_status.lock().unwrap() = image;
+    }
+}
 
 impl SeatHandler for State {
     type KeyboardFocus = KeyboardFocusTarget;

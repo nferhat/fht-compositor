@@ -11,6 +11,7 @@ use smithay::backend::renderer::element::{Element, Id, RenderElement, Underlying
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::GlesError;
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::{RenderZindex, SpaceElement};
 use smithay::desktop::utils::OutputPresentationFeedback;
@@ -162,7 +163,7 @@ impl FhtWindow {
             if current_location.x != geometry.loc.x {
                 data.location_x_animation = Some(Animation::new(
                     current_location.x as f64,
-                     geometry.loc.x as f64 ,
+                    geometry.loc.x as f64,
                     CONFIG.animation.window_geometry.easing,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
                 ));
@@ -171,7 +172,7 @@ impl FhtWindow {
             if current_location.y != geometry.loc.y {
                 data.location_y_animation = Some(Animation::new(
                     current_location.y as f64,
-                     geometry.loc.y as f64 ,
+                    geometry.loc.y as f64,
                     CONFIG.animation.window_geometry.easing,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
                 ));
@@ -521,7 +522,7 @@ where
         }
     }
 
-    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+    fn current_commit(&self) -> CommitCounter {
         match self {
             Self::Surface(e) => e.current_commit(),
             Self::ResizingSurface(e) => e.current_commit(),
@@ -569,8 +570,8 @@ where
     fn damage_since(
         &self,
         scale: Scale<f64>,
-        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Surface(e) => e.damage_since(scale, commit),
             Self::ResizingSurface(e) => e.damage_since(scale, commit),
@@ -694,7 +695,7 @@ impl FhtWindow {
     ) -> Vec<FhtWindowRenderElement<R>>
     where
         R: Renderer + ImportAll + AsGlowRenderer + ImportMem,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
         let surface = self.wl_surface();
@@ -723,7 +724,8 @@ impl FhtWindow {
             .center()
             .as_logical()
             .to_physical_precise_round(scale);
-        let render_location = render_location.as_logical()
+        let render_location = render_location
+            .as_logical()
             .to_physical_precise_round(scale);
 
         let mut render_elements = vec![];
@@ -785,7 +787,7 @@ impl FhtWindow {
                     .into_iter()
                     .map(|e| rescale_surface_elements(e, center, offset_scale)),
             );
-        }  else {
+        } else {
             let (window_elements, popup_elements, border_element) = create_render_elements(alpha);
             render_elements.extend(
                 popup_elements

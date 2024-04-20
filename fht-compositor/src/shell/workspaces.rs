@@ -9,6 +9,7 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{Element, RenderElement};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::DamageSet;
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::desktop::space::SpaceElement;
@@ -396,7 +397,7 @@ impl WorkspaceSet {
     ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
 
         FhtWindowRenderElement<R>: RenderElement<R>,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
@@ -606,7 +607,7 @@ where
         &self,
         scale: Scale<f64>,
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> Vec<Rectangle<i32, Physical>> {
+    ) -> DamageSet<i32, Physical> {
         match self {
             Self::Normal(e) => e.damage_since(scale, commit),
             Self::Switching(e) => e.damage_since(scale, commit),
@@ -1483,7 +1484,7 @@ impl Workspace {
     ) -> Vec<FhtWindowRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: 'static,
+        <R as Renderer>::TextureId: Clone + 'static,
 
         FhtWindowRenderElement<R>: RenderElement<R>,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
