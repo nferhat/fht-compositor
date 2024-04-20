@@ -30,9 +30,10 @@ impl State {
     fn process_window_commit(surface: &WlSurface, state: &mut Fht) {
         // First check: the pending window may be a pending one, needing both an initial configure
         // call and a prepapring before mapping.
-        let possible_unmapped_window = state.unmapped_windows.iter().position(|(w, _, _)| {
-            w.wl_surface() == *surface
-        });
+        let possible_unmapped_window = state
+            .unmapped_windows
+            .iter()
+            .position(|(w, _, _)| w.wl_surface() == *surface);
         if let Some(idx) = state
             .pending_windows
             .iter()
@@ -49,14 +50,12 @@ impl State {
                     let window_surface = state.fht.pending_windows.remove(idx);
                     state.fht.prepare_pending_window(window_surface);
                     // For some reason I have to commit this manually.
-                    state
-                        .fht
-                        .loop_handle
-                        .insert_idle(move |state| {
-                            state.fht.loop_handle.insert_idle(move |state| {
-                                state.commit(&surface)
-                            });
-                        });
+                    state.fht.loop_handle.insert_idle(move |state| {
+                        state
+                            .fht
+                            .loop_handle
+                            .insert_idle(move |state| state.commit(&surface));
+                    });
                 });
             }
 
@@ -83,13 +82,12 @@ impl State {
             // Window got unmapped.
             if !has_render_buffer(surface) {
                 let output = output.clone();
-                let (index, workspace) = state.wset_mut_for(&output)
+                let (index, workspace) = state
+                    .wset_mut_for(&output)
                     .workspaces
                     .iter_mut()
                     .enumerate()
-                    .find(|(_, workspace)| {
-                        workspace.windows.iter().any(|w| *w == window)
-                    })
+                    .find(|(_, workspace)| workspace.windows.iter().any(|w| *w == window))
                     .unwrap();
                 let window = workspace.remove_window(&window).unwrap();
                 state.unmapped_windows.push((window, output, index));

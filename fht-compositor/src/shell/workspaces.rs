@@ -1278,7 +1278,7 @@ impl Workspace {
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
         if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
-            window.set_geometry(self.output.geometry());
+            window.set_geometry(self.output.geometry(), false);
             window.toplevel().send_pending_configure();
         }
 
@@ -1301,7 +1301,7 @@ impl Workspace {
         maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
         maximized_geo.loc += (outer_gaps, outer_gaps).into();
         for window in maximized_windows {
-            window.set_geometry_with_border(maximized_geo);
+            window.set_geometry_with_border(maximized_geo, false);
             window.toplevel().send_pending_configure();
         }
 
@@ -1312,9 +1312,9 @@ impl Workspace {
                 windows_len,
                 maximized_geo,
                 inner_gaps,
-                |_idx, window, new_geo| {
-                    window.set_geometry_with_border(new_geo);
-                    window.toplevel().send_pending_configure();
+                |_idx, w, new_geo| {
+                    w.set_geometry_with_border(new_geo, false);
+                    w.toplevel().send_pending_configure();
                 },
             );
         }

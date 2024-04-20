@@ -1,0 +1,18 @@
+[2m2024-04-20T13:31:12.360185Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Starting fht-compositor. [3mversion[0m[2m=[0m"0.1.0" [3mgit_hash[0m[2m=[0m"Unknown"
+[2m2024-04-20T13:31:12.360363Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Listening on socket. [3msocket_name[0m[2m=[0m"wayland-2"
+[2m2024-04-20T13:31:12.362852Z[0m [32m INFO[0m [2mfht_compositor::portals[0m[2m:[0m Starting XDG screencast portal!
+[2m2024-04-20T13:31:12.362880Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Initialized monotonic clock.
+[2m2024-04-20T13:31:12.369770Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Initialized wl_seat.
+[2m2024-04-20T13:31:12.369808Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Running from TTY, initializing Udev backend.
+[2m2024-04-20T13:31:12.557387Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m Found primary GPU for rendering! [3mprimary_gpu[0m[2m=[0mDrmNode { dev: 57984, ty: Render }
+[2m2024-04-20T13:31:12.557405Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m [3mprimary_node[0m[2m=[0mDrmNode { dev: 57856, ty: Primary }
+[2m2024-04-20T13:31:12.562926Z[0m [33m WARN[0m [2msmithay::backend::drm::device::fd[0m[2m:[0m Unable to become drm master, assuming unprivileged mode
+[2m2024-04-20T13:31:12.576829Z[0m [33m WARN[0m [2msmithay::backend::drm::device::fd[0m[2m:[0m Unable to become drm master, assuming unprivileged mode
+[2m2024-04-20T13:31:12.902164Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m Trying to initialize EGL Hardware Acceleration [3mself.primary_gpu[0m[2m=[0mDrmNode { dev: 57984, ty: Render }
+[2m2024-04-20T13:31:12.902215Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m EGL hardware-acceleration enabled
+[2m2024-04-20T13:31:13.715097Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m Trying to setup connector. [3mcrtc[0m[2m=[0mcrtc::Handle(51) [3moutput_name[0m[2m=[0m"eDP-1"
+[2m2024-04-20T13:31:13.715911Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Adding new output. [3mname[0m[2m=[0m"eDP-1"
+[2m2024-04-20T13:31:13.753461Z[0m [33m WARN[0m [2msmithay::backend::drm::surface::atomic[0m[2m:[0m Failed to destroy old mode property blob: No such file or directory (os error 2)
+[2m2024-04-20T13:31:34.996179Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Shutting down! Goodbye~
+[2m2024-04-20T13:31:36.480740Z[0m [31mERROR[0m [2msmithay::backend::drm::device::atomic[0m[2m:[0m Failed to restore previous state. Error: Permission denied (os error 13)
+[2m2024-04-20T13:31:36.480814Z[0m [31mERROR[0m [2msmithay::backend::drm::device::atomic[0m[2m:[0m Failed to restore previous state. Error: Permission denied (os error 13)

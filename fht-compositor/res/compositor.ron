@@ -81,6 +81,18 @@ FhtConfig(
             easing: EaseOut,
             direction: Horizontal,
         ),
+
+        // Animation when opening or closing a window.
+        window_open_close: (
+            duration: 300,
+            easing: EaseOutCubic,
+        ),
+
+        // Animation when a window changes geometry.
+        window_geometry: (
+            duration: 300,
+            easing: EaseOutCubic,
+        )
     ),
 
     // Key bindings.

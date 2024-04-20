@@ -1,10 +1,12 @@
 mod surface;
 
+use std::ops::Mul;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::GlesError;
@@ -36,13 +38,34 @@ use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{BorderConfig, CONFIG};
-use crate::utils::geometry::{Global, PointExt, PointGlobalExt, RectExt, RectGlobalExt, SizeExt};
+use crate::utils::animation::Animation;
+use crate::utils::geometry::{
+    Global, PointExt, PointGlobalExt, RectCenterExt, RectExt, RectGlobalExt, SizeExt,
+};
 
 pub struct FhtWindowData {
     pub border_config: Option<BorderConfig>,
     pub location: Point<i32, Global>,
     pub z_index: u32,
     pub last_floating_geometry: Option<Rectangle<i32, Global>>,
+
+    // Open close animation.
+    //
+    // An issue to solve with these animations is when closing a window, smithay deletes the
+    // Toplevel object and we clean everything behind this, which is problematic since we need to
+    // render that last frame.
+    //
+    // Currently investigating how to "cache" that last frame for resuse.
+    pub open_close_animation: Option<Animation>,
+
+    // Window geometry animations.
+    //
+    // its a point that we are going progressively offset until we hit the end and boom the
+    // animation is over. The window already manages its own location, so we are not spamming the
+    // wayland protocols.
+    pub render_location: Point<i32, Global>, // this can be equal to location
+    pub location_x_animation: Option<Animation>,
+    pub location_y_animation: Option<Animation>,
 }
 
 #[derive(Clone)]
@@ -78,6 +101,12 @@ impl FhtWindow {
                 location: Point::default(),
                 z_index: RenderZindex::Shell as u32,
                 last_floating_geometry: None,
+
+                open_close_animation: None,
+
+                render_location: Point::default(),
+                location_x_animation: None,
+                location_y_animation: None,
             })),
         }
     }
@@ -95,11 +124,16 @@ impl FhtWindow {
     }
 
     pub fn render_location(&self) -> Point<i32, Global> {
-        self.location() - self.surface.geometry().loc.as_global()
+        let data = self.data.lock().unwrap();
+        data.render_location - self.surface.geometry().loc.as_global()
     }
 
     pub fn border_config(&self) -> BorderConfig {
-        self.data.lock().unwrap().border_config.unwrap_or(CONFIG.decoration.border)
+        self.data
+            .lock()
+            .unwrap()
+            .border_config
+            .unwrap_or(CONFIG.decoration.border)
     }
 
     pub fn geometry(&self) -> Rectangle<i32, Global> {
@@ -108,26 +142,55 @@ impl FhtWindow {
         geo
     }
 
-    pub fn set_geometry(&self, geometry: Rectangle<i32, Global>) {
-        self.surface.toplevel().with_pending_state(|state| {
-            state.size = Some(geometry.size.as_logical());
-        });
+    pub fn set_geometry(&self, geometry: Rectangle<i32, Global>, instant: bool) {
+        if instant {
+            let mut data = self.data.lock().unwrap();
+            self.surface.toplevel().with_pending_state(|state| {
+                state.size = Some(geometry.size.as_logical());
+            });
 
-        let mut data = self.data.lock().unwrap();
-        data.location = geometry.loc;
+            data.location = geometry.loc;
+            data.render_location = geometry.loc;
+            if !self.tiled() {
+                data.last_floating_geometry = Some(geometry)
+            }
+        } else {
+            let current_location = self.location();
+            let mut data = self.data.lock().unwrap();
+            data.location = geometry.loc;
 
-        if !self.tiled() {
-            data.last_floating_geometry = Some(geometry)
+            if current_location.x != geometry.loc.x {
+                data.location_x_animation = Some(Animation::new(
+                    current_location.x as f64,
+                     geometry.loc.x as f64 ,
+                    CONFIG.animation.window_geometry.easing,
+                    Duration::from_millis(CONFIG.animation.window_geometry.duration),
+                ));
+            }
+
+            if current_location.y != geometry.loc.y {
+                data.location_y_animation = Some(Animation::new(
+                    current_location.y as f64,
+                     geometry.loc.y as f64 ,
+                    CONFIG.animation.window_geometry.easing,
+                    Duration::from_millis(CONFIG.animation.window_geometry.duration),
+                ));
+            }
+
+            // TODO: Support resizing animations.
+            self.surface.toplevel().with_pending_state(|state| {
+                state.size = Some(geometry.size.as_logical());
+            });
         }
     }
 
-    pub fn set_geometry_with_border(&self, mut geometry: Rectangle<i32, Global>) {
+    pub fn set_geometry_with_border(&self, mut geometry: Rectangle<i32, Global>, instant: bool) {
         let thickness = self.border_config().thickness as i32;
         geometry.loc.x += thickness as i32;
         geometry.loc.y += thickness as i32;
         geometry.size.w -= 2 * thickness as i32;
         geometry.size.h -= 2 * thickness as i32;
-        self.set_geometry(geometry);
+        self.set_geometry(geometry, instant);
     }
 
     pub fn bbox(&self) -> Rectangle<i32, Global> {
@@ -381,6 +444,49 @@ impl FhtWindow {
     }
 }
 
+// Animation related code.
+impl FhtWindow {
+    pub fn advance_animations(&self, current_time: Duration) {
+        let mut data = self.data.lock().unwrap();
+
+        let _ = data.open_close_animation.take_if(|anim| anim.is_finished());
+        if let Some(open_close_animation) = data.open_close_animation.as_mut() {
+            open_close_animation.set_current_time(current_time);
+        }
+
+        if let Some(_) = data.location_x_animation.take_if(|anim| anim.is_finished()) {
+            data.render_location.x = data.location.x;
+        }
+        if let Some(x_animation) = data.location_x_animation.as_mut() {
+            x_animation.set_current_time(current_time);
+            data.render_location.x = x_animation.value().round() as i32;
+        }
+
+        if let Some(_) = data.location_y_animation.take_if(|anim| anim.is_finished()) {
+            data.render_location.y = data.location.y;
+        }
+        if let Some(y_animation) = data.location_y_animation.as_mut() {
+            y_animation.set_current_time(current_time);
+            data.render_location.y = y_animation.value().round() as i32;
+        }
+    }
+
+    pub fn start_open_close_animation(&self) {
+        let mut data = self.data.lock().unwrap();
+        data.open_close_animation = Some(Animation::new(
+            0.0,
+            1.0,
+            CONFIG.animation.window_open_close.easing,
+            Duration::from_millis(CONFIG.animation.window_open_close.duration),
+        ));
+    }
+
+    pub fn open_close_animation_scale(&self) -> Option<f64> {
+        let data = self.data.lock().unwrap();
+        data.open_close_animation.as_ref().map(Animation::value)
+    }
+}
+
 impl IsAlive for FhtWindow {
     fn alive(&self) -> bool {
         self.surface.alive()
@@ -394,8 +500,10 @@ where
     <R as Renderer>::TextureId: 'static,
     WaylandSurfaceRenderElement<R>: RenderElement<R>,
 {
-    Normal(FhtWindowSurfaceRenderElement<R>),
+    Surface(FhtWindowSurfaceRenderElement<R>),
+    ResizingSurface(RescaleRenderElement<FhtWindowSurfaceRenderElement<R>>),
     Border(PixelShaderElement),
+    ResizingBorder(RescaleRenderElement<PixelShaderElement>),
 }
 
 impl<R> Element for FhtWindowRenderElement<R>
@@ -406,43 +514,55 @@ where
 {
     fn id(&self) -> &Id {
         match self {
-            Self::Normal(e) => e.id(),
+            Self::Surface(e) => e.id(),
+            Self::ResizingSurface(e) => e.id(),
             Self::Border(e) => e.id(),
+            Self::ResizingBorder(e) => e.id(),
         }
     }
 
     fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
         match self {
-            Self::Normal(e) => e.current_commit(),
+            Self::Surface(e) => e.current_commit(),
+            Self::ResizingSurface(e) => e.current_commit(),
             Self::Border(e) => e.current_commit(),
+            Self::ResizingBorder(e) => e.current_commit(),
         }
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
         match self {
-            Self::Normal(e) => e.src(),
+            Self::Surface(e) => e.src(),
+            Self::ResizingSurface(e) => e.src(),
             Self::Border(e) => e.src(),
+            Self::ResizingBorder(e) => e.src(),
         }
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         match self {
-            Self::Normal(e) => e.geometry(scale),
+            Self::Surface(e) => e.geometry(scale),
+            Self::ResizingSurface(e) => e.geometry(scale),
             Self::Border(e) => e.geometry(scale),
+            Self::ResizingBorder(e) => e.geometry(scale),
         }
     }
 
     fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
         match self {
-            Self::Normal(e) => e.location(scale),
+            Self::Surface(e) => e.location(scale),
+            Self::ResizingSurface(e) => e.location(scale),
             Self::Border(e) => e.location(scale),
+            Self::ResizingBorder(e) => e.location(scale),
         }
     }
 
     fn transform(&self) -> smithay::utils::Transform {
         match self {
-            Self::Normal(e) => e.transform(),
+            Self::Surface(e) => e.transform(),
+            Self::ResizingSurface(e) => e.transform(),
             Self::Border(e) => e.transform(),
+            Self::ResizingBorder(e) => e.transform(),
         }
     }
 
@@ -452,29 +572,37 @@ where
         commit: Option<smithay::backend::renderer::utils::CommitCounter>,
     ) -> Vec<Rectangle<i32, Physical>> {
         match self {
-            Self::Normal(e) => e.damage_since(scale, commit),
+            Self::Surface(e) => e.damage_since(scale, commit),
+            Self::ResizingSurface(e) => e.damage_since(scale, commit),
             Self::Border(e) => e.damage_since(scale, commit),
+            Self::ResizingBorder(e) => e.damage_since(scale, commit),
         }
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
         match self {
-            Self::Normal(e) => e.opaque_regions(scale),
+            Self::Surface(e) => e.opaque_regions(scale),
+            Self::ResizingSurface(e) => e.opaque_regions(scale),
             Self::Border(e) => e.opaque_regions(scale),
+            Self::ResizingBorder(e) => e.opaque_regions(scale),
         }
     }
 
     fn alpha(&self) -> f32 {
         match self {
-            Self::Normal(e) => e.alpha(),
+            Self::Surface(e) => e.alpha(),
+            Self::ResizingSurface(e) => e.alpha(),
             Self::Border(e) => e.alpha(),
+            Self::ResizingBorder(e) => e.alpha(),
         }
     }
 
     fn kind(&self) -> smithay::backend::renderer::element::Kind {
         match self {
-            Self::Normal(e) => e.kind(),
+            Self::Surface(e) => e.kind(),
+            Self::ResizingSurface(e) => e.kind(),
             Self::Border(e) => e.kind(),
+            Self::ResizingBorder(e) => e.kind(),
         }
     }
 }
@@ -488,17 +616,25 @@ impl RenderElement<GlowRenderer> for FhtWindowRenderElement<GlowRenderer> {
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         match self {
-            Self::Normal(e) => e.draw(frame, src, dst, damage),
+            Self::Surface(e) => e.draw(frame, src, dst, damage),
+            Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
             Self::Border(e) => <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
                 e, frame, src, dst, damage,
             ),
+            Self::ResizingBorder(e) => {
+                <RescaleRenderElement<PixelShaderElement> as RenderElement<GlowRenderer>>::draw(
+                    e, frame, src, dst, damage,
+                )
+            }
         }
     }
 
     fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
         match self {
-            Self::Normal(e) => e.underlying_storage(renderer),
+            Self::Surface(e) => e.underlying_storage(renderer),
+            Self::ResizingSurface(e) => e.underlying_storage(renderer),
             Self::Border(e) => e.underlying_storage(renderer),
+            Self::ResizingBorder(e) => e.underlying_storage(renderer),
         }
     }
 }
@@ -513,10 +649,18 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtWindowRenderElement<UdevRenderer
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
         match self {
-            Self::Normal(e) => e.draw(frame, src, dst, damage),
+            Self::Surface(e) => e.draw(frame, src, dst, damage),
+            Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
             Self::Border(e) => {
                 let frame = frame.glow_frame_mut();
                 <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+                    e, frame, src, dst, damage,
+                )
+                .map_err(|err| UdevRenderError::Render(err))
+            }
+            Self::ResizingBorder(e) => {
+                let frame = frame.glow_frame_mut();
+                <RescaleRenderElement<PixelShaderElement> as RenderElement<GlowRenderer>>::draw(
                     e, frame, src, dst, damage,
                 )
                 .map_err(|err| UdevRenderError::Render(err))
@@ -526,8 +670,13 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtWindowRenderElement<UdevRenderer
 
     fn underlying_storage(&self, renderer: &mut UdevRenderer<'a>) -> Option<UnderlyingStorage> {
         match self {
-            Self::Normal(e) => e.underlying_storage(renderer),
+            Self::Surface(e) => e.underlying_storage(renderer),
+            Self::ResizingSurface(e) => e.underlying_storage(renderer),
             Self::Border(e) => {
+                let renderer = renderer.glow_renderer_mut();
+                e.underlying_storage(renderer)
+            }
+            Self::ResizingBorder(e) => {
                 let renderer = renderer.glow_renderer_mut();
                 e.underlying_storage(renderer)
             }
@@ -551,52 +700,107 @@ impl FhtWindow {
         let surface = self.wl_surface();
         // If the window is fullscreen then it's edge to edge with no border and rounding.
         // Otherwise, the window is not edge to edge and can be drawn normally.
-        let border_config = (!self.fullscreen()).then(|| self.border_config());
+        let border_config = (!self.fullscreen()).then(|| {
+            let border_config = self.border_config();
+            super::decorations::RoundedOutlineShaderSettings {
+                thickness: border_config.thickness,
+                radius: border_config.radius,
+                color: if self.activated() {
+                    border_config.focused_color
+                } else {
+                    border_config.normal_color
+                },
+            }
+        });
+
         let render_location = self.render_location();
-        let geometry = self.geometry();
+        // Render location may also include CSD like shadows that we don't need, but we also need
+        // the offset to match the animation
+        let mut border_geometry = self.geometry();
+        border_geometry.loc = render_location + self.surface.geometry().loc.as_global();
+        // We still need the absolute center of the window
+        let center = border_geometry
+            .center()
+            .as_logical()
+            .to_physical_precise_round(scale);
+        let render_location = render_location.as_logical()
+            .to_physical_precise_round(scale);
 
         let mut render_elements = vec![];
 
-        let (window_elements, popup_elements) = self.surface.render_elements(
-            renderer,
-            render_location
-                .as_logical()
-                .to_physical_precise_round(scale),
-            scale,
-            alpha,
-            border_config.map(|bc| bc.radius),
-        );
-        render_elements.extend(
-            popup_elements
-                .into_iter()
-                .map(FhtWindowRenderElement::Normal),
-        );
-
-        if let Some(border_config) = border_config {
-            let border_element = RoundedOutlineShader::element(
+        let create_render_elements = |alpha| {
+            let (window_elements, popup_elements) = self.surface.render_elements(
                 renderer,
-                scale.x.max(scale.y), // WARN: This may not be always accurate.
+                render_location,
+                scale,
                 alpha,
-                &surface,
-                geometry.as_logical().as_local(),
-                super::decorations::RoundedOutlineShaderSettings {
-                    thickness: border_config.thickness,
-                    radius: border_config.radius,
-                    color: if self.activated() {
-                        border_config.focused_color
-                    } else {
-                        border_config.normal_color
-                    },
-                },
+                border_config.as_ref().map(|bc| bc.radius),
             );
-            render_elements.push(FhtWindowRenderElement::Border(border_element));
-        }
 
-        render_elements.extend(
-            window_elements
-                .into_iter()
-                .map(FhtWindowRenderElement::Normal),
-        );
+            let border_element = border_config.map(|border_config| {
+                RoundedOutlineShader::element(
+                    renderer,
+                    scale.x.max(scale.y), // WARN: This may not be always accurate.
+                    alpha,
+                    &surface,
+                    border_geometry.as_logical().as_local(),
+                    border_config,
+                )
+            });
+
+            (window_elements, popup_elements, border_element)
+        };
+
+        let rescale_surface_elements = |e: FhtWindowSurfaceRenderElement<R>,
+                                        origin: Point<i32, Physical>,
+                                        scale: Scale<f64>| {
+            FhtWindowRenderElement::ResizingSurface(RescaleRenderElement::from_element(
+                e, origin, scale,
+            ))
+        };
+
+        if let Some(offset_scale) = self.open_close_animation_scale() {
+            // With an offset, we rescale everything to the absolute center of the main window
+            // toplevel, incluiding the border and the subsurfaces.
+            //
+            // This will create a stretching effect on the X and Y axes, until the offset reaches
+            // one and the window is now not scaled anymore.
+            // This alpha function is arbitrary, I tried out stuff in desmos.
+            let alpha = f64::exp(f64::cos(offset_scale + 0.575).mul(-6.5)) as f32;
+            let offset_scale = offset_scale.into();
+
+            let (window_elements, popup_elements, border_element) = create_render_elements(alpha);
+            render_elements.extend(
+                popup_elements
+                    .into_iter()
+                    .map(|e| rescale_surface_elements(e, center, offset_scale)),
+            );
+            if let Some(border_element) = border_element {
+                render_elements.push(FhtWindowRenderElement::ResizingBorder(
+                    RescaleRenderElement::from_element(border_element, center, offset_scale),
+                ));
+            }
+            render_elements.extend(
+                window_elements
+                    .into_iter()
+                    .map(|e| rescale_surface_elements(e, center, offset_scale)),
+            );
+        }  else {
+            let (window_elements, popup_elements, border_element) = create_render_elements(alpha);
+            render_elements.extend(
+                popup_elements
+                    .into_iter()
+                    .map(FhtWindowRenderElement::Surface),
+            );
+            if let Some(border_element) = border_element {
+                render_elements.push(FhtWindowRenderElement::Border(border_element));
+            }
+            render_elements.extend(
+                window_elements
+                    .into_iter()
+                    .map(FhtWindowRenderElement::Surface),
+            );
+        }
 
         render_elements
     }

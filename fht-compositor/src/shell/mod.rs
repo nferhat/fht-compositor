@@ -27,7 +27,7 @@ pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
 pub use self::window::FhtWindow;
 use self::window::FhtWindowSurface;
-use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
+use self::workspaces::{FullscreenSurface, Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
 use crate::utils::geometry::{
@@ -222,10 +222,7 @@ impl Fht {
             .map(|(_, settings)| settings.clone())
             .unwrap_or_default();
 
-        let window = FhtWindow::new(
-            window_surface,
-            map_settings.border,
-        );
+        let window = FhtWindow::new(window_surface, map_settings.border);
 
         // Apply rules
         //
@@ -251,7 +248,7 @@ impl Fht {
 
         if map_settings.fullscreen {
             // Use output geometry, and account for window borders.
-            window.set_geometry(output.geometry());
+            window.set_geometry(output.geometry(), true);
             window.set_tiled(!map_settings.floating);
 
             let mut wl_output = None;
@@ -295,7 +292,7 @@ impl Fht {
                 window_geo.loc -= window_geo.size.downscale(2).to_point();
             }
 
-            window.set_geometry_with_border(window_geo);
+            window.set_geometry_with_border(window_geo, true);
         } else {
             window.set_tiled(true);
 
@@ -312,7 +309,7 @@ impl Fht {
 
             let output_geo = output.geometry();
             if let Some(window) = workspace.fullscreen.as_ref().map(|f| &f.inner) {
-                window.set_geometry(output_geo);
+                window.set_geometry(output_geo, false);
                 window.toplevel().send_pending_configure();
             }
 
@@ -324,7 +321,7 @@ impl Fht {
             maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
             maximized_geo.loc += (outer_gaps, outer_gaps).into();
             for window in maximized_windows {
-                window.set_geometry_with_border(maximized_geo);
+                window.set_geometry_with_border(maximized_geo, false);
                 window.toplevel().send_pending_configure();
             }
 
@@ -337,7 +334,7 @@ impl Fht {
                 maximized_geo,
                 inner_gaps,
                 |_idx, w, new_geo| {
-                    w.set_geometry_with_border(new_geo);
+                    w.set_geometry_with_border(new_geo, *w == window);
                     w.toplevel().send_pending_configure();
                 },
             );
@@ -375,6 +372,7 @@ impl Fht {
                 + 1u32;
             window.set_z_index(z_index);
         }
+        window.start_open_close_animation();
         workspace.insert_window(window.clone());
 
         // From using the compositor opening a window when a switch is being done feels more
@@ -441,6 +439,13 @@ impl Fht {
         }
         if let Some(animation) = wset.switch_animation.as_mut() {
             animation.animation.set_current_time(current_time);
+        }
+        let workspace = wset.active();
+        if let Some(FullscreenSurface { inner, .. }) = workspace.fullscreen.as_ref() {
+            inner.advance_animations(current_time)
+        }
+        for window in &workspace.windows {
+            window.advance_animations(current_time)
         }
     }
 

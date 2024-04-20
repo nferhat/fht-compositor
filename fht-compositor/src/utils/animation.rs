@@ -5,9 +5,10 @@ use smithay::reexports::rustix::time::{clock_gettime, ClockId};
 use crate::config::Easing;
 
 /// A trait representing any kind of animation for the compositor needs.
+#[derive(Clone, Copy, Debug)]
 pub struct Animation {
-    start: f64,
-    end: f64,
+    pub start: f64,
+    pub end: f64,
     easing: Easing,
     started_at: Duration, // TODO: Use an instant?
     current_time: Duration,
