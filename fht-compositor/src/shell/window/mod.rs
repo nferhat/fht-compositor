@@ -243,19 +243,27 @@ impl FhtWindow {
     }
 
     pub fn set_tiled(&self, tiled: bool) {
-        self.surface.toplevel().with_pending_state(|state| {
+        let is_floating = self.surface.toplevel().with_pending_state(|state| {
             if tiled {
                 state.states.set(XdgToplevelState::TiledLeft);
                 state.states.set(XdgToplevelState::TiledRight);
                 state.states.set(XdgToplevelState::TiledTop);
                 state.states.set(XdgToplevelState::TiledBottom);
+                false
             } else {
                 state.states.unset(XdgToplevelState::TiledLeft);
                 state.states.unset(XdgToplevelState::TiledRight);
                 state.states.unset(XdgToplevelState::TiledTop);
                 state.states.unset(XdgToplevelState::TiledBottom);
-            };
+                true
+            }
         });
+        if is_floating {
+            let last_floating_geometry = self.data.lock().unwrap().last_floating_geometry;
+            if let Some(last_floating_geometry) = last_floating_geometry {
+                self.set_geometry(last_floating_geometry, false);
+            }
+        }
     }
 
     pub fn bounds(&self) -> Option<Size<i32, Logical>> {
