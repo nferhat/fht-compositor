@@ -11,7 +11,7 @@ use smithay::backend::input::{
 #[cfg(feature = "udev_backend")]
 use smithay::backend::session::Session;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
-use smithay::input::keyboard::{FilterResult, Keysym};
+use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
 use smithay::utils::{Point, SERIAL_COUNTER};
@@ -293,8 +293,20 @@ impl State {
                             }
                         }
 
+                        let mut modifiers = *modifiers;
+                        // Swap ALT and SUPER under the x11 backend since you are probably running
+                        // under a parent compositor that already has binds with the super key.
+                        #[cfg(feature = "x11_backend")]
+                        if matches!(&mut state.backend, crate::backend::Backend::X11(_)) {
+                            modifiers = ModifiersState {
+                                alt: modifiers.logo,
+                                logo: modifiers.alt,
+                                ..modifiers
+                            }
+                        }
+
                         if key_state == KeyState::Pressed && !inhibited {
-                            let key_pattern = KeyPattern((*modifiers).into(), keysym);
+                            let key_pattern = KeyPattern(modifiers.into(), keysym);
                             let action = CONFIG.keybinds.get(&key_pattern).cloned();
                             debug!(?keysym, ?key_pattern, ?action);
 
