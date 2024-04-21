@@ -31,6 +31,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 
 use crate::backend::render::AsGlowFrame;
+#[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::shell::decorations::RoundedQuadShader;
 use crate::state::State;

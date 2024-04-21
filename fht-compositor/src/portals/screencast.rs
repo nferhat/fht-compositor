@@ -369,88 +369,90 @@ impl State {
                 .. // TODO: Take in account of cursor_mode
             } => {
                 // We don't support screencasting on X11 since eh, you prob dont need it.
-                #[cfg(feature = "udev_backend")]
-                let Backend::Udev(ref mut data) = &mut self.backend
-                else {
-                    warn!("ScreenCast is only supported on udev backend!");
-                    return;
-                };
                 #[cfg(not(feature = "udev_backend"))]
                 {
                     warn!("ScreenCast is only supported on udev backend!");
                     return;
                 }
+                #[cfg(feature = "udev_backend")]
+                {
+                    let Backend::Udev(ref mut data) = &mut self.backend
+                    else {
+                        warn!("ScreenCast is only supported on udev backend!");
+                        return;
+                    };
 
-                let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
-                else {
-                    warn!("No available GBM device!");
-                    return;
-                };
+                    let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
+                    else {
+                        warn!("No available GBM device!");
+                        return;
+                    };
 
-                match &mut source {
-                    SessionSource::Unset => unreachable!(),
-                    SessionSource::Output(name, output) => {
-                        if output.is_none() {
-                            info!(output_name = name);
-                            if let Some(o) = self.fht.output_named(&name) {
-                                *output = Some(o);
-                            } else {
-                                warn!("Tried to start a screencast with an invalid output!");
-                                to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                    return;
+                    match &mut source {
+                        SessionSource::Unset => unreachable!(),
+                        SessionSource::Output(name, output) => {
+                            if output.is_none() {
+                                info!(output_name = name);
+                                if let Some(o) = self.fht.output_named(&name) {
+                                    *output = Some(o);
+                                } else {
+                                    warn!("Tried to start a screencast with an invalid output!");
+                                    to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                                        return;
+                                }
+                            }
+                        }
+                        SessionSource::Rectangle(rec, output) => {
+                            if output.is_none() {
+                                info!("Adding from rec");
+                                if let Some(o) = self
+                                    .fht
+                                    .outputs()
+                                    .find(|o| o.geometry().intersection(*rec).is_some())
+                                    .cloned()
+                                {
+                                    *output = Some(o);
+                                } else {
+                                    warn!("Tried to start a screecast with an invalid region!");
+                                    to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                                        return;
+                                }
                             }
                         }
                     }
-                    SessionSource::Rectangle(rec, output) => {
-                        if output.is_none() {
-                            info!("Adding from rec");
-                            if let Some(o) = self
-                                .fht
-                                .outputs()
-                                .find(|o| o.geometry().intersection(*rec).is_some())
-                                .cloned()
-                            {
-                                *output = Some(o);
-                            } else {
-                                warn!("Tried to start a screecast with an invalid region!");
-                                to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                    return;
-                            }
-                        }
-                    }
-                }
 
-                self.fht.pipewire_initialised.call_once(|| {
-                    self.fht.pipewire = PipeWire::new(&self.fht.loop_handle)
-                        .map_err(|err| {
-                            warn!(
-                                ?err,
-                                "Failed to initialize PipeWire! ScreenCasts will NOT work!"
-                            );
-                        })
-                        .ok();
-                });
+                    self.fht.pipewire_initialised.call_once(|| {
+                        self.fht.pipewire = PipeWire::new(&self.fht.loop_handle)
+                            .map_err(|err| {
+                                warn!(
+                                    ?err,
+                                    "Failed to initialize PipeWire! ScreenCasts will NOT work!"
+                                );
+                            })
+                            .ok();
+                    });
 
-                let Some(pipewire) = self.fht.pipewire.as_mut() else {
-                    warn!("PipeWire is not initialised!");
-                    to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                    return;
-                };
-
-                match pipewire.start_cast(
-                    to_compositor.clone(),
-                    to_screencast.clone(),
-                    gbm_device,
-                    session_handle,
-                    source.clone(),
-                    source_type,
-                ) {
-                    Ok(cast) => {
-                        pipewire.casts.push(cast);
-                    }
-                    Err(err) => {
-                        error!(?err, "Failed to start screen cast!");
+                    let Some(pipewire) = self.fht.pipewire.as_mut() else {
+                        warn!("PipeWire is not initialised!");
                         to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                        return;
+                    };
+
+                    match pipewire.start_cast(
+                        to_compositor.clone(),
+                        to_screencast.clone(),
+                        gbm_device,
+                        session_handle,
+                        source.clone(),
+                        source_type,
+                    ) {
+                        Ok(cast) => {
+                            pipewire.casts.push(cast);
+                        }
+                        Err(err) => {
+                            error!(?err, "Failed to start screen cast!");
+                            to_screencast.send_blocking(Response::PipeWireFail).unwrap();
+                        }
                     }
                 }
             }
