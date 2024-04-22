@@ -20,7 +20,7 @@ serde = { version = "1.0.196", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/nferhat/Smithay"
-rev = "73830af"
+rev = "2d86a43"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]

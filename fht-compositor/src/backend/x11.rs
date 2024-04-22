@@ -191,7 +191,11 @@ impl X11Data {
                         }
                         state.process_input_event(event)
                     },
-                    X11Event::Focus(_) => {}
+                    X11Event::Focus { focused: true, window_id } => {
+                        let output = backend.surfaces.get_mut(&window_id).unwrap().output.clone();
+                        state.fht.focus_state.output = Some(output);
+                    }
+                    X11Event::Focus { focused: false, window_id } => {}
                 }
             })
             .map_err(|_| anyhow::anyhow!("Failed to insert X11 backend source to event loop!"))?;
