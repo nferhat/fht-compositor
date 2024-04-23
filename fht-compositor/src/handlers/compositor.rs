@@ -16,7 +16,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::LayerSurfaceAttributes;
 use smithay::wayland::shell::xdg::XdgPopupSurfaceRoleAttributes;
 
-use crate::state::{Fht, State};
+use crate::state::{Fht, OutputState, State};
 
 /// Ensures that the [`WlSurface`] has a render buffer
 fn has_render_buffer(surface: &WlSurface) -> bool {
@@ -229,8 +229,7 @@ impl CompositorHandler for State {
 
         // Try to redraw the output
         if let Some(output) = self.fht.visible_output_for_surface(surface) {
-            self.backend
-                .schedule_render_output(output, &self.fht.loop_handle);
+            OutputState::get(output).render_state.queue()
         }
     }
 }

@@ -1,7 +1,7 @@
 use smithay::output::Output;
-use smithay::reexports::calloop::LoopHandle;
+use smithay::utils::{Monotonic, Time};
 
-use crate::state::State;
+use crate::state::Fht;
 
 pub mod render;
 #[cfg(feature = "udev_backend")]
@@ -62,23 +62,17 @@ impl Backend {
     /// The backend is free to oblige or discard your request, based on internal state like Vblank
     /// state, or if a frame has already been scheduled.
     #[profiling::function]
-    pub fn schedule_render_output(
+    pub fn render(
         &mut self,
+        fht: &mut Fht,
         output: &Output,
-        _loop_handle: &LoopHandle<'static, State>,
-    ) {
+        current_time: Time<Monotonic>,
+    ) -> anyhow::Result<bool> {
         match self {
             #[cfg(feature = "x11_backend")]
-            Self::X11(ref mut data) => data.schedule_render(output),
+            Self::X11(ref mut data) => data.render(fht, output, current_time.into()),
             #[cfg(feature = "udev_backend")]
-            Self::Udev(_) => {
-                // TODO: Make scheduling work properly.
-                // Basically the udev render loop works pretty tighly due to VBlanks, so trying
-                // to render in between may or may not just lock the compositor in a state
-                // where it thinks its always scheduled.
-
-                // let _ = data.schedule_render(output, std::time::Duration::ZERO, loop_handle);
-            }
+            Self::Udev(data) => data.render(fht, output, current_time.into()),
         }
     }
 }

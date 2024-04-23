@@ -455,12 +455,14 @@ impl FhtWindow {
 
 // Animation related code.
 impl FhtWindow {
-    pub fn advance_animations(&self, current_time: Duration) {
+    pub fn advance_animations(&self, current_time: Duration) -> bool {
+        let mut animations_running = false;
         let mut data = self.data.lock().unwrap();
 
         let _ = data.open_close_animation.take_if(|anim| anim.is_finished());
         if let Some(open_close_animation) = data.open_close_animation.as_mut() {
             open_close_animation.set_current_time(current_time);
+            animations_running = true;
         }
 
         if let Some(_) = data.location_x_animation.take_if(|anim| anim.is_finished()) {
@@ -469,6 +471,7 @@ impl FhtWindow {
         if let Some(x_animation) = data.location_x_animation.as_mut() {
             x_animation.set_current_time(current_time);
             data.render_location.x = x_animation.value().round() as i32;
+            animations_running = true;
         }
 
         if let Some(_) = data.location_y_animation.take_if(|anim| anim.is_finished()) {
@@ -477,7 +480,10 @@ impl FhtWindow {
         if let Some(y_animation) = data.location_y_animation.as_mut() {
             y_animation.set_current_time(current_time);
             data.render_location.y = y_animation.value().round() as i32;
+            animations_running = true;
         }
+
+        animations_running
     }
 
     pub fn start_open_close_animation(&self) {

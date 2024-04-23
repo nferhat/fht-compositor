@@ -1,7 +1,9 @@
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use indexmap::IndexMap;
@@ -10,22 +12,27 @@ use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, RenderElementStates,
 };
 use smithay::desktop::utils::{
+    send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
     surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-    update_surface_primary_scanout_output, OutputPresentationFeedback,
+    take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
+    OutputPresentationFeedback,
 };
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
-use smithay::input::pointer::PointerHandle;
+use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{self, LoopHandle, LoopSignal};
+use smithay::reexports::calloop::{self, LoopHandle, LoopSignal, RegistrationToken};
 use smithay::reexports::input;
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Monotonic, Point, SERIAL_COUNTER};
-use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::compositor::{
+    with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
+    TraversalAction,
+};
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::input_method::InputMethodManagerState;
@@ -121,6 +128,22 @@ impl State {
             .workspaces_mut()
             .for_each(|(_, wset)| wset.refresh());
         self.fht.popups.cleanup();
+        // Redraw queued outputs.
+        {
+            profiling::scope!("redraw_queued_outputs");
+            for output in self
+                .fht
+                .outputs()
+                .filter_map(|o| {
+                    let is_queued = OutputState::get(o).render_state.is_queued();
+                    is_queued.then(|| o.clone())
+                })
+                .collect::<Vec<_>>()
+            {
+                // TODO: This
+                self.redraw(output);
+            }
+        }
 
         // Make sure the surface is not dead (otherwise wayland wont be happy)
         let _ = self.fht.focus_state.focus_target.take_if(|f| !f.alive());
@@ -173,6 +196,48 @@ impl State {
             compositor: CompositorClientState::default(),
             security_context: None,
         }
+    }
+
+    /// Redraw this output.
+    #[profiling::function]
+    pub fn redraw(&mut self, output: Output) {
+        // Verify our invariant.
+        let mut output_state = OutputState::get(&output);
+        assert!(output_state.render_state.is_queued());
+
+        // Advance animations.
+        let current_time = self.fht.clock.now();
+        output_state.animations_running = self.fht.advance_animations(&output, current_time.into());
+        drop(output_state);
+
+        // Then ask the backend to render.
+        // if res.is_err() == something wrong happened and we didnt render anything.
+        // if res == Ok(true) we rendered and submitted a new buffer
+        // if res == Ok(false) we rendered but had no damage to submit
+        let res = self.backend.render(&mut self.fht, &output, current_time);
+
+        {
+            let mut output_state = OutputState::get(&output);
+
+            if res.is_err() {
+                // Update the redraw state on failed render.
+                output_state.render_state =
+                    if let RenderState::WaitingForVblankTimer { token, .. } =
+                        output_state.render_state
+                    {
+                        RenderState::WaitingForVblankTimer {
+                            token,
+                            queued: false,
+                        }
+                    } else {
+                        RenderState::Idle
+                    };
+            }
+        }
+
+        // Send frame callbacks
+        self.fht.send_frames(&output);
+        // TODO: Handle screencopy
     }
 }
 
@@ -610,51 +675,108 @@ impl Fht {
     ///
     /// This function handles primary scanout outputs (so that [`WlSurface`]s send frames
     /// immediatly to a specific render surface, the one in [`RenderElementStates`])
-    ///
-    /// This function also, if you provide one, sends render and scanout feedbacks to
-    /// [`WlSurface`]s
     #[profiling::function]
-    pub fn send_frames(
-        &self,
-        output: &Output,
-        render_element_states: &RenderElementStates,
-        dmabuf_feedback: Option<SurfaceDmabufFeedback>,
-    ) {
+    pub fn send_frames(&self, output: &Output) {
         let time = self.clock.now();
-        let throttle = Some(std::time::Duration::from_secs(1));
+        let throttle = Some(Duration::from_secs(1));
+        let sequence = OutputState::get(output).current_frame_sequence;
+
+        let should_send_frames = |surface: &WlSurface, states: &SurfaceData| {
+            // Use smithay's surface_primary_scanout_output helper to avoid sending frames to
+            // invisible surfaces of the output, at the cost of sending more frames for the cursor.
+            let current_primary_output = surface_primary_scanout_output(surface, states);
+            if current_primary_output.as_ref() != Some(output) {
+                return None;
+            }
+
+            let last_callback_output: &RefCell<Option<(Output, u32)>> =
+                states.data_map.get_or_insert(RefCell::default);
+            let mut last_callback_output = last_callback_output.borrow_mut();
+
+            let mut send = true;
+            if let Some((last_output, last_sequence)) = last_callback_output.as_ref() {
+                // We already sent a frame callback to this surface, do not waste time sending
+                if last_output == output && *last_sequence == sequence {
+                    send = false;
+                }
+            }
+
+            if send {
+                *last_callback_output = Some((output.clone(), sequence));
+                Some(output.clone())
+            } else {
+                None
+            }
+        };
+
+        if let CursorImageStatus::Surface(surface) =
+            &*self.cursor_theme_manager.image_status.lock().unwrap()
+        {
+            send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
+        }
+
+        if let Some(surface) = &self.dnd_icon {
+            send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
+        }
 
         for window in self.visible_windows_for_output(output) {
-            window.with_surfaces(|surface, states| {
-                let primary_scanout_output = update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    states,
-                    render_element_states,
-                    default_primary_scanout_output_compare,
-                );
-                if let Some(output) = primary_scanout_output {
-                    with_fractional_scale(states, |fractional_scale| {
-                        fractional_scale
-                            .set_preferred_scale(output.current_scale().fractional_scale())
-                    });
-                }
-            });
-            window.send_frame(output, time, throttle, surface_primary_scanout_output);
-            if let Some(ref dmabuf_feedback) = dmabuf_feedback {
-                window.send_dmabuf_feedback(output, surface_primary_scanout_output, |surface, _| {
-                    select_dmabuf_feedback(
-                        surface,
-                        render_element_states,
-                        &dmabuf_feedback.render_feedback,
-                        &dmabuf_feedback.scanout_feedback,
-                    )
-                })
-            }
+            window.send_frame(output, time, throttle, should_send_frames);
         }
 
         let map = layer_map_for_output(output);
         for layer_surface in map.layers() {
-            layer_surface.with_surfaces(|surface, states| {
+            layer_surface.send_frame(output, time, throttle, should_send_frames);
+        }
+    }
+
+    pub fn update_primary_scanout_output(
+        &self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) {
+        if let CursorImageStatus::Surface(surface) =
+            &*self.cursor_theme_manager.image_status.lock().unwrap()
+        {
+            with_surface_tree_downward(
+                surface,
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |surface, states, _| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                },
+                |_, _, _| true,
+            );
+        }
+
+        if let Some(surface) = &self.dnd_icon {
+            with_surface_tree_downward(
+                surface,
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |surface, states, _| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                },
+                |_, _, _| true,
+            );
+        }
+
+        // Both windows and layer surfaces can only be drawn on a single output at a time, so there
+        // no need to update all the windows of the output.
+
+        for window in self.visible_windows_for_output(output) {
+            window.with_surfaces(|surface, states| {
                 let primary_scanout_output = update_surface_primary_scanout_output(
                     surface,
                     output,
@@ -670,22 +792,98 @@ impl Fht {
                     });
                 }
             });
+        }
 
-            layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
-            if let Some(ref dmabuf_feedback) = dmabuf_feedback {
-                layer_surface.send_dmabuf_feedback(
+        for surface in layer_map_for_output(output).layers() {
+            surface.with_surfaces(|surface, states| {
+                let primary_scanout_output = update_surface_primary_scanout_output(
+                    surface,
                     output,
-                    surface_primary_scanout_output,
-                    |surface, _| {
-                        select_dmabuf_feedback(
-                            surface,
-                            render_element_states,
-                            &dmabuf_feedback.render_feedback,
-                            &dmabuf_feedback.scanout_feedback,
-                        )
-                    },
+                    states,
+                    render_element_states,
+                    // Layer surfaces are shown only on one output at a time.
+                    |_, _, output, _| output,
                 );
-            }
+
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                }
+            });
+        }
+    }
+
+    /// Send a dmabuf feedback to every visible [`WlSurface`] on this output.
+    pub fn send_dmabuf_feedbacks(
+        &self,
+        output: &Output,
+        feedback: &SurfaceDmabufFeedback,
+        render_element_states: &RenderElementStates,
+    ) {
+        if let Some(surface) = &self.dnd_icon {
+            send_dmabuf_feedback_surface_tree(
+                surface,
+                output,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                },
+            );
+        }
+
+        if let CursorImageStatus::Surface(surface) =
+            &*self.cursor_theme_manager.image_status.lock().unwrap()
+        {
+            send_dmabuf_feedback_surface_tree(
+                surface,
+                output,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                },
+            );
+        }
+
+        for window in self.visible_windows_for_output(output) {
+            window.send_dmabuf_feedback(
+                output,
+                |_, _| Some(output.clone()),
+                |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                },
+            );
+        }
+
+        for surface in layer_map_for_output(output).layers() {
+            surface.send_dmabuf_feedback(
+                output,
+                |_, _| Some(output.clone()),
+                |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                },
+            );
         }
     }
 
@@ -697,6 +895,30 @@ impl Fht {
         render_element_states: &RenderElementStates,
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+        if let CursorImageStatus::Surface(surface) =
+            &*self.cursor_theme_manager.image_status.lock().unwrap()
+        {
+            take_presentation_feedback_surface_tree(
+                surface,
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
+
+        if let Some(surface) = &self.dnd_icon {
+            take_presentation_feedback_surface_tree(
+                surface,
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
 
         for window in &self.wset_for(output).active().windows {
             window.take_presentation_feedback(
@@ -761,4 +983,95 @@ pub fn egui_state_for_output(output: &Output) -> Rc<EguiState> {
 pub struct FocusState {
     pub output: Option<Output>,
     pub focus_target: Option<KeyboardFocusTarget>,
+}
+
+/// The additional state of an [`Output`]
+#[derive(Debug)]
+pub struct OutputState {
+    /// A state machine to track where in the rendering pipeline
+    pub render_state: RenderState,
+
+    /// Are there any animations running on the output.
+    pub animations_running: bool,
+
+    /// The last "sequence" the output displayed.
+    ///
+    /// Alot of Wayland clients run their main loop based on the send_frames callback the
+    /// compositor should be sending to them, so we need at best to send a single frame callback
+    /// per redraw call (at least this is what I understood from the wayland book)
+    ///
+    /// If we send more than one, this will make those clients update twice or more on a single
+    /// frame, which is not what the user should be expecting.
+    ///
+    /// In order todo this, we add one each refresh cycle to this output, then, every WlSurface
+    /// will track the last sequence it was redrawn on. If its not equal to this sequence for this
+    /// output, we send a frame callback, otherwise, we skip it.
+    pub current_frame_sequence: u32,
+}
+
+impl OutputState {
+    pub fn get(output: &Output) -> RefMut<'_, Self> {
+        output.user_data().insert_if_missing(|| Self::new(output));
+        output
+            .user_data()
+            .get::<RefCell<Self>>()
+            .unwrap()
+            .borrow_mut()
+    }
+
+    pub fn new(output: &Output) {
+        output.user_data().insert_if_missing(|| {
+            RefCell::new(Self {
+                render_state: RenderState::Idle,
+                animations_running: false,
+                current_frame_sequence: 0,
+            })
+        });
+    }
+}
+
+#[derive(Debug, Default)]
+pub enum RenderState {
+    /// The output is not being redrawn.
+    #[default]
+    Idle,
+    /// The output redraw is queued and is getting done so in the next dispatch cycle.
+    Queued,
+    /// The output is waiting for a TTY Vblank event.
+    WaitingForVblank { redraw_needed: bool },
+    /// The output is getting redrawn after the next estimated TTY Vblank event.
+    WaitingForVblankTimer {
+        token: RegistrationToken,
+        queued: bool,
+    },
+}
+
+impl RenderState {
+    #[inline(always)]
+    pub fn is_queued(&self) -> bool {
+        matches!(
+            self,
+            RenderState::Queued | RenderState::WaitingForVblankTimer { queued: true, .. }
+        )
+    }
+
+    pub fn queue(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Idle => Self::Queued,
+            Self::WaitingForVblank {
+                redraw_needed: false,
+            } => Self::WaitingForVblank {
+                redraw_needed: true,
+            },
+            Self::WaitingForVblankTimer {
+                token,
+                queued: false,
+            } => Self::WaitingForVblankTimer {
+                token,
+                queued: true,
+            },
+            // We are already queued
+            value => value,
+        }
+    }
 }

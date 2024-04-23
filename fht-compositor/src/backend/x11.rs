@@ -17,8 +17,7 @@ use smithay::backend::vulkan::{Instance, PhysicalDevice};
 use smithay::backend::x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface};
 use smithay::output::{Mode, Output};
 use smithay::reexports::ash::vk::ExtPhysicalDeviceDrmFn;
-use smithay::reexports::calloop::ping::{make_ping, Ping};
-use smithay::reexports::gbm::{self};
+use smithay::reexports::gbm;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::utils::{DeviceFd, Physical, Size};
 use smithay::wayland::dmabuf::{
@@ -28,7 +27,7 @@ use smithay::wayland::dmabuf::{
 use super::render::BackendAllocator;
 use crate::config::CONFIG;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
-use crate::state::{Fht, State};
+use crate::state::{Fht, OutputState, RenderState, State};
 use crate::utils::fps::Fps;
 
 pub struct X11Data {
@@ -44,11 +43,8 @@ pub struct X11Data {
 }
 
 pub struct Surface {
-    pending: bool,
-    dirty: bool,
     inner: X11Surface,
     damage_tracker: OutputDamageTracker,
-    render_ping: Ping,
     output: Output,
     fps: Fps,
     window: Window,
@@ -169,33 +165,31 @@ impl X11Data {
                         surface.output.set_preferred(new_mode);
                         state.fht.output_resized(&surface.output);
 
-                        surface.dirty = true;
-                        if !surface.pending {
-                            surface.render_ping.ping();
-                        }
+                        OutputState::get(&surface.output).render_state.queue();
                     }
                     X11Event::Refresh { window_id } | X11Event::PresentCompleted { window_id } => {
                         let surface = backend.surfaces.get_mut(&window_id).unwrap();
-
-                        if surface.dirty {
-                            surface.render_ping.ping();
-                        } else {
-                            surface.pending = false;
-                        }
+                        OutputState::get(&surface.output).render_state.queue();
                     }
-                    X11Event::Input {event, window_id} => {
+                    X11Event::Input { event, window_id } => {
                         // Adapt mouse events to match our x11 windows outputs
                         if let Some(window_id) = window_id {
                             let surface = backend.surfaces.get(&window_id).unwrap();
                             state.fht.focus_state.output = Some(surface.output.clone());
                         }
                         state.process_input_event(event)
-                    },
-                    X11Event::Focus { focused: true, window_id } => {
+                    }
+                    X11Event::Focus {
+                        focused: true,
+                        window_id,
+                    } => {
                         let output = backend.surfaces.get_mut(&window_id).unwrap().output.clone();
                         state.fht.focus_state.output = Some(output);
                     }
-                    X11Event::Focus { focused: false, window_id } => {}
+                    X11Event::Focus {
+                        focused: false,
+                        window_id,
+                    } => {}
                 }
             })
             .map_err(|_| anyhow::anyhow!("Failed to insert X11 backend source to event loop!"))?;
@@ -268,61 +262,31 @@ impl X11Data {
         // Register the output
         state.add_output(output.clone());
         state.focus_state.output = Some(output.clone());
-
+        // Create rendering state
         let damage_tracker = OutputDamageTracker::from_output(&output);
-
-        let (render_ping, render_source) =
-            make_ping().context("Failed to initialize render ping source!")?;
+        OutputState::get(&output).render_state.queue();
 
         self.surfaces.insert(
             window.id(),
             Surface {
-                pending: false,
-                dirty: true,
                 inner: surface,
                 damage_tracker,
-                render_ping: render_ping.clone(),
-                output: output.clone(),
+                output,
                 fps: Fps::new(),
                 window,
             },
         );
 
-        state
-            .loop_handle
-            .insert_source(render_source, move |_, _, state| {
-                let backend = state.backend.x11();
-                if let Err(err) = backend.render_output(&mut state.fht, &output) {
-                    error!(?err, "Failed to render output!");
-                }
-            })?;
-        render_ping.ping();
-
         Ok(())
     }
 
     #[profiling::function]
-    pub fn schedule_render(&mut self, output: &Output) {
+    pub fn render(&mut self, state: &mut Fht, output: &Output, current_time: Duration) -> anyhow::Result<bool> {
         let Some(surface) = self.surfaces.values_mut().find(|s| s.output == *output) else {
-            error!("Tried to render a non existing surface!");
-            return;
-        };
-        surface.dirty = true;
-        if !surface.pending {
-            surface.render_ping.ping();
-        }
-    }
-
-    #[profiling::function]
-    pub fn render_output(&mut self, state: &mut Fht, output: &Output) -> anyhow::Result<()> {
-        let Some(surface) = self.surfaces.values_mut().find(|s| s.output == *output) else {
-            error!("Tried to render a non existing surface!");
-            return Ok(());
+            anyhow::bail!("Tried to render a non existing surface!");
         };
 
-        state.advance_animations(&surface.output, state.clock.now().into());
         surface.fps.start();
-
         let (buffer, buffer_age) = surface
             .inner
             .buffer()
@@ -351,12 +315,20 @@ impl X11Data {
 
         match res {
             Ok(RenderOutputResult { damage, states, .. }) => {
+                let mut output_state = OutputState::get(&surface.output);
+                match std::mem::take(&mut output_state.render_state) {
+                    RenderState::Queued => (),
+                    _ => unreachable!(),
+                }
+                output_state.current_frame_sequence = output_state.current_frame_sequence.wrapping_add(1);
+
+                state.update_primary_scanout_output(output, &states);
+
                 surface
                     .inner
                     .submit()
                     .context("Failed to submit buffer to X11Surface!")?;
                 surface.fps.displayed();
-                state.send_frames(&surface.output, &states, None);
                 if damage.is_some() {
                     let mut output_presentation_feedback =
                         state.take_presentation_feedback(&surface.output, &states);
@@ -365,12 +337,21 @@ impl X11Data {
                         .current_mode()
                         .map(|mode| Duration::from_secs_f64(1_000.0 / f64::from(mode.refresh)))
                         .unwrap_or_default();
-                    output_presentation_feedback.presented(
-                        state.clock.now(),
+                    output_presentation_feedback.presented::<_, smithay::utils::Monotonic>(
+                        current_time,
                         refresh,
                         0,
                         wp_presentation_feedback::Kind::Vsync,
                     );
+
+                    // We damaged so render after
+                    output_state.render_state.queue();
+
+                    Ok(true)
+                } else {
+                    // Didn't render anything, no need to schedule or something since we are
+                    // already managed by a parent compositor(even xwayland) to send frames.
+                    Ok(false)
                 }
             }
             Err(err) => {
@@ -378,8 +359,6 @@ impl X11Data {
                 anyhow::bail!("Failed rendering! {err}");
             }
         }
-
-        Ok(())
     }
 
     pub fn dmabuf_imported(&mut self, dmabuf: &Dmabuf, notifier: ImportNotifier) {

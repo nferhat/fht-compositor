@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Context as _;
 use libc::dev_t;
@@ -9,8 +9,7 @@ use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::compositor::{DrmCompositor, PrimaryPlaneElement, RenderFrameError};
 use smithay::backend::drm::{
-    DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
-    DrmNode, NodeType,
+    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
 };
 use smithay::backend::egl::context::ContextPriority;
 use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
@@ -38,7 +37,7 @@ use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::input::keyboard::XkbConfig;
 use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::reexports::calloop::{Dispatcher, LoopHandle, RegistrationToken};
+use smithay::reexports::calloop::{Dispatcher, RegistrationToken};
 use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
@@ -52,7 +51,7 @@ use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_li
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Physical, Rectangle, Scale, Size, Transform};
+use smithay::utils::{DeviceFd, Monotonic, Physical, Rectangle, Scale, Size, Time, Transform};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
@@ -63,7 +62,7 @@ use smithay_drm_extras::edid::EdidInfo;
 use super::render::FhtRenderElement;
 use crate::config::CONFIG;
 use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
-use crate::state::{Fht, State, SurfaceDmabufFeedback};
+use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
 
@@ -242,11 +241,7 @@ impl UdevData {
                     }
 
                     for output in state.fht.outputs() {
-                        let _ = state.backend.udev().schedule_render(
-                            output,
-                            Duration::ZERO,
-                            &state.fht.loop_handle,
-                        );
+                        OutputState::get(output).render_state.queue()
                     }
                 }
             })
@@ -775,9 +770,9 @@ impl UdevData {
 
         device.surfaces.insert(crtc, surface);
 
-        if let Err(err) = self.schedule_render(&output, Duration::ZERO, &fht.loop_handle) {
-            error!(?err, "Failed to schedule initial render for surface!");
-        };
+        // if let Err(err) = self.schedule_render(&output, Duration::ZERO, &fht.loop_handle) {
+        //     error!(?err, "Failed to schedule initial render for surface!");
+        // };
 
         Ok(())
     }
@@ -838,121 +833,187 @@ impl UdevData {
 
     /// Request the backend to schedule a next frame for this output.
     #[profiling::function]
-    pub fn schedule_render(
+    pub fn render(
         &mut self,
+        fht: &mut Fht,
         output: &Output,
-        duration: Duration,
-        loop_handle: &LoopHandle<'static, State>,
-    ) -> anyhow::Result<()> {
-        let Some((&device_node, &crtc)) =
+        current_time: Duration,
+    ) -> anyhow::Result<bool> {
+        let Some((device_node, crtc)) =
             self.devices.iter_mut().find_map(|(device_node, device)| {
-                device
+                let crtc = device
                     .surfaces
-                    .iter_mut()
-                    .find(|(_, s)| s.output == *output)
-                    .map(move |(crtc, _)| (device_node, crtc))
+                    .iter()
+                    .find(|(_, surface)| surface.output == *output)
+                    .map(|(crtc, _)| *crtc);
+                crtc.map(|crtc| (*device_node, crtc))
             })
         else {
-            warn!("Attempted to call schedule_render on a non-existent output!");
-            return Ok(());
+            anyhow::bail!("No surface matching output!");
         };
 
-        loop_handle
-            .insert_source(Timer::from_duration(duration), move |_time, _, state| {
-                state
-                    .backend
-                    .udev()
-                    .render(device_node, crtc, &mut state.fht);
-                TimeoutAction::Drop
-            })
-            .map_err(|_| anyhow::anyhow!("Failed to insert timer for rendering surface!"))?;
+        let device = self.devices.get_mut(&device_node).unwrap();
+        if !device.drm.is_active() {
+            anyhow::bail!("Device DRM is not active!");
+        }
 
-        Ok(())
-    }
+        let surface = device.surfaces.get_mut(&crtc).unwrap();
 
-    /// Render the surface associated with this device and CRTC connector.
-    #[profiling::function]
-    pub fn render(&mut self, device_node: DrmNode, crtc: CrtcHandle, fht: &mut Fht) {
-        let Some(device) = self.devices.get_mut(&device_node) else {
-            warn!(
-                ?device_node,
-                "Attempted to call render on a non-existent device!"
-            );
-            return;
+        let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
+            self.gpu_manager.single_renderer(&surface.render_node)
+        } else {
+            let format = surface.compositor.format();
+            self.gpu_manager
+                .renderer(&self.primary_gpu, &surface.render_node, format)
+        }) else {
+            anyhow::bail!("Failed to get renderer!");
         };
 
-        let Some(surface) = device.surfaces.get_mut(&crtc) else {
-            warn!(
-                ?device_node,
-                ?crtc,
-                "Attempted to call render on a non-existent crtc!"
-            );
-            return;
-        };
+        surface.fps.start();
 
-        let start = Instant::now();
+        let elements =
+            super::render::output_elements(&mut renderer, &surface.output, fht, &mut surface.fps);
+        surface.fps.elements();
 
-        fht.advance_animations(&surface.output, fht.clock.now().into());
-        let result = render_surface(surface, &mut self.gpu_manager, self.primary_gpu, fht);
-
-        let reschedule = match &result {
-            Ok(has_rendered) => !has_rendered,
-            Err(err) => {
-                warn!("Error during rendering: {:?}", err);
-                match err {
-                    SwapBuffersError::AlreadySwapped => false,
-                    SwapBuffersError::TemporaryFailure(err) => match err.downcast_ref::<DrmError>()
-                    {
-                        Some(DrmError::DeviceInactive) => true,
-                        Some(DrmError::Access(DrmAccessError { source, .. })) => {
-                            source.kind() == std::io::ErrorKind::PermissionDenied
-                        }
-                        _ => false,
-                    },
-                    SwapBuffersError::ContextLost(err) => match err.downcast_ref::<DrmError>() {
-                        Some(DrmError::TestFailed(_)) => {
-                            // reset the complete state, disabling all connectors and planes in case
-                            // we hit a test failed most likely we hit
-                            // this after a tty switch when a foreign master changed CRTC <->
-                            // connector bindings and we run in a
-                            // mismatch
-                            device
-                                .drm
-                                .reset_state()
-                                .expect("failed to reset drm device");
-                            true
-                        }
-                        _ => panic!("Rendering loop lost: {}", err),
-                    },
+        let res = surface
+            .compositor
+            .render_frame(&mut renderer, &elements, [0.1, 0.1, 0.1, 1.0])
+            .map_err(|err| match err {
+                RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
+                RenderFrameError::RenderFrame(OutputDamageTrackerError::Rendering(err)) => {
+                    SwapBuffersError::from(err)
                 }
+                _ => unreachable!(),
+            });
+        surface.fps.render();
+
+        match res {
+            Err(err) => {
+                warn!(?err, "Rendering error!");
+            }
+            Ok(res) => {
+                if res.needs_sync() {
+                    if let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
+                        profiling::scope!("SyncPoint::wait");
+                        if let Err(err) = element.sync.wait() {
+                            error!(?err, "Failed to wait for SyncPoint")
+                        };
+                    }
+                }
+
+                fht.update_primary_scanout_output(output, &res.states);
+                if let Some(dmabuf_feedback) = surface.dmabuf_feedback.as_ref() {
+                    fht.send_dmabuf_feedbacks(output, dmabuf_feedback, &res.states);
+                }
+
+                if !res.is_empty {
+                    let presentation_feedbacks =
+                        fht.take_presentation_feedback(output, &res.states);
+                    let data = (presentation_feedbacks, current_time);
+
+                    match surface.compositor.queue_frame(data) {
+                        Ok(()) => {
+                            let mut output_state = OutputState::get(&surface.output);
+                            let new_state = RenderState::WaitingForVblank {
+                                redraw_needed: false,
+                            };
+                            match std::mem::replace(&mut output_state.render_state, new_state) {
+                                RenderState::Queued => (),
+                                RenderState::WaitingForVblankTimer {
+                                    token,
+                                    queued: true,
+                                } => {
+                                    fht.loop_handle.remove(token);
+                                }
+                                _ => unreachable!(),
+                            };
+
+
+                            #[cfg(feature = "xdg-screencast-portal")]
+                            {
+                                // Render screencopy now since we actually drawed something
+                                render_screencopy(fht, &surface.output, &mut renderer, &elements);
+                                surface.fps.screencast();
+                            }
+
+                            // We queued and client buffers are now displayed, we can now send
+                            // frame events to them so they start building the next buffer
+                            output_state.current_frame_sequence =
+                                output_state.current_frame_sequence.wrapping_add(1);
+
+                            return Ok(true);
+                        }
+                        Err(err) => {
+                            warn!("error queueing frame: {err}");
+                        }
+                    }
+                }
+            }
+        }
+
+        // We didn't render anything so the output was not damaged, we are still going to try to
+        // render after an estimated time till the next Vblank.
+        //
+        // We use the surface Fps counter to estimate how much time it takes to display a frame, on
+        // the last 6 frames, but this could be anything else. (Maybe base this on output refresh?)
+        let mut estimated_vblank_duration = surface.fps.avg_frametime();
+        if estimated_vblank_duration.is_zero() {
+            // In case the average render time is null just use the output's refresh rate and
+            // multiply by 0.95 to give some leeway to the compositor to draw.
+            let output_refresh = surface.output.current_mode().unwrap().refresh;
+            estimated_vblank_duration =
+                Duration::from_millis(((1_000_000f32 / output_refresh as f32) * 0.95f32) as u64);
+        }
+
+        let mut output_state = OutputState::get(&surface.output);
+        match std::mem::take(&mut output_state.render_state) {
+            RenderState::Idle => unreachable!(),
+            RenderState::Queued => (),
+            RenderState::WaitingForVblank { .. } => unreachable!(),
+            RenderState::WaitingForVblankTimer { token, .. } => {
+                output_state.render_state = RenderState::WaitingForVblankTimer { token, queued: false };
+                return Ok(false);
             }
         };
 
-        if reschedule {
-            let output_refresh = match surface.output.current_mode() {
-                Some(mode) => mode.refresh,
-                None => return,
-            };
-            // If reschedule is true we either hit a temporary failure or more likely rendering
-            // did not cause any damage on the output. In this case we just re-schedule a repaint
-            // after approx. one frame to re-test for damage.
-            let reschedule_duration =
-                Duration::from_millis((1_000_000f32 / output_refresh as f32) as u64);
-            trace!(
-                "reschedule repaint timer with delay {:?} on {:?}",
-                reschedule_duration,
-                crtc,
-            );
-            let output = surface.output.clone();
-            if let Err(err) = self.schedule_render(&output, reschedule_duration, &fht.loop_handle) {
-                warn!(?err, "Failed to reschedule surface!");
-            };
-        } else {
-            let elapsed = start.elapsed();
-            tracing::trace!(?elapsed, "rendered surface");
-        }
+        let timer = Timer::from_duration(estimated_vblank_duration);
+        let output = surface.output.clone();
+        let token = fht
+            .loop_handle
+            .insert_source(timer, move |_, _, state| {
+                profiling::scope!("estimated vblank timer");
+                let mut output_state = OutputState::get(&output);
+                output_state.current_frame_sequence =
+                    output_state.current_frame_sequence.wrapping_add(1);
 
-        profiling::finish_frame!();
+                match std::mem::replace(&mut output_state.render_state, RenderState::Idle) {
+                    // The timer fired just in front of a redraw.
+                    RenderState::WaitingForVblankTimer { queued, .. } => {
+                        if queued {
+                            output_state.render_state = RenderState::Queued;
+                            // If we are queued wait for the next render to send frame callback
+                            return TimeoutAction::Drop;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                if output_state.animations_running {
+                    output_state.render_state.queue();
+                } else {
+                    drop(output_state);
+                    state.fht.send_frames(&output);
+                }
+
+                TimeoutAction::Drop
+            })
+            .unwrap();
+        output_state.render_state = RenderState::WaitingForVblankTimer {
+            token,
+            queued: false,
+        };
+
+        Ok(false)
     }
 
     /// Handle a DRM VBlank event
@@ -985,13 +1046,13 @@ impl UdevData {
 
         surface.fps.displayed();
 
-        let should_schedule = match surface
+        match surface
             .compositor
             .frame_submitted()
             .map_err(Into::<SwapBuffersError>::into)
         {
             Ok(user_data) => {
-                if let Some(mut feedback) = user_data.flatten() {
+                if let Some((mut feedback, presentation_time)) = user_data {
                     let seq = metadata.sequence;
 
                     let (clock, flags) = match metadata.time {
@@ -1002,7 +1063,7 @@ impl UdevData {
                                 | wp_presentation_feedback::Kind::HwCompletion,
                         ),
                         DrmEventTime::Realtime(_) => {
-                            (fht.clock.now(), wp_presentation_feedback::Kind::Vsync)
+                            (presentation_time, wp_presentation_feedback::Kind::Vsync)
                         }
                     };
 
@@ -1012,159 +1073,37 @@ impl UdevData {
                         .map(|mode| Duration::from_secs_f64(1_000f64 / mode.refresh as f64))
                         .unwrap_or_default();
 
-                    feedback.presented(clock, refresh, seq as u64, flags);
+                    feedback.presented::<Time<Monotonic>, _>(
+                        clock.into(),
+                        refresh,
+                        seq as u64,
+                        flags,
+                    );
                 }
-
-                true
             }
             Err(err) => {
                 warn!("Error during rendering: {:?}", err);
                 match err {
-                    SwapBuffersError::AlreadySwapped => true,
-                    // If the device has been deactivated do not reschedule, this will be done
-                    // by session resume
-                    SwapBuffersError::TemporaryFailure(err)
-                        if matches!(
-                            err.downcast_ref::<DrmError>(),
-                            Some(&DrmError::DeviceInactive)
-                        ) =>
-                    {
-                        false
-                    }
-                    SwapBuffersError::TemporaryFailure(err) => matches!(
-                        err.downcast_ref::<DrmError>(),
-                        Some(DrmError::Access(DrmAccessError {
-                            source,
-                            ..
-                        })) if source.kind() == std::io::ErrorKind::PermissionDenied
-                    ),
                     SwapBuffersError::ContextLost(err) => panic!("Rendering loop lost: {}", err),
+                    _ => (),
                 }
             }
         };
 
-        if !should_schedule {
-            return;
-        }
-
-        // What are we trying to solve by introducing a delay here:
-        //
-        // Basically it is all about latency of client provided buffers.
-        // A client driven by frame callbacks will wait for a frame callback
-        // to repaint and submit a new buffer. As we send frame callbacks
-        // as part of the repaint in the compositor the latency would always
-        // be approx. 2 frames. By introducing a delay before we repaint in
-        // the compositor we can reduce the latency to approx. 1 frame + the
-        // remaining duration from the repaint to the next VBlank.
-        //
-        // With the delay it is also possible to further reduce latency if
-        // the client is driven by presentation feedback. As the presentation
-        // feedback is directly sent after a VBlank the client can submit a
-        // new buffer during the repaint delay that can hit the very next
-        // VBlank, thus reducing the potential latency to below one frame.
-        //
-        // Choosing a good delay is a topic on its own so we just implement
-        // a simple strategy here. We just split the duration between two
-        // VBlanks into two steps, one for the client repaint and one for the
-        // compositor repaint. Theoretically the repaint in the compositor should
-        // be faster so we give the client a bit more time to repaint. On a typical
-        // modern system the repaint in the compositor should not take more than 2ms
-        // so this should be safe for refresh rates up to at least 120 Hz. For 120 Hz
-        // this results in approx. 3.33ms time for repainting in the compositor.
-        // A too big delay could result in missing the next VBlank in the compositor.
-        //
-        // A more complete solution could work on a sliding window analyzing past repaints
-        // and do some prediction for the next repaint.
-        let duration = if self.primary_gpu != surface.render_node {
-            // However, if we need to do a copy, that might not be enough.
-            // (And without actual comparision to previous frames we cannot really know.)
-            // So lets ignore that in those cases to avoid thrashing performance.
-            trace!("scheduling repaint timer immediately on {:?}", crtc);
-            Duration::ZERO
-        } else {
-            let repaint_delay = surface.fps.avg_rendertime(5);
-            trace!(
-                "scheduling repaint timer with delay {:?} on {:?}",
-                repaint_delay,
-                crtc
-            );
-            repaint_delay
-        };
-
-        let output = surface.output.clone();
-        if let Err(err) = self.schedule_render(&output, duration, &fht.loop_handle) {
-            error!(?err, "Failed to schedule render after VBlank!");
-        }
-    }
-}
-
-/// Render a surface.
-///
-/// This uses the surface render_node, falling back the primary gpu if necessary.
-#[profiling::function]
-fn render_surface(
-    surface: &mut Surface,
-    gpu_manager: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
-    primary_gpu: DrmNode,
-    fht: &mut Fht,
-) -> Result<bool, SwapBuffersError> {
-    let mut renderer = if surface.render_node == primary_gpu {
-        gpu_manager.single_renderer(&surface.render_node)
-    } else {
-        let format = surface.compositor.format();
-        gpu_manager.renderer(&primary_gpu, &surface.render_node, format)
-    }
-    .unwrap();
-
-    surface.fps.start();
-
-    let elements =
-        super::render::output_elements(&mut renderer, &surface.output, fht, &mut surface.fps);
-    surface.fps.elements();
-
-    let res = surface
-        .compositor
-        .render_frame(&mut renderer, &elements, [0.1, 0.1, 0.1, 1.0])
-        .map_err(|err| match err {
-            RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
-            RenderFrameError::RenderFrame(OutputDamageTrackerError::Rendering(err)) => {
-                SwapBuffersError::from(err)
-            }
-            _ => unreachable!(),
-        })?;
-    surface.fps.render();
-
-    #[cfg(feature = "xdg-screencast-portal")]
-    {
-        render_screencopy(fht, &surface.output, &mut renderer, &elements);
-        surface.fps.screencast();
-    }
-
-    if res.needs_sync() {
-        if let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
-            profiling::scope!("SyncPoint::wait");
-            if let Err(err) = element.sync.wait() {
-                error!(?err, "Failed to wait for SyncPoint")
+        let mut output_state = OutputState::get(&surface.output);
+        let redraw_needed =
+            match std::mem::replace(&mut output_state.render_state, RenderState::Idle) {
+                RenderState::WaitingForVblank { redraw_needed } => redraw_needed,
+                _ => unreachable!(),
             };
+
+        if redraw_needed || output_state.animations_running {
+            output_state.render_state.queue();
+        } else {
+            drop(output_state);
+            fht.send_frames(&surface.output);
         }
     }
-
-    fht.send_frames(
-        &surface.output,
-        &res.states,
-        surface.dmabuf_feedback.clone(),
-    );
-
-    if !res.is_empty {
-        let output_presentation_feedback =
-            fht.take_presentation_feedback(&surface.output, &res.states);
-        surface
-            .compositor
-            .queue_frame(Some(output_presentation_feedback))
-            .map_err(Into::<SwapBuffersError>::into)?;
-    }
-
-    Ok(!res.is_empty)
 }
 
 pub struct Device {
@@ -1191,7 +1130,7 @@ pub struct Surface {
 pub type GbmDrmCompositor = DrmCompositor<
     GbmAllocator<DrmDeviceFd>,
     GbmDevice<DrmDeviceFd>,
-    Option<OutputPresentationFeedback>,
+    (OutputPresentationFeedback, Duration),
     DrmDeviceFd,
 >;
 

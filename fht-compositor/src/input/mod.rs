@@ -25,7 +25,7 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
 use crate::shell::PointerFocusTarget;
-use crate::state::{egui_state_for_output, State};
+use crate::state::{egui_state_for_output, OutputState, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
@@ -144,8 +144,7 @@ impl State {
 
         // FIXME: More granular, maybe check for where the point was and is now
         for output in self.fht.outputs() {
-            self.backend
-                .schedule_render_output(output, &self.fht.loop_handle);
+            OutputState::get(output).render_state.queue()
         }
     }
 
@@ -293,6 +292,7 @@ impl State {
                             }
                         }
 
+                        #[allow(unused_mut)]
                         let mut modifiers = *modifiers;
                         // Swap ALT and SUPER under the x11 backend since you are probably running
                         // under a parent compositor that already has binds with the super key.
@@ -826,8 +826,7 @@ impl State {
 
         // FIXME: Granular
         for output in self.fht.outputs() {
-            self.backend
-                .schedule_render_output(output, &self.fht.loop_handle);
+            OutputState::get(output).render_state.queue()
         }
     }
 }

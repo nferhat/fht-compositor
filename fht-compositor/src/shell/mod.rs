@@ -429,7 +429,8 @@ impl Fht {
     }
 
     /// Advance all the active animations for this given output
-    pub fn advance_animations(&mut self, output: &Output, current_time: Duration) {
+    pub fn advance_animations(&mut self, output: &Output, current_time: Duration) -> bool {
+        let mut animations_running = false;
         let wset = self.wset_mut_for(output);
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
             wset.switch_animation.take_if(|a| a.animation.is_finished())
@@ -439,14 +440,17 @@ impl Fht {
         }
         if let Some(animation) = wset.switch_animation.as_mut() {
             animation.animation.set_current_time(current_time);
+            animations_running = true;
         }
         let workspace = wset.active();
         if let Some(FullscreenSurface { inner, .. }) = workspace.fullscreen.as_ref() {
-            inner.advance_animations(current_time)
+            animations_running |= inner.advance_animations(current_time);
         }
         for window in &workspace.windows {
-            window.advance_animations(current_time)
+            animations_running |= window.advance_animations(current_time);
         }
+
+        animations_running
     }
 
     /// Get an interator over all the windows registered in the compositor.
