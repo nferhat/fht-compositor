@@ -17,6 +17,7 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
+use smithay::wayland::compositor::send_surface_state;
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
@@ -965,6 +966,10 @@ impl Workspace {
             window.bbox().to_local(&self.output).as_logical(),
         );
         window.set_bounds(Some(self.output.geometry().size.as_logical()));
+        // configure the wl_surface
+        let scale = self.output.current_scale().integer_scale();
+        let transform = self.output.current_transform();
+        window.with_surfaces(|surface, data| send_surface_state(surface, data, scale, transform));
 
         {
             let ipc_path = self.ipc_path.clone();
