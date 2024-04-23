@@ -156,13 +156,20 @@ impl FhtWindow {
                 data.last_floating_geometry = Some(geometry)
             }
         } else {
-            let current_location = self.location();
             let mut data = self.data.lock().unwrap();
+            let current_location = data.location;
             data.location = geometry.loc;
 
             if current_location.x != geometry.loc.x {
+                // If we have a current animation, just pickup from where we are.
+                let start = data
+                    .location_x_animation
+                    .take_if(|anim| !anim.is_finished())
+                    .map(|anim| anim.value())
+                    .unwrap_or(data.render_location.x as f64);
+
                 data.location_x_animation = Some(Animation::new(
-                    current_location.x as f64,
+                    start,
                     geometry.loc.x as f64,
                     CONFIG.animation.window_geometry.easing,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
@@ -170,12 +177,22 @@ impl FhtWindow {
             }
 
             if current_location.y != geometry.loc.y {
+                let start = data
+                    .location_y_animation
+                    .take_if(|anim| !anim.is_finished())
+                    .map(|anim| anim.value())
+                    .unwrap_or(data.render_location.y as f64);
+
                 data.location_y_animation = Some(Animation::new(
-                    current_location.y as f64,
+                    start,
                     geometry.loc.y as f64,
                     CONFIG.animation.window_geometry.easing,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
                 ));
+            }
+
+            if !self.tiled() {
+                data.last_floating_geometry = Some(geometry)
             }
 
             // TODO: Support resizing animations.
