@@ -314,10 +314,64 @@ impl State {
                 }
             }
             KeyAction::FocusNextOutput => {
-                // TODO: yes
+                let outputs_len = self.fht.workspaces.len();
+                if outputs_len < 2 {
+                    return;
+                }
+
+                let current_output_idx = self
+                    .fht
+                    .outputs()
+                    .position(|o| o == output)
+                    .expect("Focused output is not registered");
+
+                let mut next_output_idx = current_output_idx + 1;
+                if next_output_idx == outputs_len {
+                    next_output_idx = 0;
+                }
+
+                let output = self
+                    .fht
+                    .outputs()
+                    .skip(next_output_idx)
+                    .next()
+                    .unwrap()
+                    .clone();
+                if CONFIG.general.cursor_warps {
+                    let center = output.geometry().center();
+                    self.move_pointer(center.to_f64());
+                }
+                self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::FocusPreviousOutput => {
-                // TODO: yes
+                let outputs_len = self.fht.workspaces.len();
+                if outputs_len < 2 {
+                    return;
+                }
+
+                let current_output_idx = self
+                    .fht
+                    .outputs()
+                    .position(|o| o == output)
+                    .expect("Focused output is not registered");
+
+                let next_output_idx = match current_output_idx.checked_sub(1) {
+                    Some(idx) => idx,
+                    None => outputs_len - 1,
+                };
+
+                let output = self
+                    .fht
+                    .outputs()
+                    .skip(next_output_idx)
+                    .next()
+                    .unwrap()
+                    .clone();
+                if CONFIG.general.cursor_warps {
+                    let center = output.geometry().center();
+                    self.move_pointer(center.to_f64());
+                }
+                self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::CloseFocusedWindow => {
                 if let Some(window) = active.focused() {
