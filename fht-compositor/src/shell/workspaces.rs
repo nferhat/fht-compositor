@@ -1412,6 +1412,10 @@ impl Workspace {
         | WorkspaceLayout::BottomStack {
             master_width_factor,
             ..
+        }
+        | WorkspaceLayout::CenteredMaster {
+            master_width_factor,
+            ..
         } = active_layout
         {
             *master_width_factor += delta;
@@ -1426,7 +1430,8 @@ impl Workspace {
     pub fn change_nmaster(&mut self, delta: i32) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile { nmaster, .. }
-        | WorkspaceLayout::BottomStack { nmaster, .. } = active_layout
+        | WorkspaceLayout::BottomStack { nmaster, .. }
+        | WorkspaceLayout::CenteredMaster { nmaster, .. } = active_layout
         {
             let new_nmaster = nmaster
                 .saturating_add_signed(delta as isize)
@@ -1543,6 +1548,15 @@ pub enum WorkspaceLayout {
         nmaster: usize,
         master_width_factor: f32,
     },
+    /// The centered master layout is a layout where the master stack is in the middle and its
+    /// windows are getting partitioned inside of it height-wise.
+    ///
+    /// The stack clients are on the left and right of the master windows, being also repartioned
+    /// height-wise.
+    CenteredMaster {
+        nmaster: usize,
+        master_width_factor: f32,
+    },
     /// Floating layout, basically do nothing to arrange the windows.
     Floating,
 }
@@ -1552,6 +1566,7 @@ impl ToString for WorkspaceLayout {
         match self {
             Self::Tile { .. } => "tile".into(),
             Self::BottomStack { .. } => "bstack".into(),
+            Self::CenteredMaster { .. } => "cmaster".into(),
             Self::Floating => "floating".into(),
         }
     }
@@ -1724,6 +1739,125 @@ impl WorkspaceLayout {
                     }
 
                     window.toplevel().send_pending_configure();
+                }
+            }
+            #[allow(unused)]
+            WorkspaceLayout::CenteredMaster {
+                nmaster,
+                master_width_factor,
+            } => {
+                // A lone master window in a workspace will basically appear the same as a
+                // maximized window, so it's logical to start from there
+                let master_len = min(windows_len, nmaster);
+                let mut master_geo = tile_area;
+                // If there's n master clients, there's (n-1) gets to leave between them
+                master_geo.size.h -= inner_gaps * (master_len.saturating_sub(1)) as i32;
+                // Divide and use floor.
+                master_geo.size.h = (master_geo.size.h as f64 / master_len as f64).floor() as i32;
+                // Calculate the rest of the height to add for each master client.
+                // Using floor will always leave us with some removed remainder, so we account for
+                // it here.
+                let mut master_rest = tile_area.size.h
+                    - (master_len.saturating_sub(1) as i32 * inner_gaps)
+                    - (master_len as i32 * master_geo.size.h);
+
+                // Repeat for left column.
+                let left_len = windows_len.saturating_sub(nmaster) / 2;
+                let mut left_geo = Rectangle::default();
+                left_geo.size.h =
+                    tile_area.size.h - (inner_gaps * left_len.saturating_sub(1) as i32);
+                left_geo.size.h = (left_geo.size.h as f64 / left_len as f64).floor() as i32;
+                let mut left_rest = tile_area.size.h
+                    - (left_len.saturating_sub(1) as i32 * inner_gaps)
+                    - (left_len as i32 * left_geo.size.h);
+
+                // Repeat again for right column
+                let right_len = (windows_len.saturating_sub(nmaster) / 2) as i32
+                    + (windows_len.saturating_sub(nmaster) % 2) as i32;
+                let mut right_geo = Rectangle::default();
+                right_geo.size.h =
+                    tile_area.size.h - (inner_gaps * right_len.saturating_sub(1) as i32);
+                right_geo.size.h = (right_geo.size.h as f64 / right_len as f64).floor() as i32;
+                let mut right_rest = tile_area.size.h
+                    - (right_len.saturating_sub(1) as i32 * inner_gaps)
+                    - (right_len as i32 * right_geo.size.h);
+
+                if windows_len > nmaster {
+                    if (windows_len - nmaster) > 1 {
+                        master_geo.size.w = ((master_geo.size.w - 2 * inner_gaps) as f32
+                            * master_width_factor)
+                            .round() as i32;
+                        left_geo.size.w =
+                            (tile_area.size.w - master_geo.size.w - 2 * inner_gaps) / 2;
+                        right_geo.size.w =
+                            tile_area.size.w - master_geo.size.w - 2 * inner_gaps - left_geo.size.w;
+                        master_geo.loc.x += left_geo.size.w + inner_gaps;
+                    } else {
+                        master_geo.size.w = ((master_geo.size.w - inner_gaps) as f32
+                            * master_width_factor)
+                            .round() as i32;
+                        left_geo.size.w = 0;
+                        right_geo.size.w = master_geo.size.w - inner_gaps;
+                    }
+
+                    left_geo.loc = tile_area.loc;
+                    right_geo.loc = tile_area.loc; // for y value only
+                    right_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                for (idx, window) in windows.enumerate() {
+                    if idx < nmaster {
+                        let mut master_height = master_geo.size.h;
+                        if master_rest != 0 {
+                            master_height += 1;
+                            master_rest -= 1;
+                        }
+
+                        apply_geometry(
+                            idx,
+                            window,
+                            Rectangle::from_loc_and_size(
+                                master_geo.loc,
+                                (master_geo.size.w, master_height),
+                            ),
+                        );
+
+                        master_geo.loc.y += master_geo.size.h + inner_gaps;
+                    } else if ((idx - nmaster) % 2 != 0) {
+                        let mut left_height = left_geo.size.h;
+                        if left_rest != 0 {
+                            left_height += 1;
+                            left_rest -= 1;
+                        }
+
+                        apply_geometry(
+                            idx,
+                            window,
+                            Rectangle::from_loc_and_size(
+                                left_geo.loc,
+                                (left_geo.size.w, left_height),
+                            ),
+                        );
+
+                        left_geo.loc.y += left_geo.size.h + inner_gaps;
+                    } else {
+                        let mut right_height = right_geo.size.h;
+                        if right_rest != 0 {
+                            right_height += 1;
+                            right_rest -= 1;
+                        }
+
+                        apply_geometry(
+                            idx,
+                            window,
+                            Rectangle::from_loc_and_size(
+                                right_geo.loc,
+                                (right_geo.size.w, right_height),
+                            ),
+                        );
+
+                        right_geo.loc.y += right_geo.size.h + inner_gaps;
+                    }
                 }
             }
             WorkspaceLayout::Floating => {
