@@ -522,7 +522,7 @@ impl WorkspaceSwitchAnimation {
         let animation = Animation::new(
             0.0,
             1.0,
-            CONFIG.animation.workspace_switch.easing,
+            CONFIG.animation.workspace_switch.curve,
             Duration::from_millis(CONFIG.animation.workspace_switch.duration),
         );
 

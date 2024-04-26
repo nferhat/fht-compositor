@@ -1,47 +1,6 @@
-use keyframe::EasingFunction;
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum Easing {
-    EaseIn,
-    EaseInCubic,
-    EaseInOut,
-    EaseInOutCubic,
-    EaseInOutQuart,
-    EaseInOutQuint,
-    EaseInQuad,
-    EaseInQuart,
-    EaseInQuint,
-    EaseOut,
-    EaseOutCubic,
-    EaseOutQuad,
-    EaseOutQuart,
-    EaseOutQuint,
-    #[default]
-    Linear,
-}
-
-impl Easing {
-    pub fn y(&self, x: f64) -> f64 {
-        match self {
-            Self::EaseIn => keyframe::functions::EaseIn.y(x),
-            Self::EaseInCubic => keyframe::functions::EaseInCubic.y(x),
-            Self::EaseInOut => keyframe::functions::EaseInOut.y(x),
-            Self::EaseInOutCubic => keyframe::functions::EaseInOutCubic.y(x),
-            Self::EaseInOutQuart => keyframe::functions::EaseInOutQuart.y(x),
-            Self::EaseInOutQuint => keyframe::functions::EaseInOutQuint.y(x),
-            Self::EaseInQuad => keyframe::functions::EaseInQuad.y(x),
-            Self::EaseInQuart => keyframe::functions::EaseInQuart.y(x),
-            Self::EaseInQuint => keyframe::functions::EaseInQuint.y(x),
-            Self::EaseOut => keyframe::functions::EaseOut.y(x),
-            Self::EaseOutCubic => keyframe::functions::EaseOutCubic.y(x),
-            Self::EaseOutQuad => keyframe::functions::EaseOutQuad.y(x),
-            Self::EaseOutQuart => keyframe::functions::EaseOutQuart.y(x),
-            Self::EaseOutQuint => keyframe::functions::EaseOutQuint.y(x),
-            Self::Linear => keyframe::functions::Linear.y(x),
-        }
-    }
-}
+use crate::utils::animation::curve::AnimationCurve;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationConfig {
@@ -66,7 +25,7 @@ const fn default_workspace_switch_animation_duration() -> u64 {
 pub struct WorkspaceSwitchAnimationConfig {
     /// What easing to use for the animation:
     #[serde(default)]
-    pub easing: Easing,
+    pub curve: AnimationCurve,
     /// The duration of the animation, in milliseconds.
     #[serde(default = "default_workspace_switch_animation_duration")]
     pub duration: u64,
@@ -78,7 +37,7 @@ pub struct WorkspaceSwitchAnimationConfig {
 impl Default for WorkspaceSwitchAnimationConfig {
     fn default() -> Self {
         Self {
-            easing: Easing::default(),
+            curve: AnimationCurve::default(),
             duration: 350,
             direction: WorkspaceSwitchAnimationDirection::Horizontal,
         }
@@ -100,7 +59,7 @@ const fn default_window_animation_duration() -> u64 {
 pub struct WindowOpenCloseAnimation {
     /// What easing to use for the animation:
     #[serde(default)]
-    pub easing: Easing,
+    pub curve: AnimationCurve,
     /// The duration of the animation, in milliseconds.
     #[serde(default = "default_window_animation_duration")]
     pub duration: u64,
@@ -109,7 +68,7 @@ pub struct WindowOpenCloseAnimation {
 impl Default for WindowOpenCloseAnimation {
     fn default() -> Self {
         Self {
-            easing: Easing::default(),
+            curve: AnimationCurve::default(),
             duration: 300,
         }
     }
@@ -119,7 +78,7 @@ impl Default for WindowOpenCloseAnimation {
 pub struct WindowGeometryAnimation {
     /// What easing to use for the animation:
     #[serde(default)]
-    pub easing: Easing,
+    pub curve: AnimationCurve,
     /// The duration of the animation, in milliseconds.
     #[serde(default = "default_window_animation_duration")]
     pub duration: u64,
@@ -128,7 +87,7 @@ pub struct WindowGeometryAnimation {
 impl Default for WindowGeometryAnimation {
     fn default() -> Self {
         Self {
-            easing: Easing::default(),
+            curve: AnimationCurve::default(),
             duration: 300,
         }
     }

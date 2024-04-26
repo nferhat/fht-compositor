@@ -23,7 +23,9 @@ use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::user_data::UserDataMap;
-use smithay::utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size};
+use smithay::utils::{
+    Buffer, IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time,
+};
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, SurfaceData as WlSurfaceData, TraversalAction,
 };
@@ -171,7 +173,7 @@ impl FhtWindow {
                 data.location_x_animation = Some(Animation::new(
                     start,
                     geometry.loc.x as f64,
-                    CONFIG.animation.window_geometry.easing,
+                    CONFIG.animation.window_geometry.curve,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
                 ));
             }
@@ -186,7 +188,7 @@ impl FhtWindow {
                 data.location_y_animation = Some(Animation::new(
                     start,
                     geometry.loc.y as f64,
-                    CONFIG.animation.window_geometry.easing,
+                    CONFIG.animation.window_geometry.curve,
                     Duration::from_millis(CONFIG.animation.window_geometry.duration),
                 ));
             }
@@ -472,7 +474,7 @@ impl FhtWindow {
 
 // Animation related code.
 impl FhtWindow {
-    pub fn advance_animations(&self, current_time: Duration) -> bool {
+    pub fn advance_animations(&self, current_time: Time<Monotonic>) -> bool {
         let mut animations_running = false;
         let mut data = self.data.lock().unwrap();
 
@@ -508,7 +510,7 @@ impl FhtWindow {
         data.open_close_animation = Some(Animation::new(
             0.0,
             1.0,
-            CONFIG.animation.window_open_close.easing,
+            CONFIG.animation.window_open_close.curve,
             Duration::from_millis(CONFIG.animation.window_open_close.duration),
         ));
     }

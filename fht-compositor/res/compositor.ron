@@ -1,10 +1,5 @@
-#![enable(implicit_some)]
 FhtConfig(
     // A NON EXHAUSTIVE configuration for fht-compositor, that you can use as a starting point.
-    //
-    // implicit_some is a ron feature extension that basically adds implicitly a Some around values when
-    // the expected type is a Option<T>, really useful
-
     // ---
 
     greet: true,
@@ -73,25 +68,53 @@ FhtConfig(
     ),
 
     // Animations (since we are hyprland v-1)
+    // We have three animations curves builtin:
+    //
+    // - Using predefined curves (from keyframe crate), like Expo, Sine, Quint, etc
+    //   You can use this curve like so: Simple(<Curve-Name>) (eg. Simple(EaseOutQuint))
+    //
+    // - Using spring parameters.
+    //   These are harder to model and tweak, you can use GNOME's elastic app to tweak them.
+    //   See example below.
+    //   Springs are make the duration setting useless.
+    //
+    // - Using a cubic bezier (tweak using https://www.cssportal.com/css-cubic-bezier-generator/)
+    //   These are the same as hyprland's bezier curves.
+    //   Give it two points: p1 and p2, both of which are (f64, f64) (x and y coordinates).
     animation: (
         // Animation for a workspace switch, or a transition, similar to what is available on GNOME
         // and Windows 10 desktop switches.
         workspace_switch: (
-            duration: 350,
-            easing: EaseOut,
-            direction: Horizontal,
+            // Example of a spring animation
+            curve: Spring(
+                initial_velocity: 0.0,
+                damping_ratio: 1.5,
+                mass: 1.0,
+                stiffness:500.0,
+                epsilon: 0.001,
+                clamp: false,
+            ),
+            direction: Vertical,
         ),
 
         // Animation when opening or closing a window.
         window_open_close: (
             duration: 300,
-            easing: EaseOutCubic,
+            curve: Cubic(
+                p1: (0.05, 0.7),
+                p2: (0.1, 0.95),
+            ),
         ),
 
         // Animation when a window changes geometry.
         window_geometry: (
             duration: 300,
-            easing: EaseOutCubic,
+            curve: Cubic(
+                p1: (0.05, 0.7),
+                p2: (0.1, 0.95),
+            ),
+            // Or you can use something premade
+            // curve: Simple(EaseOutQuint),
         )
     ),
 

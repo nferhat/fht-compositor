@@ -207,7 +207,7 @@ impl State {
 
         // Advance animations.
         let current_time = self.fht.clock.now();
-        output_state.animations_running = self.fht.advance_animations(&output, current_time.into());
+        output_state.animations_running = self.fht.advance_animations(&output, current_time);
         drop(output_state);
 
         // Then ask the backend to render.

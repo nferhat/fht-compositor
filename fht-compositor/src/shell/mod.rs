@@ -6,8 +6,6 @@ pub mod grabs;
 pub mod window;
 pub mod workspaces;
 
-use std::time::Duration;
-
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind,
     WindowSurfaceType,
@@ -16,7 +14,7 @@ use smithay::input::pointer::Focus;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Point, Rectangle, Serial, Size};
+use smithay::utils::{Monotonic, Point, Rectangle, Serial, Size, Time};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
@@ -429,7 +427,7 @@ impl Fht {
     }
 
     /// Advance all the active animations for this given output
-    pub fn advance_animations(&mut self, output: &Output, current_time: Duration) -> bool {
+    pub fn advance_animations(&mut self, output: &Output, current_time: Time<Monotonic>) -> bool {
         let mut animations_running = false;
         let wset = self.wset_mut_for(output);
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =

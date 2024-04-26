@@ -94,6 +94,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::Context;
+use ron::extensions::Extensions;
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
 use smithay::reexports::rustix::path::Arg;
@@ -103,10 +104,9 @@ const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
 
 #[allow(unused_imports)]
 pub use self::types::{
-    AnimationConfig, BorderConfig, CursorConfig, Easing, FhtConfig as FhtConfigInner,
-    GeneralConfig, InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
-    WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
-    WorkspaceSwitchAnimationDirection,
+    AnimationConfig, BorderConfig, CursorConfig, FhtConfig as FhtConfigInner, GeneralConfig,
+    InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings,
+    WindowRulePattern, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
 };
 use crate::state::State;
 
@@ -169,8 +169,11 @@ pub fn load_config() -> anyhow::Result<FhtConfigInner> {
         }
     };
 
-    let config: FhtConfigInner = ron::de::from_reader(reader).context("Malformed config file!")?;
-    Ok(config)
+    ron::Options::default()
+        .with_default_extension(Extensions::IMPLICIT_SOME)
+        .with_default_extension(Extensions::UNWRAP_VARIANT_NEWTYPES)
+        .from_reader(reader)
+        .context("Malformed config file!")
 }
 
 pub fn init_config_file_watcher(
