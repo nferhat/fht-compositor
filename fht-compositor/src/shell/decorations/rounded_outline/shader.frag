@@ -14,13 +14,12 @@ float roundedBoxSDF(vec2 center, vec2 size, float radius) {
 
 void main() {
     vec2 half_size = size / 2.0;
-    vec2 location = v_coords * size;
-    vec2 center = location - half_size;
+    vec2 center = (v_coords * size) - half_size;
 
-    float distance = roundedBoxSDF(center, half_size - vec2(half_thickness), radius + half_thickness);
-    float smoothedAlphaOuter = 1.0 - smoothstep(-0.5, 1.0, distance - half_thickness);
+    float distance = roundedBoxSDF(center, half_size - vec2(half_thickness), radius - half_thickness);
+    float smoothedAlphaOuter = 1.0 - smoothstep(-0.5, .5, distance - half_thickness);
     // Create an inner circle that isn't as anti-aliased as the outer ring
-    float smoothedAlphaInner = 1.0 - smoothstep(-0.5, 0.5, distance + half_thickness);
+    float smoothedAlphaInner = 1.0 - smoothstep(-0.5, 0.25, distance + half_thickness);
     gl_FragColor = mix(vec4(0), v_color, smoothedAlphaOuter - smoothedAlphaInner);
 }
 
