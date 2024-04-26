@@ -1,7 +1,8 @@
 use std::ops::Div;
 use std::time::Duration;
 
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::de::Visitor;
+use serde::{Deserialize, Serialize};
 
 /// Delta by which we check durations and values.
 const DELTA: f64 = 0.001;
@@ -27,21 +28,30 @@ pub struct Animation {
 impl<'de> Deserialize<'de> for Animation {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> {
+        D: serde::Deserializer<'de>,
+    {
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field { InitialVelocity, Clamp, Mass, DampingRatio, Stiffness, Epsilon }
+        enum Field {
+            InitialVelocity,
+            Clamp,
+            Mass,
+            DampingRatio,
+            Stiffness,
+            Epsilon,
+        }
 
         struct AnimationVisitor;
-        impl <'de> Visitor<'de> for AnimationVisitor {
+        impl<'de> Visitor<'de> for AnimationVisitor {
             type Value = Animation;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct Animation")
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-                where
-                    A: serde::de::MapAccess<'de>, {
+            where
+                A: serde::de::MapAccess<'de>,
+            {
                 let mut initial_velocity = None;
                 let mut clamp = None;
                 let mut mass = None;
@@ -90,11 +100,14 @@ impl<'de> Deserialize<'de> for Animation {
                     }
                 }
 
-                let initial_velocity = initial_velocity.ok_or_else(|| serde::de::Error::missing_field("velocity"))?;
+                let initial_velocity =
+                    initial_velocity.ok_or_else(|| serde::de::Error::missing_field("velocity"))?;
                 let clamp = clamp.ok_or_else(|| serde::de::Error::missing_field("clamp"))?;
                 let mass = mass.ok_or_else(|| serde::de::Error::missing_field("mass"))?;
-                let damping_ratio: f64 = damping_ratio.ok_or_else(|| serde::de::Error::missing_field("damping_ratio"))?;
-                let stiffness = stiffness.ok_or_else(|| serde::de::Error::missing_field("stiffness"))?;
+                let damping_ratio: f64 = damping_ratio
+                    .ok_or_else(|| serde::de::Error::missing_field("damping_ratio"))?;
+                let stiffness =
+                    stiffness.ok_or_else(|| serde::de::Error::missing_field("stiffness"))?;
                 let epsilon = epsilon.unwrap_or(0.001);
                 // Calculate our damping based on the damping ratio.
                 // Thats how libadwaita does i
@@ -111,7 +124,14 @@ impl<'de> Deserialize<'de> for Animation {
             }
         }
 
-        const FIELDS: &[&str] = &["initial_velocity", "clamp", "mass", "damping_ratio", "stiffness", "epsilon"];
+        const FIELDS: &[&str] = &[
+            "initial_velocity",
+            "clamp",
+            "mass",
+            "damping_ratio",
+            "stiffness",
+            "epsilon",
+        ];
         deserializer.deserialize_struct("Animation", FIELDS, AnimationVisitor)
     }
 }
@@ -218,11 +238,13 @@ impl Animation {
         } else if beta < omega0 {
             // Second possibility: animation is underdamped.
             let omega1 = (omega0.powf(2.0) - beta.powf(2.0)).sqrt();
-            end + envelope * (x0 * (omega1 * t).cos() + ((beta + x0 * v0) / omega1) * (omega1 * t).sin())
+            end + envelope
+                * (x0 * (omega1 * t).cos() + ((beta + x0 * v0) / omega1) * (omega1 * t).sin())
         } else if beta > omega0 {
             // Third possibility: animation is overmapped.
             let omega2 = (beta.powf(2.0) - omega0.powf(2.0)).sqrt();
-            end + envelope * (x0 * (omega2 * t).cosh() + ((beta * x0 + v0) / omega2) * (omega2 * t).sinh())
+            end + envelope
+                * (x0 * (omega2 * t).cosh() + ((beta * x0 + v0) / omega2) * (omega2 * t).sinh())
         } else {
             unreachable!("Something really wrong happened with spring animations...");
         }

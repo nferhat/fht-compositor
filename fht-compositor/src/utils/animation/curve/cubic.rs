@@ -1,4 +1,6 @@
-use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
+use serde::de::Visitor;
+use serde::ser::SerializeSeq;
+use serde::{Deserialize, Serialize};
 
 /// A single cubic control point.
 pub type ControlPoint = (f64, f64);
@@ -25,8 +27,9 @@ pub struct Animation {
 
 impl Serialize for Animation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         let mut seq = serializer.serialize_seq(Some(4))?;
 
         seq.serialize_element(&self.p1.0)?;
@@ -41,22 +44,27 @@ impl Serialize for Animation {
 // Custom deserializer since we don't want to serialize baked points.
 impl<'de> Deserialize<'de> for Animation {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de> {
+    where
+        D: serde::Deserializer<'de>,
+    {
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
-        enum Field { P1, P2 }
+        enum Field {
+            P1,
+            P2,
+        }
 
         struct AnimationVisitor;
-        impl <'de> Visitor<'de> for AnimationVisitor {
+        impl<'de> Visitor<'de> for AnimationVisitor {
             type Value = Animation;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct Animation")
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-                where
-                    A: serde::de::MapAccess<'de>, {
+            where
+                A: serde::de::MapAccess<'de>,
+            {
                 let mut p1 @ mut p2 = Option::<ControlPoint>::None;
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -105,7 +113,7 @@ impl Animation {
         Self {
             p1: (x0, y0),
             p2: (x1, y1),
-            baked_points
+            baked_points,
         }
     }
 
@@ -115,7 +123,7 @@ impl Animation {
         let mut index = 0;
         let mut below = true;
 
-        let mut step = (BAKED_POINTS + 1)/2;
+        let mut step = (BAKED_POINTS + 1) / 2;
         while step > 0 {
             if below {
                 index += step;

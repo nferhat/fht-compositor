@@ -281,7 +281,12 @@ impl X11Data {
     }
 
     #[profiling::function]
-    pub fn render(&mut self, state: &mut Fht, output: &Output, current_time: Duration) -> anyhow::Result<bool> {
+    pub fn render(
+        &mut self,
+        state: &mut Fht,
+        output: &Output,
+        current_time: Duration,
+    ) -> anyhow::Result<bool> {
         let Some(surface) = self.surfaces.values_mut().find(|s| s.output == *output) else {
             anyhow::bail!("Tried to render a non existing surface!");
         };
@@ -320,7 +325,8 @@ impl X11Data {
                     RenderState::Queued => (),
                     _ => unreachable!(),
                 }
-                output_state.current_frame_sequence = output_state.current_frame_sequence.wrapping_add(1);
+                output_state.current_frame_sequence =
+                    output_state.current_frame_sequence.wrapping_add(1);
 
                 state.update_primary_scanout_output(output, &states);
 

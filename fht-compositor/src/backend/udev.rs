@@ -928,7 +928,6 @@ impl UdevData {
                                 _ => unreachable!(),
                             };
 
-
                             #[cfg(feature = "xdg-screencast-portal")]
                             {
                                 // Render screencopy now since we actually drawed something
@@ -971,7 +970,10 @@ impl UdevData {
             RenderState::Queued => (),
             RenderState::WaitingForVblank { .. } => unreachable!(),
             RenderState::WaitingForVblankTimer { token, .. } => {
-                output_state.render_state = RenderState::WaitingForVblankTimer { token, queued: false };
+                output_state.render_state = RenderState::WaitingForVblankTimer {
+                    token,
+                    queued: false,
+                };
                 return Ok(false);
             }
         };
