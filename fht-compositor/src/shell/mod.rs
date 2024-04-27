@@ -162,31 +162,26 @@ impl Fht {
         output: &Output,
     ) -> Box<dyn Iterator<Item = &FhtWindow> + '_> {
         let wset = self.wset_for(output);
+        let mut windows =
+            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &FhtWindow>>;
 
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = wset.switch_animation.as_ref() {
-            let active = wset.active();
             let target = &wset.workspaces[*target_idx];
-            if let Some(fullscreen) = active
-                .fullscreen
-                .as_ref()
-                .map(|f| &f.inner)
-                .or_else(|| target.fullscreen.as_ref().map(|f| &f.inner))
-            {
-                return Box::new(std::iter::once(fullscreen))
-                    as Box<dyn Iterator<Item = &FhtWindow>>;
+            if let Some(fullscreen) = target.fullscreen.as_ref().map(|f| &f.inner) {
+                windows = Box::new(windows.chain(std::iter::once(fullscreen)));
             } else {
-                return Box::new(active.windows.iter().chain(target.windows.iter()))
-                    as Box<dyn Iterator<Item = &FhtWindow>>;
-            }
-        } else {
-            let active = wset.active();
-            if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
-                return Box::new(std::iter::once(fullscreen))
-                    as Box<dyn Iterator<Item = &FhtWindow>>;
-            } else {
-                return Box::new(active.windows.iter()) as Box<dyn Iterator<Item = &FhtWindow>>;
+                windows = Box::new(windows.chain(target.windows.iter()));
             }
         }
+
+        let active = wset.active();
+        if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
+            windows = Box::new(windows.chain(std::iter::once(fullscreen)))
+        } else {
+            windows = Box::new(windows.chain(active.windows.iter()))
+        };
+
+        Box::new(windows)
     }
 
     /// Prepapre a pending window to be mapped.
