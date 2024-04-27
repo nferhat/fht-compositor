@@ -379,12 +379,13 @@ impl Fht {
         let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
 
         if should_focus {
-            if CONFIG.general.cursor_warps {
-                let center = window.geometry().center();
-                self.loop_handle
-                    .insert_idle(move |state| state.move_pointer(center.to_f64()));
-            }
-            self.focus_state.focus_target = Some(window.clone().into());
+            self.loop_handle.insert_idle(move |state| {
+                if CONFIG.general.cursor_warps {
+                    let center = window.geometry().center();
+                    state.move_pointer(center.to_f64());
+                }
+                state.set_focus_target(Some(window.clone().into()));
+            });
         }
     }
 

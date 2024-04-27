@@ -887,8 +887,9 @@ impl Workspace {
             inner.surface.refresh();
         }
         let output_geometry = self.output.geometry();
-        for (idx, window) in self.windows.iter().enumerate() {
-            window.set_activated(idx == self.focused_window_idx);
+        for window in self.windows.iter() {
+            // This is now managed globally with focus targets
+            // window.set_activated(idx == self.focused_window_idx);
 
             let bbox = window.bbox();
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
@@ -1901,7 +1902,7 @@ impl State {
                         let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 }
             }
             IpcWorkspaceRequest::FocusPreviousWindow => {
@@ -1911,7 +1912,7 @@ impl State {
                         let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 }
             }
         }

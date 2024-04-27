@@ -6,7 +6,7 @@ use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
-use crate::shell::PointerFocusTarget;
+use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 use crate::utils::geometry::{PointExt, RectCenterExt};
 use crate::utils::output::OutputExt;
@@ -212,6 +212,7 @@ impl State {
         let Some(ref output) = self.fht.focus_state.output.clone() else {
             return;
         };
+        let current_focus = self.fht.focus_state.focus_target.clone();
         let wset = self.fht.wset_mut_for(output);
         let active = wset.active_mut();
 
@@ -235,12 +236,17 @@ impl State {
                 }
             }
             KeyAction::CenterFocusedWindow => {
-                if let Some(window) = active.focused().filter(|w| !w.tiled()).cloned() {
+                if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
+                    if window.tiled() {
+                        return;
+                    }
+
                     let mut geo = window.geometry();
                     let output_geo = output.geometry();
                     geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
                     geo.loc -= geo.size.downscale(2).to_point();
                     window.set_geometry_with_border(geo, false);
+                    window.toplevel().send_configure();
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
@@ -269,7 +275,7 @@ impl State {
                         let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::FocusPreviousWindow => {
@@ -277,7 +283,7 @@ impl State {
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
                         let center = window.geometry().center();
-                        self.fht.focus_state.focus_target = Some(window.into());
+                        self.set_focus_target(Some(window.into()));
                         self.move_pointer(center.to_f64())
                     }
                 }
@@ -289,7 +295,7 @@ impl State {
                         let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
@@ -299,7 +305,7 @@ impl State {
                         let center = window.geometry().center();
                         self.move_pointer(center.to_f64())
                     }
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::FocusNextOutput => {
@@ -363,17 +369,14 @@ impl State {
                 self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::CloseFocusedWindow => {
-                if let Some(window) = active.focused() {
+                if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
                     window.close()
                 }
-                active.refresh();
-                if let Some(window) = active.focused().cloned() {
-                    self.fht.focus_state.focus_target = Some(window.into());
-                }
+                self.set_focus_target(None); // reset focus
             }
             KeyAction::FocusWorkspace(idx) => {
                 if let Some(window) = wset.set_active_idx(idx, true) {
-                    self.fht.focus_state.focus_target = Some(window.into());
+                    self.set_focus_target(Some(window.into()));
                 };
             }
             KeyAction::SendFocusedWindowToWorkspace(idx) => {

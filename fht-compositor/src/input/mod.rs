@@ -24,7 +24,7 @@ use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurf
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
-use crate::shell::PointerFocusTarget;
+use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::{egui_state_for_output, OutputState, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
@@ -54,7 +54,6 @@ impl State {
         let pointer_loc = pointer.current_location().as_global();
         let layer_map = layer_map_for_output(output);
         let wset = self.fht.wset_mut_for(output);
-        let active = wset.active_mut();
 
         if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc.as_logical()) {
             if layer.can_receive_keyboard_focus() {
@@ -66,11 +65,11 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.fht.focus_state.focus_target = Some(layer.clone().into());
+                    self.set_focus_target(Some(layer.clone().into()));
                     return;
                 }
             }
-        } else if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
+        } else if let Some(fullscreen) = wset.active().fullscreen.as_ref().map(|f| &f.inner) {
             if fullscreen
                 .surface_under(
                     pointer_loc.to_local(output).as_logical(),
@@ -78,7 +77,8 @@ impl State {
                 )
                 .is_some()
             {
-                self.fht.focus_state.focus_target = Some(fullscreen.clone().into());
+                let fullscreen = fullscreen.clone();
+                self.set_focus_target(Some(fullscreen.into()));
                 return;
             }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc.as_logical()) {
@@ -91,14 +91,19 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.fht.focus_state.focus_target = Some(layer.clone().into());
+                    self.set_focus_target(Some(layer.clone().into()));
                     return;
                 }
             }
-        } else if let Some(window) = active.window_under(pointer_loc).map(|(w, _)| w.clone()) {
+        } else if let Some(window) = wset
+            .active()
+            .window_under(pointer_loc)
+            .map(|(w, _)| w.clone())
+        {
+            let active = wset.active_mut();
             active.focus_window(&window);
             active.raise_window(&window);
-            self.fht.focus_state.focus_target = Some(window.clone().into());
+            self.set_focus_target(Some(window.clone().into()));
         } else if let Some(layer) = layer_map
             .layer_under(Layer::Bottom, pointer_loc.as_logical())
             .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc.as_logical()))
@@ -112,11 +117,28 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.fht.focus_state.focus_target = Some(layer.clone().into());
+                    self.set_focus_target(Some(layer.clone().into()));
                     return;
                 }
             }
         }
+    }
+
+    pub fn set_focus_target(&mut self, ft: Option<KeyboardFocusTarget>) {
+        let old_focus = self.fht.focus_state.focus_target.take();
+        if let Some(KeyboardFocusTarget::Window(w)) = old_focus.as_ref() {
+            w.set_activated(false);
+        };
+
+        if let Some(KeyboardFocusTarget::Window(w)) = ft.as_ref() {
+            w.set_activated(true);
+        };
+
+        self.fht.focus_state.focus_target = ft.clone();
+        self.fht
+            .keyboard
+            .clone()
+            .set_focus(self, ft, SERIAL_COUNTER.next_serial());
     }
 
     pub fn move_pointer(&mut self, point: Point<f64, Global>) {

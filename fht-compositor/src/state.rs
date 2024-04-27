@@ -146,35 +146,31 @@ impl State {
         }
 
         // Make sure the surface is not dead (otherwise wayland wont be happy)
-        let _ = self.fht.focus_state.focus_target.take_if(|f| !f.alive());
-        let old_focus = self.fht.keyboard.current_focus();
+        // NOTE: focus_target from state is always guaranteed to be the same as keyboard focus.
+        let old_focus_dead = self
+            .fht
+            .focus_state
+            .focus_target
+            .take_if(|f| !f.alive())
+            .is_some();
         {
             profiling::scope!("refresh_focus");
-            if self.fht.focus_state.focus_target.is_some() {
-                // If we need to focus a specific surface, then do it.
-                if self.fht.focus_state.focus_target != old_focus {
-                    self.fht.keyboard.clone().set_focus(
-                        self,
-                        self.fht.focus_state.focus_target.clone(),
-                        SERIAL_COUNTER.next_serial(),
-                    );
-                }
-            } else {
-                // Otherwise, the focused target will be the focused window on the active workspace.
+            if old_focus_dead {
+                // Focus target died, just remove it.
+                self.fht
+                    .keyboard
+                    .clone()
+                    .set_focus(self, None, SERIAL_COUNTER.next_serial());
+            }
+
+            if self.fht.focus_state.focus_target.is_none() {
+                // We are focusing nothing, default to the active workspace focused window.
                 if let Some(window) = self.fht.focus_state.output.as_ref().and_then(|o| {
                     let active = self.fht.wset_for(o).active();
-                    active
-                        .fullscreen
-                        .as_ref()
-                        .map(|f| f.inner.clone())
-                        .or_else(|| active.focused().cloned())
+                    active.focused().cloned()
                 }) {
-                    self.fht.focus_state.focus_target = Some(window.into());
-                    self.fht.keyboard.clone().set_focus(
-                        self,
-                        self.fht.focus_state.focus_target.clone(),
-                        SERIAL_COUNTER.next_serial(),
-                    );
+                    window.set_activated(true);
+                    self.set_focus_target(Some(window.into()));
                 }
             }
         }
