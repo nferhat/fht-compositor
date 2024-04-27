@@ -119,7 +119,6 @@ impl Animation {
 
     /// Get the Y value at a given X coordinate, assuming that x is included in [0.0, 1.0]
     pub fn y(&self, x: f64) -> f64 {
-        dbg!(x);
         let mut index = 0;
         let mut below = true;
 
@@ -139,7 +138,6 @@ impl Animation {
         let (x0, y0) = self.baked_points[lower_index];
         let (x1, y1) = self.baked_points[lower_index + 1];
         let delta = (x - x0) / (x1 - x0);
-        dbg!(delta);
 
         if delta.is_nan() || delta.is_infinite() {
             0.0
