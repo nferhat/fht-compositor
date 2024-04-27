@@ -145,7 +145,6 @@ FhtConfig(
         ([SUPER, SHIFT], "Space"): SelectPreviousLayout,
         ([SUPER, CTRL], "Space"):  ToggleFloating,
         ([SUPER, CTRL], "s"):      CenterFocusedWindow,
-        ([SUPER, CTRL], "p"):      PinFocusedWindow,
         ([SUPER],       "f"):      FullscreenFocusedWindow,
         ([SUPER],       "m"):      ToggleMaximizeOnFocusedWindow,
         ([SUPER], "h"):            ChangeMwfact(-0.05),

@@ -93,14 +93,6 @@ pub enum KeyAction {
     /// Toggle floating mode for the focused window.
     ToggleFloating,
 
-    /// Pins the focused window, making it show above all the workspaces of an output, no matter
-    /// which workspace it is
-    ///
-    /// Works only if the window you are trying to pin is floating.
-    ///
-    /// NOTE: I have to implement pinning before lmao
-    PinFocusedWindow,
-
     /// Move the focused window to the center of it's monitor.
     ///
     /// Works only if the window you are trying to ping is floating.
@@ -241,9 +233,6 @@ impl State {
                     active.raise_window(&window);
                     active.refresh_window_geometries();
                 }
-            }
-            KeyAction::PinFocusedWindow => {
-                todo!("PinFocusedWindow support");
             }
             KeyAction::CenterFocusedWindow => {
                 if let Some(window) = active.focused().filter(|w| !w.tiled()).cloned() {
