@@ -1,5 +1,4 @@
 pub mod cursor;
-pub mod decorations;
 pub mod focus_target;
 pub mod grabs;
 // pub mod window;

@@ -21,11 +21,11 @@ use smithay::wayland::compositor::send_surface_state;
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
-use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
 use crate::ipc::{IpcOutput, IpcWorkspace, IpcWorkspaceRequest};
+use crate::renderer::AsGlowRenderer;
 use crate::state::State;
 use crate::utils::animation::Animation;
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -533,7 +533,6 @@ impl WorkspaceSwitchAnimation {
     }
 }
 
-#[derive(Debug)]
 pub enum WorkspaceSetRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem,

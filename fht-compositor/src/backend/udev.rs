@@ -22,13 +22,8 @@ use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
     Error as MultiError, GpuManager, MultiFrame, MultiRenderer,
 };
-#[cfg(feature = "xdg-screencast-portal")]
-use smithay::backend::renderer::{
-    element::{Element, RenderElement},
-    Bind, Frame,
-};
 #[cfg(feature = "egl")]
-use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl, Renderer};
+use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -51,7 +46,7 @@ use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_li
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Monotonic, Physical, Rectangle, Scale, Size, Time, Transform};
+use smithay::utils::{DeviceFd, Monotonic, Time};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
@@ -59,9 +54,8 @@ use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
-use super::render::FhtRenderElement;
 use crate::config::CONFIG;
-use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
+use crate::renderer::{init_shaders, RenderTarget};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -107,7 +101,7 @@ pub struct UdevData {
     /// The primary device node, aka the DRM node pointing to your gpu.
     /// It may or may not be the same as the primary_gpu node.
     pub primary_node: DrmNode,
-    gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
+    pub gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
     pub devices: HashMap<DrmNode, Device>,
     _registration_tokens: Vec<RegistrationToken>,
 }
@@ -353,8 +347,7 @@ impl UdevData {
         }
 
         let mut renderer = data.gpu_manager.single_renderer(&primary_gpu).unwrap();
-        RoundedQuadShader::init(&mut renderer);
-        RoundedOutlineShader::init(&mut renderer);
+        init_shaders(&mut renderer);
 
         state.shm_state.update_formats(renderer.shm_formats());
 
@@ -871,8 +864,7 @@ impl UdevData {
 
         surface.fps.start();
 
-        let elements =
-            super::render::output_elements(&mut renderer, &surface.output, fht, &mut surface.fps);
+        let elements = fht.output_elements(&mut renderer, &surface.output, Some(&mut surface.fps), RenderTarget::Output);
         surface.fps.elements();
 
         let res = surface
@@ -927,13 +919,6 @@ impl UdevData {
                                 }
                                 _ => unreachable!(),
                             };
-
-                            #[cfg(feature = "xdg-screencast-portal")]
-                            {
-                                // Render screencopy now since we actually drawed something
-                                render_screencopy(fht, &surface.output, &mut renderer, &elements);
-                                surface.fps.screencast();
-                            }
 
                             // We queued and client buffers are now displayed, we can now send
                             // frame events to them so they start building the next buffer
@@ -1203,115 +1188,4 @@ fn get_surface_dmabuf_feedback(
         render_feedback,
         scanout_feedback,
     })
-}
-
-#[cfg(feature = "xdg-screencast-portal")]
-#[profiling::function]
-fn render_screencopy<'a>(
-    state: &mut Fht,
-    output: &Output,
-    renderer: &mut UdevRenderer<'a>,
-    elements: &'a [FhtRenderElement<UdevRenderer<'a>>],
-) {
-    let size = output.current_mode().unwrap().size;
-    let transform = output.current_transform();
-    let size = transform.transform_size(size);
-
-    let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
-
-    let Some(pipewire) = state.pipewire.as_mut() else {
-        // No need for a log message here, it would just flood the TTY and logs.
-        return;
-    };
-
-    let mut casts_to_stop = vec![];
-
-    let mut casts = std::mem::take(&mut pipewire.casts);
-    for cast in &mut casts {
-        if !cast.is_active.get() {
-            continue;
-        }
-
-        if &cast.output != output {
-            continue;
-        }
-
-        if cast.size.to_physical_precise_round(scale) != size {
-            casts_to_stop.push(cast.session_handle.clone());
-            continue;
-        }
-
-        {
-            let mut buffer = match cast.stream.dequeue_buffer() {
-                Some(buffer) => buffer,
-                None => {
-                    debug!(
-                        session_handle = cast.session_handle.to_string(),
-                        "PipeWire stream out of buffers! Skipping frame."
-                    );
-                    continue;
-                }
-            };
-
-            let data = &mut buffer.datas_mut()[0];
-            let fd = data.as_raw().fd as i32;
-            let dmabuf = cast.dmabufs.borrow()[&fd].clone();
-
-            // FIXME: Hidden / embedded / metadata cursor
-            let elements = elements.iter().rev();
-
-            if let Err(err) = render_to_dmabuf(renderer, dmabuf, size, scale, transform, elements) {
-                error!("error rendering to dmabuf: {err:?}");
-                continue;
-            }
-
-            let maxsize = data.as_raw().maxsize;
-            let chunk = data.chunk_mut();
-            *chunk.size_mut() = maxsize;
-            *chunk.stride_mut() = maxsize as i32 / size.h;
-        }
-    }
-    pipewire.casts = casts;
-
-    for id in casts_to_stop {
-        state.stop_cast(id);
-    }
-}
-
-#[cfg(feature = "xdg-screencast-portal")]
-#[profiling::function]
-pub fn render_to_dmabuf<'a>(
-    renderer: &mut UdevRenderer<'a>,
-    dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
-    size: Size<i32, Physical>,
-    scale: Scale<f64>,
-    transform: Transform,
-    elements: impl Iterator<Item = &'a FhtRenderElement<UdevRenderer<'a>>>,
-) -> anyhow::Result<()> {
-    let output_rect = Rectangle::from_loc_and_size((0, 0), size);
-
-    renderer.bind(dmabuf).context("error binding texture")?;
-    let mut frame = renderer
-        .render(size, transform)
-        .context("error starting frame")?;
-
-    frame
-        .clear([0., 0., 0., 0.], &[output_rect])
-        .context("error clearing")?;
-
-    for element in elements {
-        let src = element.src();
-        let dst = element.geometry(scale);
-
-        if let Some(mut damage) = output_rect.intersection(dst) {
-            damage.loc -= dst.loc;
-            element
-                .draw(&mut frame, src, dst, &[damage])
-                .context("error drawing element")?;
-        }
-    }
-
-    let _sync_point = frame.finish().context("error finishing frame")?;
-
-    Ok(())
 }

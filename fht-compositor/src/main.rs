@@ -31,6 +31,7 @@ mod input;
 mod ipc;
 mod portals;
 mod protocols;
+mod renderer;
 mod shell;
 mod state;
 mod utils;

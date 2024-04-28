@@ -13,7 +13,6 @@ pub use self::animation::*;
 pub use self::decoration::*;
 pub use self::input::*;
 pub use self::rules::*;
-use crate::backend::render::BackendAllocator;
 use crate::input::{KeyAction, KeyPattern, MouseAction, MousePattern};
 use crate::shell::workspaces::WorkspaceLayout;
 
@@ -209,12 +208,6 @@ fn default_render_node() -> Option<std::path::PathBuf> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderConfig {
-    /// Which allocator to prefer when running a backend?
-    ///
-    /// If this is none, the Vulkan backend will be used
-    #[serde(default)]
-    pub allocator: BackendAllocator,
-
     /// Should we avoid using 10-bit color formats.
     ///
     /// This is only effective in the udev backend.
@@ -247,7 +240,6 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
-            allocator: BackendAllocator::default(),
             #[cfg(feature = "udev_backend")]
             disable_10bit: default_disable_10bit(),
             #[cfg(feature = "udev_backend")]

@@ -32,7 +32,7 @@ use smithay::reexports::gbm::{BufferObjectFlags as GbmBufferFlags, Modifier};
 use smithay::utils::{Logical, Size};
 
 use super::geometry::SizeExt;
-use crate::portals::{ScreenCastRequest, ScreenCastResponse, SessionSource, SourceType};
+use crate::portals::{CursorMode, ScreenCastRequest, ScreenCastResponse, SessionSource, SourceType};
 use crate::state::State;
 
 /// A helper PipeWire instance to manage PipeWire streams.
@@ -47,6 +47,7 @@ pub struct Cast {
     pub stream: Stream,
     _listener: pipewire::stream::StreamListener<()>,
     pub is_active: Rc<Cell<bool>>,
+    pub cursor_mode: CursorMode,
     pub output: Output,
     pub size: Size<i32, Logical>,
     pub dmabufs: Rc<RefCell<HashMap<i32, Dmabuf>>>,
@@ -107,6 +108,7 @@ impl PipeWire {
         session_handle: zvariant::OwnedObjectPath,
         source: SessionSource,
         source_type: SourceType,
+        cursor_mode: CursorMode,
     ) -> anyhow::Result<Cast> {
         let Some(output) = source.output().cloned() else {
             anyhow::bail!("Session source has no output!");
@@ -382,6 +384,7 @@ impl PipeWire {
             _listener: listener,
             is_active,
             output,
+            cursor_mode,
             size: size.as_logical(),
             dmabufs,
         };

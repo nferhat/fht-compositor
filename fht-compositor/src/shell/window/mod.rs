@@ -8,7 +8,6 @@ use std::time::Duration;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::GlesError;
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
@@ -34,13 +33,12 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 pub use surface::*;
 
-use super::decorations::RoundedOutlineShader;
-#[cfg(feature = "udev_backend")]
-use crate::backend::render::AsGlowFrame;
-use crate::backend::render::AsGlowRenderer;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{BorderConfig, CONFIG};
+use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
+use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutlineShaderSettings};
+use crate::renderer::AsGlowRenderer;
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
     Global, PointExt, PointGlobalExt, RectCenterExt, RectExt, RectGlobalExt, SizeExt,
@@ -527,7 +525,6 @@ impl IsAlive for FhtWindow {
     }
 }
 
-#[derive(Debug)]
 pub enum FhtWindowRenderElement<R>
 where
     R: Renderer + ImportAll,
@@ -536,8 +533,8 @@ where
 {
     Surface(FhtWindowSurfaceRenderElement<R>),
     ResizingSurface(RescaleRenderElement<FhtWindowSurfaceRenderElement<R>>),
-    Border(PixelShaderElement),
-    ResizingBorder(RescaleRenderElement<PixelShaderElement>),
+    Border(FhtPixelShaderElement),
+    ResizingBorder(RescaleRenderElement<FhtPixelShaderElement>),
 }
 
 impl<R> Element for FhtWindowRenderElement<R>
@@ -652,11 +649,11 @@ impl RenderElement<GlowRenderer> for FhtWindowRenderElement<GlowRenderer> {
         match self {
             Self::Surface(e) => e.draw(frame, src, dst, damage),
             Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
-            Self::Border(e) => <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+            Self::Border(e) => <FhtPixelShaderElement as RenderElement<GlowRenderer>>::draw(
                 e, frame, src, dst, damage,
             ),
             Self::ResizingBorder(e) => {
-                <RescaleRenderElement<PixelShaderElement> as RenderElement<GlowRenderer>>::draw(
+                <RescaleRenderElement<FhtPixelShaderElement> as RenderElement<GlowRenderer>>::draw(
                     e, frame, src, dst, damage,
                 )
             }
@@ -686,19 +683,11 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtWindowRenderElement<UdevRenderer
             Self::Surface(e) => e.draw(frame, src, dst, damage),
             Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
             Self::Border(e) => {
-                let frame = frame.glow_frame_mut();
-                <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
-                    e, frame, src, dst, damage,
-                )
-                .map_err(|err| UdevRenderError::Render(err))
-            }
+                <FhtPixelShaderElement as RenderElement<UdevRenderer<'a>>>::draw(e, frame, src, dst, damage)
+            },
             Self::ResizingBorder(e) => {
-                let frame = frame.glow_frame_mut();
-                <RescaleRenderElement<PixelShaderElement> as RenderElement<GlowRenderer>>::draw(
-                    e, frame, src, dst, damage,
-                )
-                .map_err(|err| UdevRenderError::Render(err))
-            }
+                <RescaleRenderElement<FhtPixelShaderElement> as RenderElement<UdevRenderer<'a>>>::draw(e, frame, src, dst, damage)
+            },
         }
     }
 
@@ -706,14 +695,8 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtWindowRenderElement<UdevRenderer
         match self {
             Self::Surface(e) => e.underlying_storage(renderer),
             Self::ResizingSurface(e) => e.underlying_storage(renderer),
-            Self::Border(e) => {
-                let renderer = renderer.glow_renderer_mut();
-                e.underlying_storage(renderer)
-            }
-            Self::ResizingBorder(e) => {
-                let renderer = renderer.glow_renderer_mut();
-                e.underlying_storage(renderer)
-            }
+            Self::Border(e) => e.underlying_storage(renderer),
+            Self::ResizingBorder(e) => e.underlying_storage(renderer),
         }
     }
 }
@@ -727,7 +710,7 @@ impl FhtWindow {
         alpha: f32,
     ) -> Vec<FhtWindowRenderElement<R>>
     where
-        R: Renderer + ImportAll + AsGlowRenderer + ImportMem,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
@@ -736,7 +719,7 @@ impl FhtWindow {
         // Otherwise, the window is not edge to edge and can be drawn normally.
         let border_config = (!self.fullscreen()).then(|| {
             let border_config = self.border_config();
-            super::decorations::RoundedOutlineShaderSettings {
+            RoundedOutlineShaderSettings {
                 thickness: border_config.thickness,
                 radius: border_config.radius,
                 color: if self.activated() {

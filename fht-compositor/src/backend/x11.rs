@@ -24,9 +24,7 @@ use smithay::wayland::dmabuf::{
     DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
 };
 
-use super::render::BackendAllocator;
-use crate::config::CONFIG;
-use crate::shell::decorations::{RoundedOutlineShader, RoundedQuadShader};
+use crate::renderer::{init_shaders, RenderTarget};
 use crate::state::{Fht, OutputState, RenderState, State};
 use crate::utils::fps::Fps;
 
@@ -50,34 +48,6 @@ pub struct Surface {
     window: Window,
 }
 
-pub fn try_vulkan_allocator(drm_node: DrmNode) -> Option<VulkanAllocator> {
-    Instance::new(Version::VERSION_1_2, None)
-        .ok()
-        .and_then(|instance| {
-            PhysicalDevice::enumerate(&instance)
-                .ok()
-                .and_then(|devices| {
-                    devices
-                        .filter(|phd| phd.has_device_extension(ExtPhysicalDeviceDrmFn::name()))
-                        .find(|phd| {
-                            phd.primary_node().unwrap() == Some(drm_node)
-                                || phd.render_node().unwrap() == Some(drm_node)
-                        })
-                })
-        })
-        .and_then(|physical_device| {
-            VulkanAllocator::new(
-                &physical_device,
-                ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
-            )
-            .ok()
-        })
-}
-
-pub fn gbm_allocator(device: gbm::Device<DeviceFd>) -> GbmAllocator<DeviceFd> {
-    GbmAllocator::new(device, GbmBufferFlags::RENDERING)
-}
-
 impl X11Data {
     pub fn new(state: &mut Fht) -> anyhow::Result<Self> {
         // Create the X11 backend and get the DRM node for direct rendering.
@@ -95,8 +65,7 @@ impl X11Data {
         #[cfg_attr(not(feature = "egl"), allow(unsued_mut))]
         let mut renderer =
             unsafe { GlowRenderer::new(context) }.context("Failed to create Gles renderer!")?;
-        RoundedOutlineShader::init(&mut renderer);
-        RoundedQuadShader::init(&mut renderer);
+        init_shaders(&mut renderer);
 
         #[cfg(feature = "egl")]
         if renderer.bind_wl_display(&state.display_handle).is_ok() {
@@ -205,36 +174,45 @@ impl X11Data {
             .build(&self.backend_handle)
             .context("Failed to build X11 window!")?;
 
-        // Allocator.
-        //
-        // Use what the user prefers, falling back to Gbm if Vulkan failed.
+        // Try vulkan, otherwise try GBM.
         let device = self.gbm_device.clone();
         let context = self.renderer.egl_context();
         let modifiers = context.dmabuf_render_formats().iter().map(|f| f.modifier);
-        let preferred_allocator = &CONFIG.renderer.allocator;
-        let surface = match preferred_allocator {
-            BackendAllocator::Vulkan => {
-                let vulkan_allocator = try_vulkan_allocator(self.drm_node);
-                if let Some(allocator) = vulkan_allocator {
-                    self.backend_handle.create_surface(
-                        &window,
-                        DmabufAllocator(allocator),
-                        modifiers,
+        let surface = {
+            let vulkan_allocator = Instance::new(Version::VERSION_1_2, None)
+                .ok()
+                .and_then(|instance| {
+                    PhysicalDevice::enumerate(&instance)
+                        .ok()
+                        .and_then(|devices| {
+                            devices
+                                .filter(|phd| {
+                                    phd.has_device_extension(ExtPhysicalDeviceDrmFn::name())
+                                })
+                                .find(|phd| {
+                                    phd.primary_node().unwrap() == Some(self.drm_node)
+                                        || phd.render_node().unwrap() == Some(self.drm_node)
+                                })
+                        })
+                })
+                .and_then(|physical_device| {
+                    VulkanAllocator::new(
+                        &physical_device,
+                        ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
                     )
-                } else {
-                    warn!("Failed to initialize vulkan allocator! Falling back to GBM");
-                    self.backend_handle.create_surface(
-                        &window,
-                        DmabufAllocator(gbm_allocator(device)),
-                        modifiers,
-                    )
-                }
+                    .ok()
+                });
+            if let Some(allocator) = vulkan_allocator {
+                self.backend_handle
+                    .create_surface(&window, DmabufAllocator(allocator), modifiers)
+            } else {
+                warn!("Failed to initialize vulkan allocator! Falling back to GBM");
+                self.backend_handle.create_surface(
+                    &window,
+                    DmabufAllocator(GbmAllocator::new(device, GbmBufferFlags::RENDERING)),
+                    modifiers,
+                )
             }
-            BackendAllocator::Gbm => self.backend_handle.create_surface(
-                &window,
-                DmabufAllocator(gbm_allocator(device)),
-                modifiers,
-            ),
         }
         .context("Failed to create X11Surface")?;
 
@@ -297,12 +275,8 @@ impl X11Data {
             .buffer()
             .context("Failed to allocate buffer!")?;
 
-        let render_elements = super::render::output_elements(
-            &mut self.renderer,
-            &surface.output,
-            state,
-            &mut surface.fps,
-        );
+        let render_elements =
+            state.output_elements(&mut self.renderer, &surface.output, Some(&mut surface.fps), RenderTarget::Output);
         surface.fps.elements();
 
         self.renderer

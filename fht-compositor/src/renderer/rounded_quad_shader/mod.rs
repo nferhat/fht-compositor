@@ -1,9 +1,8 @@
 use std::borrow::BorrowMut;
 
-use smithay::backend::egl::EGLContext;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexProgram, UniformName, UniformType};
 
-use crate::backend::render::AsGlowRenderer;
+use super::AsGlowRenderer;
 
 pub struct RoundedQuadShader(pub GlesTexProgram);
 
@@ -35,8 +34,9 @@ impl RoundedQuadShader {
     /// Get a reference to the shader instance stored in this renderer EGLContext userdata.
     ///
     /// If you didn't initialize the shader before, this function will do it for you.
-    pub fn get(egl_context: &EGLContext) -> GlesTexProgram {
-        egl_context
+    pub fn get(renderer: &mut impl AsGlowRenderer) -> GlesTexProgram {
+        BorrowMut::<GlesRenderer>::borrow_mut(renderer.glow_renderer_mut())
+            .egl_context()
             .user_data()
             .get::<RoundedQuadShader>()
             .expect("Shaders didn't initialize!")

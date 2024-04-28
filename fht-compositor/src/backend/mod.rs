@@ -1,9 +1,10 @@
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
 use smithay::utils::{Monotonic, Time};
 
+use crate::renderer::AsGlowRenderer;
 use crate::state::Fht;
 
-pub mod render;
 #[cfg(feature = "udev_backend")]
 pub mod udev;
 #[cfg(feature = "x11_backend")]
@@ -73,6 +74,19 @@ impl Backend {
             Self::X11(ref mut data) => data.render(fht, output, current_time.into()),
             #[cfg(feature = "udev_backend")]
             Self::Udev(data) => data.render(fht, output, current_time.into()),
+        }
+    }
+
+    /// Get the primary renderer of the backend
+    pub fn with_renderer<T, F: FnOnce(&mut GlowRenderer) -> T>(&mut self, f: F) -> T {
+        match self {
+            #[cfg(feature = "x11_backend")]
+            Self::X11(ref mut data) => f(&mut data.renderer),
+            #[cfg(feature = "udev_backend")]
+            Self::Udev(ref mut data) => {
+                let mut multi_renderer = data.gpu_manager.single_renderer(&data.primary_gpu).unwrap();
+                f(multi_renderer.glow_renderer_mut())
+            }
         }
     }
 }

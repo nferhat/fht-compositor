@@ -187,87 +187,84 @@ impl CursorThemeManager {
         E: From<CursorRenderElement<R>>,
     {
         let image_status = &*self.image_status.lock().unwrap();
-        if *image_status == CursorImageStatus::Hidden {
-            return vec![];
-        }
+        match *image_status {
+            CursorImageStatus::Hidden => vec![],
+            CursorImageStatus::Surface(ref wl_surface) => {
+                let hotspot = compositor::with_states(wl_surface, |states| {
+                    states
+                        .data_map
+                        .get::<Mutex<CursorImageAttributes>>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .hotspot
+                })
+                .to_physical_precise_round(scale);
+                location -= hotspot;
 
-        if let CursorImageStatus::Surface(ref wl_surface) = image_status {
-            let hotspot = compositor::with_states(wl_surface, |states| {
-                states
-                    .data_map
-                    .get::<Mutex<CursorImageAttributes>>()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .hotspot
-            })
-            .to_physical_precise_round(scale);
-            location -= hotspot;
-
-            let elements: Vec<CursorRenderElement<R>> = render_elements_from_surface_tree(
-                renderer,
-                wl_surface,
-                location,
-                scale,
-                alpha,
-                Kind::Cursor,
-            );
-
-            return elements.into_iter().map(E::from).collect();
-        }
-
-        let CursorImageStatus::Named(cursor_icon) = image_status else {
-            unreachable!()
-        };
-
-        let cursor_image = self
-            .load_cursor_image(*cursor_icon, cursor_scale)
-            .unwrap_or_else(get_fallback_cursor_data);
-        let (frame, hotspot) = cursor_image.frame(time.as_millis() as u32);
-        location -= hotspot;
-
-        // Get the cursor texture, and generate them all if not already present
-        let mut texture_cache = self.texture_cache.borrow_mut();
-        let frame_texture_cache = texture_cache
-            .entry((*cursor_icon, cursor_scale))
-            .or_default();
-
-        let maybe_frame_texture = frame_texture_cache
-            .iter()
-            .find(|(f, _)| f == frame)
-            .and_then(|(_, t)| t.downcast_ref::<TextureBuffer<R::TextureId>>());
-        let frame_texture = match maybe_frame_texture {
-            Some(t) => t,
-            None => {
-                let texture = TextureBuffer::from_memory(
+                render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
                     renderer,
-                    &frame.pixels_rgba,
-                    Fourcc::Abgr8888,
-                    (frame.width as i32, frame.height as i32),
-                    false,
-                    cursor_scale as i32,
-                    Transform::Normal,
-                    None,
+                    wl_surface,
+                    location,
+                    scale,
+                    alpha,
+                    Kind::Cursor,
                 )
-                .expect("Failed to import cursor bitmap");
-                frame_texture_cache.push((frame.clone(), Box::new(texture.clone())));
-                frame_texture_cache
-                    .last()
-                    .and_then(|(_, i)| i.downcast_ref::<TextureBuffer<R::TextureId>>())
-                    .unwrap()
+                .into_iter()
+                .map(E::from)
+                .collect()
             }
-        };
+            CursorImageStatus::Named(cursor_icon) => {
+                let cursor_image = self
+                    .load_cursor_image(cursor_icon, cursor_scale)
+                    .unwrap_or_else(get_fallback_cursor_data);
+                let (frame, hotspot) = cursor_image.frame(time.as_millis() as u32);
+                location -= hotspot;
 
-        vec![E::from(CursorRenderElement::Texture(
-            TextureRenderElement::from_texture_buffer(
-                location.to_f64(),
-                &frame_texture,
-                None,
-                None,
-                None,
-                Kind::Cursor,
-            ),
-        ))]
+                // Get the cursor texture, and generate them all if not already present
+                let mut texture_cache = self.texture_cache.borrow_mut();
+                let frame_texture_cache = texture_cache
+                    .entry((cursor_icon, cursor_scale))
+                    .or_default();
+
+                let maybe_frame_texture = frame_texture_cache
+                    .iter()
+                    .find(|(f, _)| f == frame)
+                    .and_then(|(_, t)| t.downcast_ref::<TextureBuffer<R::TextureId>>());
+                let frame_texture = match maybe_frame_texture {
+                    Some(t) => t,
+                    None => {
+                        let texture = TextureBuffer::from_memory(
+                            renderer,
+                            &frame.pixels_rgba,
+                            Fourcc::Abgr8888,
+                            (frame.width as i32, frame.height as i32),
+                            false,
+                            cursor_scale as i32,
+                            Transform::Normal,
+                            None,
+                        )
+                        .expect("Failed to import cursor bitmap");
+                        frame_texture_cache.push((frame.clone(), Box::new(texture.clone())));
+                        frame_texture_cache
+                            .last()
+                            .and_then(|(_, i)| i.downcast_ref::<TextureBuffer<R::TextureId>>())
+                            .unwrap()
+                    }
+                };
+
+                vec![E::from(CursorRenderElement::Texture(
+                    TextureRenderElement::from_texture_buffer(
+                        location.to_f64(),
+                        &frame_texture,
+                        None,
+                        None,
+                        None,
+                        Kind::Cursor,
+                    ),
+                ))]
+            }
+        }
     }
 }
 

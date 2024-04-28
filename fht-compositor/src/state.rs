@@ -233,7 +233,11 @@ impl State {
 
         // Send frame callbacks
         self.fht.send_frames(&output);
-        // TODO: Handle screencopy
+
+        #[cfg(feature = "xdg-screencast-portal")]
+        self.backend.with_renderer(|renderer| {
+            self.fht.render_screencopy(&output, renderer);
+        });
     }
 }
 

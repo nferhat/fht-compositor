@@ -15,7 +15,6 @@ struct PendingFrame {
     start: Instant,
     duration_elements: Option<Duration>,
     duration_render: Option<Duration>,
-    duration_screencast: Option<Duration>,
     duration_displayed: Option<Duration>,
 }
 
@@ -24,19 +23,12 @@ pub struct Frame {
     pub start: Instant,
     pub duration_elements: Duration,
     pub duration_render: Duration,
-    pub duration_screencopy: Option<Duration>,
     pub duration_displayed: Duration,
 }
 
 impl Frame {
     fn render_time(&self) -> Duration {
         self.duration_elements + self.duration_render
-    }
-
-    fn frame_time(&self) -> Duration {
-        self.duration_elements
-            + self.duration_render
-            + self.duration_screencopy.clone().unwrap_or(Duration::ZERO)
     }
 }
 
@@ -46,7 +38,6 @@ impl From<PendingFrame> for Frame {
             start: pending.start,
             duration_elements: pending.duration_elements.unwrap_or(Duration::ZERO),
             duration_render: pending.duration_render.unwrap_or(Duration::ZERO),
-            duration_screencopy: pending.duration_screencast,
             duration_displayed: pending.duration_displayed.unwrap_or(Duration::ZERO),
         }
     }
@@ -60,7 +51,6 @@ impl Fps {
             start: Instant::now(),
             duration_elements: None,
             duration_render: None,
-            duration_screencast: None,
             duration_displayed: None,
         });
     }
@@ -80,24 +70,12 @@ impl Fps {
         }
     }
 
-    #[cfg(feature = "xdg-screencast-portal")]
-    pub fn screencast(&mut self) {
-        if let Some(frame) = self.pending_frame.as_mut() {
-            frame.duration_screencast = Some(
-                Instant::now().duration_since(frame.start)
-                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_render.clone().unwrap_or(Duration::ZERO),
-            );
-        }
-    }
-
     pub fn displayed(&mut self) {
         if let Some(mut frame) = self.pending_frame.take() {
             frame.duration_displayed = Some(
                 Instant::now().duration_since(frame.start)
                     - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
                     - frame.duration_render.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_screencast.clone().unwrap_or(Duration::ZERO),
             );
 
             self.frames.push_back(frame.into());
@@ -110,7 +88,7 @@ impl Fps {
     pub fn max_frametime(&self) -> Duration {
         self.frames
             .iter()
-            .map(|f| f.frame_time())
+            .map(Frame::render_time)
             .max()
             .unwrap_or(Duration::ZERO)
     }
@@ -118,7 +96,7 @@ impl Fps {
     pub fn min_frametime(&self) -> Duration {
         self.frames
             .iter()
-            .map(|f| f.frame_time())
+            .map(Frame::render_time)
             .min()
             .unwrap_or(Duration::ZERO)
     }
@@ -127,7 +105,7 @@ impl Fps {
         if self.frames.is_empty() {
             return Duration::ZERO;
         }
-        self.frames.iter().map(|f| f.frame_time()).sum::<Duration>() / (self.frames.len() as u32)
+        self.frames.iter().map(Frame::render_time).sum::<Duration>() / (self.frames.len() as u32)
     }
 
     pub fn avg_rendertime(&self, window: usize) -> Duration {
@@ -145,7 +123,7 @@ impl Fps {
         }
         let secs = match (self.frames.front(), self.frames.back()) {
             (Some(Frame { start, .. }), Some(end_frame)) => {
-                end_frame.start.duration_since(*start) + end_frame.frame_time()
+                end_frame.start.duration_since(*start) + end_frame.render_time()
             }
             _ => Duration::ZERO,
         }

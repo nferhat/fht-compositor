@@ -11,7 +11,8 @@ use smithay::backend::renderer::gles::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Rectangle;
 
-use crate::backend::render::AsGlowRenderer;
+use super::pixel_shader_element::FhtPixelShaderElement;
+use super::AsGlowRenderer;
 use crate::config::ColorConfig;
 use crate::utils::geometry::{Local, RectLocalExt};
 
@@ -50,7 +51,7 @@ impl RoundedOutlineShader {
                     &[
                         UniformName::new("v_start_color", UniformType::_4f),
                         UniformName::new("v_end_color", UniformType::_4f),
-                        UniformName::new("v_gradient_direction", UniformType::_2f),
+                        UniformName::new("v_gradient_angle", UniformType::_1f),
                         UniformName::new("radius", UniformType::_1f),
                         UniformName::new("half_thickness", UniformType::_1f),
                     ],
@@ -87,7 +88,7 @@ impl RoundedOutlineShader {
         wl_surface: &WlSurface,
         mut geo: Rectangle<i32, Local>,
         settings: RoundedOutlineShaderSettings,
-    ) -> PixelShaderElement {
+    ) -> FhtPixelShaderElement {
         // Scaled thickness only matters to make the border thickness in the shader.
         // Geometry shouldd still obey the normal thickness
         let thickness = settings.thickness as i32;
@@ -105,17 +106,15 @@ impl RoundedOutlineShader {
             if element.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
                 element.resize(geo.as_logical(), None);
             }
-            return element.clone();
+            return FhtPixelShaderElement(element.clone());
         }
 
         let (start_color, end_color, angle) = match settings.color {
             ColorConfig::Solid(color) => (color, color, 0.0),
             ColorConfig::Gradient { start, end, angle } => {
-                (start, end, angle * std::f32::consts::PI)
+                (start, end, angle)
             }
         };
-        let gradient_direction = [angle.cos(), angle.sin()];
-
         let mut element = PixelShaderElement::new(
             shader.program.clone(),
             geo.as_logical(),
@@ -124,7 +123,7 @@ impl RoundedOutlineShader {
             vec![
                 Uniform::new("v_start_color", start_color),
                 Uniform::new("v_end_color", end_color),
-                Uniform::new("v_gradient_direction", gradient_direction),
+                Uniform::new("v_gradient_angle", angle),
                 Uniform::new("half_thickness", scaled_thickness as f32 / 2f32),
                 Uniform::new("radius", settings.radius),
             ],
@@ -136,6 +135,6 @@ impl RoundedOutlineShader {
         }
 
         element_cache.insert(wl_surface.clone(), (settings, element.clone()));
-        element
+        FhtPixelShaderElement(element)
     }
 }

@@ -28,7 +28,7 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     /// org.freedesktop.impl.portal.ScreenCast:AvailableCursorModes
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct CursorMode: u32 {
         /// The cursor is not part of the screen cast stream.
         const HIDDEN = 1;
@@ -366,7 +366,7 @@ impl State {
                 session_handle,
                 mut source,
                 source_type,
-                .. // TODO: Take in account of cursor_mode
+                cursor_mode
             } => {
                 // We don't support screencasting on X11 since eh, you prob dont need it.
                 #[cfg(not(feature = "udev_backend"))]
@@ -445,6 +445,7 @@ impl State {
                         session_handle,
                         source.clone(),
                         source_type,
+                        cursor_mode,
                     ) {
                         Ok(cast) => {
                             pipewire.casts.push(cast);
