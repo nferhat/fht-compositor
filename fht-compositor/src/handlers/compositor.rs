@@ -46,8 +46,22 @@ impl State {
             // We don't have a render buffer, send initial configure to window so it acknowledges it
             // needs one and send additional data with it.
             if !has_render_buffer(&surface) || possible_unmapped_window.is_none() {
+                let surface = surface.clone();
                 state.loop_handle.insert_idle(move |state| {
-                    let window_surface = state.fht.pending_windows.remove(idx);
+                    // Make sure the index is not out of bounds.
+                    let window_surface = if idx < state.fht.pending_windows.len() {
+                        state.fht.pending_windows.remove(idx)
+                    } else {
+                        let Some(idx) = state.fht.pending_windows.iter().position(|w| {
+                            w.wl_surface().as_ref() == Some(&surface)
+                        }) else {
+                            warn!(?idx, "Pending window vanished out of nowhere.");
+                            return;
+                        };
+
+                        state.fht.pending_windows.remove(idx)
+                    };
+
                     state.fht.prepare_pending_window(window_surface);
                     // For some reason I have to commit this manually.
                     state.fht.loop_handle.insert_idle(move |state| {
