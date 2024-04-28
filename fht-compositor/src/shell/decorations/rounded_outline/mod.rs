@@ -84,8 +84,11 @@ impl RoundedOutlineShader {
         wl_surface: &WlSurface,
         mut geo: Rectangle<i32, Local>,
         settings: RoundedOutlineShaderSettings,
-    ) -> PixelShaderElement {
-        let thickness = (settings.thickness as f64 * scale).round() as i32;
+    ) -> FhtPixelShaderElement {
+        // Scaled thickness only matters to make the border thickness in the shader.
+        // Geometry shouldd still obey the normal thickness
+        let thickness = settings.thickness as i32;
+        let scaled_thickness = settings.thickness as f32 * scale as f32;
         geo.loc -= (thickness, thickness).into();
         geo.size += (2 * thickness, 2 * thickness).into();
 
