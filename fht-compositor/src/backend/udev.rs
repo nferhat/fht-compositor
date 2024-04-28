@@ -939,7 +939,8 @@ impl UdevData {
                             // frame events to them so they start building the next buffer
                             output_state.current_frame_sequence =
                                 output_state.current_frame_sequence.wrapping_add(1);
-
+                            // Also notify profiling or our sucess.
+                            profiling::finish_frame!();
                             return Ok(true);
                         }
                         Err(err) => {
@@ -1014,6 +1015,10 @@ impl UdevData {
             token,
             queued: false,
         };
+
+        // We did not render anything, but still we queued a next render and so this frame should
+        // be considered finished, so profiling should be informed.
+        profiling::finish_frame!();
 
         Ok(false)
     }
