@@ -2,6 +2,7 @@ use colors_transform::{AlphaColor, Color, Hsl, Rgb};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use self::border::BorderConfig;
+pub use self::color::ColorConfig;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct DecorationConfig {
@@ -36,14 +37,10 @@ mod border {
     #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
     pub struct BorderConfig {
         /// The border color for the focused window.
-        #[serde(serialize_with = "serialize_focused_color")]
-        #[serde(deserialize_with = "deserialize_focused_color")]
-        pub focused_color: [f32; 4],
+        pub focused_color: ColorConfig,
 
         /// The border color for the non-focused window(s).
-        #[serde(serialize_with = "serialize_focused_color")]
-        #[serde(deserialize_with = "deserialize_focused_color")]
-        pub normal_color: [f32; 4],
+        pub normal_color: ColorConfig,
 
         /// The thickness of the border.
         #[serde(default = "default_thickness")]
@@ -57,24 +54,23 @@ mod border {
     impl Default for BorderConfig {
         fn default() -> Self {
             Self {
-                focused_color: [1.0, 0.0, 0.0, 1.0],
-                normal_color: [0.5, 0.5, 0.5, 0.5],
+                focused_color: ColorConfig::Solid([1.0, 0.0, 0.0, 1.0]),
+                normal_color: ColorConfig::Solid([0.5, 0.5, 0.5, 0.5]),
                 thickness: 2,
                 radius: 10.0,
             }
         }
     }
+}
 
-    fn serialize_focused_color<S: Serializer>(
-        color: &[f32; 4],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+mod color_parser {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(color: &[f32; 4], serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(color)
     }
 
-    fn deserialize_focused_color<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<[f32; 4], D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 4], D::Error> {
         // We don't internally expose the BorderConfig type, but you can use a valid css color
         // string.
         let color = String::deserialize(deserializer)?;
@@ -111,5 +107,21 @@ mod border {
             serde::de::Unexpected::Str(&color),
             &"Invalid color input!",
         ))
+    }
+}
+
+mod color {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+    pub enum ColorConfig {
+        Solid(#[serde(with = "super::color_parser")] [f32; 4]),
+        Gradient {
+            #[serde(with = "super::color_parser")]
+            start: [f32; 4],
+            #[serde(with = "super::color_parser")]
+            end: [f32; 4],
+            angle: f32,
+        },
     }
 }

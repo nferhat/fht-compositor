@@ -53,8 +53,8 @@ FhtConfig(
         border: (
             thickness: 2,
             radius: 8,
-            focused_color: "#6791c9",
-            normal_color: "#44474f",
+            focused_color: Solid("#6791c9"),
+            normal_color: Solid("#44474f"),
         ),
 
         // Should we allow clients to draw client-side decorations?

@@ -12,20 +12,21 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Rectangle;
 
 use crate::backend::render::AsGlowRenderer;
+use crate::config::ColorConfig;
 use crate::utils::geometry::{Local, RectLocalExt};
 
 pub type RoundedOutlineShaderCache =
     HashMap<WlSurface, (RoundedOutlineShaderSettings, PixelShaderElement)>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// Settings to control a rounded outline shader element
 pub struct RoundedOutlineShaderSettings {
     /// The thickness to use.
     pub thickness: u8,
     /// The radius.
     pub radius: f32,
-    /// The color, in R, G, B, A values
-    pub color: [f32; 4],
+    /// The color, either a solid one or a gradient.
+    pub color: ColorConfig,
 }
 
 pub struct RoundedOutlineShader {
@@ -47,7 +48,9 @@ impl RoundedOutlineShader {
                 .compile_custom_pixel_shader(
                     Self::SRC,
                     &[
-                        UniformName::new("v_color", UniformType::_4f),
+                        UniformName::new("v_start_color", UniformType::_4f),
+                        UniformName::new("v_end_color", UniformType::_4f),
+                        UniformName::new("v_gradient_direction", UniformType::_2f),
                         UniformName::new("radius", UniformType::_1f),
                         UniformName::new("half_thickness", UniformType::_1f),
                     ],
@@ -84,7 +87,7 @@ impl RoundedOutlineShader {
         wl_surface: &WlSurface,
         mut geo: Rectangle<i32, Local>,
         settings: RoundedOutlineShaderSettings,
-    ) -> FhtPixelShaderElement {
+    ) -> PixelShaderElement {
         // Scaled thickness only matters to make the border thickness in the shader.
         // Geometry shouldd still obey the normal thickness
         let thickness = settings.thickness as i32;
@@ -105,14 +108,24 @@ impl RoundedOutlineShader {
             return element.clone();
         }
 
+        let (start_color, end_color, angle) = match settings.color {
+            ColorConfig::Solid(color) => (color, color, 0.0),
+            ColorConfig::Gradient { start, end, angle } => {
+                (start, end, angle * std::f32::consts::PI)
+            }
+        };
+        let gradient_direction = [angle.cos(), angle.sin()];
+
         let mut element = PixelShaderElement::new(
             shader.program.clone(),
             geo.as_logical(),
             None, //TODO
             alpha,
             vec![
-                Uniform::new("v_color", settings.color),
-                Uniform::new("half_thickness", thickness as f32 / 2f32),
+                Uniform::new("v_start_color", start_color),
+                Uniform::new("v_end_color", end_color),
+                Uniform::new("v_gradient_direction", gradient_direction),
+                Uniform::new("half_thickness", scaled_thickness as f32 / 2f32),
                 Uniform::new("radius", settings.radius),
             ],
             Kind::Unspecified,

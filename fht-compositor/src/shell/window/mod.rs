@@ -763,7 +763,7 @@ impl FhtWindow {
 
         let mut render_elements = vec![];
 
-        let create_render_elements = |alpha| {
+        let mut create_render_elements = |alpha| {
             let (window_elements, popup_elements) = self.surface.render_elements(
                 renderer,
                 render_location,

@@ -104,9 +104,10 @@ const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
 
 #[allow(unused_imports)]
 pub use self::types::{
-    AnimationConfig, BorderConfig, CursorConfig, FhtConfig as FhtConfigInner, GeneralConfig,
-    InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings,
-    WindowRulePattern, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
+    AnimationConfig, BorderConfig, ColorConfig, CursorConfig, FhtConfig as FhtConfigInner,
+    GeneralConfig, InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
+    WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
+    WorkspaceSwitchAnimationDirection,
 };
 use crate::state::State;
 
