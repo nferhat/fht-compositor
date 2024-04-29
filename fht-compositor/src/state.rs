@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use indexmap::IndexMap;
+use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, RenderElementStates,
@@ -233,11 +234,6 @@ impl State {
 
         // Send frame callbacks
         self.fht.send_frames(&output);
-
-        #[cfg(feature = "xdg-screencast-portal")]
-        self.backend.with_renderer(|renderer| {
-            self.fht.render_screencopy(&output, renderer);
-        });
     }
 }
 
@@ -1007,6 +1003,10 @@ pub struct OutputState {
     /// will track the last sequence it was redrawn on. If its not equal to this sequence for this
     /// output, we send a frame callback, otherwise, we skip it.
     pub current_frame_sequence: u32,
+
+    /// The custom damage tracker for this output.
+    /// This is for screencast.
+    pub damage_tracker: OutputDamageTracker,
 }
 
 impl OutputState {
@@ -1025,6 +1025,7 @@ impl OutputState {
                 render_state: RenderState::Idle,
                 animations_running: false,
                 current_frame_sequence: 0,
+                damage_tracker: OutputDamageTracker::from_output(output),
             })
         });
     }

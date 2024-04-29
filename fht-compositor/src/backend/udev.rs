@@ -55,7 +55,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
 use crate::config::CONFIG;
-use crate::renderer::{init_shaders, RenderTarget};
+use crate::renderer::init_shaders;
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -864,12 +864,16 @@ impl UdevData {
 
         surface.fps.start();
 
-        let elements = fht.output_elements(&mut renderer, &surface.output, Some(&mut surface.fps), RenderTarget::Output);
+        let output_elements_result = fht.output_elements(
+            &mut renderer,
+            &surface.output,
+            &mut surface.fps,
+        );
         surface.fps.elements();
 
         let res = surface
             .compositor
-            .render_frame(&mut renderer, &elements, [0.1, 0.1, 0.1, 1.0])
+            .render_frame(&mut renderer, &output_elements_result.render_elements, [0.1, 0.1, 0.1, 1.0])
             .map_err(|err| match err {
                 RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
                 RenderFrameError::RenderFrame(OutputDamageTrackerError::Rendering(err)) => {
@@ -926,6 +930,18 @@ impl UdevData {
                                 output_state.current_frame_sequence.wrapping_add(1);
                             // Also notify profiling or our sucess.
                             profiling::finish_frame!();
+                            // Damage also means screencast.
+                            #[cfg(feature = "xdg-screencast-portal")]
+                            {
+                                drop(output_state);
+                                fht.render_screencast(
+                                    output,
+                                    &mut renderer,
+                                    &output_elements_result,
+                                );
+                                surface.fps.screencast();
+                            }
+
                             return Ok(true);
                         }
                         Err(err) => {

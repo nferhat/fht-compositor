@@ -13,13 +13,11 @@ pub mod render_element;
 pub mod rounded_outline_shader;
 pub mod rounded_quad_shader;
 
-use anyhow::Context;
-use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, Element, Kind, RenderElement};
+use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
 use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Renderer};
@@ -27,7 +25,7 @@ use smithay::desktop::space::SurfaceTree;
 use smithay::desktop::{layer_map_for_output, PopupManager};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
-use smithay::utils::{IsAlive, Physical, Rectangle, Scale, Size, Transform};
+use smithay::utils::{IsAlive, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use self::render_element::FhtRenderElement;
@@ -38,18 +36,24 @@ use crate::portals::CursorMode;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
-use crate::state::{egui_state_for_output, Fht};
+use crate::state::{egui_state_for_output, Fht, OutputState};
 use crate::utils::fps::Fps;
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::output::OutputExt;
 
-/// To where are we going to render?
-#[derive(Clone, Copy, PartialEq)]
-pub enum RenderTarget {
-    /// We are going to render to an output.
-    Output,
-    /// We are going to render to a screencast
-    ScreenCast,
+pub struct OutputElementsResult<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: Clone + 'static,
+
+    FhtRenderElement<R>: RenderElement<R>,
+    CursorRenderElement<R>: RenderElement<R>,
+    FhtWindowRenderElement<R>: RenderElement<R>,
+    WaylandSurfaceRenderElement<R>: RenderElement<R>,
+    WorkspaceSetRenderElement<R>: RenderElement<R>,
+{
+    pub render_elements: Vec<FhtRenderElement<R>>,
+    pub cursor_elements_len: usize,
 }
 
 impl Fht {
@@ -58,9 +62,8 @@ impl Fht {
         &mut self,
         renderer: &mut R,
         output: &Output,
-        fps: Option<&mut Fps>,
-        render_target: RenderTarget,
-    ) -> Vec<FhtRenderElement<R>>
+        fps: &mut Fps,
+    ) -> OutputElementsResult<R>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
@@ -78,16 +81,17 @@ impl Fht {
 
         let mut elements = vec![];
 
-        if matches!(render_target, RenderTarget::Output) {
-            // Cursor is only rendered for outputs.
-            elements.extend(self.cursor_elements(renderer, output));
+        // Start with the cursor
+        //
+        // Why include cursor_elements_len? Since if we are rendering to screencast, we can take a
+        // slice of elements to skip cursor_elements (slice [cursor_elements_len..])
+        let cursor_elements = self.cursor_elements(renderer, output);
+        let cursor_elements_len = cursor_elements.len();
+        elements.extend(cursor_elements);
 
-            // Then EGUI, for debug overlay, config error notification, and greeting.
-            let fps = fps.unwrap(); // if we are rendering to a screencoppy/screencast we
-            // dont have a FPS counter.
-            if let Some(egui) = self.egui_elements(renderer.glow_renderer_mut(), output, fps) {
-                elements.push(FhtRenderElement::Egui(egui))
-            }
+        // Then EGUI, for debug overlay, config error notification, and greeting.
+        if let Some(egui) = self.egui_elements(renderer.glow_renderer_mut(), output, fps) {
+            elements.push(FhtRenderElement::Egui(egui))
         }
 
         // Then overlay layer shells + their popups
@@ -123,7 +127,10 @@ impl Fht {
             .chain(layer_elements(renderer, output, Layer::Background));
         elements.extend(background);
 
-        elements
+        OutputElementsResult {
+            render_elements: elements,
+            cursor_elements_len,
+        }
     }
 
     pub fn cursor_elements<R>(&self, renderer: &mut R, output: &Output) -> Vec<FhtRenderElement<R>>
@@ -244,14 +251,30 @@ impl Fht {
     /// Render and submit screencopy buffers using given renderer.
     #[cfg(feature = "xdg-screencast-portal")]
     #[profiling::function]
-    pub fn render_screencopy(&mut self, output: &Output, renderer: &mut GlowRenderer) {
+    pub fn render_screencast<R>(
+        &mut self,
+        output: &Output,
+        renderer: &mut R,
+        output_elements_result: &OutputElementsResult<R>,
+    ) where
+        R: Renderer
+            + ImportAll
+            + ImportMem
+            + Bind<smithay::backend::allocator::dmabuf::Dmabuf>
+            + AsGlowRenderer,
+        <R as Renderer>::TextureId: Clone + 'static,
+
+        FhtRenderElement<R>: RenderElement<R>,
+        CursorRenderElement<R>: RenderElement<R>,
+        FhtWindowRenderElement<R>: RenderElement<R>,
+        WaylandSurfaceRenderElement<R>: RenderElement<R>,
+        WorkspaceSetRenderElement<R>: RenderElement<R>,
+    {
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
 
         let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
-        let elements = self.output_elements(renderer, output, None, RenderTarget::ScreenCast);
-        let cursor_elements = self.cursor_elements(renderer, output);
 
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
@@ -261,6 +284,7 @@ impl Fht {
             return;
         }
 
+        let dt = &mut OutputState::get(output).damage_tracker;
         let mut casts = std::mem::take(&mut pipewire.casts);
         let mut casts_to_stop = vec![];
 
@@ -294,16 +318,14 @@ impl Fht {
                 let fd = data.as_raw().fd as i32;
                 let dmabuf = cast.dmabufs.borrow()[&fd].clone();
 
-                let res = if cast.cursor_mode.contains(CursorMode::EMBEDDED) {
-                    // Add the cursor if needed
-                    let elements = cursor_elements.iter().chain(elements.iter());
-                    render_to_dmabuf(renderer, dmabuf, size, scale, transform, elements.rev())
+                let elements = if cast.cursor_mode.contains(CursorMode::EMBEDDED) {
+                    &output_elements_result.render_elements
                 } else {
-                    render_to_dmabuf(renderer, dmabuf, size, scale, transform, elements.iter().rev())
+                    &output_elements_result.render_elements[output_elements_result.cursor_elements_len..]
                 };
 
-                if let Err(err) = res {
-                    error!("error rendering to dmabuf: {err:?}");
+                if let Err(err) = dt.render_output_with(renderer, dmabuf, 0, &elements, [0., 0., 0., 0.]) {
+                    error!(?err, "Failed to render elements to DMABUF");
                     continue;
                 }
 
@@ -378,44 +400,6 @@ impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
 pub fn init_shaders(renderer: &mut impl AsGlowRenderer) {
     rounded_quad_shader::RoundedQuadShader::init(renderer);
     rounded_outline_shader::RoundedOutlineShader::init(renderer);
-}
-
-/// Render given `elements` to a Dmabuf using the Glow renderer.
-#[profiling::function]
-pub fn render_to_dmabuf<'a>(
-    renderer: &'a mut GlowRenderer,
-    dmabuf: Dmabuf,
-    size: Size<i32, Physical>,
-    scale: Scale<f64>,
-    transform: Transform,
-    elements: impl Iterator<Item = &'a FhtRenderElement<GlowRenderer>>,
-) -> anyhow::Result<()> {
-    let output_rect = Rectangle::from_loc_and_size((0, 0), size);
-
-    renderer.bind(dmabuf).context("error binding texture")?;
-    let mut frame = renderer
-        .render(size, transform)
-        .context("error starting frame")?;
-
-    frame
-        .clear([0., 0., 0., 0.], &[output_rect])
-        .context("error clearing")?;
-
-    for element in elements {
-        let src = element.src();
-        let dst = element.geometry(scale);
-
-        if let Some(mut damage) = output_rect.intersection(dst) {
-            damage.loc -= dst.loc;
-            element
-                .draw(&mut frame, src, dst, &[damage])
-                .context("error drawing element")?;
-        }
-    }
-
-    let _sync_point = frame.finish().context("error finishing frame")?;
-
-    Ok(())
 }
 
 // / Generate the layer shell elements for a given layer for a given output layer map.

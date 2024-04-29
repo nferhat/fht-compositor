@@ -24,7 +24,7 @@ use smithay::wayland::dmabuf::{
     DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
 };
 
-use crate::renderer::{init_shaders, RenderTarget};
+use crate::renderer::init_shaders;
 use crate::state::{Fht, OutputState, RenderState, State};
 use crate::utils::fps::Fps;
 
@@ -275,8 +275,11 @@ impl X11Data {
             .buffer()
             .context("Failed to allocate buffer!")?;
 
-        let render_elements =
-            state.output_elements(&mut self.renderer, &surface.output, Some(&mut surface.fps), RenderTarget::Output);
+        let output_elements_result = state.output_elements(
+            &mut self.renderer,
+            &surface.output,
+            &mut surface.fps,
+        );
         surface.fps.elements();
 
         self.renderer
@@ -285,7 +288,7 @@ impl X11Data {
         let res = surface.damage_tracker.render_output(
             &mut self.renderer,
             buffer_age as usize,
-            &render_elements,
+            &output_elements_result.render_elements,
             [0.1, 0.1, 0.1, 1.0],
         );
 
@@ -326,6 +329,18 @@ impl X11Data {
 
                     // We damaged so render after
                     output_state.render_state.queue();
+
+                    // Also render for screencopy
+                    #[cfg(feature = "xdg-screencast-portal")]
+                    {
+                        drop(output_state);
+                        state.render_screencast(
+                            output,
+                            &mut self.renderer,
+                            &output_elements_result,
+                        );
+                        surface.fps.screencast();
+                    }
 
                     Ok(true)
                 } else {

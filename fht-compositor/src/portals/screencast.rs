@@ -366,7 +366,7 @@ impl State {
                 session_handle,
                 mut source,
                 source_type,
-                cursor_mode
+                cursor_mode,
             } => {
                 // We don't support screencasting on X11 since eh, you prob dont need it.
                 #[cfg(not(feature = "udev_backend"))]
@@ -376,8 +376,7 @@ impl State {
                 }
                 #[cfg(feature = "udev_backend")]
                 {
-                    let Backend::Udev(ref mut data) = &mut self.backend
-                    else {
+                    let Backend::Udev(ref mut data) = &mut self.backend else {
                         warn!("ScreenCast is only supported on udev backend!");
                         return;
                     };
