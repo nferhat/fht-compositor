@@ -32,7 +32,9 @@ use smithay::reexports::gbm::{BufferObjectFlags as GbmBufferFlags, Modifier};
 use smithay::utils::{Logical, Size};
 
 use super::geometry::SizeExt;
-use crate::portals::{CursorMode, ScreenCastRequest, ScreenCastResponse, SessionSource, SourceType};
+use crate::portals::{
+    CursorMode, ScreenCastRequest, ScreenCastResponse, SessionSource, SourceType,
+};
 use crate::state::State;
 
 /// A helper PipeWire instance to manage PipeWire streams.

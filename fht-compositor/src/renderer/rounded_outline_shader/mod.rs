@@ -111,9 +111,7 @@ impl RoundedOutlineShader {
 
         let (start_color, end_color, angle) = match settings.color {
             ColorConfig::Solid(color) => (color, color, 0.0),
-            ColorConfig::Gradient { start, end, angle } => {
-                (start, end, angle)
-            }
+            ColorConfig::Gradient { start, end, angle } => (start, end, angle),
         };
         let mut element = PixelShaderElement::new(
             shader.program.clone(),

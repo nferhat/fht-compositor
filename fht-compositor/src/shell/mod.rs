@@ -161,8 +161,7 @@ impl Fht {
         output: &Output,
     ) -> Box<dyn Iterator<Item = &FhtWindow> + '_> {
         let wset = self.wset_for(output);
-        let mut windows =
-            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &FhtWindow>>;
+        let mut windows = Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &FhtWindow>>;
 
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = wset.switch_animation.as_ref() {
             let target = &wset.workspaces[*target_idx];

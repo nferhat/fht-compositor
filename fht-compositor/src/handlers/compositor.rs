@@ -52,9 +52,12 @@ impl State {
                     let window_surface = if idx < state.fht.pending_windows.len() {
                         state.fht.pending_windows.remove(idx)
                     } else {
-                        let Some(idx) = state.fht.pending_windows.iter().position(|w| {
-                            w.wl_surface().as_ref() == Some(&surface)
-                        }) else {
+                        let Some(idx) = state
+                            .fht
+                            .pending_windows
+                            .iter()
+                            .position(|w| w.wl_surface().as_ref() == Some(&surface))
+                        else {
                             warn!(?idx, "Pending window vanished out of nowhere.");
                             return;
                         };

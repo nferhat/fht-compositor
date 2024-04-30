@@ -381,7 +381,8 @@ impl State {
                         return;
                     };
 
-                    let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
+                    let Some(gbm_device) =
+                        data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
                     else {
                         warn!("No available GBM device!");
                         return;
@@ -397,7 +398,7 @@ impl State {
                                 } else {
                                     warn!("Tried to start a screencast with an invalid output!");
                                     to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                        return;
+                                    return;
                                 }
                             }
                         }
@@ -414,7 +415,7 @@ impl State {
                                 } else {
                                     warn!("Tried to start a screecast with an invalid region!");
                                     to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                        return;
+                                    return;
                                 }
                             }
                         }
