@@ -59,6 +59,7 @@ use smithay_egui::EguiState;
 use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
+use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::window::FhtWindowSurface;
 use crate::shell::workspaces::WorkspaceSet;
@@ -323,6 +324,12 @@ impl Fht {
         SecurityContextState::new::<State, _>(&dh, |client| {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
+            client
+                .get_data::<ClientState>()
+                .map_or(true, |data| data.security_context.is_none())
+        });
+        ScreencopyManagerState::new::<State, _>(&dh, |client| {
+            // Same idea as security context state.
             client
                 .get_data::<ClientState>()
                 .map_or(true, |data| data.security_context.is_none())
@@ -1004,6 +1011,9 @@ pub struct OutputState {
     /// output, we send a frame callback, otherwise, we skip it.
     pub current_frame_sequence: u32,
 
+    /// The current pending screencopy frame.
+    pub pending_screencopy: Option<Screencopy>,
+
     /// The custom damage tracker for this output.
     /// This is for screencast.
     pub damage_tracker: OutputDamageTracker,
@@ -1025,6 +1035,7 @@ impl OutputState {
                 render_state: RenderState::Idle,
                 animations_running: false,
                 current_frame_sequence: 0,
+                pending_screencopy: None,
                 damage_tracker: OutputDamageTracker::from_output(output),
             })
         });

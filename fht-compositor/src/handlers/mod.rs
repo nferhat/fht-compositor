@@ -17,6 +17,7 @@ mod pointer_gestures;
 mod presentation;
 mod primary_selection;
 mod relative_pointer;
+mod screencopy;
 mod seat;
 mod security_context;
 mod selection;

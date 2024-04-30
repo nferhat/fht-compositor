@@ -275,11 +275,8 @@ impl X11Data {
             .buffer()
             .context("Failed to allocate buffer!")?;
 
-        let output_elements_result = state.output_elements(
-            &mut self.renderer,
-            &surface.output,
-            &mut surface.fps,
-        );
+        let output_elements_result =
+            state.output_elements(&mut self.renderer, &surface.output, &mut surface.fps);
         surface.fps.elements();
 
         self.renderer

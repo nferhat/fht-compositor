@@ -321,10 +321,13 @@ impl Fht {
                 let elements = if cast.cursor_mode.contains(CursorMode::EMBEDDED) {
                     &output_elements_result.render_elements
                 } else {
-                    &output_elements_result.render_elements[output_elements_result.cursor_elements_len..]
+                    &output_elements_result.render_elements
+                        [output_elements_result.cursor_elements_len..]
                 };
 
-                if let Err(err) = dt.render_output_with(renderer, dmabuf, 0, &elements, [0., 0., 0., 0.]) {
+                if let Err(err) =
+                    dt.render_output_with(renderer, dmabuf, 0, &elements, [0., 0., 0., 0.])
+                {
                     error!(?err, "Failed to render elements to DMABUF");
                     continue;
                 }

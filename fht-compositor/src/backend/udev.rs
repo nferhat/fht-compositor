@@ -6,8 +6,11 @@ use anyhow::Context as _;
 use libc::dev_t;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags};
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::drm::compositor::{DrmCompositor, PrimaryPlaneElement, RenderFrameError};
+use smithay::backend::allocator::{Buffer, Fourcc};
+use smithay::backend::drm::compositor::{
+    DrmCompositor, PrimaryPlaneElement, RenderFrameError, RenderFrameResult,
+};
+use smithay::backend::drm::gbm::GbmFramebuffer;
 use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
 };
@@ -16,11 +19,17 @@ use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::Error as OutputDamageTrackerError;
-use smithay::backend::renderer::gles::{Capability, GlesRenderer};
+use smithay::backend::renderer::element::Element;
+use smithay::backend::renderer::gles::{Capability, GlesRenderbuffer, GlesRenderer};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
     Error as MultiError, GpuManager, MultiFrame, MultiRenderer,
+};
+use smithay::backend::renderer::sync::SyncPoint;
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
+use smithay::backend::renderer::{
+    buffer_type, Bind, Blit, BufferType, ExportMem, Offscreen, TextureFilter,
 };
 #[cfg(feature = "egl")]
 use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
@@ -31,31 +40,35 @@ use smithay::backend::SwapBuffersError;
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::input::keyboard::XkbConfig;
 use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
+use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::reexports::calloop::{Dispatcher, RegistrationToken};
+use smithay::reexports::calloop::{self, Dispatcher, LoopHandle, PostAction, RegistrationToken};
 use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
 use smithay::reexports::drm::control::ModeTypeFlags;
 use smithay::reexports::drm::Device as _;
-use smithay::reexports::gbm::Device as GbmDevice;
+use smithay::reexports::gbm::{BufferObject, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
+use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Monotonic, Time};
-use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
+use smithay::utils::{DeviceFd, Monotonic, Point, Rectangle, Time, Transform};
+use smithay::wayland::dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
+use smithay::wayland::shm::{self, shm_format_to_fourcc};
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
 use crate::config::CONFIG;
 use crate::renderer::init_shaders;
+use crate::renderer::render_element::FhtRenderElement;
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -759,6 +772,9 @@ impl UdevData {
             output_global,
             compositor,
             dmabuf_feedback,
+
+            last_primary_swapchain: CommitCounter::default(),
+            last_primary_element: CommitCounter::default(),
         };
 
         device.surfaces.insert(crtc, surface);
@@ -864,16 +880,17 @@ impl UdevData {
 
         surface.fps.start();
 
-        let output_elements_result = fht.output_elements(
-            &mut renderer,
-            &surface.output,
-            &mut surface.fps,
-        );
+        let output_elements_result =
+            fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
         surface.fps.elements();
 
         let res = surface
             .compositor
-            .render_frame(&mut renderer, &output_elements_result.render_elements, [0.1, 0.1, 0.1, 1.0])
+            .render_frame(
+                &mut renderer,
+                &output_elements_result.render_elements,
+                [0.1, 0.1, 0.1, 1.0],
+            )
             .map_err(|err| match err {
                 RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
                 RenderFrameError::RenderFrame(OutputDamageTrackerError::Rendering(err)) => {
@@ -889,7 +906,7 @@ impl UdevData {
             }
             Ok(res) => {
                 if res.needs_sync() {
-                    if let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
+                    if let PrimaryPlaneElement::Swapchain(element) = &res.primary_element {
                         profiling::scope!("SyncPoint::wait");
                         if let Err(err) = element.sync.wait() {
                             error!(?err, "Failed to wait for SyncPoint")
@@ -901,6 +918,9 @@ impl UdevData {
                 if let Some(dmabuf_feedback) = surface.dmabuf_feedback.as_ref() {
                     fht.send_dmabuf_feedbacks(output, dmabuf_feedback, &res.states);
                 }
+
+                // wlr-screencopy have to be rendered whether we damaged or not.
+                self::render_screencopy(&mut renderer, surface, &res, fht.loop_handle.clone());
 
                 if !res.is_empty {
                     let presentation_feedbacks =
@@ -930,10 +950,11 @@ impl UdevData {
                                 output_state.current_frame_sequence.wrapping_add(1);
                             // Also notify profiling or our sucess.
                             profiling::finish_frame!();
+                            drop(output_state);
+
                             // Damage also means screencast.
                             #[cfg(feature = "xdg-screencast-portal")]
                             {
-                                drop(output_state);
                                 fht.render_screencast(
                                     output,
                                     &mut renderer,
@@ -1133,6 +1154,9 @@ pub struct Surface {
     output_global: GlobalId,
     compositor: GbmDrmCompositor,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
+    // Last primary plane swapchain/element, used to track damage for wlr-screencopy.
+    last_primary_swapchain: CommitCounter,
+    last_primary_element: CommitCounter,
 }
 
 pub type GbmDrmCompositor = DrmCompositor<
@@ -1204,4 +1228,228 @@ fn get_surface_dmabuf_feedback(
         render_feedback,
         scanout_feedback,
     })
+}
+
+/// Render to wlr-screencopy.
+///
+/// This uses framebuffer blitting instead of rendering with a damage tracker, improving
+/// performance. XDG desktop portal is still preferred, but some programs need programmatic copying
+/// of the screen (which this provides)
+#[profiling::function]
+fn render_screencopy<'a>(
+    renderer: &mut UdevRenderer<'a>,
+    surface: &mut Surface,
+    render_frame_result: &RenderFrameResult<
+        'a,
+        BufferObject<()>,
+        GbmFramebuffer,
+        FhtRenderElement<UdevRenderer<'a>>,
+    >,
+    loop_handle: LoopHandle<'static, State>,
+) {
+    let mut state = OutputState::get(&surface.output);
+    let Some(mut screencopy) = state.pending_screencopy.take() else {
+        return;
+    };
+    assert!(screencopy.output() == &surface.output);
+
+    let screencopy_region = screencopy.physical_region();
+    let output_size = surface.output.current_mode().unwrap().size;
+    let output_scale = surface.output.current_scale().fractional_scale();
+    let output_buffer_size = output_size.to_logical(1).to_buffer(1, Transform::Normal);
+
+    // First step: damage the screencopy
+    if screencopy.with_damage() {
+        if render_frame_result.is_empty {
+            // Protocols requires us to not send anything until we get damage.
+            state.pending_screencopy.replace(screencopy);
+            return;
+        };
+
+        let damage = match &render_frame_result.primary_element {
+            PrimaryPlaneElement::Swapchain(element) => {
+                let swapchain_commit = &mut surface.last_primary_swapchain;
+                let damage = element.damage.damage_since(Some(*swapchain_commit));
+                *swapchain_commit = element.damage.current_commit();
+                damage.map(|dmg| {
+                    dmg.into_iter()
+                        .map(|rect| {
+                            rect.to_logical(1, Transform::Normal, &rect.size)
+                                .to_physical(1)
+                        })
+                        .collect()
+                })
+            }
+            PrimaryPlaneElement::Element(element) => {
+                // INFO: Is this element guaranteed to be the same size as the
+                // |     output? If not this becomes a
+                // FIXME: offset the damage by the element's location
+                //
+                // also is this even ever reachable?
+                let element_commit = &mut surface.last_primary_element;
+                let damage = element.damage_since(output_scale.into(), Some(*element_commit));
+                *element_commit = element.current_commit();
+                Some(damage)
+            }
+        }
+        .unwrap_or_else(|| {
+            // Returning `None` means the previous CommitCounter is too old or damage
+            // was reset, so damage the whole output
+            DamageSet::from_slice(&[Rectangle::from_loc_and_size(
+                Point::from((0, 0)),
+                output_size,
+            )])
+        });
+
+        if damage.is_empty() {
+            // Still no damage, continue with your day.
+            state.pending_screencopy.replace(screencopy);
+            return;
+        };
+
+        screencopy.damage(&damage);
+    }
+
+    // Step 2: Rendering
+    let res = if let Ok(dmabuf) = get_dmabuf(screencopy.buffer()) {
+        // Make sure everything is inline
+        let format_correct =
+            Some(dmabuf.format().code) == shm_format_to_fourcc(wl_shm::Format::Argb8888);
+        let width_correct = dmabuf.width() == screencopy.physical_region().size.w as u32;
+        let height_correct = dmabuf.height() == screencopy.physical_region().size.h as u32;
+
+        if !(format_correct && width_correct && height_correct) {
+            return;
+        }
+
+        (|| -> anyhow::Result<Option<SyncPoint>> {
+            if screencopy_region == Rectangle::from_loc_and_size((0, 0), output_size) {
+                renderer.bind(dmabuf)?;
+                let blit_frame_result = render_frame_result.blit_frame_result(
+                    screencopy_region.size,
+                    Transform::Normal,
+                    output_scale,
+                    renderer,
+                    [screencopy_region],
+                    [],
+                )?;
+                Ok(Some(blit_frame_result))
+            } else {
+                // blit_frame_result can't blit from a specific source rectangle, so blit to an
+                // offscreen then to our result.
+                let offscreen: GlesRenderbuffer =
+                    renderer.create_buffer(Fourcc::Abgr8888, output_buffer_size)?;
+                renderer.bind(offscreen.clone())?;
+
+                let sync_point = render_frame_result.blit_frame_result(
+                    output_size,
+                    Transform::Normal,
+                    output_scale,
+                    renderer,
+                    [Rectangle::from_loc_and_size(Point::default(), output_size)],
+                    [],
+                )?;
+
+                // NOTE: Doing blit_to offscreen -> dmabuf causes some weird artifacting on the
+                // first frames of a wf-recorder recording. But doing so with reversed targets
+                // is fine???
+                // They both run the same internal code and I don't understand why there's
+                // different behaviour. Even adding a missing `self.unbind()?` thats missing from
+                // blit_to doesn't fix it.
+                renderer.bind(dmabuf)?;
+                renderer.blit_from(
+                    offscreen,
+                    screencopy_region,
+                    Rectangle::from_loc_and_size(Point::default(), screencopy_region.size),
+                    TextureFilter::Linear,
+                )?;
+
+                Ok(Some(sync_point))
+            }
+        })()
+    } else if matches!(buffer_type(screencopy.buffer()), Some(BufferType::Shm)) {
+        let res =
+            shm::with_buffer_contents_mut(screencopy.buffer(), |shm_ptr, shm_len, buffer_data| {
+                // yoinked from pinnacle which
+                // yoinked from Niri (thanks yall)
+                anyhow::ensure!(
+                    // The buffer prefers pixels in little endian ...
+                    buffer_data.format == wl_shm::Format::Argb8888
+                        && buffer_data.stride == screencopy_region.size.w * 4
+                        && buffer_data.height == screencopy_region.size.h
+                        && shm_len as i32 == buffer_data.stride * buffer_data.height,
+                    "invalid buffer format or size"
+                );
+
+                let screencopy_buffer_region = screencopy_region.to_logical(1).to_buffer(
+                    1,
+                    Transform::Normal,
+                    &screencopy_region.size.to_logical(1),
+                );
+
+                let offscreen: GlesRenderbuffer =
+                    renderer.create_buffer(Fourcc::Abgr8888, output_buffer_size)?;
+                renderer.bind(offscreen.clone())?;
+
+                // Blit everything to the offscreen, and then only copy what matters to us.
+                // This is for the same reason as above, blit_frame_result cant copy a src
+                // rectangle.
+                let sync_point = render_frame_result.blit_frame_result(
+                    output_size,
+                    Transform::Normal,
+                    output_scale,
+                    renderer,
+                    [Rectangle::from_loc_and_size(
+                        Point::from((0, 0)),
+                        output_size,
+                    )],
+                    [],
+                )?;
+
+                let mapping =
+                    renderer.copy_framebuffer(screencopy_buffer_region, Fourcc::Argb8888)?;
+                let bytes = renderer.map_texture(&mapping)?;
+                anyhow::ensure!(bytes.len() == shm_len, "mapped buffer has wrong length");
+
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), shm_ptr, shm_len);
+                }
+
+                Ok(Some(sync_point))
+            });
+
+        let Ok(res) = res else {
+            unreachable!("Buffer is guaranteed to SHM and should be managed by wl_shm!");
+        };
+
+        res
+    } else {
+        Err(anyhow::anyhow!("Unsupported buffer type!"))
+    };
+
+    // If i understand everything properly we don't want to submit to the screencopy till the
+    // syncpoint is reached, by then the buffer should be filled and we can use it.
+    match res {
+        Ok(Some(sync_point)) if !sync_point.is_reached() => {
+            let Some(sync_fd) = sync_point.export() else {
+                screencopy.submit(false);
+                return;
+            };
+            let mut screencopy = Some(screencopy);
+            let source = Generic::new(sync_fd, calloop::Interest::READ, calloop::Mode::OneShot);
+            let res = loop_handle.insert_source(source, move |_, _, _| {
+                let Some(screencopy) = screencopy.take() else {
+                    unreachable!("This source is removed after one run");
+                };
+
+                screencopy.submit(false);
+                Ok(PostAction::Remove)
+            });
+            if let Err(err) = res {
+                error!(?err, "Failed to schedule screencopy submission!");
+            }
+        }
+        Ok(_) => screencopy.submit(false),
+        Err(err) => error!(?err, "Failed to submit screencopy!"),
+    }
 }
