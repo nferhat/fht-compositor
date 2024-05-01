@@ -15,6 +15,7 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 use super::{AsGlowFrame, AsGlowRenderer};
+#[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;

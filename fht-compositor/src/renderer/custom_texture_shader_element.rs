@@ -6,7 +6,6 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
-#[cfg(feature = "udev_backend")]
 use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
