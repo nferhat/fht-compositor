@@ -28,7 +28,7 @@ fn default_layouts() -> Vec<WorkspaceLayout> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FhtConfig {
+pub struct CompositorConfig {
     /// A list of programs to autostart
     ///
     /// NOTE: These are evaluated using `/bin/sh`
@@ -72,7 +72,7 @@ pub struct FhtConfig {
     pub renderer: RenderConfig,
 }
 
-impl Default for FhtConfig {
+impl Default for CompositorConfig {
     fn default() -> Self {
         Self {
             autostart: Vec::new(),
@@ -87,6 +87,11 @@ impl Default for FhtConfig {
             renderer: RenderConfig::default(),
         }
     }
+}
+
+impl fht_config::Config for CompositorConfig {
+    const NAME: &'static str = "compositor";
+    const DEFAULT_CONTENTS: &'static str = include_str!("../../../res/compositor.ron");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,181 +1,18 @@
-//! Compositor configuration.
-//!
-//! The config is located at `~/.config/fht/compositor.ron`, using the [ron](https://docs.rs/ron/0.8.1/ron/)
-//! as the configuration format (go read their spec before anything else)
-//!
-//! ## Configuration reloading
-//!
-//! Live reloading is *not* supported (yet). Use the dedicated
-//! [`ReloadConfig`](crate::input::actions::KeyAction::ReloadConfig) action to reload your
-//! configuration.
-//!
-//! If your configuration fails to reload, fht-compositor will fallback on the following generic
-//! configuration:
-//!
-//! ```rust
-//! (
-//!     autostart: [],
-//!
-//!     keybinds: {
-//!         ([ALT], "q"): Quit,
-//!         ([ALT], "r"): ReloadConfig,
-//!     },
-//! )
-//! ```
-//! </div>
-//!
-//!
-//! A example config may look like the following:
-//!
-//! ```rust,ignore
-//! (
-//!     autostart: [
-//!         "/usr/libexec/polkit-gnome-authentication-agent-1",
-//!         "swaybg -i ~/.config/theme/wallpaper.jpg",
-//!     ],
-//!
-//!     general: (
-//!         warp_window_on_focus: false,
-//!         outer_gaps: 8,
-//!         inner_gaps: 8,
-//!     ),
-//!
-//!     keybinds: {
-//!         // Left side of the tuple: your modifiers
-//!         // Right side of the tuple: the desired key
-//!         //
-//!         // You should go check the KeyPattern documentation for more info.
-//!         //
-//!         // You should go check the KeyAction enum for all possible actions
-//!
-//!         ([SUPER], "q"): Quit,
-//!         ([SUPER, CTRL], "r"): ReloadConfig,
-//!         ([SUPER], "Return"): RunCommand("alacritty"),
-//!         ([SUPER], "p"): RunCommand("wofi --show drun"),
-//!     },
-//!
-//!     input: (
-//!         keyboard: (
-//!             rules: "",
-//!             model: "",
-//!             layout: "us",
-//!             variant: "",
-//!             options: "",
-//!
-//!             repeat_rate: 50,
-//!             repeat_delay: 250,
-//!         ),
-//!
-//!         mouse: (
-//!             acceleration_profile: Flat,
-//!         ),
-//!     ),
-//!
-//!     renderer: (
-//!         allocator: Vulkan,
-//!         // allocator: Gbm,
-//!     )
-//! )
-//! ```
-//!
-//! ## TODO
-//!
-//! - [x] Cursor configuration
-//! - [ ] Output configuration
-//! - [ ] Window rules
-
 mod types;
 
-use std::cell::SyncUnsafeCell;
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::sync::LazyLock;
-
-use anyhow::Context;
-use ron::extensions::Extensions;
+use fht_config::{Config, ConfigWrapper};
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
-use smithay::reexports::rustix::path::Arg;
-use xdg::BaseDirectories;
-
-const DEFAULT_CONFIG: &str = include_str!("../../res/compositor.ron");
 
 #[allow(unused_imports)]
 pub use self::types::{
-    AnimationConfig, BorderConfig, ColorConfig, CursorConfig, FhtConfig as FhtConfigInner,
-    GeneralConfig, InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
-    WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
-    WorkspaceSwitchAnimationDirection,
+    AnimationConfig, BorderConfig, ColorConfig, CursorConfig, CompositorConfig, GeneralConfig,
+    InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings,
+    WindowRulePattern, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
 };
 use crate::state::State;
 
-// To avoid mutable static madness just use an private unsafe cell with one getter and setter.
-// Dont show this to the user though
-#[derive(Debug, Default)]
-#[doc(hidden)]
-pub struct FhtConfig(SyncUnsafeCell<FhtConfigInner>);
-
-impl std::ops::Deref for FhtConfig {
-    type Target = FhtConfigInner;
-
-    fn deref(&self) -> &Self::Target {
-        // This is kinda scary todo, but we are using a LazyCell around this struct, so it should
-        // always be initialized whatever we do
-        unsafe {
-            let inner_ptr = self
-                .0
-                .get()
-                .as_ref()
-                .expect("Config was not initialized before!");
-            inner_ptr
-        }
-    }
-}
-
-unsafe impl Send for FhtConfig {}
-unsafe impl Sync for FhtConfig {}
-
-pub static CONFIG: LazyLock<FhtConfig> = LazyLock::new(|| {
-    let inner = load_config().unwrap();
-    FhtConfig(SyncUnsafeCell::new(inner))
-});
-pub static CONFIG_PATH: LazyLock<String> = LazyLock::new(|| {
-    BaseDirectories::new()
-        .unwrap()
-        .place_config_file("fht/compositor.ron")
-        .expect("Failed to get config file!")
-        .to_string_lossy()
-        .to_string() // I know right genius
-});
-
-pub fn load_config() -> anyhow::Result<FhtConfigInner> {
-    let config_path = CONFIG_PATH.as_str();
-    let reader = OpenOptions::new().read(true).write(false).open(config_path);
-    let reader = match reader {
-        Ok(reader) => reader,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            // Create config file for user
-            let mut file = File::create_new(config_path).unwrap();
-            writeln!(&mut file, "{}", DEFAULT_CONFIG).unwrap();
-            OpenOptions::new()
-                .read(true)
-                .write(false)
-                .open(config_path)
-                .unwrap()
-        }
-        Err(err) => {
-            anyhow::bail!("Failed to open config file: {}", err)
-        }
-    };
-
-    ron::Options::default()
-        .with_default_extension(Extensions::IMPLICIT_SOME)
-        .with_default_extension(Extensions::UNWRAP_VARIANT_NEWTYPES)
-        .from_reader(reader)
-        .context("Malformed config file!")
-}
+pub static CONFIG: ConfigWrapper<CompositorConfig> = ConfigWrapper::new();
 
 pub fn init_config_file_watcher(
     loop_handle: &LoopHandle<'static, State>,
@@ -192,7 +29,7 @@ pub fn init_config_file_watcher(
         .map_err(|err| anyhow::anyhow!("Failed to insert config file watcher source! {err}"))?;
 
     async_std::task::spawn(async move {
-        let path = PathBuf::from_str(&CONFIG_PATH).unwrap();
+        let path = CompositorConfig::get_path();
         let mut last_mtime = path.metadata().and_then(|md| md.modified()).ok();
 
         loop {
@@ -218,10 +55,10 @@ pub fn init_config_file_watcher(
 impl State {
     #[profiling::function]
     pub fn reload_config(&mut self) {
-        let new_config = match load_config() {
+        let new_config = match CompositorConfig::load() {
             Ok(config) => config,
             Err(err) => {
-                self.fht.last_config_error = Some(err);
+                self.fht.last_config_error = Some(anyhow::anyhow!(err));
                 return;
             }
         };
@@ -233,9 +70,7 @@ impl State {
         }
 
         let old_config = CONFIG.clone();
-        unsafe {
-            *CONFIG.0.get() = new_config;
-        }
+        CONFIG.set(new_config);
 
         // the [`CursorThemeManager`] automatically checks for changes.
         self.fht.cursor_theme_manager.reload();

@@ -1504,6 +1504,7 @@ dependencies = [
  "bitflags 2.4.2",
  "color-eyre",
  "colors-transform",
+ "fht-config",
  "indexmap",
  "keyframe",
  "libc",
@@ -1526,6 +1527,16 @@ dependencies = [
  "xdg",
  "zbus",
  "zvariant",
+]
+
+[[package]]
+name = "fht-config"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "thiserror",
+ "xdg",
 ]
 
 [[package]]

@@ -13,16 +13,18 @@
 extern crate tracing;
 
 use std::error::Error;
+use std::mem::size_of;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use fht_config::Config;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
 use smithay::wayland::socket::ListeningSocketSource;
 use state::State;
 
-use crate::config::CONFIG;
+use crate::config::{CompositorConfig, CONFIG};
 
 mod backend;
 mod config;
@@ -128,12 +130,29 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     ipc::start(&loop_handle).expect("Failed to start IPC connection!");
     portals::start(&loop_handle).expect("Failed to setup portal!");
 
+    // Load the configuration before the state, since the state itself uses the config.
+    let mut last_config_error = None;
+     match CompositorConfig::load() {
+        Ok(config) => {
+            info!("Loaded config.");
+            // The config is always initialized to the default values as a failsafe.
+            // Update them now
+            CONFIG.set(config);
+        },
+        Err(err) => {
+            error!(?err, "Failed to load config!");
+            last_config_error = Some(anyhow::anyhow!(err));
+            CONFIG.set(CompositorConfig::default())
+        }
+    }
+
     let mut state = State::new(
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
         socket_name.clone(),
     );
+    state.fht.last_config_error = last_config_error;
 
     std::env::set_var("WAYLAND_DISPLAY", &socket_name);
     std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");

@@ -1,5 +1,5 @@
 [workspace]
-members = ["fht-compositor", "fht-share-picker", "smithay-egui"]
+members = ["fht-compositor", "fht-config", "fht-share-picker", "smithay-egui"]
 resolver = "2"
 
 [workspace.dependencies]

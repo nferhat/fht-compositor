@@ -33,6 +33,7 @@ async-std = { workspace = true, features = ["unstable"] }
 xcursor = "0.3.3"
 x11rb = { version = "0.12.0", optional = true, default-features = false, features = ["composite"] }
 serde_arrays = "0.1.0"
+fht-config.path = "../fht-config"
 
 [features]
 default = ["egl", "x11_backend", "udev_backend", "all-portals"]
