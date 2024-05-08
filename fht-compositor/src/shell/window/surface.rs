@@ -2,7 +2,7 @@ use smithay::backend::input::KeyState;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{Kind, RenderElement};
+use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::{RenderZindex, SpaceElement};
@@ -360,49 +360,36 @@ impl FhtWindowSurface {
         scale: Scale<f64>,
         alpha: f32,
         border_radius: Option<f32>,
-    ) -> (
-        Vec<FhtWindowSurfaceRenderElement<R>>,
-        Vec<FhtWindowSurfaceRenderElement<R>>,
-    )
+    ) -> Vec<FhtWindowSurfaceRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
         WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
-        let surface = self.wl_surface().unwrap();
+        let surface = self.toplevel().wl_surface();
 
-        let popup_render_elements = PopupManager::popups_for_surface(&surface)
-            .flat_map(|(popup, popup_offset)| {
-                let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
-                    .to_physical_precise_round(scale);
+        let mut render_elements = PopupManager::popups_for_surface(surface).flat_map(|(popup, popup_offset)| {
+            let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
+                .to_physical_precise_round(scale);
 
-                render_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    location + offset,
-                    scale,
-                    alpha,
-                    Kind::Unspecified,
-                )
-                .into_iter()
-                .map(|e: WaylandSurfaceRenderElement<R>| {
-                    FhtWindowSurfaceRenderElement::from_element_no_shader(e)
-                })
-            })
-            .collect();
+            render_elements_from_surface_tree(
+                renderer,
+                popup.wl_surface(),
+                location + offset,
+                scale,
+                alpha,
+                Kind::Unspecified,
+            ).into_iter().map(FhtWindowSurfaceRenderElement::from_element_no_shader)
+        }).collect::<Vec<_>>();
 
-        // NOTE: We only round the main window elements since rounding subsurfaces leads to black
-        // areas where the rounded corners are, even when opaque regions are empty.
-        let window_render_elements = render_elements_from_surface_tree(
+        render_elements.extend(render_elements_from_surface_tree(
             renderer,
-            &surface,
+            surface,
             location,
             scale,
             alpha,
             Kind::Unspecified,
-        )
-        .into_iter()
-        .map(|e| {
+        ).into_iter().map(|e| {
             if let Some(border_radius) = border_radius {
                 let texture_shader = RoundedQuadShader::get(renderer);
                 FhtWindowSurfaceRenderElement::from_element(
@@ -413,9 +400,9 @@ impl FhtWindowSurface {
             } else {
                 FhtWindowSurfaceRenderElement::from_element_no_shader(e)
             }
-        })
-        .collect();
+        }));
 
-        (window_render_elements, popup_render_elements)
+        render_elements
+
     }
 }

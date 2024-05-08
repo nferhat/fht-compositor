@@ -7,6 +7,9 @@
 
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
+use smithay::backend::renderer::element::utils::{
+    CropRenderElement, RelocateRenderElement, RescaleRenderElement,
+};
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
@@ -20,6 +23,10 @@ use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::window::FhtWindowRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
+
+/// Wrapped type returned by `constrain_render_elements`
+pub type ConstrainedRenderElement<E> =
+    CropRenderElement<RelocateRenderElement<RescaleRenderElement<E>>>;
 
 pub enum FhtRenderElement<R>
 where

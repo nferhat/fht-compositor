@@ -80,21 +80,18 @@ impl RoundedOutlineShader {
 
     /// Create a rounded outline element.
     ///
+    /// The geometry expects you to have already removed your desired border thickness.
+    ///
     /// The geo argument should be local to the output where the wl_surface is being drawn.
     pub fn element(
         renderer: &mut impl AsGlowRenderer,
         scale: f64,
         alpha: f32,
         wl_surface: &WlSurface,
-        mut geo: Rectangle<i32, Local>,
+        geo: Rectangle<i32, Local>,
         settings: RoundedOutlineShaderSettings,
     ) -> FhtPixelShaderElement {
-        // Scaled thickness only matters to make the border thickness in the shader.
-        // Geometry shouldd still obey the normal thickness
-        let thickness = settings.thickness as i32;
         let scaled_thickness = settings.thickness as f32 * scale as f32;
-        geo.loc -= (thickness, thickness).into();
-        geo.size += (2 * thickness, 2 * thickness).into();
 
         let shader = Self::get(renderer);
         let mut element_cache = RefCell::borrow_mut(&shader.element_cache);

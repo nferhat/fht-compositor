@@ -730,11 +730,18 @@ impl FhtWindow {
             }
         });
 
+        // Render location accounts for client-side decorations that clients might force or not
+        // (thank you libadwaita+gtk) that the border should not be accounting for.
         let render_location = self.render_location();
-        // Render location may also include CSD like shadows that we don't need, but we also need
-        // the offset to match the animation
         let mut border_geometry = self.geometry();
+        // The RoundedOutlineShaderElement excepts us to remove thickness
         border_geometry.loc = render_location + self.surface.geometry().loc.as_global();
+        if let Some(RoundedOutlineShaderSettings { thickness, .. }) = border_config.as_ref() {
+            let thickness = *thickness as i32;
+            border_geometry.loc -= (thickness, thickness).into();
+            border_geometry.size += (2 * thickness, 2 * thickness).into();
+        }
+
         // We still need the absolute center of the window
         let center = border_geometry
             .center()
@@ -747,7 +754,7 @@ impl FhtWindow {
         let mut render_elements = vec![];
 
         let mut create_render_elements = |alpha| {
-            let (window_elements, popup_elements) = self.surface.render_elements(
+            let surface_elements = self.surface.render_elements(
                 renderer,
                 render_location,
                 scale,
@@ -766,7 +773,7 @@ impl FhtWindow {
                 )
             });
 
-            (window_elements, popup_elements, border_element)
+            (surface_elements, border_element)
         };
 
         let rescale_surface_elements = |e: FhtWindowSurfaceRenderElement<R>,
@@ -784,40 +791,29 @@ impl FhtWindow {
             // This will create a stretching effect on the X and Y axes, until the offset reaches
             // one and the window is now not scaled anymore.
             // This alpha function is arbitrary, I tried out stuff in desmos.
+            let offset_scale = (offset_scale / 2.0 + 0.5).max(0.0);
             let alpha = f64::exp(f64::cos(offset_scale + 0.575).mul(-6.5)) as f32;
             let offset_scale = offset_scale.into();
 
-            let (window_elements, popup_elements, border_element) = create_render_elements(alpha);
+            let (surface_elements, border_element) = create_render_elements(alpha);
             render_elements.extend(
-                popup_elements
+                surface_elements
                     .into_iter()
                     .map(|e| rescale_surface_elements(e, center, offset_scale)),
             );
-            if let Some(border_element) = border_element {
-                render_elements.push(FhtWindowRenderElement::ResizingBorder(
-                    RescaleRenderElement::from_element(border_element, center, offset_scale),
-                ));
-            }
-            render_elements.extend(
-                window_elements
-                    .into_iter()
-                    .map(|e| rescale_surface_elements(e, center, offset_scale)),
-            );
+            render_elements.extend(border_element.into_iter().map(|e| {
+                FhtWindowRenderElement::ResizingBorder(
+                    RescaleRenderElement::from_element(e, center, offset_scale)
+                )
+            }));
         } else {
-            let (window_elements, popup_elements, border_element) = create_render_elements(alpha);
+            let (surface_elements, border_element) = create_render_elements(alpha);
             render_elements.extend(
-                popup_elements
+                surface_elements
                     .into_iter()
                     .map(FhtWindowRenderElement::Surface),
             );
-            if let Some(border_element) = border_element {
-                render_elements.push(FhtWindowRenderElement::Border(border_element));
-            }
-            render_elements.extend(
-                window_elements
-                    .into_iter()
-                    .map(FhtWindowRenderElement::Surface),
-            );
+            render_elements.extend(border_element.into_iter().map(FhtWindowRenderElement::Border));
         }
 
         render_elements
