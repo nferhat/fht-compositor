@@ -24,8 +24,7 @@ impl FractionalScaleHandler for State {
         }
 
         let get_scanout_output = |surface: &WlSurface, states: &SurfaceData| {
-            surface_primary_scanout_output(surface, states)
-            .or_else(|| {
+            surface_primary_scanout_output(surface, states).or_else(|| {
                 // Our custom send frames throlling state.
                 let last_callback_output: &RefCell<Option<(Output, u32)>> =
                     states.data_map.get_or_insert(RefCell::default);
@@ -36,33 +35,32 @@ impl FractionalScaleHandler for State {
 
         let primary_scanout_output = if root != surface {
             // We are the root surface.
-            with_states(&root, |states| {
-                get_scanout_output(&root, states)
-            }).or_else(|| {
+            with_states(&root, |states| get_scanout_output(&root, states)).or_else(|| {
                 // Use window workspace output.
-                self.fht.find_window_and_output(&root)
+                self.fht
+                    .find_window_and_output(&root)
                     .map(|(_, o)| o)
                     .cloned()
             })
         } else {
             // We are not the root surface, try from surface state.
-            with_states(&surface, |states| {
-                get_scanout_output(&surface, states)
-            }).or_else(|| {
+            with_states(&surface, |states| get_scanout_output(&surface, states)).or_else(|| {
                 // Try the root of the surface, if possible
-                self.fht.find_window_and_output(&root)
+                self.fht
+                    .find_window_and_output(&root)
                     .map(|(_, o)| o)
                     .cloned()
             })
-        }.unwrap_or_else(|| {
+        }
+        .unwrap_or_else(|| {
             // Final blow: the first available output.
             self.fht.outputs().next().unwrap().clone()
         });
 
-
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional_scale| {
-                fractional_scale.set_preferred_scale(primary_scanout_output.current_scale().fractional_scale());
+                fractional_scale
+                    .set_preferred_scale(primary_scanout_output.current_scale().fractional_scale());
             });
         });
     }

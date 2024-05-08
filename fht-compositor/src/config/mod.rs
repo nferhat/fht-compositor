@@ -6,7 +6,7 @@ use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
 
 #[allow(unused_imports)]
 pub use self::types::{
-    AnimationConfig, BorderConfig, ColorConfig, CursorConfig, CompositorConfig, GeneralConfig,
+    AnimationConfig, BorderConfig, ColorConfig, CompositorConfig, CursorConfig, GeneralConfig,
     InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings,
     WindowRulePattern, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
 };

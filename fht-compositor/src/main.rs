@@ -132,13 +132,13 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 
     // Load the configuration before the state, since the state itself uses the config.
     let mut last_config_error = None;
-     match CompositorConfig::load() {
+    match CompositorConfig::load() {
         Ok(config) => {
             info!("Loaded config.");
             // The config is always initialized to the default values as a failsafe.
             // Update them now
             CONFIG.set(config);
-        },
+        }
         Err(err) => {
             error!(?err, "Failed to load config!");
             last_config_error = Some(anyhow::anyhow!(err));
