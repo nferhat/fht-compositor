@@ -681,6 +681,8 @@ impl<'a> RenderElement<UdevRenderer<'a>> for WorkspaceSetRenderElement<UdevRende
     }
 }
 
+pub struct WorkspaceElement {}
+
 /// A single workspace.
 ///
 /// This workspace should not stand on it's own, and it's preferred you use it with a
