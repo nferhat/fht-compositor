@@ -1,8 +1,10 @@
+use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
-use smithay::backend::renderer::gles::element::PixelShaderElement;
-use smithay::backend::renderer::gles::GlesError;
+use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::Texture;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev_backend")]
@@ -10,11 +12,13 @@ use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
-/// A newtype struct around PixelShaderElement for it to implement RenderElement<UdevRenderer>
+/// A newtype struct around TextureRenderElement<GlesTexture> for it to implement
+/// RenderElement<UdevRenderer>
 #[derive(Debug)]
-pub struct FhtPixelShaderElement(pub PixelShaderElement);
+pub struct FhtTextureElement<E = GlesTexture>(pub TextureRenderElement<E>)
+    where E: Texture + Clone + 'static;
 
-impl Element for FhtPixelShaderElement {
+impl<E: Texture + Clone + 'static> Element for FhtTextureElement<E> {
     fn id(&self) -> &Id {
         self.0.id()
     }
@@ -60,7 +64,7 @@ impl Element for FhtPixelShaderElement {
     }
 }
 
-impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
+impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
     fn draw(
         &self,
         frame: &mut GlowFrame<'_>,
@@ -68,19 +72,43 @@ impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(&self.0, frame, src, dst, damage)
+        <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
+            &self.0, frame, src, dst, damage,
+        )
     }
 
     fn underlying_storage(
         &self,
-        _: &mut GlowRenderer,
+        renderer: &mut GlowRenderer,
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+        self.0.underlying_storage(renderer)
+    }
+}
+
+#[cfg(feature = "udev_backend")]
+impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
+    fn draw(
+        &self,
+        frame: &mut UdevFrame<'a, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+    ) -> Result<(), UdevRenderError<'a>> {
+        <TextureRenderElement<MultiTexture> as RenderElement<UdevRenderer<'a>>>::draw(
+            &self.0, frame, src, dst, damage,
+        )
+    }
+
+    fn underlying_storage(
+        &self,
+        _: &mut UdevRenderer<'a>,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
         None // pixel shader elements can't be scanned out.
     }
 }
 
 #[cfg(feature = "udev_backend")]
-impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
+impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
     fn draw(
         &self,
         frame: &mut UdevFrame<'a, '_>,
@@ -89,8 +117,10 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
         let frame = frame.glow_frame_mut();
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(&self.0, frame, src, dst, damage)
-            .map_err(|err| UdevRenderError::Render(err))
+        <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
+            &self.0, frame, src, dst, damage,
+        )
+        .map_err(UdevRenderError::Render)
     }
 
     fn underlying_storage(

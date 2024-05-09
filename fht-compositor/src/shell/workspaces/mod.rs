@@ -7,9 +7,7 @@ use async_std::task::spawn;
 use serde::{Deserialize, Serialize};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
-use smithay::backend::renderer::element::{Element, RenderElement};
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::DamageSet;
+use smithay::backend::renderer::element::RenderElement;
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
@@ -21,11 +19,10 @@ use smithay::wayland::compositor::send_surface_state;
 
 use super::window::FhtWindowRenderElement;
 use super::FhtWindow;
-#[cfg(feature = "udev_backend")]
-use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
+use crate::fht_render_elements;
 use crate::ipc::{IpcOutput, IpcWorkspace, IpcWorkspaceRequest};
-use crate::renderer::AsGlowRenderer;
+use crate::renderer::{AsGlowRenderer, FhtRenderer};
 use crate::state::State;
 use crate::utils::animation::Animation;
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -384,7 +381,7 @@ impl WorkspaceSet {
     /// Render all the elements in this workspace set, returning them and whether it currently
     /// holds a fullscreen window.
     #[profiling::function]
-    pub fn render_elements<R>(
+    pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
@@ -533,151 +530,10 @@ impl WorkspaceSwitchAnimation {
     }
 }
 
-pub enum WorkspaceSetRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-
-    FhtWindowRenderElement<R>: RenderElement<R>,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-{
-    Normal(FhtWindowRenderElement<R>),
-    // FIXME: This makes the border look funky. Should go figure out why
-    // Switching(CropRenderElement<RelocateRenderElement<FhtWindowRenderElement<R>>>),
-    Switching(RelocateRenderElement<FhtWindowRenderElement<R>>),
-}
-
-impl<R> Element for WorkspaceSetRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-
-    FhtWindowRenderElement<R>: RenderElement<R>,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-{
-    fn id(&self) -> &smithay::backend::renderer::element::Id {
-        match self {
-            Self::Normal(e) => e.id(),
-            Self::Switching(e) => e.id(),
-        }
-    }
-
-    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
-        match self {
-            Self::Normal(e) => e.current_commit(),
-            Self::Switching(e) => e.current_commit(),
-        }
-    }
-
-    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
-        match self {
-            Self::Normal(e) => e.src(),
-            Self::Switching(e) => e.src(),
-        }
-    }
-
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
-        match self {
-            Self::Normal(e) => e.geometry(scale),
-            Self::Switching(e) => e.geometry(scale),
-        }
-    }
-
-    fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
-        match self {
-            Self::Normal(e) => e.location(scale),
-            Self::Switching(e) => e.location(scale),
-        }
-    }
-
-    fn transform(&self) -> smithay::utils::Transform {
-        match self {
-            Self::Normal(e) => e.transform(),
-            Self::Switching(e) => e.transform(),
-        }
-    }
-
-    fn damage_since(
-        &self,
-        scale: Scale<f64>,
-        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> DamageSet<i32, Physical> {
-        match self {
-            Self::Normal(e) => e.damage_since(scale, commit),
-            Self::Switching(e) => e.damage_since(scale, commit),
-        }
-    }
-
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
-        match self {
-            Self::Normal(e) => e.opaque_regions(scale),
-            Self::Switching(e) => e.opaque_regions(scale),
-        }
-    }
-
-    fn alpha(&self) -> f32 {
-        match self {
-            Self::Normal(e) => e.alpha(),
-            Self::Switching(e) => e.alpha(),
-        }
-    }
-
-    fn kind(&self) -> smithay::backend::renderer::element::Kind {
-        match self {
-            Self::Normal(e) => e.kind(),
-            Self::Switching(e) => e.kind(),
-        }
-    }
-}
-
-impl RenderElement<GlowRenderer> for WorkspaceSetRenderElement<GlowRenderer> {
-    fn draw(
-        &self,
-        frame: &mut GlowFrame,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, smithay::utils::Physical>,
-        damage: &[Rectangle<i32, smithay::utils::Physical>],
-    ) -> Result<(), <GlowRenderer as Renderer>::Error> {
-        match self {
-            Self::Normal(e) => e.draw(frame, src, dst, damage),
-            Self::Switching(e) => e.draw(frame, src, dst, damage),
-        }
-    }
-
-    fn underlying_storage(
-        &self,
-        renderer: &mut GlowRenderer,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        match self {
-            Self::Normal(e) => e.underlying_storage(renderer),
-            Self::Switching(e) => e.underlying_storage(renderer),
-        }
-    }
-}
-
-#[cfg(feature = "udev_backend")]
-impl<'a> RenderElement<UdevRenderer<'a>> for WorkspaceSetRenderElement<UdevRenderer<'a>> {
-    fn draw(
-        &self,
-        frame: &mut UdevFrame<'a, '_>,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, smithay::utils::Physical>,
-        damage: &[Rectangle<i32, smithay::utils::Physical>],
-    ) -> Result<(), UdevRenderError<'a>> {
-        match self {
-            Self::Normal(e) => e.draw(frame, src, dst, damage),
-            Self::Switching(e) => e.draw(frame, src, dst, damage),
-        }
-    }
-
-    fn underlying_storage(
-        &self,
-        renderer: &mut UdevRenderer<'a>,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        match self {
-            Self::Normal(e) => e.underlying_storage(renderer),
-            Self::Switching(e) => e.underlying_storage(renderer),
-        }
+fht_render_elements! {
+    WorkspaceSetRenderElement<R> => {
+        Normal = FhtWindowRenderElement<R>,
+        Switching = RelocateRenderElement<FhtWindowRenderElement<R>>,
     }
 }
 
@@ -1487,19 +1343,12 @@ impl Workspace {
 
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
-    pub fn render_elements<R>(
+    pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<FhtWindowRenderElement<R>>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    {
+    ) -> Vec<FhtWindowRenderElement<R>> {
         if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
             return inner.render_elements(renderer, scale, alpha);
         }

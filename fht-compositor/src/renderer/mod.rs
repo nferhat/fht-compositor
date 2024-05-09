@@ -9,18 +9,21 @@
 pub mod custom_texture_shader_element;
 pub mod egui;
 pub mod pixel_shader_element;
-pub mod render_element;
 pub mod rounded_outline_shader;
 pub mod rounded_quad_shader;
+pub mod texture_element;
+pub mod render_elements;
 
+use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
-use smithay::backend::renderer::gles::GlesTexture;
+use smithay::backend::renderer::gles::{GlesError, GlesRenderbuffer, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Renderer};
+use smithay::backend::renderer::multigpu::MultiTexture;
+use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture};
 use smithay::desktop::space::SurfaceTree;
 use smithay::desktop::{layer_map_for_output, PopupManager};
 use smithay::input::pointer::CursorImageStatus;
@@ -28,7 +31,8 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
-use self::render_element::FhtRenderElement;
+use self::texture_element::FhtTextureElement;
+use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::config::CONFIG;
@@ -41,24 +45,23 @@ use crate::utils::fps::Fps;
 use crate::utils::geometry::RectGlobalExt;
 use crate::utils::output::OutputExt;
 
-pub struct OutputElementsResult<R>
-where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Clone + 'static,
+crate::fht_render_elements! {
+    FhtRenderElement<R> => {
+        Cursor = CursorRenderElement<R>,
+        Egui = FhtTextureElement,
+        Wayland = WaylandSurfaceRenderElement<R>,
+        WorkspaceSet = WorkspaceSetRenderElement<R>,
+    }
+}
 
-    FhtRenderElement<R>: RenderElement<R>,
-    CursorRenderElement<R>: RenderElement<R>,
-    FhtWindowRenderElement<R>: RenderElement<R>,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    WorkspaceSetRenderElement<R>: RenderElement<R>,
-{
+pub struct OutputElementsResult<R: FhtRenderer> {
     pub render_elements: Vec<FhtRenderElement<R>>,
     pub cursor_elements_len: usize,
 }
 
 impl Fht {
     /// Generate all the elements for this output.
-    pub fn output_elements<R>(
+    pub fn output_elements<R: FhtRenderer>(
         &mut self,
         renderer: &mut R,
         output: &Output,
@@ -91,7 +94,7 @@ impl Fht {
 
         // Then EGUI, for debug overlay, config error notification, and greeting.
         if let Some(egui) = self.egui_elements(renderer.glow_renderer_mut(), output, fps) {
-            elements.push(FhtRenderElement::Egui(egui))
+            elements.push(FhtRenderElement::Egui(FhtTextureElement(egui)))
         }
 
         // Then overlay layer shells + their popups
@@ -133,7 +136,11 @@ impl Fht {
         }
     }
 
-    pub fn cursor_elements<R>(&self, renderer: &mut R, output: &Output) -> Vec<FhtRenderElement<R>>
+    pub fn cursor_elements<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<FhtRenderElement<R>>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         <R as Renderer>::TextureId: Clone + 'static,
@@ -251,25 +258,12 @@ impl Fht {
     /// Render and submit screencopy buffers using given renderer.
     #[cfg(feature = "xdg-screencast-portal")]
     #[profiling::function]
-    pub fn render_screencast<R>(
+    pub fn render_screencast<R: FhtRenderer>(
         &mut self,
         output: &Output,
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
-    ) where
-        R: Renderer
-            + ImportAll
-            + ImportMem
-            + Bind<smithay::backend::allocator::dmabuf::Dmabuf>
-            + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-
-        FhtRenderElement<R>: RenderElement<R>,
-        CursorRenderElement<R>: RenderElement<R>,
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-        WorkspaceSetRenderElement<R>: RenderElement<R>,
-    {
+    ) where FhtRenderElement<R>: RenderElement<R> {
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
@@ -346,6 +340,32 @@ impl Fht {
     }
 }
 
+/// A meta trait combining all the requirements for our renderer
+pub trait FhtRenderer:
+    Renderer<TextureId = Self::FhtTextureId, Error = Self::FhtError>
+    + ImportAll
+    + ImportMem
+    + Bind<Dmabuf>
+    + Offscreen<GlesRenderbuffer>
+    + Offscreen<GlesTexture>
+    + AsGlowRenderer
+{
+    // Thank you rust for not being able  to resolve type bounds.
+    type FhtTextureId: Texture + Clone + 'static;
+    type FhtError: std::error::Error + From<GlesError> + 'static;
+}
+
+impl FhtRenderer for GlowRenderer {
+    type FhtTextureId = GlesTexture;
+    type FhtError = GlesError;
+}
+
+#[cfg(feature = "udev_backend")]
+impl<'a> FhtRenderer for UdevRenderer<'a> {
+    type FhtTextureId = MultiTexture;
+    type FhtError = UdevRenderError<'a>;
+}
+
 /// Helper trait to get around a borrow checker/trait checker limitations (e0277.
 pub trait AsGlowRenderer: Renderer {
     fn glow_renderer(&self) -> &GlowRenderer;
@@ -406,7 +426,7 @@ pub fn init_shaders(renderer: &mut impl AsGlowRenderer) {
 }
 
 // / Generate the layer shell elements for a given layer for a given output layer map.
-pub fn layer_elements<R>(
+pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,
     layer: Layer,

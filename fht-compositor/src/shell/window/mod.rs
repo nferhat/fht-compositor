@@ -5,13 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
-use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::GlesError;
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::{RenderZindex, SpaceElement};
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
@@ -23,7 +17,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{
-    Buffer, IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time,
+    IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time,
 };
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, SurfaceData as WlSurfaceData, TraversalAction,
@@ -33,12 +27,11 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 pub use surface::*;
 
-#[cfg(feature = "udev_backend")]
-use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::config::{BorderConfig, CONFIG};
+use crate::fht_render_elements;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutlineShaderSettings};
-use crate::renderer::AsGlowRenderer;
+use crate::renderer::FhtRenderer;
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
     Global, PointExt, PointGlobalExt, RectCenterExt, RectExt, RectGlobalExt, SizeExt,
@@ -525,195 +518,23 @@ impl IsAlive for FhtWindow {
     }
 }
 
-pub enum FhtWindowRenderElement<R>
-where
-    R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-{
-    Surface(FhtWindowSurfaceRenderElement<R>),
-    ResizingSurface(RescaleRenderElement<FhtWindowSurfaceRenderElement<R>>),
-    Border(FhtPixelShaderElement),
-    ResizingBorder(RescaleRenderElement<FhtPixelShaderElement>),
-}
-
-impl<R> Element for FhtWindowRenderElement<R>
-where
-    R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-{
-    fn id(&self) -> &Id {
-        match self {
-            Self::Surface(e) => e.id(),
-            Self::ResizingSurface(e) => e.id(),
-            Self::Border(e) => e.id(),
-            Self::ResizingBorder(e) => e.id(),
-        }
-    }
-
-    fn current_commit(&self) -> CommitCounter {
-        match self {
-            Self::Surface(e) => e.current_commit(),
-            Self::ResizingSurface(e) => e.current_commit(),
-            Self::Border(e) => e.current_commit(),
-            Self::ResizingBorder(e) => e.current_commit(),
-        }
-    }
-
-    fn src(&self) -> Rectangle<f64, Buffer> {
-        match self {
-            Self::Surface(e) => e.src(),
-            Self::ResizingSurface(e) => e.src(),
-            Self::Border(e) => e.src(),
-            Self::ResizingBorder(e) => e.src(),
-        }
-    }
-
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        match self {
-            Self::Surface(e) => e.geometry(scale),
-            Self::ResizingSurface(e) => e.geometry(scale),
-            Self::Border(e) => e.geometry(scale),
-            Self::ResizingBorder(e) => e.geometry(scale),
-        }
-    }
-
-    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
-        match self {
-            Self::Surface(e) => e.location(scale),
-            Self::ResizingSurface(e) => e.location(scale),
-            Self::Border(e) => e.location(scale),
-            Self::ResizingBorder(e) => e.location(scale),
-        }
-    }
-
-    fn transform(&self) -> smithay::utils::Transform {
-        match self {
-            Self::Surface(e) => e.transform(),
-            Self::ResizingSurface(e) => e.transform(),
-            Self::Border(e) => e.transform(),
-            Self::ResizingBorder(e) => e.transform(),
-        }
-    }
-
-    fn damage_since(
-        &self,
-        scale: Scale<f64>,
-        commit: Option<CommitCounter>,
-    ) -> DamageSet<i32, Physical> {
-        match self {
-            Self::Surface(e) => e.damage_since(scale, commit),
-            Self::ResizingSurface(e) => e.damage_since(scale, commit),
-            Self::Border(e) => e.damage_since(scale, commit),
-            Self::ResizingBorder(e) => e.damage_since(scale, commit),
-        }
-    }
-
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
-        match self {
-            Self::Surface(e) => e.opaque_regions(scale),
-            Self::ResizingSurface(e) => e.opaque_regions(scale),
-            Self::Border(e) => e.opaque_regions(scale),
-            Self::ResizingBorder(e) => e.opaque_regions(scale),
-        }
-    }
-
-    fn alpha(&self) -> f32 {
-        match self {
-            Self::Surface(e) => e.alpha(),
-            Self::ResizingSurface(e) => e.alpha(),
-            Self::Border(e) => e.alpha(),
-            Self::ResizingBorder(e) => e.alpha(),
-        }
-    }
-
-    fn kind(&self) -> smithay::backend::renderer::element::Kind {
-        match self {
-            Self::Surface(e) => e.kind(),
-            Self::ResizingSurface(e) => e.kind(),
-            Self::Border(e) => e.kind(),
-            Self::ResizingBorder(e) => e.kind(),
-        }
-    }
-}
-
-impl RenderElement<GlowRenderer> for FhtWindowRenderElement<GlowRenderer> {
-    fn draw(
-        &self,
-        frame: &mut GlowFrame,
-        src: Rectangle<f64, Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlesError> {
-        match self {
-            Self::Surface(e) => e.draw(frame, src, dst, damage),
-            Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
-            Self::Border(e) => <FhtPixelShaderElement as RenderElement<GlowRenderer>>::draw(
-                e, frame, src, dst, damage,
-            ),
-            Self::ResizingBorder(e) => {
-                <RescaleRenderElement<FhtPixelShaderElement> as RenderElement<GlowRenderer>>::draw(
-                    e, frame, src, dst, damage,
-                )
-            }
-        }
-    }
-
-    fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage> {
-        match self {
-            Self::Surface(e) => e.underlying_storage(renderer),
-            Self::ResizingSurface(e) => e.underlying_storage(renderer),
-            Self::Border(e) => e.underlying_storage(renderer),
-            Self::ResizingBorder(e) => e.underlying_storage(renderer),
-        }
-    }
-}
-
-#[cfg(feature = "udev_backend")]
-impl<'a> RenderElement<UdevRenderer<'a>> for FhtWindowRenderElement<UdevRenderer<'a>> {
-    fn draw(
-        &self,
-        frame: &mut UdevFrame<'a, '_>,
-        src: Rectangle<f64, Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError> {
-        match self {
-            Self::Surface(e) => e.draw(frame, src, dst, damage),
-            Self::ResizingSurface(e) => e.draw(frame, src, dst, damage),
-            Self::Border(e) => {
-                <FhtPixelShaderElement as RenderElement<UdevRenderer<'a>>>::draw(e, frame, src, dst, damage)
-            },
-            Self::ResizingBorder(e) => {
-                <RescaleRenderElement<FhtPixelShaderElement> as RenderElement<UdevRenderer<'a>>>::draw(e, frame, src, dst, damage)
-            },
-        }
-    }
-
-    fn underlying_storage(&self, renderer: &mut UdevRenderer<'a>) -> Option<UnderlyingStorage> {
-        match self {
-            Self::Surface(e) => e.underlying_storage(renderer),
-            Self::ResizingSurface(e) => e.underlying_storage(renderer),
-            Self::Border(e) => e.underlying_storage(renderer),
-            Self::ResizingBorder(e) => e.underlying_storage(renderer),
-        }
+fht_render_elements! {
+    FhtWindowRenderElement<R> => {
+        Surface = FhtWindowSurfaceRenderElement<R>,
+        ResizingSurface = RescaleRenderElement<FhtWindowSurfaceRenderElement<R>>,
+        Border = FhtPixelShaderElement,
+        ResizingBorder = RescaleRenderElement<FhtPixelShaderElement>,
     }
 }
 
 impl FhtWindow {
     #[profiling::function]
-    pub fn render_elements<R>(
+    pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<FhtWindowRenderElement<R>>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    {
+    ) -> Vec<FhtWindowRenderElement<R>> {
         let surface = self.wl_surface();
         // If the window is fullscreen then it's edge to edge with no border and rounding.
         // Otherwise, the window is not edge to edge and can be drawn normally.
@@ -802,9 +623,11 @@ impl FhtWindow {
                     .map(|e| rescale_surface_elements(e, center, offset_scale)),
             );
             render_elements.extend(border_element.into_iter().map(|e| {
-                FhtWindowRenderElement::ResizingBorder(
-                    RescaleRenderElement::from_element(e, center, offset_scale)
-                )
+                FhtWindowRenderElement::ResizingBorder(RescaleRenderElement::from_element(
+                    e,
+                    center,
+                    offset_scale,
+                ))
             }));
         } else {
             let (surface_elements, border_element) = create_render_elements(alpha);
@@ -813,7 +636,11 @@ impl FhtWindow {
                     .into_iter()
                     .map(FhtWindowRenderElement::Surface),
             );
-            render_elements.extend(border_element.into_iter().map(FhtWindowRenderElement::Border));
+            render_elements.extend(
+                border_element
+                    .into_iter()
+                    .map(FhtWindowRenderElement::Border),
+            );
         }
 
         render_elements
