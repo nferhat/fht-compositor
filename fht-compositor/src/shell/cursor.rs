@@ -13,15 +13,15 @@ use smithay::backend::renderer::element::surface::{
 };
 use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::input::pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus};
-use smithay::render_elements;
 use smithay::utils::{Physical, Point, Scale, Transform};
 use smithay::wayland::compositor;
 use xcursor::parser::{parse_xcursor, Image};
 use xcursor::CursorTheme;
 
 use crate::config::{CursorConfig, CONFIG};
+use crate::renderer::texture_element::FhtTextureElement;
+use crate::renderer::FhtRenderer;
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../res/cursor.rgba");
 
@@ -182,8 +182,7 @@ impl CursorThemeManager {
         time: Duration,
     ) -> Vec<E>
     where
-        R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Clone + 'static,
+        R: FhtRenderer,
         E: From<CursorRenderElement<R>>,
     {
         let image_status = &*self.image_status.lock().unwrap();
@@ -254,14 +253,14 @@ impl CursorThemeManager {
                 };
 
                 vec![E::from(CursorRenderElement::Texture(
-                    TextureRenderElement::from_texture_buffer(
+                    FhtTextureElement(TextureRenderElement::from_texture_buffer(
                         location.to_f64(),
                         &frame_texture,
                         None,
                         None,
                         None,
                         Kind::Cursor,
-                    ),
+                    )),
                 ))]
             }
         }
@@ -319,19 +318,9 @@ impl std::fmt::Display for Error {
     }
 }
 
-render_elements! {
-    pub CursorRenderElement<R> where
-        R: ImportAll;
-    Surface=WaylandSurfaceRenderElement<R>,
-    Texture=TextureRenderElement<<R as Renderer>::TextureId>,
-}
-
-impl<R: Renderer> std::fmt::Debug for CursorRenderElement<R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Surface(arg0) => f.debug_tuple("Surface").field(arg0).finish(),
-            Self::Texture(arg0) => f.debug_tuple("Texture").field(arg0).finish(),
-            Self::_GenericCatcher(arg0) => f.debug_tuple("_GenericCatcher").field(arg0).finish(),
-        }
+crate::fht_render_elements! {
+    CursorRenderElement<R> => {
+        Surface = WaylandSurfaceRenderElement<R>,
+        Texture = FhtTextureElement<R::TextureId>,
     }
 }

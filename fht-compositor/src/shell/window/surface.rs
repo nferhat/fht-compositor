@@ -2,9 +2,8 @@ use smithay::backend::input::KeyState;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
+use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::Uniform;
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::space::{RenderZindex, SpaceElement};
 use smithay::desktop::{PopupManager, Window, WindowSurface};
 use smithay::input::keyboard::{KeyboardTarget, KeysymHandle, ModifiersState};
@@ -26,7 +25,7 @@ use smithay::wayland::shell::xdg::ToplevelSurface;
 
 use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
 use crate::renderer::rounded_quad_shader::RoundedQuadShader;
-use crate::renderer::AsGlowRenderer;
+use crate::renderer::FhtRenderer;
 use crate::state::State;
 
 /// A window surface.
@@ -353,56 +352,58 @@ pub type FhtWindowSurfaceRenderElement<R> =
 
 impl FhtWindowSurface {
     #[profiling::function]
-    pub(super) fn render_elements<R>(
+    pub(super) fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         border_radius: Option<f32>,
-    ) -> Vec<FhtWindowSurfaceRenderElement<R>>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    {
+    ) -> Vec<FhtWindowSurfaceRenderElement<R>> {
         let surface = self.toplevel().wl_surface();
 
-        let mut render_elements = PopupManager::popups_for_surface(surface).flat_map(|(popup, popup_offset)| {
-            let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
-                .to_physical_precise_round(scale);
+        let mut render_elements = PopupManager::popups_for_surface(surface)
+            .flat_map(|(popup, popup_offset)| {
+                let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
+                    .to_physical_precise_round(scale);
 
+                render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    location + offset,
+                    scale,
+                    alpha,
+                    Kind::Unspecified,
+                )
+                .into_iter()
+                .map(FhtWindowSurfaceRenderElement::from_element_no_shader)
+            })
+            .collect::<Vec<_>>();
+
+        render_elements.extend(
             render_elements_from_surface_tree(
                 renderer,
-                popup.wl_surface(),
-                location + offset,
+                surface,
+                location,
                 scale,
                 alpha,
                 Kind::Unspecified,
-            ).into_iter().map(FhtWindowSurfaceRenderElement::from_element_no_shader)
-        }).collect::<Vec<_>>();
-
-        render_elements.extend(render_elements_from_surface_tree(
-            renderer,
-            surface,
-            location,
-            scale,
-            alpha,
-            Kind::Unspecified,
-        ).into_iter().map(|e| {
-            if let Some(border_radius) = border_radius {
-                let texture_shader = RoundedQuadShader::get(renderer);
-                FhtWindowSurfaceRenderElement::from_element(
-                    e,
-                    texture_shader,
-                    vec![Uniform::new("radius", border_radius)],
-                )
-            } else {
-                FhtWindowSurfaceRenderElement::from_element_no_shader(e)
-            }
-        }));
+            )
+            .into_iter()
+            .map(|e| {
+                if let Some(border_radius) = border_radius {
+                    let texture_shader = RoundedQuadShader::get(renderer);
+                    FhtWindowSurfaceRenderElement::from_element(
+                        e,
+                        texture_shader,
+                        vec![Uniform::new("radius", border_radius)],
+                    )
+                } else {
+                    FhtWindowSurfaceRenderElement::from_element_no_shader(e)
+                }
+            }),
+        );
 
         render_elements
-
     }
 }

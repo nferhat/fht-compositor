@@ -67,8 +67,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
 use crate::config::CONFIG;
-use crate::renderer::init_shaders;
-use crate::renderer::render_element::FhtRenderElement;
+use crate::renderer::{init_shaders, FhtRenderElement};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;

@@ -16,6 +16,7 @@ use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 /// about which uniforms are getting passed in.
 ///
 /// In addition to this, the shader also gets passed in `size` (the dst size of the element)
+#[derive(Debug)]
 pub struct CustomTextureShaderElement<E: Element> {
     element: E,
     texture_shader: Option<(GlesTexProgram, Vec<Uniform<'static>>)>,
