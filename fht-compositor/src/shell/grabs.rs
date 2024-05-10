@@ -1,3 +1,4 @@
+use smithay::desktop::Window;
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
     GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
@@ -6,13 +7,13 @@ use smithay::input::pointer::{
 };
 use smithay::utils::{Logical, Point};
 
-use super::{FhtWindow, PointerFocusTarget};
+use super::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::geometry::{Global, PointExt};
 
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
-    pub window: FhtWindow,
+    pub window: Window,
     pub initial_window_location: Point<i32, Global>,
 }
 
@@ -30,19 +31,20 @@ impl PointerGrab<State> for MoveSurfaceGrab {
 
         // Basically, instead of implementing kind of a cfacts patch like dwm, grabs make the
         // window floating so the workspace dont care about it.
-        if self.window.tiled() {
-            self.window.set_tiled(false);
-            if let Some(ws) = data.fht.ws_mut_for(&self.window) {
-                ws.refresh_window_geometries();
-            }
-        }
+        // if self.window.tiled() {
+        //     self.window.set_tiled(false);
+        //     if let Some(ws) = data.fht.ws_mut_for(&self.window) {
+        //         ws.refresh_window_geometries();
+        //     }
+        // }
 
         let position_delta = (event.location - self.start_data.location).as_global();
         let new_location = self.initial_window_location.to_f64() + position_delta;
 
-        let mut new_geo = self.window.geometry();
-        new_geo.loc = new_location.to_i32_round();
-        self.window.set_geometry_with_border(new_geo, true)
+        // TODO: Yeah.
+        // let mut new_geo = self.window.geometry();
+        // new_geo.loc = new_location.to_i32_round();
+        // self.window.set_geometry_with_border(new_geo, true)
     }
 
     fn relative_motion(

@@ -33,15 +33,15 @@ impl State {
         let possible_unmapped_window = state
             .unmapped_windows
             .iter()
-            .position(|(w, _, _)| w.wl_surface() == *surface);
+            .position(|(w, _, _)| w.wl_surface().as_ref() == Some(surface));
         if let Some(idx) = state
             .pending_windows
             .iter()
             .position(|w| w.wl_surface().as_ref() == Some(surface))
         {
             let surface = surface.clone();
-            let window_surface = state.pending_windows[idx].clone();
-            window_surface.inner.on_commit();
+            let window = state.pending_windows[idx].clone();
+            window.on_commit();
 
             // We don't have a render buffer, send initial configure to window so it acknowledges it
             // needs one and send additional data with it.
@@ -83,10 +83,10 @@ impl State {
         if let Some(idx) = state
             .unmapped_windows
             .iter()
-            .position(|(w, _, _)| w.wl_surface() == *surface)
+            .position(|(w, _, _)| w.wl_surface().as_ref() == Some(surface))
         {
             let (window, output, workspace_idx) = state.unmapped_windows.remove(idx);
-            window.surface.inner.on_commit();
+            window.on_commit();
             state.map_window(window, output, workspace_idx);
 
             return;
@@ -95,7 +95,7 @@ impl State {
         // Other check: its a mapped window.
         if let Some((window, output)) = state.find_window_and_output(surface) {
             let window = window.clone();
-            window.surface.inner.on_commit();
+            window.on_commit();
             // Window got unmapped.
             if !has_render_buffer(surface) {
                 let output = output.clone();

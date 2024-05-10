@@ -10,6 +10,7 @@ pub use workspace::{Request as IpcWorkspaceRequest, Workspace as IpcWorkspace};
 use zbus::{interface, zvariant};
 
 use crate::config::CONFIG;
+use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::state::State;
 use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::RectCenterExt;
@@ -387,7 +388,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.tiled()))
+                        .send_blocking(IpcResponse::WindowPropBool(true))
                         .unwrap();
                 } else {
                     to_ipc
@@ -401,9 +402,9 @@ impl State {
                     .all_windows()
                     .find(|window| window.uid() == window_id)
                 {
-                    window.set_tiled(tiled);
-                    window.toplevel().send_pending_configure();
-                    self.fht.ws_for(window).unwrap().refresh_window_geometries();
+                    // window.set_tiled(tiled);
+                    // window.toplevel().send_pending_configure();
+                    // self.fht.ws_for(window).unwrap().refresh_window_geometries();
                 }
             }
             IpcRequest::GetWindowMaximized { window_id } => {
@@ -431,7 +432,7 @@ impl State {
                     .find(|window| window.uid() == window_id)
                 {
                     window.set_maximized(maximized);
-                    window.toplevel().send_pending_configure();
+                    window.toplevel().unwrap().send_pending_configure();
                     self.fht.ws_for(window).unwrap().refresh_window_geometries();
                 }
             }
@@ -461,10 +462,11 @@ impl State {
                     .cloned();
                 if let Some(window) = maybe_window {
                     if fullscreened {
-                        let toplevel = window.toplevel().clone();
+                        let toplevel = window.toplevel().unwrap().clone();
                         self.fullscreen_request(toplevel, None);
                     } else {
-                        window.set_fullscreen(false, None);
+                        window.set_fullscreen(false);
+                        window.set_fullscreen_output(None);
                         let workspace = self.fht.ws_mut_for(&window).unwrap();
                         workspace.remove_current_fullscreen();
                     }

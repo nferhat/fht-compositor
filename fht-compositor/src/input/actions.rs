@@ -216,185 +216,186 @@ impl State {
         let wset = self.fht.wset_mut_for(output);
         let active = wset.active_mut();
 
-        match action {
-            KeyAction::Quit => self
-                .fht
-                .stop
-                .store(true, std::sync::atomic::Ordering::SeqCst),
-            KeyAction::ReloadConfig => self.reload_config(),
-            KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
-            KeyAction::SelectNextLayout => active.select_next_layout(),
-            KeyAction::SelectPreviousLayout => active.select_previous_layout(),
-            KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
-            KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
-            KeyAction::ToggleFloating => {
-                if let Some(window) = active.focused().cloned() {
-                    let new_tiled = !window.tiled();
-                    window.set_tiled(new_tiled);
-                    active.raise_window(&window);
-                    active.refresh_window_geometries();
-                }
-            }
-            KeyAction::CenterFocusedWindow => {
-                if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
-                    if window.tiled() {
-                        return;
-                    }
-
-                    let mut geo = window.geometry();
-                    let output_geo = output.geometry();
-                    geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
-                    geo.loc -= geo.size.downscale(2).to_point();
-                    window.set_geometry_with_border(geo, false);
-                    window.toplevel().send_configure();
-                }
-            }
-            KeyAction::FullscreenFocusedWindow => {
-                if let Some(window) = active.focused().cloned() {
-                    if !window.fullscreen() {
-                        let toplevel = window.toplevel().clone();
-                        self.fullscreen_request(toplevel, None);
-                    } else {
-                        window.set_fullscreen(false, None);
-                        let workspace = self.fht.ws_mut_for(&window).unwrap();
-                        workspace.remove_current_fullscreen();
-                    }
-                }
-            }
-            KeyAction::MaximizeFocusedWindow => {
-                if let Some(window) = active.focused().cloned() {
-                    let new_maximized = !window.maximized();
-                    window.set_maximized(new_maximized);
-                    active.refresh_window_geometries();
-                }
-            }
-            KeyAction::FocusNextWindow => {
-                let new_focus = active.focus_next_window().cloned();
-                if let Some(window) = new_focus {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.move_pointer(center.to_f64())
-                    }
-                    self.set_focus_target(Some(window.into()));
-                }
-            }
-            KeyAction::FocusPreviousWindow => {
-                let new_focus = active.focus_previous_window().cloned();
-                if let Some(window) = new_focus {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.set_focus_target(Some(window.into()));
-                        self.move_pointer(center.to_f64())
-                    }
-                }
-            }
-            KeyAction::SwapWithNextWindow => {
-                active.swap_with_next_window();
-                if let Some(window) = active.focused().cloned() {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.move_pointer(center.to_f64())
-                    }
-                    self.set_focus_target(Some(window.into()));
-                }
-            }
-            KeyAction::SwapWithPreviousWindow => {
-                active.swap_with_previous_window();
-                if let Some(window) = active.focused().cloned() {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.move_pointer(center.to_f64())
-                    }
-                    self.set_focus_target(Some(window.into()));
-                }
-            }
-            KeyAction::FocusNextOutput => {
-                let outputs_len = self.fht.workspaces.len();
-                if outputs_len < 2 {
-                    return;
-                }
-
-                let current_output_idx = self
-                    .fht
-                    .outputs()
-                    .position(|o| o == output)
-                    .expect("Focused output is not registered");
-
-                let mut next_output_idx = current_output_idx + 1;
-                if next_output_idx == outputs_len {
-                    next_output_idx = 0;
-                }
-
-                let output = self
-                    .fht
-                    .outputs()
-                    .skip(next_output_idx)
-                    .next()
-                    .unwrap()
-                    .clone();
-                if CONFIG.general.cursor_warps {
-                    let center = output.geometry().center();
-                    self.move_pointer(center.to_f64());
-                }
-                self.fht.focus_state.output.replace(output).unwrap();
-            }
-            KeyAction::FocusPreviousOutput => {
-                let outputs_len = self.fht.workspaces.len();
-                if outputs_len < 2 {
-                    return;
-                }
-
-                let current_output_idx = self
-                    .fht
-                    .outputs()
-                    .position(|o| o == output)
-                    .expect("Focused output is not registered");
-
-                let next_output_idx = match current_output_idx.checked_sub(1) {
-                    Some(idx) => idx,
-                    None => outputs_len - 1,
-                };
-
-                let output = self
-                    .fht
-                    .outputs()
-                    .skip(next_output_idx)
-                    .next()
-                    .unwrap()
-                    .clone();
-                if CONFIG.general.cursor_warps {
-                    let center = output.geometry().center();
-                    self.move_pointer(center.to_f64());
-                }
-                self.fht.focus_state.output.replace(output).unwrap();
-            }
-            KeyAction::CloseFocusedWindow => {
-                if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
-                    window.close()
-                }
-                self.set_focus_target(None); // reset focus
-            }
-            KeyAction::FocusWorkspace(idx) => {
-                if let Some(window) = wset.set_active_idx(idx, true) {
-                    self.set_focus_target(Some(window.into()));
-                };
-            }
-            KeyAction::SendFocusedWindowToWorkspace(idx) => {
-                let Some(window) = active.focused().cloned() else {
-                    return;
-                };
-                let window = active.remove_window(&window).unwrap();
-                let new_focus = active.focused().cloned();
-                let idx = idx.clamp(0, 9);
-                wset.workspaces[idx].insert_window(window);
-
-                if let Some(window) = new_focus {
-                    self.fht.focus_state.focus_target = Some(window.into())
-                }
-            }
-
-            _ => {}
-        }
+        // TODO: Adapt
+        // match action {
+        //     KeyAction::Quit => self
+        //         .fht
+        //         .stop
+        //         .store(true, std::sync::atomic::Ordering::SeqCst),
+        //     KeyAction::ReloadConfig => self.reload_config(),
+        //     KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
+        //     KeyAction::SelectNextLayout => active.select_next_layout(),
+        //     KeyAction::SelectPreviousLayout => active.select_previous_layout(),
+        //     KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
+        //     KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
+        //     KeyAction::ToggleFloating => {
+        //         if let Some(window) = active.focused().cloned() {
+        //             let new_tiled = !window.tiled();
+        //             window.set_tiled(new_tiled);
+        //             active.raise_window(&window);
+        //             active.refresh_window_geometries();
+        //         }
+        //     }
+        //     KeyAction::CenterFocusedWindow => {
+        //         if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
+        //             if window.tiled() {
+        //                 return;
+        //             }
+        //
+        //             let mut geo = window.geometry();
+        //             let output_geo = output.geometry();
+        //             geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
+        //             geo.loc -= geo.size.downscale(2).to_point();
+        //             window.set_geometry_with_border(geo, false);
+        //             window.toplevel().send_configure();
+        //         }
+        //     }
+        //     KeyAction::FullscreenFocusedWindow => {
+        //         if let Some(window) = active.focused().cloned() {
+        //             if !window.fullscreen() {
+        //                 let toplevel = window.toplevel().clone();
+        //                 self.fullscreen_request(toplevel, None);
+        //             } else {
+        //                 window.set_fullscreen(false, None);
+        //                 let workspace = self.fht.ws_mut_for(&window).unwrap();
+        //                 workspace.remove_current_fullscreen();
+        //             }
+        //         }
+        //     }
+        //     KeyAction::MaximizeFocusedWindow => {
+        //         if let Some(window) = active.focused().cloned() {
+        //             let new_maximized = !window.maximized();
+        //             window.set_maximized(new_maximized);
+        //             active.refresh_window_geometries();
+        //         }
+        //     }
+        //     KeyAction::FocusNextWindow => {
+        //         let new_focus = active.focus_next_window().cloned();
+        //         if let Some(window) = new_focus {
+        //             if CONFIG.general.cursor_warps {
+        //                 let center = window.geometry().center();
+        //                 self.move_pointer(center.to_f64())
+        //             }
+        //             self.set_focus_target(Some(window.into()));
+        //         }
+        //     }
+        //     KeyAction::FocusPreviousWindow => {
+        //         let new_focus = active.focus_previous_window().cloned();
+        //         if let Some(window) = new_focus {
+        //             if CONFIG.general.cursor_warps {
+        //                 let center = window.geometry().center();
+        //                 self.set_focus_target(Some(window.into()));
+        //                 self.move_pointer(center.to_f64())
+        //             }
+        //         }
+        //     }
+        //     KeyAction::SwapWithNextWindow => {
+        //         active.swap_with_next_window();
+        //         if let Some(window) = active.focused().cloned() {
+        //             if CONFIG.general.cursor_warps {
+        //                 let center = window.geometry().center();
+        //                 self.move_pointer(center.to_f64())
+        //             }
+        //             self.set_focus_target(Some(window.into()));
+        //         }
+        //     }
+        //     KeyAction::SwapWithPreviousWindow => {
+        //         active.swap_with_previous_window();
+        //         if let Some(window) = active.focused().cloned() {
+        //             if CONFIG.general.cursor_warps {
+        //                 let center = window.geometry().center();
+        //                 self.move_pointer(center.to_f64())
+        //             }
+        //             self.set_focus_target(Some(window.into()));
+        //         }
+        //     }
+        //     KeyAction::FocusNextOutput => {
+        //         let outputs_len = self.fht.workspaces.len();
+        //         if outputs_len < 2 {
+        //             return;
+        //         }
+        //
+        //         let current_output_idx = self
+        //             .fht
+        //             .outputs()
+        //             .position(|o| o == output)
+        //             .expect("Focused output is not registered");
+        //
+        //         let mut next_output_idx = current_output_idx + 1;
+        //         if next_output_idx == outputs_len {
+        //             next_output_idx = 0;
+        //         }
+        //
+        //         let output = self
+        //             .fht
+        //             .outputs()
+        //             .skip(next_output_idx)
+        //             .next()
+        //             .unwrap()
+        //             .clone();
+        //         if CONFIG.general.cursor_warps {
+        //             let center = output.geometry().center();
+        //             self.move_pointer(center.to_f64());
+        //         }
+        //         self.fht.focus_state.output.replace(output).unwrap();
+        //     }
+        //     KeyAction::FocusPreviousOutput => {
+        //         let outputs_len = self.fht.workspaces.len();
+        //         if outputs_len < 2 {
+        //             return;
+        //         }
+        //
+        //         let current_output_idx = self
+        //             .fht
+        //             .outputs()
+        //             .position(|o| o == output)
+        //             .expect("Focused output is not registered");
+        //
+        //         let next_output_idx = match current_output_idx.checked_sub(1) {
+        //             Some(idx) => idx,
+        //             None => outputs_len - 1,
+        //         };
+        //
+        //         let output = self
+        //             .fht
+        //             .outputs()
+        //             .skip(next_output_idx)
+        //             .next()
+        //             .unwrap()
+        //             .clone();
+        //         if CONFIG.general.cursor_warps {
+        //             let center = output.geometry().center();
+        //             self.move_pointer(center.to_f64());
+        //         }
+        //         self.fht.focus_state.output.replace(output).unwrap();
+        //     }
+        //     KeyAction::CloseFocusedWindow => {
+        //         if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
+        //             window.close()
+        //         }
+        //         self.set_focus_target(None); // reset focus
+        //     }
+        //     KeyAction::FocusWorkspace(idx) => {
+        //         if let Some(window) = wset.set_active_idx(idx, true) {
+        //             self.set_focus_target(Some(window.into()));
+        //         };
+        //     }
+        //     KeyAction::SendFocusedWindowToWorkspace(idx) => {
+        //         let Some(window) = active.focused().cloned() else {
+        //             return;
+        //         };
+        //         let window = active.remove_window(&window).unwrap();
+        //         let new_focus = active.focused().cloned();
+        //         let idx = idx.clamp(0, 9);
+        //         wset.workspaces[idx].insert_window(window);
+        //
+        //         if let Some(window) = new_focus {
+        //             self.fht.focus_state.focus_target = Some(window.into())
+        //         }
+        //     }
+        //
+        //     _ => {}
+        // }
     }
 }
 
@@ -466,9 +467,9 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    if window.tiled() && floating_only {
-                        return;
-                    }
+                    // if window.tiled() && floating_only {
+                    //     return;
+                    // }
                     self.fht.loop_handle.insert_idle(move |state| {
                         state.handle_move_request(window, serial);
                     });

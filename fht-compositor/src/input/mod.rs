@@ -69,18 +69,18 @@ impl State {
                     return;
                 }
             }
-        } else if let Some(fullscreen) = wset.active().fullscreen.as_ref().map(|f| &f.inner) {
-            if fullscreen
-                .surface_under(
-                    pointer_loc.to_local(output).as_logical(),
-                    WindowSurfaceType::ALL,
-                )
-                .is_some()
-            {
-                let fullscreen = fullscreen.clone();
-                self.set_focus_target(Some(fullscreen.into()));
-                return;
-            }
+        // } else if let Some(fullscreen) = wset.active().fullscreen.as_ref().map(|f| &f.inner) {
+        //     if fullscreen
+        //         .surface_under(
+        //             pointer_loc.to_local(output).as_logical(),
+        //             WindowSurfaceType::ALL,
+        //         )
+        //         .is_some()
+        //     {
+        //         let fullscreen = fullscreen.clone();
+        //         self.set_focus_target(Some(fullscreen.into()));
+        //         return;
+        //     }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc.as_logical()) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
@@ -269,7 +269,7 @@ impl State {
                     .focus_target_under(pointer_location)
                     .and_then(|(ft, _)| {
                         if let PointerFocusTarget::Window(w) = ft {
-                            let wl_surface = w.wl_surface();
+                            let wl_surface = w.wl_surface()?;
                             self.fht
                                 .seat
                                 .keyboard_shortcuts_inhibitor_for_surface(&wl_surface)

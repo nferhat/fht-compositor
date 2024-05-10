@@ -16,7 +16,8 @@ use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 /// RenderElement<UdevRenderer>
 #[derive(Debug)]
 pub struct FhtTextureElement<E = GlesTexture>(pub TextureRenderElement<E>)
-    where E: Texture + Clone + 'static;
+where
+    E: Texture + Clone + 'static;
 
 impl<E: Texture + Clone + 'static> Element for FhtTextureElement<E> {
     fn id(&self) -> &Id {

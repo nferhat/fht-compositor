@@ -23,7 +23,7 @@ impl InputMethodHandler for State {
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
         self.fht
             .find_window(parent)
-            .map(|w| w.surface.geometry())
+            .map(|w| w.geometry())
             .unwrap_or_default()
     }
 }

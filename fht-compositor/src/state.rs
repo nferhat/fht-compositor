@@ -18,7 +18,7 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
     OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
+use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, Window};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -61,9 +61,8 @@ use crate::config::CONFIG;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::window::FhtWindowSurface;
 use crate::shell::workspaces::WorkspaceSet;
-use crate::shell::{FhtWindow, KeyboardFocusTarget};
+use crate::shell::KeyboardFocusTarget;
 use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
@@ -256,10 +255,12 @@ pub struct Fht {
 
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
-    pub workspaces: IndexMap<Output, WorkspaceSet>,
+    pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
     pub pending_layers: HashMap<WlSurface, (LayerSurface, Output)>,
-    pub pending_windows: Vec<FhtWindowSurface>,
-    pub unmapped_windows: Vec<(FhtWindow, Output, usize)>,
+    // Pending windows did not receive an initial configure yet.
+    // Unmapped have and are waiting to be remapped/get a new buffer.
+    pub pending_windows: Vec<smithay::desktop::Window>,
+    pub unmapped_windows: Vec<(smithay::desktop::Window, Output, usize)>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
 
@@ -524,9 +525,7 @@ impl Fht {
             //
             // Due to how we manage windows, a window can't be in two workspaces at a time, let
             // alone from different outputs
-            new_workspace
-                .windows
-                .extend(old_workspace.windows.drain(..));
+            new_workspace.tiles.extend(old_workspace.tiles.drain(..));
             new_workspace.refresh_window_geometries();
         }
 
@@ -641,12 +640,12 @@ impl Fht {
     }
 
     /// List all the outputs and a reference to their associated workspace set.
-    pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
+    pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet<Window>)> {
         self.workspaces.iter()
     }
 
     /// List all the outptuts and a mutable reference to their associated workspace set.
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet)> {
+    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet<Window>)> {
         self.workspaces.iter_mut()
     }
 
@@ -655,7 +654,7 @@ impl Fht {
     /// ## PANICS
     ///
     /// This function panics if you didn't register the output.
-    pub fn wset_for(&self, output: &Output) -> &WorkspaceSet {
+    pub fn wset_for(&self, output: &Output) -> &WorkspaceSet<Window> {
         self.workspaces
             .get(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
@@ -666,7 +665,7 @@ impl Fht {
     /// ## PANICS
     ///
     /// This function panics if you didn't register the output.
-    pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet {
+    pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet<Window> {
         self.workspaces
             .get_mut(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
@@ -722,8 +721,8 @@ impl Fht {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
 
-        for window in self.visible_windows_for_output(output) {
-            window.send_frame(output, time, throttle, should_send_frames);
+        for tile in self.visible_windows_for_output(output) {
+            tile.send_frame(output, time, throttle, should_send_frames);
         }
 
         let map = layer_map_for_output(output);
@@ -778,8 +777,8 @@ impl Fht {
         // Both windows and layer surfaces can only be drawn on a single output at a time, so there
         // no need to update all the windows of the output.
 
-        for window in self.visible_windows_for_output(output) {
-            window.with_surfaces(|surface, states| {
+        for tile in self.visible_windows_for_output(output) {
+            tile.with_surfaces(|surface, states| {
                 let primary_scanout_output = update_surface_primary_scanout_output(
                     surface,
                     output,
@@ -859,8 +858,8 @@ impl Fht {
             );
         }
 
-        for window in self.visible_windows_for_output(output) {
-            window.send_dmabuf_feedback(
+        for tile in self.visible_windows_for_output(output) {
+            tile.send_dmabuf_feedback(
                 output,
                 |_, _| Some(output.clone()),
                 |surface, _| {
@@ -923,8 +922,8 @@ impl Fht {
             );
         }
 
-        for window in &self.wset_for(output).active().windows {
-            window.take_presentation_feedback(
+        for tile in &self.wset_for(output).active().tiles {
+            tile.element().take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {

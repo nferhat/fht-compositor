@@ -1,3 +1,5 @@
+pub mod tile;
+
 use std::cmp::min;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -17,8 +19,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::send_surface_state;
 
-use super::window::FhtWindowRenderElement;
-use super::FhtWindow;
+use self::tile::{WorkspaceElement, WorkspaceTile, WorkspaceTileRenderElement};
 use crate::config::{WorkspaceSwitchAnimationDirection, CONFIG};
 use crate::fht_render_elements;
 use crate::ipc::{IpcOutput, IpcWorkspace, IpcWorkspaceRequest};
@@ -31,12 +32,12 @@ use crate::utils::geometry::{
 };
 use crate::utils::output::OutputExt;
 
-pub struct WorkspaceSet {
+pub struct WorkspaceSet<E: WorkspaceElement> {
     /// The output of this set.
     pub(super) output: Output,
 
     /// All the workspaces of this set.
-    pub workspaces: Vec<Workspace>,
+    pub workspaces: Vec<Workspace<E>>,
 
     /// The current switch animation, of any.
     pub switch_animation: Option<WorkspaceSwitchAnimation>,
@@ -46,7 +47,7 @@ pub struct WorkspaceSet {
 }
 
 #[allow(dead_code)]
-impl WorkspaceSet {
+impl<E: WorkspaceElement> WorkspaceSet<E> {
     /// Create a new [`WorkspaceSet`] for this output.
     ///
     /// This function creates  9 workspaces, indexed from 0 to 8, each with independent layout
@@ -94,41 +95,43 @@ impl WorkspaceSet {
     /// candidate that the compositor should focus.
     ///
     /// Animations are opt-in, set `animate` to true if its needed.
-    pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<FhtWindow> {
-        let target_idx = target_idx.clamp(0, 9);
-        if !animate {
-            self.active_idx.store(target_idx, Ordering::SeqCst);
-            return self.workspaces[target_idx].focused().cloned();
-        }
-
-        let active_idx = self.active_idx.load(Ordering::SeqCst);
-        if target_idx == active_idx || self.switch_animation.is_some() {
-            return None;
-        }
-
-        {
-            let name = self.output.name().replace("-", "_");
-            let path = format!("/fht/desktop/Compositor/Output/{name}");
-            let target_idx = target_idx as u8;
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcOutput>(path)
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.active_workspace_index = target_idx;
-                iface
-                    .active_workspace_index_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
-
-        self.workspaces[target_idx].focused().cloned()
+    pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<E> {
+        // TODO: Adapt
+        None
+        // let target_idx = target_idx.clamp(0, 9);
+        // if !animate {
+        //     self.active_idx.store(target_idx, Ordering::SeqCst);
+        //     return self.workspaces[target_idx].focused().cloned();
+        // }
+        //
+        // let active_idx = self.active_idx.load(Ordering::SeqCst);
+        // if target_idx == active_idx || self.switch_animation.is_some() {
+        //     return None;
+        // }
+        //
+        // {
+        //     let name = self.output.name().replace("-", "_");
+        //     let path = format!("/fht/desktop/Compositor/Output/{name}");
+        //     let target_idx = target_idx as u8;
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcOutput>(path)
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.active_workspace_index = target_idx;
+        //         iface
+        //             .active_workspace_index_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
+        //
+        // self.workspaces[target_idx].focused().cloned()
     }
 
     /// Get the active workspace index of this [`WorkspaceSet`]
@@ -147,7 +150,7 @@ impl WorkspaceSet {
     ///
     /// If there's a switch animation going on, use the target workspace and not the currently
     /// active one.
-    pub fn active(&self) -> &Workspace {
+    pub fn active(&self) -> &Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &self.workspaces[*target_idx]
         } else {
@@ -159,7 +162,7 @@ impl WorkspaceSet {
     ///
     /// If there's a switch animation going on, use the target workspace and not the currently
     /// active one.
-    pub fn active_mut(&mut self) -> &mut Workspace {
+    pub fn active_mut(&mut self) -> &mut Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &mut self.workspaces[*target_idx]
         } else {
@@ -168,12 +171,12 @@ impl WorkspaceSet {
     }
 
     /// Get an iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
-    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
+    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace<E>> {
         self.workspaces.iter()
     }
 
     /// Get a mutable iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> {
+    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace<E>> {
         self.workspaces.iter_mut()
     }
 
@@ -187,45 +190,46 @@ impl WorkspaceSet {
     }
 
     /// Find the window associated with this [`WlSurface`]
-    pub fn find_window(&self, surface: &WlSurface) -> Option<&FhtWindow> {
+    pub fn find_window(&self, surface: &WlSurface) -> Option<&E> {
         self.workspaces().find_map(|ws| ws.find_window(surface))
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
-    pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace> {
+    pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_surface(surface))
     }
 
     /// Find the workspace containing the window associated with this [`WlSurface`].
-    pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
+    pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace<E>> {
         self.workspaces_mut().find(|ws| ws.has_surface(surface))
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
-    pub fn find_window_and_workspace(
-        &self,
-        surface: &WlSurface,
-    ) -> Option<(&FhtWindow, &Workspace)> {
-        self.workspaces()
-            .find_map(|ws| ws.find_window(surface).map(|w| (w, ws)))
+    pub fn find_window_and_workspace(&self, surface: &WlSurface) -> Option<(&E, &Workspace<E>)> {
+        // TODO: Adapt.
+        None
+        // self.workspaces()
+        //     .find_map(|ws| ws.find_window(surface).map(|w| (w, ws)))
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
     pub fn find_window_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
-    ) -> Option<(FhtWindow, &mut Workspace)> {
-        self.workspaces_mut()
-            .find_map(|ws| ws.find_window(surface).cloned().map(|w| (w, ws)))
+    ) -> Option<(E, &mut Workspace<E>)> {
+        // TODO: Adapt.
+        None
+        // self.workspaces_mut()
+        //     .find_map(|ws| ws.find_window(surface).cloned().map(|w| (w, ws)))
     }
 
     /// Get a reference to the [`Workspace`] holding this window, if any.
-    pub fn ws_for(&self, window: &FhtWindow) -> Option<&Workspace> {
+    pub fn ws_for(&self, window: &E) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_window(window))
     }
 
     /// Get a mutable reference to the [`Workspace`] holding this window, if any.
-    pub fn ws_mut_for(&mut self, window: &FhtWindow) -> Option<&mut Workspace> {
+    pub fn ws_mut_for(&mut self, window: &E) -> Option<&mut Workspace<E>> {
         self.workspaces_mut().find(|ws| ws.has_window(window))
     }
 
@@ -233,86 +237,85 @@ impl WorkspaceSet {
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
-    pub fn current_fullscreen(&self) -> Option<(&FhtWindow, Point<i32, Global>)> {
-        if self.switch_animation.is_none() {
-            // It's just the active one, so no need to do additional calculations.
-            return self
-                .active()
-                .fullscreen
-                .as_ref()
-                .map(|f| (&f.inner, f.inner.render_location()));
-        }
-
-        let animation = self.switch_animation.as_ref().unwrap();
-        let output_geo = self.output.geometry();
-
-        let (current_offset, target_offset) =
-            if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
-                // Focusing the next offset.
-                // For the active, how much should we *remove* from the current position
-                // For the target, how much should we add to the current position
-                match CONFIG.animation.workspace_switch.direction {
-                    WorkspaceSwitchAnimationDirection::Horizontal => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
-                        (
-                            Point::from(((-offset), 0)),
-                            Point::from(((-offset + output_geo.size.w), 0)),
-                        )
-                    }
-                    WorkspaceSwitchAnimationDirection::Vertical => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
-                        (
-                            Point::from((0, (-offset))),
-                            Point::from((0, (-offset + output_geo.size.h))),
-                        )
-                    }
-                }
-            } else {
-                // Focusing a previous workspace
-                // For the active, how much should we add to tyhe current position
-                // For the target, how much should we remove from the current position.
-                match CONFIG.animation.workspace_switch.direction {
-                    WorkspaceSwitchAnimationDirection::Horizontal => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
-                        (
-                            Point::from((offset, 0)),
-                            Point::from((offset - output_geo.size.w, 0)),
-                        )
-                    }
-                    WorkspaceSwitchAnimationDirection::Vertical => {
-                        let offset =
-                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
-                        (
-                            Point::from((0, (offset))),
-                            Point::from((0, (offset - output_geo.size.h))),
-                        )
-                    }
-                }
-            };
-
-        self.active()
-            .fullscreen
-            .as_ref()
-            .map(|f| (&f.inner, f.inner.render_location() + current_offset))
-            .or_else(|| {
-                self.workspaces[animation.target_idx]
-                    .fullscreen
-                    .as_ref()
-                    .map(|f| (&f.inner, f.inner.render_location() + target_offset))
-            })
+    pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Global>)> {
+        // TODO: Adapt
+        None
+        // if self.switch_animation.is_none() {
+        //     // It's just the active one, so no need to do additional calculations.
+        //     return self
+        //         .active()
+        //         .fullscreen
+        //         .as_ref()
+        //         .map(|f| (&f.inner, f.inner.render_location()));
+        // }
+        //
+        // let animation = self.switch_animation.as_ref().unwrap();
+        // let output_geo = self.output.geometry();
+        //
+        // let (current_offset, target_offset) =
+        //     if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
+        //         // Focusing the next offset.
+        //         // For the active, how much should we *remove* from the current position
+        //         // For the target, how much should we add to the current position
+        //         match CONFIG.animation.workspace_switch.direction {
+        //             WorkspaceSwitchAnimationDirection::Horizontal => {
+        //                 let offset =
+        //                     (animation.animation.value() * output_geo.size.w as f64).round() as
+        // i32;                 (
+        //                     Point::from(((-offset), 0)),
+        //                     Point::from(((-offset + output_geo.size.w), 0)),
+        //                 )
+        //             }
+        //             WorkspaceSwitchAnimationDirection::Vertical => {
+        //                 let offset =
+        //                     (animation.animation.value() * output_geo.size.h as f64).round() as
+        // i32;                 (
+        //                     Point::from((0, (-offset))),
+        //                     Point::from((0, (-offset + output_geo.size.h))),
+        //                 )
+        //             }
+        //         }
+        //     } else {
+        //         // Focusing a previous workspace
+        //         // For the active, how much should we add to tyhe current position
+        //         // For the target, how much should we remove from the current position.
+        //         match CONFIG.animation.workspace_switch.direction {
+        //             WorkspaceSwitchAnimationDirection::Horizontal => {
+        //                 let offset =
+        //                     (animation.animation.value() * output_geo.size.w as f64).round() as
+        // i32;                 (
+        //                     Point::from((offset, 0)),
+        //                     Point::from((offset - output_geo.size.w, 0)),
+        //                 )
+        //             }
+        //             WorkspaceSwitchAnimationDirection::Vertical => {
+        //                 let offset =
+        //                     (animation.animation.value() * output_geo.size.h as f64).round() as
+        // i32;                 (
+        //                     Point::from((0, (offset))),
+        //                     Point::from((0, (offset - output_geo.size.h))),
+        //                 )
+        //             }
+        //         }
+        //     };
+        //
+        // self.active()
+        //     .fullscreen
+        //     .as_ref()
+        //     .map(|f| (&f.inner, f.inner.render_location() + current_offset))
+        //     .or_else(|| {
+        //         self.workspaces[animation.target_idx]
+        //             .fullscreen
+        //             .as_ref()
+        //             .map(|f| (&f.inner, f.inner.render_location() + target_offset))
+        //     })
     }
 
     /// Get the window in under the cursor and it's location in global coordinate space.
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
-    pub fn window_under(
-        &self,
-        point: Point<f64, Global>,
-    ) -> Option<(&FhtWindow, Point<i32, Global>)> {
+    pub fn window_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
         if self.switch_animation.is_none() {
             // It's just the active one, so no need to do additional calculations.
             return self.active().window_under(point);
@@ -386,14 +389,7 @@ impl WorkspaceSet {
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    {
+    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>) {
         let mut elements = vec![];
         let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
         let output_geo: Rectangle<i32, Physical> = self
@@ -411,7 +407,7 @@ impl WorkspaceSet {
                     .map(WorkspaceSetRenderElement::Normal),
             );
 
-            return (active.fullscreen.is_some(), elements);
+            return (false, elements);
         }
 
         // Switching
@@ -428,7 +424,7 @@ impl WorkspaceSet {
                     .into_iter()
                     .map(WorkspaceSetRenderElement::Normal),
             );
-            return (target.fullscreen.is_some(), elements);
+            return (false, elements);
         }
 
         // Otherwise to computations
@@ -495,7 +491,7 @@ impl WorkspaceSet {
         }));
 
         (
-            active.fullscreen.is_some() || target.fullscreen.is_some(),
+            false, // active.fullscreen.is_some() || target.fullscreen.is_some(),
             elements,
         )
     }
@@ -532,12 +528,10 @@ impl WorkspaceSwitchAnimation {
 
 fht_render_elements! {
     WorkspaceSetRenderElement<R> => {
-        Normal = FhtWindowRenderElement<R>,
-        Switching = RelocateRenderElement<FhtWindowRenderElement<R>>,
+        Normal = WorkspaceTileRenderElement<R>,
+        Switching = RelocateRenderElement<WorkspaceTileRenderElement<R>>,
     }
 }
-
-pub struct WorkspaceElement {}
 
 /// A single workspace.
 ///
@@ -545,7 +539,7 @@ pub struct WorkspaceElement {}
 /// [`WorkspaceSet`], but nothing stops you from doing whatever you want with it like assigning it
 /// to a single output.
 #[derive(Debug)]
-pub struct Workspace {
+pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
     output: Output,
 
@@ -556,24 +550,24 @@ pub struct Workspace {
     ///
     /// WARNING: We shouldn't expose this to keep the dbus interface in sync, but here its symbol
     /// to drain the windows when deleting an output, soo it should be fine
-    pub windows: Vec<FhtWindow>,
+    pub tiles: Vec<WorkspaceTile<E>>,
 
     /// The focused window index.
     focused_window_idx: usize,
 
-    /// The currently fullscreened window, if any.
-    ///
-    /// How [`Workspace`]s handle fullscreening is a bit "weird" and "unconventional":
-    /// Only one window per workspace can be fullscreened at a time.
-    ///
-    /// When that window is fullscreened, it's removed from the window list so that it can be
-    /// rendered exclusively on this workspace, so that we can profit from direct scan-out of
-    /// fullscreen window, very useful for game performance.
-    ///
-    /// Doing actions such as using focus_next_window/focus_previous_window will remove the
-    /// fullscreen and insert it back at the last index it was at.
-    pub fullscreen: Option<FullscreenSurface>,
-
+    // TODO: Adapt
+    // / The currently fullscreened window, if any.
+    // /
+    // / How [`Workspace`]s handle fullscreening is a bit "weird" and "unconventional":
+    // / Only one window per workspace can be fullscreened at a time.
+    // /
+    // / When that window is fullscreened, it's removed from the window list so that it can be
+    // / rendered exclusively on this workspace, so that we can profit from direct scan-out of
+    // / fullscreen window, very useful for game performance.
+    // /
+    // / Doing actions such as using focus_next_window/focus_previous_window will remove the
+    // / fullscreen and insert it back at the last index it was at.
+    // pub fullscreen: Option<FullscreenSurface>,
     /// The layouts list for this workspace.
     pub layouts: Vec<WorkspaceLayout>,
 
@@ -589,7 +583,7 @@ pub struct Workspace {
     loop_handle: LoopHandle<'static, State>,
 }
 
-impl Drop for Workspace {
+impl<E: WorkspaceElement> Drop for Workspace<E> {
     fn drop(&mut self) {
         // When dropping thw workspace, we also want to close the MPSC channel opened with it to
         // communicate with the async dbus api.
@@ -614,7 +608,7 @@ impl Drop for Workspace {
     }
 }
 
-impl Workspace {
+impl<E: WorkspaceElement> Workspace<E> {
     /// Create a new [`Workspace`] for this output.
     pub fn new(
         output: Output,
@@ -642,8 +636,8 @@ impl Workspace {
         Self {
             output,
 
-            windows: vec![],
-            fullscreen: None,
+            tiles: vec![],
+            // fullscreen: None,
             focused_window_idx: 0,
 
             layouts: CONFIG.general.layouts.clone(),
@@ -662,139 +656,130 @@ impl Workspace {
     pub fn refresh(&mut self) {
         let mut should_refresh_geometries = false;
         // Invalidate current fullscreen if its dead
-        if let Some(FullscreenSurface {
-            inner,
-            mut last_known_idx,
-        }) = self
-            .fullscreen
-            .take_if(|f| !f.inner.alive() || !f.inner.fullscreen())
-        {
-            should_refresh_geometries = true;
-            inner.set_fullscreen(false, None);
-            last_known_idx = last_known_idx.clamp(0, self.windows.len());
-            // NOTE: I assume that if you call this function you don't have a handle to the inner
-            // fullscreen window, so just make sure it understood theres no more fullscreen.
-            inner.set_fullscreen(false, None);
-            inner.toplevel().send_pending_configure();
-
-            {
-                let ipc_path = self.ipc_path.clone();
-                spawn(async move {
-                    let iface_ref = DBUS_CONNECTION
-                        .object_server()
-                        .inner()
-                        .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                        .await
-                        .unwrap();
-                    let mut iface = iface_ref.get_mut().await;
-                    iface.fullscreen = None;
-                    iface
-                        .fullscreen_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                });
-            }
-
-            self.windows.insert(last_known_idx, inner);
-        }
-
-        // Clean dead/zombie windows
-        // Also ensure that we dont try to access out of bounds indexes, and sync up the IPC.
-        let mut removed_ids = vec![];
-        self.windows.retain(|window| {
-            if !window.alive() {
-                removed_ids.push(window.uid());
-                false
-            } else {
-                true
-            }
-        });
-        let new_len = self.windows.len();
-        if !removed_ids.is_empty() {
-            should_refresh_geometries = true;
-
-            {
-                let ipc_path = self.ipc_path.clone();
-                spawn(async move {
-                    let iface_ref = DBUS_CONNECTION
-                        .object_server()
-                        .inner()
-                        .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                        .await
-                        .unwrap();
-                    let mut iface = iface_ref.get_mut().await;
-                    iface.windows.retain(|uid| !removed_ids.contains(uid));
-                    iface
-                        .windows_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                });
-            }
-        }
-
-        if should_refresh_geometries {
-            self.focused_window_idx = self.focused_window_idx.clamp(0, new_len.saturating_sub(1));
-            self.refresh_window_geometries();
-        }
-
-        // Refresh internal state of windows
+        // if let Some(FullscreenSurface {
+        //     inner,
+        //     mut last_known_idx,
+        // }) = self
+        //     .fullscreen
+        //     .take_if(|f| !f.inner.alive() || !f.inner.fullscreen())
+        // {
+        //     should_refresh_geometries = true;
+        //     inner.set_fullscreen(false, None);
+        //     last_known_idx = last_known_idx.clamp(0, self.tiles.len());
+        //     // NOTE: I assume that if you call this function you don't have a handle to the inner
+        //     // fullscreen window, so just make sure it understood theres no more fullscreen.
+        //     inner.set_fullscreen(false, None);
+        //     inner.toplevel().send_pending_configure();
         //
-        if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            inner.set_activated(true);
-            inner.surface.refresh();
-        }
-        let output_geometry = self.output.geometry();
-        for window in self.windows.iter() {
-            // This is now managed globally with focus targets
-            // window.set_activated(idx == self.focused_window_idx);
-
-            let bbox = window.bbox();
-            if let Some(mut overlap) = output_geometry.intersection(bbox) {
-                // output_enter excepts the overlap to be relative to the element, weird choice but
-                // I comply.
-                overlap.loc -= bbox.loc;
-                window
-                    .surface
-                    .output_enter(&self.output, overlap.as_logical());
-            }
-
-            window.surface.refresh();
-        }
+        //     {
+        //         let ipc_path = self.ipc_path.clone();
+        //         spawn(async move {
+        //             let iface_ref = DBUS_CONNECTION
+        //                 .object_server()
+        //                 .inner()
+        //                 .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //                 .await
+        //                 .unwrap();
+        //             let mut iface = iface_ref.get_mut().await;
+        //             iface.fullscreen = None;
+        //             iface
+        //                 .fullscreen_changed(iface_ref.signal_context())
+        //                 .await
+        //                 .unwrap();
+        //         });
+        //     }
+        //
+        //     self.tiles.insert(last_known_idx, inner);
+        // }
+        //
+        // // Clean dead/zombie windows
+        // // Also ensure that we dont try to access out of bounds indexes, and sync up the IPC.
+        // let mut removed_ids = vec![];
+        // self.tiles.retain(|window| {
+        //     if !window.alive() {
+        //         removed_ids.push(window.uid());
+        //         false
+        //     } else {
+        //         true
+        //     }
+        // });
+        // let new_len = self.tiles.len();
+        // if !removed_ids.is_empty() {
+        //     should_refresh_geometries = true;
+        //
+        //     {
+        //         let ipc_path = self.ipc_path.clone();
+        //         spawn(async move {
+        //             let iface_ref = DBUS_CONNECTION
+        //                 .object_server()
+        //                 .inner()
+        //                 .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //                 .await
+        //                 .unwrap();
+        //             let mut iface = iface_ref.get_mut().await;
+        //             iface.windows.retain(|uid| !removed_ids.contains(uid));
+        //             iface
+        //                 .windows_changed(iface_ref.signal_context())
+        //                 .await
+        //                 .unwrap();
+        //         });
+        //     }
+        // }
+        //
+        // if should_refresh_geometries {
+        //     self.focused_window_idx = self.focused_window_idx.clamp(0,
+        // new_len.saturating_sub(1));     self.refresh_window_geometries();
+        // }
+        //
+        // // Refresh internal state of windows
+        // //
+        // if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
+        //     inner.set_activated(true);
+        //     inner.surface.refresh();
+        // }
+        // let output_geometry = self.output.geometry();
+        // for window in self.tiles.iter() {
+        //     // This is now managed globally with focus targets
+        //     // window.set_activated(idx == self.focused_window_idx);
+        //
+        //     let bbox = window.bbox();
+        //     if let Some(mut overlap) = output_geometry.intersection(bbox) {
+        //         // output_enter excepts the overlap to be relative to the element, weird choice
+        // but         // I comply.
+        //         overlap.loc -= bbox.loc;
+        //         window
+        //             .surface
+        //             .output_enter(&self.output, overlap.as_logical());
+        //     }
+        //
+        //     window.surface.refresh();
+        // }
+        // TODO: Adapt
     }
 
     /// Return whether this workspace has this window.
-    pub fn find_window(&self, surface: &WlSurface) -> Option<&FhtWindow> {
-        self.fullscreen
-            .as_ref()
-            .filter(|f| f.inner.wl_surface() == *surface)
-            .map(|f| &f.inner)
-            .or_else(|| self.windows.iter().find(|w| w.wl_surface() == *surface))
+    pub fn find_window(&self, surface: &WlSurface) -> Option<&E> {
+        // TODO: Adapt
+        None
     }
 
     /// Return whether this workspace has this window.
-    pub fn has_window(&self, window: &FhtWindow) -> bool {
-        self.fullscreen.as_ref().is_some_and(|f| f.inner == *window)
-            || self.windows.iter().any(|w| w == window)
+    pub fn has_window(&self, window: &E) -> bool {
+        // TODO: Adapt
+        false
     }
 
     /// Return whether this workspace has a window with this [`WlSurface`] as its toplevel surface.
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.fullscreen
-            .as_ref()
-            .is_some_and(|f| f.inner.has_surface(surface, WindowSurfaceType::TOPLEVEL))
-            || self
-                .windows
-                .iter()
-                .any(|w| w.has_surface(surface, WindowSurfaceType::TOPLEVEL))
+        // TODO: Adapt.
+        false
     }
 
     /// Return the focused window, giving priority to the fullscreen window first, then the
     /// possible active non-fullscreen window.
-    pub fn focused(&self) -> Option<&FhtWindow> {
-        self.fullscreen
-            .as_ref()
-            .map(|f| &f.inner)
-            .or_else(|| self.windows.get(self.focused_window_idx))
+    pub fn focused(&self) -> Option<&E> {
+        // TODO: Adapt
+        None
     }
 
     /// Insert a window in this [`Workspace`]
@@ -804,104 +789,107 @@ impl Workspace {
     /// [`Workspace`] output.
     ///
     /// This doesn't reinsert a window if it's already inserted.
-    pub fn insert_window(&mut self, window: FhtWindow) {
-        if self.windows.contains(&window)
-            || self.fullscreen.as_ref().is_some_and(|f| f.inner == window)
-        {
-            return;
-        }
-
-        if let Some(fullscreen) = self.remove_current_fullscreen() {
-            fullscreen.set_fullscreen(false, None);
-            fullscreen.surface.toplevel().send_pending_configure();
-        }
-
-        // Configure the window for insertion
-        // refresh_window_geometries send a configure message for us
-        window.surface.output_enter(
-            &self.output,
-            window.bbox().to_local(&self.output).as_logical(),
-        );
-        window.set_bounds(Some(self.output.geometry().size.as_logical()));
-        // configure the wl_surface
-        let scale = self.output.current_scale().integer_scale();
-        let transform = self.output.current_transform();
-        window.with_surfaces(|surface, data| send_surface_state(surface, data, scale, transform));
-
-        {
-            let ipc_path = self.ipc_path.clone();
-            let uid = window.uid();
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.windows.push(uid);
-                iface
-                    .windows_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        self.windows.push(window.clone());
-        if window.fullscreen() {
-            self.fullscreen_window(&window);
-        } else {
-            if CONFIG.general.focus_new_windows {
-                self.focused_window_idx = self.windows.len() - 1;
-            }
-            self.refresh_window_geometries();
-        }
+    pub fn insert_window(&mut self, window: E) {
+        // TODO: Adapt
+        // if self.tiles.contains(&window)
+        //     || self.fullscreen.as_ref().is_some_and(|f| f.inner == window)
+        // {
+        //     return;
+        // }
+        //
+        // if let Some(fullscreen) = self.remove_current_fullscreen() {
+        //     fullscreen.set_fullscreen(false, None);
+        //     fullscreen.surface.toplevel().send_pending_configure();
+        // }
+        //
+        // // Configure the window for insertion
+        // // refresh_window_geometries send a configure message for us
+        // window.surface.output_enter(
+        //     &self.output,
+        //     window.bbox().to_local(&self.output).as_logical(),
+        // );
+        // window.set_bounds(Some(self.output.geometry().size.as_logical()));
+        // // configure the wl_surface
+        // let scale = self.output.current_scale().integer_scale();
+        // let transform = self.output.current_transform();
+        // window.with_surfaces(|surface, data| send_surface_state(surface, data, scale,
+        // transform));
+        //
+        // {
+        //     let ipc_path = self.ipc_path.clone();
+        //     let uid = window.uid();
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.windows.push(uid);
+        //         iface
+        //             .windows_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // self.tiles.push(window.clone());
+        // if window.fullscreen() {
+        //     self.fullscreen_window(&window);
+        // } else {
+        //     if CONFIG.general.focus_new_windows {
+        //         self.focused_window_idx = self.tiles.len() - 1;
+        //     }
+        //     self.refresh_window_geometries();
+        // }
     }
 
     /// Removes a window from this [`Workspace`], returning it if it was found.
     ///
     /// This function also undones the configuration that was done in [`Self::insert_window`]
-    pub fn remove_window(&mut self, window: &FhtWindow) -> Option<FhtWindow> {
-        if let Some(fullscreen) = self.fullscreen.take_if(|f| &f.inner == window) {
-            return Some(fullscreen.inner);
-        }
-
-        let Some(idx) = self.windows.iter().position(|w| w == window) else {
-            return None;
-        };
-
-        let window = self.windows.remove(idx);
-        // "Un"-configure the window (for potentially inserting it on another workspace who knows)
-        window.surface.output_leave(&self.output);
-        window.set_bounds(None);
-        self.focused_window_idx = self.focused_window_idx.clamp(0, self.windows.len() - 1);
-
-        {
-            let ipc_path = self.ipc_path.clone();
-            let window_id = window.uid();
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.windows.retain(|uid| *uid != window_id);
-                iface
-                    .windows_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        self.refresh_window_geometries();
-        Some(window)
+    pub fn remove_window(&mut self, window: &E) -> Option<E> {
+        // TODO: Adapt
+        None
+        // if let Some(fullscreen) = self.fullscreen.take_if(|f| &f.inner == window) {
+        //     return Some(fullscreen.inner);
+        // }
+        //
+        // let Some(idx) = self.tiles.iter().position(|w| w == window) else {
+        //     return None;
+        // };
+        //
+        // let window = self.tiles.remove(idx);
+        // // "Un"-configure the window (for potentially inserting it on another workspace who
+        // knows) window.surface.output_leave(&self.output);
+        // window.set_bounds(None);
+        // self.focused_window_idx = self.focused_window_idx.clamp(0, self.tiles.len() - 1);
+        //
+        // {
+        //     let ipc_path = self.ipc_path.clone();
+        //     let window_id = window.uid();
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.windows.retain(|uid| *uid != window_id);
+        //         iface
+        //             .windows_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // self.refresh_window_geometries();
     }
 
     /// Focus a given window, if this [`Workspace`] contains it.
-    pub fn focus_window(&mut self, window: &FhtWindow) {
-        if let Some(idx) = self.windows.iter().position(|w| w == window) {
+    pub fn focus_window(&mut self, window: &E) {
+        if let Some(idx) = self.tiles.iter().position(|w| w == window) {
             self.focused_window_idx = idx;
 
             {
@@ -927,213 +915,222 @@ impl Workspace {
     }
 
     /// Focus the next available window, cycling back to the first one if needed.
-    pub fn focus_next_window(&mut self) -> Option<&FhtWindow> {
-        if self.windows.is_empty() {
-            return None;
-        }
-
-        if let Some(fullscreen) = self.remove_current_fullscreen() {
-            fullscreen.set_fullscreen(false, None);
-            // refresh window geos will send a configure req for us.
-            self.refresh_window_geometries();
-        }
-
-        let windows_len = self.windows.len();
-        let new_focused_idx = self.focused_window_idx + 1;
-        self.focused_window_idx = if new_focused_idx == windows_len {
-            0
-        } else {
-            new_focused_idx
-        };
-
-        {
-            let ipc_path = self.ipc_path.clone();
-            let focused_window_idx = self.focused_window_idx as u8;
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.focused_window_index = focused_window_idx;
-                iface
-                    .focused_window_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        let window = &self.windows[self.focused_window_idx];
-        self.raise_window(window);
-        Some(window)
+    pub fn focus_next_window(&mut self) -> Option<&E> {
+        // TODO: Adapt.
+        None
+        // if self.tiles.is_empty() {
+        //     return None;
+        // }
+        //
+        // if let Some(fullscreen) = self.remove_current_fullscreen() {
+        //     fullscreen.set_fullscreen(false);
+        //     // refresh window geos will send a configure req for us.
+        //     self.refresh_window_geometries();
+        // }
+        //
+        // let windows_len = self.tiles.len();
+        // let new_focused_idx = self.focused_window_idx + 1;
+        // self.focused_window_idx = if new_focused_idx == windows_len {
+        //     0
+        // } else {
+        //     new_focused_idx
+        // };
+        //
+        // {
+        //     let ipc_path = self.ipc_path.clone();
+        //     let focused_window_idx = self.focused_window_idx as u8;
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.focused_window_index = focused_window_idx;
+        //         iface
+        //             .focused_window_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // let window = &self.tiles[self.focused_window_idx];
+        // self.raise_window(window.inner);
+        // Some(window)
     }
 
     /// Focus the previous available window, cyclying all the way to the last window if needed.
-    pub fn focus_previous_window(&mut self) -> Option<&FhtWindow> {
-        if self.windows.is_empty() {
-            return None;
-        }
-
-        if let Some(fullscreen) = self.remove_current_fullscreen() {
-            fullscreen.set_fullscreen(false, None);
-            // refresh window geos will send a configure req for us.
-            self.refresh_window_geometries();
-        }
-
-        let windows_len = self.windows.len();
-        self.focused_window_idx = match self.focused_window_idx.checked_sub(1) {
-            Some(idx) => idx,
-            None => windows_len - 1,
-        };
-
-        {
-            let ipc_path = self.ipc_path.clone();
-            let focused_window_idx = self.focused_window_idx as u8;
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.focused_window_index = focused_window_idx;
-                iface
-                    .focused_window_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        let window = &self.windows[self.focused_window_idx];
-        self.raise_window(window);
-        Some(window)
+    pub fn focus_previous_window(&mut self) -> Option<&E> {
+        // TODO: Adapt.
+        None
+        // if self.tiles.is_empty() {
+        //     return None;
+        // }
+        //
+        // if let Some(fullscreen) = self.remove_current_fullscreen() {
+        //     fullscreen.set_fullscreen(false, None);
+        //     // refresh window geos will send a configure req for us.
+        //     self.refresh_window_geometries();
+        // }
+        //
+        // let windows_len = self.tiles.len();
+        // self.focused_window_idx = match self.focused_window_idx.checked_sub(1) {
+        //     Some(idx) => idx,
+        //     None => windows_len - 1,
+        // };
+        //
+        // {
+        //     let ipc_path = self.ipc_path.clone();
+        //     let focused_window_idx = self.focused_window_idx as u8;
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.focused_window_index = focused_window_idx;
+        //         iface
+        //             .focused_window_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // let window = &self.tiles[self.focused_window_idx];
+        // self.raise_window(window);
+        // Some(window)
     }
 
     /// Swap the current window with the next window.
     pub fn swap_with_next_window(&mut self) {
-        if self.windows.len() < 2 {
-            return;
-        }
-
-        let windows_len = self.windows.len();
-        let last_focused_idx = self.focused_window_idx;
-
-        let new_focused_idx = self.focused_window_idx + 1;
-        let new_focused_idx = if new_focused_idx == windows_len {
-            0
-        } else {
-            new_focused_idx
-        };
-
-        self.focused_window_idx = new_focused_idx;
-        self.windows.swap(last_focused_idx, new_focused_idx);
-        self.refresh_window_geometries();
+        // TODO: Adapt
+        // if self.tiles.len() < 2 {
+        //     return;
+        // }
+        //
+        // let windows_len = self.tiles.len();
+        // let last_focused_idx = self.focused_window_idx;
+        //
+        // let new_focused_idx = self.focused_window_idx + 1;
+        // let new_focused_idx = if new_focused_idx == windows_len {
+        //     0
+        // } else {
+        //     new_focused_idx
+        // };
+        //
+        // self.focused_window_idx = new_focused_idx;
+        // self.tiles.swap(last_focused_idx, new_focused_idx);
+        // self.refresh_window_geometries();
     }
 
     /// Swap the current window with the previous window.
     pub fn swap_with_previous_window(&mut self) {
-        if self.windows.len() < 2 {
-            return;
-        }
-
-        let windows_len = self.windows.len();
-        let last_focused_idx = self.focused_window_idx;
-
-        let new_focused_idx = match self.focused_window_idx.checked_sub(1) {
-            Some(idx) => idx,
-            None => windows_len - 1,
-        };
-
-        self.focused_window_idx = new_focused_idx;
-        self.windows.swap(last_focused_idx, new_focused_idx);
-        self.refresh_window_geometries();
+        // TODO: Adapt
+        // if self.tiles.len() < 2 {
+        //     return;
+        // }
+        //
+        // let windows_len = self.tiles.len();
+        // let last_focused_idx = self.focused_window_idx;
+        //
+        // let new_focused_idx = match self.focused_window_idx.checked_sub(1) {
+        //     Some(idx) => idx,
+        //     None => windows_len - 1,
+        // };
+        //
+        // self.focused_window_idx = new_focused_idx;
+        // self.tiles.swap(last_focused_idx, new_focused_idx);
+        // self.refresh_window_geometries();
     }
 
     /// Fullscreen a given window, if this [`Workspace`] contains it.
     ///
     /// NOTE: You still have to configure the window for it to know that it's fullscreened.
-    pub fn fullscreen_window(&mut self, window: &FhtWindow) {
-        let Some(idx) = self.windows.iter().position(|w| w == window) else {
-            return;
-        };
-
-        let window = self.windows.remove(idx);
-
-        {
-            let window_uid = window.uid();
-            let ipc_path = self.ipc_path.clone();
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.fullscreen = Some(window_uid);
-                iface
-                    .fullscreen_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-                iface.windows.retain(|uid| *uid != window_uid);
-                iface
-                    .windows_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        self.fullscreen = Some(FullscreenSurface {
-            inner: window,
-            last_known_idx: idx,
-        });
-
-        self.focused_window_idx = self.focused_window_idx.saturating_sub(1);
-        self.refresh_window_geometries();
+    pub fn fullscreen_window(&mut self, window: &E) {
+        // TODO: Adapt
+        // let Some(idx) = self.tiles.iter().position(|w| w == window) else {
+        //     return;
+        // };
+        //
+        // let window = self.tiles.remove(idx);
+        //
+        // {
+        //     let window_uid = window.uid();
+        //     let ipc_path = self.ipc_path.clone();
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.fullscreen = Some(window_uid);
+        //         iface
+        //             .fullscreen_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //         iface.windows.retain(|uid| *uid != window_uid);
+        //         iface
+        //             .windows_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // self.fullscreen = Some(FullscreenSurface {
+        //     inner: window,
+        //     last_known_idx: idx,
+        // });
+        //
+        // self.focused_window_idx = self.focused_window_idx.saturating_sub(1);
+        // self.refresh_window_geometries();
     }
 
     /// Remove the current fullscreened window, if any.
     ///
     /// NOTE: You still have to configure the window for it to know that it's not fullscreened
     /// anymore.
-    pub fn remove_current_fullscreen(&mut self) -> Option<&FhtWindow> {
-        let FullscreenSurface {
-            inner,
-            mut last_known_idx,
-        } = self.fullscreen.take()?;
-        last_known_idx = last_known_idx.clamp(0, self.windows.len());
-        let window_uid = inner.uid();
-        self.windows.insert(last_known_idx, inner);
-        self.focused_window_idx = last_known_idx;
-        self.refresh_window_geometries();
-
-        {
-            let ipc_path = self.ipc_path.clone();
-            spawn(async move {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .inner()
-                    .interface::<_, IpcWorkspace>(ipc_path.as_ref())
-                    .await
-                    .unwrap();
-                let mut iface = iface_ref.get_mut().await;
-                iface.fullscreen = None;
-                iface
-                    .fullscreen_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-                iface.windows.insert(last_known_idx, window_uid);
-                iface
-                    .windows_changed(iface_ref.signal_context())
-                    .await
-                    .unwrap();
-            });
-        }
-
-        Some(&self.windows[last_known_idx])
+    pub fn remove_current_fullscreen(&mut self) -> Option<&E> {
+        // TODO: Adapt
+        None
+        // let FullscreenSurface {
+        //     inner,
+        //     mut last_known_idx,
+        // } = self.fullscreen.take()?;
+        // last_known_idx = last_known_idx.clamp(0, self.tiles.len());
+        // let window_uid = inner.uid();
+        // self.tiles.insert(last_known_idx, inner);
+        // self.focused_window_idx = last_known_idx;
+        // self.refresh_window_geometries();
+        //
+        // {
+        //     let ipc_path = self.ipc_path.clone();
+        //     spawn(async move {
+        //         let iface_ref = DBUS_CONNECTION
+        //             .object_server()
+        //             .inner()
+        //             .interface::<_, IpcWorkspace>(ipc_path.as_ref())
+        //             .await
+        //             .unwrap();
+        //         let mut iface = iface_ref.get_mut().await;
+        //         iface.fullscreen = None;
+        //         iface
+        //             .fullscreen_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //         iface.windows.insert(last_known_idx, window_uid);
+        //         iface
+        //             .windows_changed(iface_ref.signal_context())
+        //             .await
+        //             .unwrap();
+        //     });
+        // }
+        //
+        // Some(&self.tiles[last_known_idx])
     }
 
     /// Refresh the geometries of the windows contained in this [`Workspace`].
@@ -1143,47 +1140,48 @@ impl Workspace {
     /// active workspace layout.
     #[profiling::function]
     pub fn refresh_window_geometries(&self) {
-        if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
-            window.set_geometry(self.output.geometry(), false);
-            window.toplevel().send_pending_configure();
-        }
-
-        if self.windows.is_empty() {
-            return;
-        }
-
-        let (maximized_windows, mut tiled_windows): (Vec<&FhtWindow>, Vec<&FhtWindow>) =
-            self.windows.iter().partition(|w| w.maximized());
-        tiled_windows.retain(|w| w.tiled());
-
-        let inner_gaps = CONFIG.general.inner_gaps;
-        let outer_gaps = CONFIG.general.outer_gaps;
-
-        let usable_geo = layer_map_for_output(&self.output)
-            .non_exclusive_zone()
-            .as_local()
-            .to_global(&self.output);
-        let mut maximized_geo = usable_geo;
-        maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-        maximized_geo.loc += (outer_gaps, outer_gaps).into();
-        for window in maximized_windows {
-            window.set_geometry_with_border(maximized_geo, false);
-            window.toplevel().send_pending_configure();
-        }
-
-        if !tiled_windows.is_empty() {
-            let windows_len = tiled_windows.len();
-            self.get_active_layout().tile_windows(
-                tiled_windows.into_iter(),
-                windows_len,
-                maximized_geo,
-                inner_gaps,
-                |_idx, w, new_geo| {
-                    w.set_geometry_with_border(new_geo, false);
-                    w.toplevel().send_pending_configure();
-                },
-            );
-        }
+        // TODO: Adapt
+        // if let Some(window) = self.fullscreen.as_ref().map(|f| &f.inner) {
+        //     window.set_geometry(self.output.geometry(), false);
+        //     window.toplevel().send_pending_configure();
+        // }
+        //
+        // if self.tiles.is_empty() {
+        //     return;
+        // }
+        //
+        // let (maximized_windows, mut tiled_windows): (Vec<&E>, Vec<&E>) =
+        //     self.tiles.iter().partition(|w| w.maximized());
+        // tiled_windows.retain(|w| w.tiled());
+        //
+        // let inner_gaps = CONFIG.general.inner_gaps;
+        // let outer_gaps = CONFIG.general.outer_gaps;
+        //
+        // let usable_geo = layer_map_for_output(&self.output)
+        //     .non_exclusive_zone()
+        //     .as_local()
+        //     .to_global(&self.output);
+        // let mut maximized_geo = usable_geo;
+        // maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
+        // maximized_geo.loc += (outer_gaps, outer_gaps).into();
+        // for window in maximized_windows {
+        //     window.set_geometry_with_border(maximized_geo, false);
+        //     window.toplevel().send_pending_configure();
+        // }
+        //
+        // if !tiled_windows.is_empty() {
+        //     let windows_len = tiled_windows.len();
+        //     self.get_active_layout().tile_windows(
+        //         tiled_windows.into_iter(),
+        //         windows_len,
+        //         maximized_geo,
+        //         inner_gaps,
+        //         |_idx, w, new_geo| {
+        //             w.set_geometry_with_border(new_geo, false);
+        //             w.toplevel().send_pending_configure();
+        //         },
+        //     );
+        // }
     }
 
     /// Get the active layout that windows use for tiling.
@@ -1301,44 +1299,44 @@ impl Workspace {
 
     /// Get the window under the pointer in this workspace.
     #[profiling::function]
-    pub fn window_under(
-        &self,
-        point: Point<f64, Global>,
-    ) -> Option<(&FhtWindow, Point<i32, Global>)> {
-        if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            return Some((inner, inner.render_location()));
-        }
-
-        let mut windows = self.windows.iter().collect::<Vec<_>>();
-        windows.sort_by_key(|w| std::cmp::Reverse(w.z_index()));
-
-        windows
-            .iter()
-            .filter(|w| w.bbox().to_f64().contains(point))
-            .find_map(|w| {
-                let render_location = w.render_location();
-                if w.surface
-                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
-                {
-                    Some((*w, render_location))
-                } else {
-                    None
-                }
-            })
+    pub fn window_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
+        // TODO: Adapt.
+        None
+        // if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
+        //     return Some((inner, inner.render_location()));
+        // }
+        //
+        // let mut windows = self.tiles.iter().collect::<Vec<_>>();
+        // windows.sort_by_key(|w| std::cmp::Reverse(w.z_index()));
+        //
+        // windows
+        //     .iter()
+        //     .filter(|w| w.bbox().to_f64().contains(point))
+        //     .find_map(|w| {
+        //         let render_location = w.render_location();
+        //         if w.surface
+        //             .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+        //         {
+        //             Some((*w, render_location))
+        //         } else {
+        //             None
+        //         }
+        //     })
     }
 
     /// Raise the given window above all other windows, if found.
     #[profiling::function]
-    pub fn raise_window(&self, window: &FhtWindow) {
-        if !self.windows.contains(window) {
-            return;
-        }
-
-        let old_z_index = window.z_index();
-        let max_z_index = self.windows.iter().map(FhtWindow::z_index).sum::<u32>();
-        if old_z_index <= max_z_index {
-            window.set_z_index(max_z_index + 1);
-        }
+    pub fn raise_window(&self, window: &E) {
+        // TODO: Adapt
+        // if !self.tiles.contains(window) {
+        //     return;
+        // }
+        //
+        // let old_z_index = window.z_index();
+        // let max_z_index = self.tiles.iter().map(E::z_index).sum::<u32>();
+        // if old_z_index <= max_z_index {
+        //     window.set_z_index(max_z_index + 1);
+        // }
     }
 
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
@@ -1348,33 +1346,35 @@ impl Workspace {
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<FhtWindowRenderElement<R>> {
-        if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
-            return inner.render_elements(renderer, scale, alpha);
-        }
-
-        let mut windows = self.windows.iter().collect::<Vec<_>>();
-        windows.sort_unstable_by(|a, b| a.z_index().cmp(&b.z_index()));
-        windows.reverse();
-
-        windows
-            .into_iter()
-            .flat_map(|w| w.render_elements(renderer, scale, alpha))
-            .collect()
+    ) -> Vec<WorkspaceTileRenderElement<R>> {
+        // TODO: ADapt
+        vec![]
+        // if let Some(FullscreenSurface { inner, .. }) = self.fullscreen.as_ref() {
+        //     return inner.render_elements(renderer, scale, alpha);
+        // }
+        //
+        // let mut windows = self.tiles.iter().collect::<Vec<_>>();
+        // windows.sort_unstable_by(|a, b| a.z_index().cmp(&b.z_index()));
+        // windows.reverse();
+        //
+        // windows
+        //     .into_iter()
+        //     .flat_map(|w| w.render_elements(renderer, scale, alpha))
+        //     .collect()
     }
 }
 
-#[derive(Debug)]
-pub struct FullscreenSurface {
-    pub inner: FhtWindow,
-    pub last_known_idx: usize,
-}
-
-impl PartialEq for FullscreenSurface {
-    fn eq(&self, other: &Self) -> bool {
-        &self.inner == &other.inner
-    }
-}
+// #[derive(Debug)]
+// pub struct FullscreenSurface {
+//     pub inner: E,
+//     pub last_known_idx: usize,
+// }
+//
+// impl PartialEq for FullscreenSurface {
+//     fn eq(&self, other: &Self) -> bool {
+//         &self.inner == &other.inner
+//     }
+// }
 
 /// All layouts [`Workspace`]s can use.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1424,16 +1424,16 @@ impl ToString for WorkspaceLayout {
 }
 
 impl WorkspaceLayout {
-    /// Tile `windows` inside `tile_area` while letting `inner_gaps` between them.
+    /// Arrange workspace tiles in given `tile_area`
     ///
-    /// You can decide on how you apply the geometry to the window in the apply_geometry closure
-    pub fn tile_windows<'a>(
+    /// You can decide on how you apply the geometry to the tile in the apply_geometry closure
+    pub fn arrange_tiles<'a, E: WorkspaceElement + 'a>(
         &'a self,
-        windows: impl Iterator<Item = &'a FhtWindow>,
+        tiles: impl Iterator<Item = &'a WorkspaceTile<E>>,
         windows_len: usize,
         tile_area: Rectangle<i32, Global>,
         inner_gaps: i32,
-        apply_geometry: impl Fn(usize, &FhtWindow, Rectangle<i32, Global>),
+        apply_geometry: impl Fn(usize, &WorkspaceTile<E>, Rectangle<i32, Global>),
     ) {
         match *self {
             WorkspaceLayout::Tile {
@@ -1474,7 +1474,7 @@ impl WorkspaceLayout {
                         - (stack_len as i32 * stack_geo.size.h);
                 };
 
-                for (idx, window) in windows.enumerate() {
+                for (idx, window) in tiles.enumerate() {
                     if idx < nmaster {
                         let mut master_height = master_geo.size.h;
                         if master_rest != 0 {
@@ -1511,7 +1511,7 @@ impl WorkspaceLayout {
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
 
-                    window.toplevel().send_pending_configure();
+                    // window.toplevel().send_pending_configure();
                 }
             }
             WorkspaceLayout::BottomStack {
@@ -1552,7 +1552,7 @@ impl WorkspaceLayout {
                         - (stack_len as i32 * stack_geo.size.w);
                 };
 
-                for (idx, window) in windows.enumerate() {
+                for (idx, window) in tiles.enumerate() {
                     if idx < nmaster {
                         let mut master_width = master_geo.size.w;
                         if master_rest != 0 {
@@ -1589,7 +1589,7 @@ impl WorkspaceLayout {
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
 
-                    window.toplevel().send_pending_configure();
+                    // window.toplevel().send_pending_configure();
                 }
             }
             #[allow(unused)]
@@ -1656,7 +1656,7 @@ impl WorkspaceLayout {
                     right_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                for (idx, window) in windows.enumerate() {
+                for (idx, window) in tiles.enumerate() {
                     if idx < nmaster {
                         let mut master_height = master_geo.size.h;
                         if master_rest != 0 {
@@ -1713,8 +1713,8 @@ impl WorkspaceLayout {
             }
             WorkspaceLayout::Floating => {
                 // Let the windows be free
-                for window in windows {
-                    window.toplevel().send_pending_configure();
+                for window in tiles {
+                    // window.toplevel().send_pending_configure();
                 }
             }
         }
@@ -1739,32 +1739,34 @@ impl State {
         let is_active = active_idx == idx;
 
         match req {
-            IpcWorkspaceRequest::ChangeNmaster { delta } => workspace.change_nmaster(delta),
-            IpcWorkspaceRequest::ChangeMasterWidthFactor { delta } => {
-                workspace.change_mwfact(delta)
-            }
-            IpcWorkspaceRequest::SelectNextLayout => workspace.select_next_layout(),
-            IpcWorkspaceRequest::SelectPreviousLayout => workspace.select_next_layout(),
-            IpcWorkspaceRequest::FocusNextWindow => {
-                let new_focus = workspace.focus_next_window().cloned();
-                if is_active && let Some(window) = new_focus {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.move_pointer(center.to_f64())
-                    }
-                    self.set_focus_target(Some(window.into()));
-                }
-            }
-            IpcWorkspaceRequest::FocusPreviousWindow => {
-                let new_focus = workspace.focus_previous_window().cloned();
-                if is_active && let Some(window) = new_focus {
-                    if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.move_pointer(center.to_f64())
-                    }
-                    self.set_focus_target(Some(window.into()));
-                }
-            }
+            _ => {
+                // TODO: Adapt
+            } /* IpcWorkspaceRequest::ChangeNmaster { delta } => workspace.change_nmaster(delta),
+               * IpcWorkspaceRequest::ChangeMasterWidthFactor { delta } => {
+               *     workspace.change_mwfact(delta)
+               * }
+               * IpcWorkspaceRequest::SelectNextLayout => workspace.select_next_layout(),
+               * IpcWorkspaceRequest::SelectPreviousLayout => workspace.select_next_layout(),
+               * IpcWorkspaceRequest::FocusNextWindow => {
+               *     let new_focus = workspace.focus_next_window().cloned();
+               *     if is_active && let Some(window) = new_focus {
+               *         if CONFIG.general.cursor_warps {
+               *             let center = window.geometry().center();
+               *             self.move_pointer(center.to_f64())
+               *         }
+               *         self.set_focus_target(Some(window.into()));
+               *     }
+               * }
+               * IpcWorkspaceRequest::FocusPreviousWindow => {
+               *     let new_focus = workspace.focus_previous_window().cloned();
+               *     if is_active && let Some(window) = new_focus {
+               *         if CONFIG.general.cursor_warps {
+               *             let center = window.geometry().center();
+               *             self.move_pointer(center.to_f64())
+               *         }
+               *         self.set_focus_target(Some(window.into()));
+               *     }
+               * } */
         }
     }
 }
