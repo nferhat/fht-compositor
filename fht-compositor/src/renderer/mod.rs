@@ -22,6 +22,7 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesRenderbuffer, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+#[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture};
 use smithay::desktop::space::SurfaceTree;
@@ -32,6 +33,7 @@ use smithay::utils::{IsAlive, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use self::texture_element::FhtTextureElement;
+#[cfg(feature = "udev_backend")]
 use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};

@@ -2,6 +2,7 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+#[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::Texture;
