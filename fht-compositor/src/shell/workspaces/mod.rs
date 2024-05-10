@@ -649,6 +649,12 @@ impl<E: WorkspaceElement> Workspace<E> {
             .map(WorkspaceTile::element)
     }
 
+    /// Return the focused tile, giving priority to the fullscreen window first, then the
+    /// possible active non-fullscreen window.
+    pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
+        self.tiles.get_mut(self.focused_tile_idx)
+    }
+
     /// Get the global location of a given element.
     pub fn element_location(&self, element: &E) -> Option<Point<i32, Global>> {
         self.tiles
@@ -703,13 +709,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             });
         }
 
-        self.tiles.push(WorkspaceTile {
-            element: window,
-            cfact: 1.0,
-            z_index: 0,
-            location: Point::default(), // calculated later
-            border_config,
-        });
+        self.tiles.push(WorkspaceTile::new(window));
         if CONFIG.general.focus_new_windows {
             self.focused_tile_idx = self.tiles.len() - 1;
         }

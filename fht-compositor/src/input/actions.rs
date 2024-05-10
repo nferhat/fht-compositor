@@ -90,6 +90,9 @@ pub enum KeyAction {
     /// Change the number of master clients on the current workspace.
     ChangeNmaster(i32),
 
+    /// Change the cfact of the focused window.
+    ChangeCfact(f32),
+
     /// Maximize the focused window on the current workspace.
     ///
     /// NOTE: You cant' have 2 maximized windows at a time.
@@ -214,6 +217,16 @@ impl State {
             KeyAction::SelectPreviousLayout => active.select_previous_layout(),
             KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
             KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
+            KeyAction::ChangeCfact(delta) => {
+                let mut arrange = false;
+                if let Some(tile) = active.focused_tile_mut() {
+                    tile.cfact += delta;
+                    arrange = true;
+                }
+                if arrange {
+                    active.arrange_tiles();
+                }
+            }
             KeyAction::MaximizeFocusedWindow => {
                 if let Some(window) = active.focused().cloned() {
                     let new_maximized = !window.maximized();
