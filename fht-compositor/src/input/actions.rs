@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
 use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::utils::Serial;
-use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
 use crate::shell::workspaces::tile::WorkspaceElement;

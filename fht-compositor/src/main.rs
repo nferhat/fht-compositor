@@ -13,7 +13,6 @@
 extern crate tracing;
 
 use std::error::Error;
-use std::mem::size_of;
 use std::str::FromStr;
 use std::sync::Arc;
 

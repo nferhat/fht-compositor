@@ -100,7 +100,7 @@ impl XdgShellHandler for State {
     fn fullscreen_request(
         &mut self,
         surface: ToplevelSurface,
-        mut wl_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        wl_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
     ) {
         // TODO: Make xdg_shell request work.
         surface.send_configure();

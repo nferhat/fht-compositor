@@ -7,25 +7,22 @@ pub mod workspaces;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind, Window, WindowSurfaceType
 };
-use smithay::input::pointer::Focus;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Monotonic, Point, Rectangle, Serial, Size, Time};
+use smithay::utils::{Monotonic, Point, Time};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
-use smithay::wayland::shell::xdg::{PopupSurface, SurfaceCachedState, XdgToplevelSurfaceData};
+use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use self::grabs::MoveSurfaceGrab;
 use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
-use crate::state::{Fht, State};
+use crate::state::{Fht};
 use crate::utils::geometry::{
-    Global, Local, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
+    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
     RectLocalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;

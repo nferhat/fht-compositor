@@ -9,7 +9,7 @@ use smithay::utils::{Logical, Point};
 
 use super::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{Global, PointExt};
+use crate::utils::geometry::{Global};
 
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
