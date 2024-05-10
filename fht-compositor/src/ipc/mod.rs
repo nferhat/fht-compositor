@@ -426,15 +426,18 @@ impl State {
                 window_id,
                 maximized,
             } => {
-                if let Some(window) = self
+                let Some(window) = self
                     .fht
                     .all_windows()
                     .find(|window| window.uid() == window_id)
-                {
-                    window.set_maximized(maximized);
-                    window.toplevel().unwrap().send_pending_configure();
-                    self.fht.ws_for(window).unwrap().refresh_window_geometries();
-                }
+                    .cloned()
+                else {
+                    return;
+                };
+
+                window.set_maximized(maximized);
+                window.toplevel().unwrap().send_pending_configure();
+                self.fht.ws_mut_for(&window).unwrap().arrange_tiles();
             }
             IpcRequest::GetWindowFullscreened { window_id } => {
                 if let Some(window) = self
@@ -468,7 +471,6 @@ impl State {
                         window.set_fullscreen(false);
                         window.set_fullscreen_output(None);
                         let workspace = self.fht.ws_mut_for(&window).unwrap();
-                        workspace.remove_current_fullscreen();
                     }
                 }
             }

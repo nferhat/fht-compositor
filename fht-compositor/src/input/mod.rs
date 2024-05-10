@@ -97,12 +97,11 @@ impl State {
             }
         } else if let Some(window) = wset
             .active()
-            .window_under(pointer_loc)
+            .element_under(pointer_loc)
             .map(|(w, _)| w.clone())
         {
             let active = wset.active_mut();
-            active.focus_window(&window);
-            active.raise_window(&window);
+            active.focus_element(&window);
             self.set_focus_target(Some(window.clone().into()));
         } else if let Some(layer) = layer_map
             .layer_under(Layer::Bottom, pointer_loc.as_logical())

@@ -103,9 +103,9 @@ impl State {
                     .wset_mut_for(&output)
                     .workspaces_mut()
                     .enumerate()
-                    .find(|(_, ws)| ws.has_window(&window))
+                    .find(|(_, ws)| ws.has_element(&window))
                     .unwrap();
-                let window = workspace.remove_window(&window).unwrap();
+                let window = workspace.remove_element(&window).unwrap();
                 state.unmapped_windows.push((window, output, index));
             }
         }

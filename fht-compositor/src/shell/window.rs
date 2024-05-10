@@ -1,15 +1,20 @@
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
+use smithay::backend::renderer::element::{AsRenderElements, Kind};
 use smithay::desktop::space::SpaceElement;
-use smithay::desktop::Window;
+use smithay::desktop::{PopupManager, Window};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Point, Scale, Size};
+use smithay::utils::{Physical, Point, Scale, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
 use super::workspaces::tile::{WorkspaceElement, WorkspaceTileRenderElement};
+use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
 use crate::renderer::FhtRenderer;
-use crate::utils::geometry::{Local, PointExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectLocalExt, SizeExt};
 
 impl WorkspaceElement for Window {
     fn uid(&self) -> u64 {
@@ -138,10 +143,46 @@ impl WorkspaceElement for Window {
     fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
-        location: Point<i32, Local>,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
-        vec![]
+        let surface = self.wl_surface().unwrap();
+        let render_offset = self.render_location_offset().as_logical();
+
+        let mut render_elements = PopupManager::popups_for_surface(&surface)
+            .flat_map(|(popup, popup_offset)| {
+                let offset = (render_offset + popup_offset - popup.geometry().loc)
+                    .to_physical_precise_round(scale);
+
+                render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+                    renderer,
+                    popup.wl_surface(),
+                    location + offset,
+                    scale,
+                    alpha,
+                    Kind::Unspecified,
+                )
+                .into_iter()
+                .map(CustomTextureShaderElement::from_element_no_shader)
+                .map(WorkspaceTileRenderElement::Element)
+            })
+            .collect::<Vec<_>>();
+
+        render_elements.extend(
+            render_elements_from_surface_tree(
+                renderer,
+                &surface,
+                location,
+                scale,
+                alpha,
+                Kind::Unspecified,
+            )
+            .into_iter()
+            .map(CustomTextureShaderElement::from_element_no_shader)
+            .map(WorkspaceTileRenderElement::Element),
+        );
+
+        render_elements
     }
 }

@@ -20,7 +20,7 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
-use self::workspaces::tile::WorkspaceTile;
+use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, State};
@@ -75,6 +75,15 @@ impl Fht {
     pub fn find_window(&self, surface: &WlSurface) -> Option<&Window> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_window(surface))
+    }
+
+    /// Find the window associated with this [`WlSurface`]
+    pub fn find_window_and_workspace(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<(&Window, &Workspace<Window>)> {
+        self.workspaces()
+            .find_map(|(_, wset)| wset.find_window_and_workspace(surface))
     }
 
     /// Find the window associated with this [`WlSurface`], and the output the window is mapped
@@ -224,111 +233,12 @@ impl Fht {
             output = target_output;
         }
 
-        let dh = self.display_handle.clone();
         let wset = self.wset_mut_for(&output);
 
         let workspace_idx = match map_settings.workspace {
             None => wset.get_active_idx(),
             Some(idx) => idx.clamp(0, 9),
         };
-        let workspace = &mut wset.workspaces[workspace_idx];
-
-        if map_settings.fullscreen {
-            // TODO: Adapt
-            // // Use output geometry, and account for window borders.
-            // window.set_geometry(output.geometry(), true);
-            // window.set_tiled(!map_settings.floating);
-            //
-            // let mut wl_output = None;
-            // let client = dh.get_client(wl_surface.id()).unwrap();
-            // for wl_output_2 in output.client_outputs(&client) {
-            //     wl_output = Some(wl_output_2);
-            // }
-            //
-            // window.set_fullscreen(true, wl_output);
-        } else if map_settings.floating {
-            // TODO: Adapt
-            // let mut window_geo = Rectangle::default();
-            // if let Some(size) = map_settings.size.map(Into::into) {
-            //     window_geo.size = size;
-            // } else {
-            //     let min_size = with_states(&wl_surface, |states| {
-            //         states.cached_state.current::<SurfaceCachedState>().min_size
-            //     });
-            //     let space_element_size = window.geometry().size;
-            //     let maybe_pending_size = window
-            //         .surface
-            //         .toplevel()
-            //         .with_pending_state(|s| s.size)
-            //         .filter(|&s| s != Size::default());
-            //
-            //     if let Some(pending_size) = maybe_pending_size {
-            //         window_geo.size = pending_size.as_global();
-            //     } else if space_element_size != Size::default() {
-            //         window_geo.size = space_element_size.as_global();
-            //     } else if min_size.w > 20 && min_size.h > 20 {
-            //         window_geo.size = min_size.as_global();
-            //     } else {
-            //         window_geo.size = (800, 600).into();
-            //     }
-            // }
-            //
-            // if let Some(loc) = map_settings.location.map(Into::<Point<i32, Local>>::into) {
-            //     window_geo.loc = loc.to_global(&output);
-            // } else if map_settings.centered {
-            //     let output_geo = output.geometry();
-            //     window_geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
-            //     window_geo.loc -= window_geo.size.downscale(2).to_point();
-            // }
-            //
-            // // TODO: Still not.
-            // // window.set_geometry_with_border(window_geo, true);
-        } else {
-            // window.set_tiled(true);
-            // TODO: Adapt
-            // The following code is adapted from refresh_window_geometries.
-            //
-            // It uses the workspace layout to pre-shape the window using tile_windows, since it
-            // accepts an iterator
-            // let (maximized_windows, mut tiled_windows): (Vec<&Window>, Vec<&Window>) =
-            //     workspace.tiles.iter().partition(|w| w.maximized());
-            // tiled_windows.retain(|w| w.tiled());
-            //
-            // let inner_gaps = CONFIG.general.inner_gaps;
-            // let outer_gaps = CONFIG.general.outer_gaps;
-            //
-            // let output_geo = output.geometry();
-            // if let Some(window) = workspace.fullscreen.as_ref().map(|f| &f.inner) {
-            //     window.set_geometry(output_geo, false);
-            //     window.toplevel().send_pending_configure();
-            // }
-            //
-            // let usable_geo = layer_map_for_output(&output)
-            //     .non_exclusive_zone()
-            //     .as_local()
-            //     .to_global(&output);
-            // let mut maximized_geo = usable_geo;
-            // maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-            // maximized_geo.loc += (outer_gaps, outer_gaps).into();
-            // for window in maximized_windows {
-            //     window.set_geometry_with_border(maximized_geo, false);
-            //     window.toplevel().send_pending_configure();
-            // }
-            //
-            // // Can't check whether we are empty cause we are always not gonna be empty
-            // // (we are inserting a window, soo the iterator has always one item)
-            // let windows_len = tiled_windows.len();
-            // workspace.get_active_layout().arrange_tiles(
-            //     tiled_windows.into_iter().chain(std::iter::once(&window)),
-            //     windows_len + 1,
-            //     maximized_geo,
-            //     inner_gaps,
-            //     |_idx, w, new_geo| {
-            //         w.set_geometry_with_border(new_geo, *w == window);
-            //         w.toplevel().send_pending_configure();
-            //     },
-            // );
-        }
 
         // Client side-decorations
         let allow_csd = map_settings
@@ -349,23 +259,12 @@ impl Fht {
 
     /// Map a pending window, if it's found.
     pub fn map_window(&mut self, window: Window, output: Output, workspace_idx: usize) {
+        let loop_handle = self.loop_handle.clone();
         let wset = self.wset_mut_for(&output);
         let is_active = workspace_idx == wset.get_active_idx();
         let workspace = &mut wset.workspaces[workspace_idx];
 
-        // TODO: Adapt.
-        // if !window.tiled() {
-        //     // Raise the window so that it's visible and avoid confusion.
-        //     let z_index = workspace
-        //         .tiles
-        //         .iter()
-        //         .map(Window::z_index)
-        //         .sum::<u32>()
-        //         + 1u32;
-        //     window.set_z_index(z_index);
-        // }
-        // window.start_open_close_animation();
-        workspace.insert_window(window.clone());
+        workspace.insert_element(window.clone(), None);
 
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
@@ -373,11 +272,11 @@ impl Fht {
         let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
 
         if should_focus {
-            self.loop_handle.insert_idle(move |state| {
+            let center = workspace.element_geometry(&window).unwrap().center();
+
+            loop_handle.insert_idle(move |state| {
                 if CONFIG.general.cursor_warps {
-                    // TODO: Yeah.
-                    // let center = window.geometry().center();
-                    // state.move_pointer(center.to_f64());
+                    state.move_pointer(center.to_f64());
                 }
                 state.set_focus_target(Some(window.clone().into()));
             });
@@ -392,7 +291,7 @@ impl Fht {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self.find_window(&root) else {
+        let Some((window, workspace)) = self.find_window_and_workspace(&root) else {
             return;
         };
 
@@ -412,9 +311,8 @@ impl Fht {
         // The target (aka the popup) geometry should be relative to the parent (aka the window's)
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = outputs_geo;
-        // TODO: Adapt
-        // target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
-        // target.loc -= window.geometry().loc;
+        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
+        target.loc -= workspace.element_location(window).unwrap();
 
         popup.with_pending_state(|state| {
             state.geometry = state
@@ -438,13 +336,6 @@ impl Fht {
             animations_running = true;
         }
         let workspace = wset.active();
-        // if let Some(FullscreenSurface { inner, .. }) = workspace.fullscreen.as_ref() {
-        //     animations_running |= inner.advance_animations(current_time);
-        // }
-        for window in &workspace.tiles {
-            // TODO: Adapt
-            // animations_running |= window.advance_animations(current_time);
-        }
 
         animations_running
     }
@@ -457,69 +348,5 @@ impl Fht {
                 .iter()
                 .flat_map(|ws| ws.tiles.iter().map(|tile| tile.element()))
         })
-    }
-}
-
-impl State {
-    /// Process a move request for this given window.
-    pub fn handle_move_request(&mut self, window: Window, serial: Serial) {
-        // TODO: Adapt
-        // // NOTE: About internal handling.
-        // // ---
-        // // Even though `XdgShellHandler::move_request` has a seat argument, we only advertise one
-        // // single seat to clients (why would we support multi-seat for a standalone compositor?)
-        // // So the only pointer we have is the advertised seat pointer.
-        // let pointer = self.fht.pointer.clone();
-        // if !pointer.has_grab(serial) {
-        //     return;
-        // }
-        // let Some(start_data) = pointer.grab_start_data() else {
-        //     return;
-        // };
-        //
-        // let wl_surface = window.wl_surface();
-        // // Make sure we are moving the same window
-        // if start_data.focus.is_none()
-        //     || !start_data
-        //         .focus
-        //         .as_ref()
-        //         .unwrap()
-        //         .0
-        //         .same_client_as(&wl_surface.id())
-        // {
-        //     return;
-        // }
-        //
-        // let window_geo = window.geometry();
-        // let mut initial_window_location = window_geo.loc;
-        //
-        // // Unmaximize/Unfullscreen if it already is.
-        // let is_maximized = window.maximized();
-        // let is_fullscreen = window.fullscreen();
-        // if is_maximized || is_fullscreen {
-        //     window.set_maximized(false);
-        //     window.set_fullscreen(false, None);
-        //     window.toplevel().send_configure();
-        //
-        //     // let pos = pointer.current_location().as_global();
-        //     // let mut window_pos = pos - window_geo.to_f64().loc;
-        //     // window_pos.x = window_pos.x.clamp(0.0, window_geo.size.w.to_f64());
-        //     //
-        //     // match window_pos.x / window_geo.size.w.to_f64() {
-        //     //     x if x < 0.5
-        //     // }
-        //     let pos = pointer.current_location();
-        //     initial_window_location = (pos.x as i32, pos.y as i32).into();
-        // }
-        //
-        // window.set_fullscreen(false, None);
-        //
-        // let grab = MoveSurfaceGrab {
-        //     start_data,
-        //     window,
-        //     initial_window_location,
-        // };
-        //
-        // pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 }

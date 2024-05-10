@@ -25,26 +25,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         _: Option<(PointerFocusTarget, Point<i32, Logical>)>,
         event: &MotionEvent,
     ) {
-        // While the grab handle is active, no client should have focus, otherwise bad stuff WILL
-        // HAPPEN (dont ask me how I know, I should probably read reference source code better)
-        handle.motion(data, None, event);
-
-        // Basically, instead of implementing kind of a cfacts patch like dwm, grabs make the
-        // window floating so the workspace dont care about it.
-        // if self.window.tiled() {
-        //     self.window.set_tiled(false);
-        //     if let Some(ws) = data.fht.ws_mut_for(&self.window) {
-        //         ws.refresh_window_geometries();
-        //     }
-        // }
-
-        let position_delta = (event.location - self.start_data.location).as_global();
-        let new_location = self.initial_window_location.to_f64() + position_delta;
-
-        // TODO: Yeah.
-        // let mut new_geo = self.window.geometry();
-        // new_geo.loc = new_location.to_i32_round();
-        // self.window.set_geometry_with_border(new_geo, true)
+        // TODO: This grab is useless with the current tile system
     }
 
     fn relative_motion(

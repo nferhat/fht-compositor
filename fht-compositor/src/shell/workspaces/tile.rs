@@ -1,15 +1,19 @@
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::desktop::space::SpaceElement;
 use smithay::reexports::wayland_server::protocol::wl_output;
-use smithay::utils::{IsAlive, Point, Rectangle, Scale, Size};
+use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size};
+use smithay::wayland::seat::WaylandFocus;
 
-use crate::config::BorderConfig;
+use crate::config::{BorderConfig, CONFIG};
 use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
+use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutlineShaderSettings};
 use crate::renderer::FhtRenderer;
-use crate::utils::geometry::Local;
+use crate::utils::geometry::{Local, PointLocalExt, RectExt};
 
-pub trait WorkspaceElement: std::fmt::Debug + SpaceElement + IsAlive + Sized + PartialEq {
+pub trait WorkspaceElement:
+    Clone + std::fmt::Debug + SpaceElement + WaylandFocus + IsAlive + Sized + PartialEq
+{
     /// Get the unique ID of this element, to identify it in the D-Bus IPC>
     fn uid(&self) -> u64;
 
@@ -68,7 +72,7 @@ pub trait WorkspaceElement: std::fmt::Debug + SpaceElement + IsAlive + Sized + P
     fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
-        location: Point<i32, Local>,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<WorkspaceTileRenderElement<R>>;
@@ -82,13 +86,13 @@ pub trait WorkspaceElement: std::fmt::Debug + SpaceElement + IsAlive + Sized + P
 #[derive(Debug)]
 pub struct WorkspaceTile<E: WorkspaceElement> {
     /// The inner element.
-    element: E,
+    pub(super) element: E,
 
     /// The location of this element, relative to the workspace holding it.
     ///
     /// This location should be the top left corner of the tile's element, in other terms excluding
     /// the client-side decorations
-    pub position: Point<i32, Local>,
+    pub location: Point<i32, Local>,
 
     /// The currently client fact added to this tile.
     ///
@@ -104,7 +108,7 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     ///
     /// This can be user specified using window rules, falling back to the global configuration if
     /// not set.
-    pub border_config: BorderConfig,
+    pub border_config: Option<BorderConfig>,
     // TODO: Move animations to this struct.
 }
 
@@ -126,9 +130,33 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         &self.element
     }
 
+    /// Get this tile's geometry.
+    pub fn geometry(&self) -> Rectangle<i32, Local> {
+        let mut geo = self.element.geometry().as_local();
+        geo.loc = self.location;
+        geo
+    }
+
+    /// Get this tile's bounding box.
+    pub fn bbox(&self) -> Rectangle<i32, Local> {
+        let mut bbox = self.element.bbox().as_local();
+        bbox.loc = self.location;
+        bbox
+    }
+
+    /// Get this tile's render location.
+    pub fn render_location(&self) -> Point<i32, Local> {
+        self.location - self.element.render_location_offset()
+    }
+
     /// Return whether we need to draw a border for this tile.
     pub fn need_border(&self) -> bool {
         !self.element.fullscreen()
+    }
+
+    /// Return the border settings to use when rendering this tile.
+    pub fn border_config(&self) -> BorderConfig {
+        self.border_config.unwrap_or(CONFIG.decoration.border)
     }
 
     /// Generate render elements for this tile.
@@ -137,9 +165,44 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         renderer: &mut R,
         scale: Scale<f64>,
         alpha: f32,
+        focused: bool,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
-        // TODO: Actual logic here.
-        vec![]
+        let render_location = self
+            .render_location()
+            .as_logical()
+            .to_physical_precise_round(scale);
+        let mut render_elements =
+            self.element
+                .render_elements(renderer, render_location, scale, alpha);
+
+        if self.need_border() {
+            let mut border_geo = Rectangle::from_loc_and_size(self.location, self.element.size());
+            let border_config = self.border_config();
+            let thickness = border_config.thickness as i32;
+            border_geo.loc -= (thickness, thickness).into();
+            border_geo.size += (2 * thickness, 2 * thickness).into();
+
+            let border_element = RoundedOutlineShader::element(
+                renderer,
+                scale.x.max(scale.y),
+                alpha,
+                self.element.wl_surface().as_ref().unwrap(),
+                border_geo,
+                RoundedOutlineShaderSettings {
+                    thickness: thickness as u8,
+                    radius: border_config.radius,
+                    color: if focused {
+                        border_config.focused_color
+                    } else {
+                        border_config.normal_color
+                    },
+                },
+            );
+
+            render_elements.push(WorkspaceTileRenderElement::Border(border_element))
+        }
+
+        render_elements
     }
 }
 
