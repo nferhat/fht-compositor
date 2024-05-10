@@ -120,6 +120,7 @@ macro_rules! fht_render_elements {
             }
         }
 
+        #[cfg(feature = "udev_backend")]
         impl<'render> smithay::backend::renderer::element::RenderElement<$crate::backend::udev::UdevRenderer<'render>>
             for $($name_R<$crate::backend::udev::UdevRenderer<'render>>)? $($name_no_R)?
         {
