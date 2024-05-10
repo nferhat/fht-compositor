@@ -32,13 +32,19 @@ pub trait WorkspaceElement:
     fn render_location_offset(&self) -> Point<i32, Local>;
 
     /// Set the size of this element.
+    ///
+    /// The element should not send a configure message with this.
     fn set_size(&self, new_size: Size<i32, Local>);
     /// Get the size of this element.
     fn size(&self) -> Size<i32, Local>;
 
     /// Set whether this element is fullscreened or not.
+    ///
+    /// The element should not send a configure message with this.
     fn set_fullscreen(&self, fullscreen: bool);
     /// Set the fullscreen output for this element.
+    ///
+    /// The element should not send a configure message with this.
     fn set_fullscreen_output(&self, output: Option<wl_output::WlOutput>);
     /// Get whether the this element is fullscreened or not.
     fn fullscreen(&self) -> bool;
@@ -46,16 +52,22 @@ pub trait WorkspaceElement:
     fn fullscreen_output(&self) -> Option<wl_output::WlOutput>;
 
     /// Set whether this element is maximized or not.
+    ///
+    /// The element should not send a configure message with this.
     fn set_maximized(&self, maximize: bool);
     /// Get whether the this element is maximizeed or not.
     fn maximized(&self) -> bool;
 
     /// Set the bounds of this element.
+    ///
+    /// The element should not send a configure message with this.
     fn set_bounds(&self, bounds: Option<Size<i32, Local>>);
     /// Get the bounds of this element.
     fn bounds(&self) -> Option<Size<i32, Local>>;
 
     /// Set whether this element is activated or not.
+    ///
+    /// The element should not send a configure message with this.
     fn set_activated(&self, activated: bool);
     /// Get whether this element is activated or not.
     fn activated(&self) -> bool;
@@ -86,7 +98,7 @@ pub trait WorkspaceElement:
 #[derive(Debug)]
 pub struct WorkspaceTile<E: WorkspaceElement> {
     /// The inner element.
-    pub(super) element: E,
+    pub(crate) element: E,
 
     /// The location of this element, relative to the workspace holding it.
     ///
@@ -125,9 +137,35 @@ impl<E: WorkspaceElement> PartialEq<E> for WorkspaceTile<E> {
 }
 
 impl<E: WorkspaceElement> WorkspaceTile<E> {
+    /// Create a new tile.
+    pub fn new(element: E) -> Self {
+        Self {
+            element,
+            location: Point::default(),
+            cfact: 1.0,
+            z_index: 1,
+            border_config: None,
+        }
+    }
+
     /// Get a reference to this tile's inner element.
     pub fn element(&self) -> &E {
         &self.element
+    }
+
+    /// Set this tile's geometry.
+    ///
+    /// The tile automatically accounts for border geometry if it needs to.
+    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Local>) {
+        if self.need_border() {
+            let thickness = self.border_config().thickness as i32;
+            new_geo.loc += (thickness, thickness).into();
+            new_geo.size -= (2 * thickness, 2 * thickness).into();
+        }
+
+        self.location = new_geo.loc;
+        self.element.set_size(new_geo.size);
+        self.element.send_pending_configure();
     }
 
     /// Get this tile's geometry.

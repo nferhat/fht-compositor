@@ -239,6 +239,33 @@ impl Fht {
             None => wset.get_active_idx(),
             Some(idx) => idx.clamp(0, 9),
         };
+        let workspace = &mut wset.workspaces[workspace_idx];
+        let layout = workspace.get_active_layout();
+
+        // Pre compute window geometry for insertion.
+        // Bogus tile so we can use the arrange_tiles
+        let mut tile = WorkspaceTile::new(window);
+        let inner_gaps = CONFIG.general.inner_gaps;
+        let outer_gaps = CONFIG.general.outer_gaps;
+
+        let usable_geo = layer_map_for_output(&wset.output)
+            .non_exclusive_zone()
+            .as_local();
+        let mut tile_area = usable_geo;
+        tile_area.size -= (2 * outer_gaps, 2 * outer_gaps).into();
+        tile_area.loc += (outer_gaps, outer_gaps).into();
+
+        let tiles_len = workspace.tiles.len() + 1;
+        layout.arrange_tiles(
+            workspace.tiles.iter_mut().chain(std::iter::once(&mut tile)),
+            tiles_len,
+            tile_area,
+            inner_gaps,
+        );
+
+        let WorkspaceTile {
+            element: window, ..
+        } = tile;
 
         // Client side-decorations
         let allow_csd = map_settings
