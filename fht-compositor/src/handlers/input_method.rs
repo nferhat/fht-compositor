@@ -1,5 +1,4 @@
 use smithay::delegate_input_method_manager;
-use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupKind, PopupManager};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Rectangle;
@@ -23,7 +22,7 @@ impl InputMethodHandler for State {
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
         self.fht
             .find_window(parent)
-            .map(|w| w.surface.geometry())
+            .map(|w| w.geometry())
             .unwrap_or_default()
     }
 }

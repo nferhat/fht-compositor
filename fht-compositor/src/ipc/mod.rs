@@ -5,11 +5,11 @@ mod workspace;
 
 pub use output::{Output as IpcOutput, Request as IpcOutputRequest};
 use smithay::reexports::calloop::{self, LoopHandle};
-use smithay::wayland::shell::xdg::XdgShellHandler;
 pub use workspace::{Request as IpcWorkspaceRequest, Workspace as IpcWorkspace};
 use zbus::{interface, zvariant};
 
 use crate::config::CONFIG;
+use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::state::State;
 use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::RectCenterExt;
@@ -37,18 +37,6 @@ pub enum IpcRequest {
 
     /// Get the app_id/WM_CLASS of the window with this protocol ID.
     GetWindowAppId { window_id: u64 },
-
-    /// Get the tiled state of the window with this protocol ID.
-    GetWindowTiled { window_id: u64 },
-
-    /// Set the tiled state of the window with this protocol ID.
-    SetWindowTiled { window_id: u64, tiled: bool },
-
-    /// Get the fullscreen state of the window with this protocol ID.
-    GetWindowFullscreened { window_id: u64 },
-
-    /// Set the fullscreen state of the window with this protocol ID.
-    SetWindowFullscreened { window_id: u64, fullscreened: bool },
 
     /// Get the maximized state of the window with this protocol ID.
     GetWindowMaximized { window_id: u64 },
@@ -149,74 +137,6 @@ impl Ipc {
             Ok(IpcResponse::WindowPropString(title)) => Ok(title),
             Ok(_) => panic!("Something went really wrong..."),
             Err(err) => Err(zbus::fdo::Error::Failed(err.to_string())),
-        }
-    }
-
-    async fn get_window_tiled(&self, window_id: u64) -> zbus::fdo::Result<bool> {
-        if let Err(err) = self
-            .to_compositor
-            .send(IpcRequest::GetWindowTiled { window_id })
-        {
-            warn!(?err, "Failed to send IPC request to the compositor");
-            return Err(zbus::fdo::Error::Failed(
-                "Failed to send request to the compositor!".to_string(),
-            ));
-        };
-
-        match self.from_compositor.recv().await {
-            Ok(IpcResponse::WindowPropBool(tiled)) => Ok(tiled),
-            Ok(_) => panic!("Something went really wrong..."),
-            Err(err) => Err(zbus::fdo::Error::Failed(err.to_string())),
-        }
-    }
-
-    async fn set_window_tiled(&self, window_id: u64, tiled: bool) -> zbus::fdo::Result<()> {
-        if let Err(err) = self
-            .to_compositor
-            .send(IpcRequest::SetWindowTiled { window_id, tiled })
-        {
-            warn!(?err, "Failed to send IPC request to the compositor");
-            return Err(zbus::fdo::Error::Failed(
-                "Failed to send request to the compositor!".to_string(),
-            ));
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn get_window_fullscreened(&self, window_id: u64) -> zbus::fdo::Result<bool> {
-        if let Err(err) = self
-            .to_compositor
-            .send(IpcRequest::GetWindowFullscreened { window_id })
-        {
-            warn!(?err, "Failed to send IPC request to the compositor");
-            return Err(zbus::fdo::Error::Failed(
-                "Failed to send request to the compositor!".to_string(),
-            ));
-        };
-
-        match self.from_compositor.recv().await {
-            Ok(IpcResponse::WindowPropBool(fullscreened)) => Ok(fullscreened),
-            Ok(_) => panic!("Something went really wrong..."),
-            Err(err) => Err(zbus::fdo::Error::Failed(err.to_string())),
-        }
-    }
-
-    async fn set_window_fullscreened(
-        &self,
-        window_id: u64,
-        fullscreened: bool,
-    ) -> zbus::fdo::Result<()> {
-        if let Err(err) = self.to_compositor.send(IpcRequest::SetWindowFullscreened {
-            window_id,
-            fullscreened,
-        }) {
-            warn!(?err, "Failed to send IPC request to the compositor");
-            return Err(zbus::fdo::Error::Failed(
-                "Failed to send request to the compositor!".to_string(),
-            ));
-        } else {
-            Ok(())
         }
     }
 
@@ -380,32 +300,6 @@ impl State {
                         .unwrap();
                 }
             }
-            IpcRequest::GetWindowTiled { window_id } => {
-                if let Some(window) = self
-                    .fht
-                    .all_windows()
-                    .find(|window| window.uid() == window_id)
-                {
-                    to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.tiled()))
-                        .unwrap();
-                } else {
-                    to_ipc
-                        .send_blocking(IpcResponse::InvalidProtocolId)
-                        .unwrap();
-                }
-            }
-            IpcRequest::SetWindowTiled { window_id, tiled } => {
-                if let Some(window) = self
-                    .fht
-                    .all_windows()
-                    .find(|window| window.uid() == window_id)
-                {
-                    window.set_tiled(tiled);
-                    window.toplevel().send_pending_configure();
-                    self.fht.ws_for(window).unwrap().refresh_window_geometries();
-                }
-            }
             IpcRequest::GetWindowMaximized { window_id } => {
                 if let Some(window) = self
                     .fht
@@ -425,50 +319,18 @@ impl State {
                 window_id,
                 maximized,
             } => {
-                if let Some(window) = self
+                let Some(window) = self
                     .fht
                     .all_windows()
                     .find(|window| window.uid() == window_id)
-                {
-                    window.set_maximized(maximized);
-                    window.toplevel().send_pending_configure();
-                    self.fht.ws_for(window).unwrap().refresh_window_geometries();
-                }
-            }
-            IpcRequest::GetWindowFullscreened { window_id } => {
-                if let Some(window) = self
-                    .fht
-                    .all_windows()
-                    .find(|window| window.uid() == window_id)
-                {
-                    to_ipc
-                        .send_blocking(IpcResponse::WindowPropBool(window.fullscreen()))
-                        .unwrap();
-                } else {
-                    to_ipc
-                        .send_blocking(IpcResponse::InvalidProtocolId)
-                        .unwrap();
-                }
-            }
-            IpcRequest::SetWindowFullscreened {
-                window_id,
-                fullscreened,
-            } => {
-                let maybe_window = self
-                    .fht
-                    .all_windows()
-                    .find(|window| window.uid() == window_id)
-                    .cloned();
-                if let Some(window) = maybe_window {
-                    if fullscreened {
-                        let toplevel = window.toplevel().clone();
-                        self.fullscreen_request(toplevel, None);
-                    } else {
-                        window.set_fullscreen(false, None);
-                        let workspace = self.fht.ws_mut_for(&window).unwrap();
-                        workspace.remove_current_fullscreen();
-                    }
-                }
+                    .cloned()
+                else {
+                    return;
+                };
+
+                window.set_maximized(maximized);
+                window.toplevel().unwrap().send_pending_configure();
+                self.fht.ws_mut_for(&window).unwrap().arrange_tiles();
             }
             IpcRequest::SetFocusedOutput { name } => {
                 if let Some(output) = self.fht.output_named(&name) {

@@ -252,16 +252,16 @@ impl CursorThemeManager {
                     }
                 };
 
-                vec![E::from(CursorRenderElement::Texture(
-                    FhtTextureElement(TextureRenderElement::from_texture_buffer(
+                vec![E::from(CursorRenderElement::Texture(FhtTextureElement(
+                    TextureRenderElement::from_texture_buffer(
                         location.to_f64(),
                         &frame_texture,
                         None,
                         None,
                         None,
                         Kind::Cursor,
-                    )),
-                ))]
+                    ),
+                )))]
             }
         }
     }

@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
 use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::utils::Serial;
-use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
+use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 use crate::utils::geometry::{PointExt, RectCenterExt};
@@ -90,18 +90,8 @@ pub enum KeyAction {
     /// Change the number of master clients on the current workspace.
     ChangeNmaster(i32),
 
-    /// Toggle floating mode for the focused window.
-    ToggleFloating,
-
-    /// Move the focused window to the center of it's monitor.
-    ///
-    /// Works only if the window you are trying to ping is floating.
-    CenterFocusedWindow,
-
-    /// Fullscreens the focused window on the current workspace
-    ///
-    /// NOTE: You can't have 2 fullscreened windows at a time.
-    FullscreenFocusedWindow,
+    /// Change the cfact of the focused window.
+    ChangeCfact(f32),
 
     /// Maximize the focused window on the current workspace.
     ///
@@ -227,82 +217,58 @@ impl State {
             KeyAction::SelectPreviousLayout => active.select_previous_layout(),
             KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
             KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
-            KeyAction::ToggleFloating => {
-                if let Some(window) = active.focused().cloned() {
-                    let new_tiled = !window.tiled();
-                    window.set_tiled(new_tiled);
-                    active.raise_window(&window);
-                    active.refresh_window_geometries();
+            KeyAction::ChangeCfact(delta) => {
+                let mut arrange = false;
+                if let Some(tile) = active.focused_tile_mut() {
+                    tile.cfact += delta;
+                    arrange = true;
                 }
-            }
-            KeyAction::CenterFocusedWindow => {
-                if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
-                    if window.tiled() {
-                        return;
-                    }
-
-                    let mut geo = window.geometry();
-                    let output_geo = output.geometry();
-                    geo.loc = output_geo.loc + output_geo.size.downscale(2).to_point();
-                    geo.loc -= geo.size.downscale(2).to_point();
-                    window.set_geometry_with_border(geo, false);
-                    window.toplevel().send_configure();
-                }
-            }
-            KeyAction::FullscreenFocusedWindow => {
-                if let Some(window) = active.focused().cloned() {
-                    if !window.fullscreen() {
-                        let toplevel = window.toplevel().clone();
-                        self.fullscreen_request(toplevel, None);
-                    } else {
-                        window.set_fullscreen(false, None);
-                        let workspace = self.fht.ws_mut_for(&window).unwrap();
-                        workspace.remove_current_fullscreen();
-                    }
+                if arrange {
+                    active.arrange_tiles();
                 }
             }
             KeyAction::MaximizeFocusedWindow => {
                 if let Some(window) = active.focused().cloned() {
                     let new_maximized = !window.maximized();
                     window.set_maximized(new_maximized);
-                    active.refresh_window_geometries();
+                    active.arrange_tiles();
                 }
             }
             KeyAction::FocusNextWindow => {
-                let new_focus = active.focus_next_window().cloned();
+                let new_focus = active.focus_next_element().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
+                        let center = active.element_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::FocusPreviousWindow => {
-                let new_focus = active.focus_previous_window().cloned();
+                let new_focus = active.focus_previous_element().cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
-                        self.set_focus_target(Some(window.into()));
+                        let center = active.element_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
+                    self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::SwapWithNextWindow => {
-                active.swap_with_next_window();
+                active.swap_with_next_element();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
+                        let center = active.element_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
-                active.swap_with_previous_window();
+                active.swap_with_previous_element();
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
-                        let center = window.geometry().center();
+                        let center = active.element_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
@@ -370,7 +336,7 @@ impl State {
             }
             KeyAction::CloseFocusedWindow => {
                 if let Some(KeyboardFocusTarget::Window(window)) = current_focus {
-                    window.close()
+                    window.toplevel().unwrap().send_close();
                 }
                 self.set_focus_target(None); // reset focus
             }
@@ -383,10 +349,10 @@ impl State {
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
-                let window = active.remove_window(&window).unwrap();
+                let tile = active.remove_tile(&window).unwrap();
                 let new_focus = active.focused().cloned();
                 let idx = idx.clamp(0, 9);
-                wset.workspaces[idx].insert_window(window);
+                wset.workspaces[idx].insert_tile(tile);
 
                 if let Some(window) = new_focus {
                     self.fht.focus_state.focus_target = Some(window.into())
@@ -458,20 +424,15 @@ pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 
 impl State {
     #[profiling::function]
-    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
+    pub fn process_mouse_action(&mut self, action: MouseAction, _serial: Serial) {
         let pointer_loc = self.fht.pointer.current_location().as_global();
 
         match action {
-            MouseAction::MoveWindow { floating_only } => {
-                if let Some((PointerFocusTarget::Window(window), _)) =
+            MouseAction::MoveWindow { .. } => {
+                if let Some((PointerFocusTarget::Window(_), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    if window.tiled() && floating_only {
-                        return;
-                    }
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        state.handle_move_request(window, serial);
-                    });
+                    // TODO: With the current tile system this only action is useless.
                 }
             }
         }

@@ -9,10 +9,10 @@
 pub mod custom_texture_shader_element;
 pub mod egui;
 pub mod pixel_shader_element;
+pub mod render_elements;
 pub mod rounded_outline_shader;
 pub mod rounded_quad_shader;
 pub mod texture_element;
-pub mod render_elements;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::surface::{
@@ -40,7 +40,6 @@ use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::config::CONFIG;
 use crate::portals::CursorMode;
 use crate::shell::cursor::CursorRenderElement;
-use crate::shell::window::FhtWindowRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
 use crate::state::{egui_state_for_output, Fht, OutputState};
 use crate::utils::fps::Fps;
@@ -68,17 +67,7 @@ impl Fht {
         renderer: &mut R,
         output: &Output,
         fps: &mut Fps,
-    ) -> OutputElementsResult<R>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-
-        FhtRenderElement<R>: RenderElement<R>,
-        CursorRenderElement<R>: RenderElement<R>,
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
-        WorkspaceSetRenderElement<R>: RenderElement<R>,
-    {
+    ) -> OutputElementsResult<R> {
         assert!(
             self.workspaces.get(output).is_some(),
             "Tried to render a non-existing output!"
@@ -142,14 +131,7 @@ impl Fht {
         &self,
         renderer: &mut R,
         output: &Output,
-    ) -> Vec<FhtRenderElement<R>>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Clone + 'static,
-        CursorRenderElement<R>: RenderElement<R>,
-        FhtWindowRenderElement<R>: RenderElement<R>,
-        WorkspaceSetRenderElement<R>: RenderElement<R>,
-    {
+    ) -> Vec<FhtRenderElement<R>> {
         let mut cursor_guard = self.cursor_theme_manager.image_status.lock().unwrap();
 
         if self
@@ -265,7 +247,9 @@ impl Fht {
         output: &Output,
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
-    ) where FhtRenderElement<R>: RenderElement<R> {
+    ) where
+        FhtRenderElement<R>: RenderElement<R>,
+    {
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
@@ -432,16 +416,7 @@ pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,
     layer: Layer,
-) -> Vec<FhtRenderElement<R>>
-where
-    R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: Clone + 'static,
-
-    CursorRenderElement<R>: RenderElement<R>,
-    FhtWindowRenderElement<R>: RenderElement<R>,
-    WaylandSurfaceRenderElement<R>: RenderElement<R>,
-    WorkspaceSetRenderElement<R>: RenderElement<R>,
-{
+) -> Vec<FhtRenderElement<R>> {
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
 
     let layer_map = layer_map_for_output(output);
