@@ -401,7 +401,7 @@ impl Into<MouseButton> for FhtMouseButton {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MouseAction {
     /// Move the window under the cursor
-    MoveWindow {
+    MoveTile {
         /// Should this move window action affect only floating windows.
         ///
         /// In other terms, if this is true, only floating windows will be affected by the grab,
@@ -424,15 +424,17 @@ pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 
 impl State {
     #[profiling::function]
-    pub fn process_mouse_action(&mut self, action: MouseAction, _serial: Serial) {
+    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
         let pointer_loc = self.fht.pointer.current_location().as_global();
 
         match action {
-            MouseAction::MoveWindow { .. } => {
-                if let Some((PointerFocusTarget::Window(_), _)) =
+            MouseAction::MoveTile { .. } => {
+                if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    // TODO: With the current tile system this only action is useless.
+                    self.fht.loop_handle.insert_idle(move |state| {
+                        state.handle_move_request(window, serial)
+                    });
                 }
             }
         }

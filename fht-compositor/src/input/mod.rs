@@ -169,7 +169,7 @@ impl State {
         }
     }
 
-    fn clamp_coords(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
+    pub fn clamp_coords(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
         let (pos_x, pos_y) = pos.into();
         let max_x = self
             .fht

@@ -7,6 +7,7 @@ uniform float radius;
 uniform float half_thickness;
 
 uniform vec2 size;
+uniform float alpha;
 varying vec2 v_coords;
 
 float roundedBoxSDF(vec2 center, vec2 size, float radius) {
@@ -40,6 +41,7 @@ void main() {
     float smoothedAlphaInner = 1.0 - smoothstep(-0.5, 0.25, distance + half_thickness);
 
     vec4 v_color = get_pixel_color();
+    v_color.a = alpha;
     gl_FragColor = mix(vec4(0), v_color, smoothedAlphaOuter - smoothedAlphaInner);
 }
 

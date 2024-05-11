@@ -459,7 +459,7 @@ fht_render_elements! {
 #[derive(Debug)]
 pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
-    output: Output,
+    pub output: Output,
 
     /// The tiles this workspace contains.
     ///
@@ -630,6 +630,16 @@ impl<E: WorkspaceElement> Workspace<E> {
         })
     }
 
+    /// Find the tile with this [`WlSurface`]
+    pub fn tile_for(&self, element: &E) -> Option<&WorkspaceTile<E>> {
+        self.tiles.iter().find(|tile| *tile == element)
+    }
+
+    /// Find the tile with this [`WlSurface`]
+    pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
+        self.tiles.iter_mut().find(|tile| *tile == element)
+    }
+
     /// Return whether this workspace contains this element.
     pub fn has_element(&self, window: &E) -> bool {
         self.tiles.iter().any(|tile| tile.element == *window)
@@ -718,8 +728,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             });
         }
 
-        let mut tile = WorkspaceTile::new(window);
-        tile.border_config = border_config;
+        let tile = WorkspaceTile::new(window, border_config);
         self.tiles.push(tile);
         if CONFIG.general.focus_new_windows {
             self.focused_tile_idx = self.tiles.len() - 1;
@@ -868,6 +877,17 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         let tile = &self.tiles[self.focused_tile_idx];
         Some(tile.element())
+    }
+
+    /// Swap the two given elements.
+    ///
+    /// This will give the focus to b
+    pub fn swap_elements(&mut self, a: &E, b: &E) {
+        let Some(a_idx) = self.tiles.iter().position(|tile| tile.element == *a) else { return };
+        let Some(b_idx) = self.tiles.iter().position(|tile| tile.element == *b) else { return };
+        self.focused_tile_idx = b_idx;
+        self.tiles.swap(a_idx, b_idx);
+        self.arrange_tiles();
     }
 
     /// Swap the current element with the next element.
@@ -1079,6 +1099,33 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
+    /// Get the elements under the pointer in this workspace.
+    #[profiling::function]
+    pub fn tiles_under(&self, point: Point<f64, Global>) -> impl Iterator<Item = &WorkspaceTile<E>> {
+        let point = point.to_local(&self.output);
+        self.tiles
+            .iter()
+            .filter(move |tile| {
+                if !tile.bbox().to_f64().contains(point) {
+                    return false;
+                }
+
+                let render_location = tile.render_location();
+                tile.element.is_in_input_region(&(point - render_location.to_f64()).as_logical())
+            })
+            // .filter(|tile| {
+            //     let render_location = tile.render_location();
+            //     if tile
+            //         .element
+            //         .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+            //     {
+            //         Some((tile.element(), render_location.to_global(&self.output)))
+            //     } else {
+            //         None
+            //     }
+            // })
+    }
+
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
     pub fn render_elements<R: FhtRenderer>(
@@ -1087,13 +1134,24 @@ impl<E: WorkspaceElement> Workspace<E> {
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
-        self.tiles
+        let mut above_render_elements = vec![];
+        let render_elements: Vec<_> = self.tiles
             .iter()
             .enumerate()
-            .flat_map(|(idx, tile)| {
-                tile.render_elements(renderer, scale, alpha, idx == self.focused_tile_idx)
+            .filter_map(|(idx, tile)| {
+                if tile.draw_above_others() {
+                    above_render_elements = tile.render_elements(renderer, scale, alpha, true);
+                    None
+                } else {
+                    Some(tile.render_elements(renderer, scale, alpha, idx == self.focused_tile_idx))
+                }
+
             })
-            .collect()
+            .flatten()
+            .collect();
+
+        above_render_elements.extend(render_elements);
+        above_render_elements
     }
 }
 

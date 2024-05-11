@@ -124,4 +124,16 @@ mod color {
             angle: f32,
         },
     }
+
+    impl ColorConfig {
+        /// Get the components of this color.
+        ///
+        /// If the color is a gradient, we use the start color.
+        pub fn components(&self) -> [f32; 4] {
+            match self {
+                Self::Solid(color) => *color,
+                Self::Gradient { start, .. } => *start,
+            }
+        }
+    }
 }

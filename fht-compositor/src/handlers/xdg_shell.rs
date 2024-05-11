@@ -31,11 +31,10 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn move_request(&mut self, _surface: ToplevelSurface, _: wl_seat::WlSeat, _serial: Serial) {
-        // TODO:
-        // if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
-        //     self.handle_move_request(window, serial);
-        // }
+    fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
+        if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
+            self.handle_move_request(window, serial);
+        }
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
