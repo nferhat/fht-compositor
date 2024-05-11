@@ -1,5 +1,4 @@
 use smithay::delegate_input_method_manager;
-use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupKind, PopupManager};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Rectangle;

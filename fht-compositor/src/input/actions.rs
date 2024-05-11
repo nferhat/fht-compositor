@@ -349,10 +349,10 @@ impl State {
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
-                let window = active.remove_element(&window).unwrap();
+                let tile = active.remove_tile(&window).unwrap();
                 let new_focus = active.focused().cloned();
                 let idx = idx.clamp(0, 9);
-                wset.workspaces[idx].insert_element(window, None);
+                wset.workspaces[idx].insert_tile(tile);
 
                 if let Some(window) = new_focus {
                     self.fht.focus_state.focus_target = Some(window.into())
@@ -424,12 +424,12 @@ pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 
 impl State {
     #[profiling::function]
-    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
+    pub fn process_mouse_action(&mut self, action: MouseAction, _serial: Serial) {
         let pointer_loc = self.fht.pointer.current_location().as_global();
 
         match action {
-            MouseAction::MoveWindow { floating_only } => {
-                if let Some((PointerFocusTarget::Window(window), _)) =
+            MouseAction::MoveWindow { .. } => {
+                if let Some((PointerFocusTarget::Window(_), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
                     // TODO: With the current tile system this only action is useless.

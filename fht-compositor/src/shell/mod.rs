@@ -17,13 +17,12 @@ use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
+use self::workspaces::tile::WorkspaceTile;
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
-use crate::state::{Fht};
+use crate::state::Fht;
 use crate::utils::geometry::{
     Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
-    RectLocalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -71,7 +70,7 @@ impl Fht {
     /// Find the window associated with this [`WlSurface`]
     pub fn find_window(&self, surface: &WlSurface) -> Option<&Window> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_window(surface))
+            .find_map(|(_, wset)| wset.find_element(surface))
     }
 
     /// Find the window associated with this [`WlSurface`]
@@ -80,14 +79,14 @@ impl Fht {
         surface: &WlSurface,
     ) -> Option<(&Window, &Workspace<Window>)> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_window_and_workspace(surface))
+            .find_map(|(_, wset)| wset.find_element_and_workspace(surface))
     }
 
     /// Find the window associated with this [`WlSurface`], and the output the window is mapped
     /// onto
     pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, &Output)> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_window(surface).map(|w| (w, &wset.output)))
+            .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, &wset.output)))
     }
 
     /// Get a reference to the workspace holding this window
@@ -359,7 +358,6 @@ impl Fht {
             animation.animation.set_current_time(current_time);
             animations_running = true;
         }
-        let workspace = wset.active();
 
         animations_running
     }

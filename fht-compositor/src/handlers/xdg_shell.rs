@@ -31,7 +31,7 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
+    fn move_request(&mut self, _surface: ToplevelSurface, _: wl_seat::WlSeat, _serial: Serial) {
         // TODO:
         // if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
         //     self.handle_move_request(window, serial);
@@ -100,7 +100,7 @@ impl XdgShellHandler for State {
     fn fullscreen_request(
         &mut self,
         surface: ToplevelSurface,
-        wl_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        _wl_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
     ) {
         // TODO: Make xdg_shell request work.
         surface.send_configure();
@@ -114,11 +114,11 @@ impl XdgShellHandler for State {
     fn reposition_request(
         &mut self,
         surface: PopupSurface,
-        positioner: PositionerState,
-        token: u32,
+        _positioner: PositionerState,
+        _token: u32,
     ) {
         // TODO: Make xdg_shell request work.
-        surface.send_configure();
+        let _ = surface.send_configure();
     }
 }
 

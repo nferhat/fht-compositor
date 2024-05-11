@@ -9,14 +9,17 @@ use smithay::utils::{Logical, Point};
 
 use super::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{Global};
+use crate::utils::geometry::Global;
 
+#[allow(unused)]
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
     pub window: Window,
     pub initial_window_location: Point<i32, Global>,
 }
 
+#[allow(unused)]
+#[allow(dead_code)]
 impl PointerGrab<State> for MoveSurfaceGrab {
     fn motion(
         &mut self,

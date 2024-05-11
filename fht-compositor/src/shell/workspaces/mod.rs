@@ -181,7 +181,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     /// Find the window associated with this [`WlSurface`]
-    pub fn find_window(&self, surface: &WlSurface) -> Option<&E> {
+    pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
         self.workspaces().find_map(|ws| ws.find_element(surface))
     }
 
@@ -196,13 +196,13 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
-    pub fn find_window_and_workspace(&self, surface: &WlSurface) -> Option<(&E, &Workspace<E>)> {
+    pub fn find_element_and_workspace(&self, surface: &WlSurface) -> Option<(&E, &Workspace<E>)> {
         self.workspaces()
             .find_map(|ws| ws.find_element(surface).map(|w| (w, ws)))
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
-    pub fn find_window_and_workspace_mut(
+    pub fn find_element_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
     ) -> Option<(E, &mut Workspace<E>)> {
@@ -211,16 +211,16 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     /// Get a reference to the [`Workspace`] holding this window, if any.
-    pub fn ws_for(&self, window: &E) -> Option<&Workspace<E>> {
-        self.workspaces().find(|ws| ws.has_element(window))
+    pub fn ws_for(&self, element: &E) -> Option<&Workspace<E>> {
+        self.workspaces().find(|ws| ws.has_element(element))
     }
 
     /// Get a mutable reference to the [`Workspace`] holding this window, if any.
-    pub fn ws_mut_for(&mut self, window: &E) -> Option<&mut Workspace<E>> {
-        self.workspaces_mut().find(|ws| ws.has_element(window))
+    pub fn ws_mut_for(&mut self, element: &E) -> Option<&mut Workspace<E>> {
+        self.workspaces_mut().find(|ws| ws.has_element(element))
     }
 
-    /// Get the current fullscreen window and it's location in global coordinate space.
+    /// Get the current fullscreend element and it's location in global coordinate space.
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
@@ -229,7 +229,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         None
     }
 
-    /// Get the window in under the cursor and it's location in global coordinate space.
+    /// Get the element in under the cursor and it's location in global coordinate space.
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
@@ -300,7 +300,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     /// Render all the elements in this workspace set, returning them and whether it currently
-    /// holds a fullscreen window.
+    /// holds a fullscreen element.
     #[profiling::function]
     pub fn render_elements<R: FhtRenderer>(
         &self,
@@ -461,7 +461,7 @@ pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
     output: Output,
 
-    /// The window this workspace contains.
+    /// The tiles this workspace contains.
     ///
     /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
     /// logic will PANIC.
@@ -563,7 +563,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         let mut should_refresh_geometries = false;
         // Invalidate current fullscreen if its dead
 
-        // Clean dead/zombie windows
+        // Clean dead/zombie tiles
         // Also ensure that we dont try to access out of bounds indexes, and sync up the IPC.
         let mut removed_ids = vec![];
         self.tiles.retain(|tile| {
@@ -623,35 +623,35 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    /// Return whether this workspace has this window.
+    /// Find the element with this [`WlSurface`]
     pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
         self.tiles.iter().find_map(|tile| {
             (tile.element.wl_surface().as_ref() == Some(surface)).then_some(&tile.element)
         })
     }
 
-    /// Return whether this workspace has this window.
+    /// Return whether this workspace contains this element.
     pub fn has_element(&self, window: &E) -> bool {
         self.tiles.iter().any(|tile| tile.element == *window)
     }
 
-    /// Return whether this workspace has a window with this [`WlSurface`] as its toplevel surface.
+    /// Return whether this workspace has an element  with this [`WlSurface`].
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
         self.tiles
             .iter()
             .any(|tile| tile.element.wl_surface().as_ref() == Some(surface))
     }
 
-    /// Return the focused window, giving priority to the fullscreen window first, then the
-    /// possible active non-fullscreen window.
+    /// Return the focused element, giving priority to the fullscreen element first, then the
+    /// possible active non-fullscreen element.
     pub fn focused(&self) -> Option<&E> {
         self.tiles
             .get(self.focused_tile_idx)
             .map(WorkspaceTile::element)
     }
 
-    /// Return the focused tile, giving priority to the fullscreen window first, then the
-    /// possible active non-fullscreen window.
+    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
+    /// possible active non-fullscreen element.
     pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
         self.tiles.get_mut(self.focused_tile_idx)
     }
@@ -668,14 +668,22 @@ impl<E: WorkspaceElement> Workspace<E> {
     pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Global>> {
         self.tiles
             .iter()
-            .find(|tile| tile.element == *element)
+            .find(|tile| *tile == element)
             .map(|tile| tile.geometry().to_global(&self.output))
+    }
+
+    /// Insert a tile in this [`Workspace`]
+    ///
+    /// See [`Workspace::insert_element`]
+    pub fn insert_tile(&mut self, tile: WorkspaceTile<E>) {
+        let WorkspaceTile { element, border_config, .. } = tile;
+        self.insert_element(element, border_config);
     }
 
     /// Insert an element in this [`Workspace`]
     ///
-    /// This function does additional configuration of the window before inserting it in the window
-    /// list, mainly setting the bounds of the window, and notifying it of entering this
+    /// This function does additional configuration of the element before creating a tile for it,
+    /// mainly setting the bounds of the window, and notifying it of entering this
     /// [`Workspace`] output.
     ///
     /// This doesn't reinsert the element if it's already inserted.
@@ -710,18 +718,20 @@ impl<E: WorkspaceElement> Workspace<E> {
             });
         }
 
-        self.tiles.push(WorkspaceTile::new(window));
+        let mut tile = WorkspaceTile::new(window);
+        tile.border_config = border_config;
+        self.tiles.push(tile);
         if CONFIG.general.focus_new_windows {
             self.focused_tile_idx = self.tiles.len() - 1;
         }
         self.arrange_tiles();
     }
 
-    /// Removes a window from this [`Workspace`], returning it if it was found.
+    /// Removes a tile from this [`Workspace`], returning it if it was found.
     ///
     /// This function also undones the configuration that was done in [`Self::insert_window`]
-    pub fn remove_element(&mut self, element: &E) -> Option<E> {
-        let Some(idx) = self.tiles.iter().position(|w| w.element == *element) else {
+    pub fn remove_tile(&mut self, element: &E) -> Option<WorkspaceTile<E>> {
+        let Some(idx) = self.tiles.iter().position(|t| t.element == *element) else {
             return None;
         };
 
@@ -751,10 +761,17 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         self.arrange_tiles();
-        Some(tile.element)
+        Some(tile)
     }
 
-    /// Focus a given window, if this [`Workspace`] contains it.
+    /// Removes an element from this [`Workspace`], returning it if it was found.
+    ///
+    /// This function also undones the configuration that was done in [`Self::insert_window`]
+    pub fn remove_element(&mut self, element: &E) -> Option<E> {
+        self.remove_tile(element).map(|t| t.element)
+    }
+
+    /// Focus a given element, if this [`Workspace`] contains it.
     pub fn focus_element(&mut self, window: &E) {
         if let Some(idx) = self.tiles.iter().position(|w| w == window) {
             self.focused_tile_idx = idx;
@@ -818,7 +835,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         Some(tile.element())
     }
 
-    /// Focus the previous available element, cyclying all the way to the last window if needed.
+    /// Focus the previous available element, cyclying all the way to the last element if needed.
     pub fn focus_previous_element(&mut self) -> Option<&E> {
         if self.tiles.is_empty() {
             return None;
@@ -893,7 +910,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles();
     }
 
-    /// Refresh the geometries of the windows contained in this [`Workspace`].
+    /// Refresh the geometries of the tiles contained in this [`Workspace`].
     ///
     /// This ensures geometry for maximized and tiled elements.
     #[profiling::function]
@@ -929,7 +946,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         layout.arrange_tiles(tiled.into_iter(), tiled_len, maximized_geo, inner_gaps);
     }
 
-    /// Get the active layout that windows use for tiling.
+    /// Get the active layout that arranges the tiles
     pub fn get_active_layout(&self) -> WorkspaceLayout {
         self.layouts[self.active_layout_idx]
     }
@@ -1042,7 +1059,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles();
     }
 
-    /// Get the window under the pointer in this workspace.
+    /// Get the element under the pointer in this workspace.
     #[profiling::function]
     pub fn element_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
         let point = point.to_local(&self.output);

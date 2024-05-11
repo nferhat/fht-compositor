@@ -237,6 +237,7 @@ impl State {
     }
 }
 
+#[allow(unused, dead_code)] // some globals need to be registered but never read
 pub struct Fht {
     pub socket_name: String,
     pub display_handle: DisplayHandle,

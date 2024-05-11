@@ -1,8 +1,7 @@
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{Kind};
-use smithay::desktop::space::SpaceElement;
+use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{PopupManager, Window};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
 use smithay::reexports::wayland_server::Resource;
@@ -14,7 +13,7 @@ use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 use super::workspaces::tile::{WorkspaceElement, WorkspaceTileRenderElement};
 use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
 use crate::renderer::FhtRenderer;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, RectLocalExt, SizeExt};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 
 impl WorkspaceElement for Window {
     fn uid(&self) -> u64 {
