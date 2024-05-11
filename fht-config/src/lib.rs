@@ -75,13 +75,19 @@ impl<Inner: Config> ConfigWrapper<Inner> {
     /// SAFETY: Its up to YOU to initialize the config.
     pub const fn new() -> Self {
         Self {
-            inner: SyncUnsafeCell::new(None)
+            inner: SyncUnsafeCell::new(None),
         }
     }
 
     /// Get a reference to the inner unsafe cell.
     pub fn get(&self) -> &Inner {
-        let inner_ref = unsafe { self.inner.get().as_ref().expect("Configuration points to NULL!").as_ref() };
+        let inner_ref = unsafe {
+            self.inner
+                .get()
+                .as_ref()
+                .expect("Configuration points to NULL!")
+                .as_ref()
+        };
         inner_ref.expect("Tried to get configuration before initializing it!")
     }
 

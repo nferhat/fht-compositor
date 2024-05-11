@@ -686,7 +686,11 @@ impl<E: WorkspaceElement> Workspace<E> {
     ///
     /// See [`Workspace::insert_element`]
     pub fn insert_tile(&mut self, tile: WorkspaceTile<E>) {
-        let WorkspaceTile { element, border_config, .. } = tile;
+        let WorkspaceTile {
+            element,
+            border_config,
+            ..
+        } = tile;
         self.insert_element(element, border_config);
     }
 

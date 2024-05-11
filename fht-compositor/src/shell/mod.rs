@@ -174,11 +174,20 @@ impl Fht {
     }
 
     /// Find every output where this window (and it's subsurfaces) is displayed.
-    pub fn visible_outputs_for_window(&self, window: &Window) -> Box<dyn Iterator<Item = &Output> + '_> {
-        let Some(ws) = self.ws_for(window) else { return Box::new(std::iter::empty()) };
-        let Some(window_geo) = ws.element_geometry(window)  else { return Box::new(std::iter::empty()) };
-        Box::new(self.outputs()
-            .filter(move |o| o.geometry().intersection(window_geo).is_some()))
+    pub fn visible_outputs_for_window(
+        &self,
+        window: &Window,
+    ) -> Box<dyn Iterator<Item = &Output> + '_> {
+        let Some(ws) = self.ws_for(window) else {
+            return Box::new(std::iter::empty());
+        };
+        let Some(window_geo) = ws.element_geometry(window) else {
+            return Box::new(std::iter::empty());
+        };
+        Box::new(
+            self.outputs()
+                .filter(move |o| o.geometry().intersection(window_geo).is_some()),
+        )
     }
 
     /// Find every window that is curently displayed on this output
