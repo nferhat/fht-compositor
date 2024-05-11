@@ -604,9 +604,9 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         // Refresh internal state of windows
         let output_geometry = self.output.geometry();
-        for tile in self.tiles.iter() {
+        for (idx, tile) in self.tiles.iter().enumerate() {
             // This is now managed globally with focus targets
-            // window.set_activated(idx == self.focused_tile_idx);
+            tile.element.set_activated(idx == self.focused_tile_idx);
 
             let mut bbox = tile.element.bbox().as_global();
             bbox.loc = tile.location.to_global(&self.output);
@@ -618,6 +618,7 @@ impl<E: WorkspaceElement> Workspace<E> {
                     .output_enter(&self.output, overlap.as_logical());
             }
 
+            tile.element.send_pending_configure();
             tile.element.refresh();
         }
     }
