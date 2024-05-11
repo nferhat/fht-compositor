@@ -143,14 +143,12 @@ FhtConfig(
         ([SHIFT, SUPER], "c"):     CloseFocusedWindow,
         ([SUPER], "Space"):        SelectNextLayout,
         ([SUPER, SHIFT], "Space"): SelectPreviousLayout,
-        ([SUPER, CTRL], "Space"):  ToggleFloating,
-        ([SUPER, CTRL], "s"):      CenterFocusedWindow,
-        ([SUPER],       "f"):      FullscreenFocusedWindow,
-        ([SUPER],       "m"):      ToggleMaximizeOnFocusedWindow,
         ([SUPER], "h"):            ChangeMwfact(-0.05),
         ([SUPER], "l"):            ChangeMwfact(0.05),
         ([SUPER, SHIFT], "h"):     ChangeNmaster(1),
         ([SUPER, SHIFT], "l"):     ChangeNmaster(-1),
+        ([SUPER], "i"):            ChangeCfact(0.1),
+        ([SUPER], "o"):            ChangeCfact(-0.1),
 
         // Workspaces. (you probably don't wanna touch this)
         ([SUPER], "1"): FocusWorkspace(0),
