@@ -1,10 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-const fn default_true() -> bool {
-    true
-}
-
 fn serialize_regex<S: Serializer>(regex: &Option<Regex>, serializer: S) -> Result<S::Ok, S::Error> {
     if let Some(regex) = regex {
         let regex_str = regex.to_string();
@@ -111,28 +107,6 @@ impl WindowRulePattern {
 /// Initial settings/state for a window when mapping it
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowMapSettings {
-    /// Should the window be floating?
-    #[serde(default)]
-    pub floating: bool,
-
-    /// Should the window be fullscreen?
-    ///
-    /// NOTE: If this is set, all of location, size, and centered options will be ignored.
-    #[serde(default)]
-    pub fullscreen: bool,
-
-    /// Window coordinates relative to the output it's getting mapped on.
-    ///
-    /// NOTE: If this is set, centered will have no effect.
-    pub location: Option<(i32, i32)>,
-
-    /// Window size, width and height.
-    pub size: Option<(i32, i32)>,
-
-    /// If the window is floating, should we center it?
-    #[serde(default = "default_true")]
-    pub centered: bool,
-
     /// On which output should we map the window?
     pub output: Option<String>,
 
@@ -153,11 +127,6 @@ pub struct WindowMapSettings {
 impl Default for WindowMapSettings {
     fn default() -> Self {
         Self {
-            floating: false,
-            fullscreen: false,
-            location: None,
-            size: None,
-            centered: true,
             output: None,
             border: None,
             allow_csd: None,
