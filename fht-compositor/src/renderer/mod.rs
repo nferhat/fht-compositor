@@ -111,19 +111,19 @@ impl Fht {
             self.wset_for(output)
                 .render_elements(renderer, output_scale.into(), 1.0);
         if !has_fullscreen {
+            elements.extend(layer_elements(renderer, output, Layer::Top));
             elements.extend(
                 wset_elements
                     .into_iter()
                     .map(FhtRenderElement::WorkspaceSet),
             );
-            elements.extend(layer_elements(renderer, output, Layer::Top));
         } else {
-            elements.extend(layer_elements(renderer, output, Layer::Top));
             elements.extend(
                 wset_elements
                     .into_iter()
                     .map(FhtRenderElement::WorkspaceSet),
             );
+            elements.extend(layer_elements(renderer, output, Layer::Top));
         }
 
         // Finally we have background and bottom elements.
