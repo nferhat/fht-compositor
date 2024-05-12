@@ -5,18 +5,37 @@ use smithay::input::pointer::{
     GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab,
     PointerInnerHandle, RelativeMotionEvent,
 };
-use smithay::utils::{Logical, Point};
+use smithay::utils::{Logical, Point, Rectangle};
 
 use super::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{Global, PointExt, PointGlobalExt};
+use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt};
 
 #[allow(unused)]
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
+    /// The concerned window.
     pub window: Window,
-    pub initial_window_location: Point<i32, Global>,
-    pub last_location: Point<i32, Global>,
+    /// The initial window geometry we started with before dragging the tile.
+    pub initial_window_geometry: Rectangle<i32, Global>,
+    /// The last registered window location.
+    last_window_location: Point<i32, Local>,
+    /// The last registered pointer location.
+    ///
+    /// Keeping at as f64, Global marker since workspaces transform them locally automatically.
+    last_pointer_location: Point<f64, Global>,
+}
+
+impl MoveSurfaceGrab {
+    pub fn new(start_data: PointerGrabStartData<State>, window: Window, initial_window_geometry: Rectangle<i32, Global>) -> Self {
+        Self {
+            start_data,
+            window,
+            initial_window_geometry,
+            last_window_location: Point::default(),
+            last_pointer_location: Point::default(),
+        }
+    }
 }
 
 #[allow(unused)]
@@ -41,15 +60,33 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         // At the old window location will be drawn a solid rectangle meant to represent a
         // placeholder for the old window.
 
-        self.last_location = event.location.as_global().to_i32_round();
+
         let position_delta = (event.location - self.start_data.location).as_global();
-        let mut new_location = self.initial_window_location.to_f64() + position_delta;
+        let mut new_location = self.initial_window_geometry.loc.to_f64() + position_delta;
         new_location = data.clamp_coords(new_location);
 
         let Some(ws) = data.fht.ws_mut_for(&self.window) else { return };
         let new_location = new_location.to_local(&ws.output).to_i32_round();
 
-        let Some(tile) = ws.tile_mut_for(&self.window) else { return };
+        self.last_pointer_location = event.location.as_global();
+        self.last_window_location = new_location;
+
+        let Some(tile) = ws.tile_mut_for(&self.window) else {
+            // Window dead/moved, no need to persist the grab
+            handle.unset_grab(self, data, event.serial, event.time, true);
+            // NOTE: Unsetting the only button to notify that we also aren't clicking. This is
+            // required for user-created grabs.
+            handle.button(
+                data,
+                &ButtonEvent {
+                    state: smithay::backend::input::ButtonState::Released,
+                    button: 0x110, // left mouse button
+                    time: event.time,
+                    serial: event.serial,
+                },
+            );
+            return
+        };
         tile.temporary_render_location = Some(new_location);
     }
 
@@ -71,24 +108,28 @@ impl PointerGrab<State> for MoveSurfaceGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            // Reset the tile location.
             if let Some(ws) = data.fht.ws_mut_for(&self.window) {
+                // When we drop the tile, instead of animating from its old location to the new
+                // one, we want for it to continue from our dragged position.
+                //
+                // So, we set our tile location so that when we swap out the two, the arrange_tiles
+                // function (used in swap_elements) will animate from this location here.
+                let location = self.last_pointer_location.to_local(&ws.output);
                 let self_tile = ws.tile_mut_for(&self.window).unwrap();
                 self_tile.temporary_render_location = None;
+                self_tile.location = self.last_window_location;
 
-                let mut other_window = None;
-                if let Some(other_tile) = ws.tiles_under(self.last_location.to_f64()).filter(|tile| tile.element != self.window).next() {
-                    other_window = Some(other_tile.element.clone());
-                }
+                // Though we only want to update our location when we actuall are goin to swap
+                let other_window = ws.tiles_under(self.last_pointer_location.to_f64()).find(|tile| tile.element != self.window)
+                    .map(|tile| tile.element.clone());
 
                 if let Some(ref other_window) = other_window {
                     ws.swap_elements(&self.window, other_window)
+                } else {
+                    // If we didnt find anything to swap with, still animate the window back.
+                    ws.arrange_tiles();
                 }
             }
-            if let Some(tile) = data.fht.tile_mut_for(&self.window) {
-                tile.temporary_render_location = None;
-            }
-
 
             handle.unset_grab(self, data, event.serial, event.time, true);
             // NOTE: Unsetting the only button to notify that we also aren't clicking. This is

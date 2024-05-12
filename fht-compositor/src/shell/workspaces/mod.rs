@@ -435,7 +435,7 @@ impl WorkspaceSwitchAnimation {
             1.0,
             CONFIG.animation.workspace_switch.curve,
             Duration::from_millis(CONFIG.animation.workspace_switch.duration),
-        );
+        ).expect("Should never fail!");
 
         Self {
             animation,

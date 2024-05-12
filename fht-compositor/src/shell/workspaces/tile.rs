@@ -1,16 +1,21 @@
+use std::time::Duration;
+
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::space::SpaceElement;
 use smithay::reexports::wayland_server::protocol::wl_output;
-use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size};
+use smithay::utils::{IsAlive, Monotonic, Physical, Point, Rectangle, Scale, Size, Time};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::config::{BorderConfig, ColorConfig, CONFIG};
 use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutlineShaderSettings};
+use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::FhtRenderer;
+use crate::utils::animation::Animation;
 use crate::utils::geometry::{Local, PointLocalExt, RectExt, SizeExt};
 
 pub trait WorkspaceElement:
@@ -128,6 +133,11 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     /// The temporary render location of this tile.
     /// Used when dragging it using MoveTile mouse action.
     pub temporary_render_location: Option<Point<i32, Local>>,
+
+    /// Location animation
+    ///
+    /// This value should be an offset getting closer to zero.
+    pub location_animation: Option<Animation<Point<i32, Local>>>,
 }
 
 impl<E: WorkspaceElement> PartialEq for WorkspaceTile<E> {
@@ -166,6 +176,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             background_buffer,
             background_buffer_color: buffer_color,
             temporary_render_location: None,
+            location_animation: None,
         }
     }
 
@@ -184,10 +195,39 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             new_geo.size -= (2 * thickness, 2 * thickness).into();
         }
 
-        self.location = new_geo.loc;
         self.element.set_size(new_geo.size);
         self.element.send_pending_configure();
         self.background_buffer.resize(new_geo.size.as_logical());
+
+        // Location animation
+        //
+        // We set our actual location, then we offset gradually until we reach our destination.
+        // By that point our offset should be equal to 0
+        let old_location = self.location;
+        self.location = new_geo.loc;
+        self.location_animation = Animation::new(
+            old_location - new_geo.loc,
+            Point::default(),
+            CONFIG.animation.window_geometry.curve,
+            Duration::from_millis(CONFIG.animation.window_geometry.duration),
+        );
+
+    }
+
+    /// Set this tile's geometry without animating.
+    ///
+    /// See [`Self::set_geometry`]
+    pub fn set_geometry_instant(&mut self, mut new_geo: Rectangle<i32, Local>) {
+        if self.need_border() {
+            let thickness = self.border_config().thickness as i32;
+            new_geo.loc += (thickness, thickness).into();
+            new_geo.size -= (2 * thickness, 2 * thickness).into();
+        }
+
+        self.element.set_size(new_geo.size);
+        self.element.send_pending_configure();
+        self.background_buffer.resize(new_geo.size.as_logical());
+        self.location = new_geo.loc;
     }
 
     /// Get this tile's geometry.
@@ -206,11 +246,16 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Get this tile's render location.
     pub fn render_location(&self) -> Point<i32, Local> {
-        if let Some(temp) = self.temporary_render_location {
-            temp - self.element.render_location_offset()
-        } else {
-            self.location - self.element.render_location_offset()
+        let mut render_location = self
+            .temporary_render_location
+            .unwrap_or(self.location);
+        render_location -= self.element.render_location_offset();
+
+        if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
+            render_location += offset;
         }
+
+        render_location
     }
 
     /// Return whether we need to draw the placeholder background buffer.
@@ -232,6 +277,17 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Return the border settings to use when rendering this tile.
     pub fn border_config(&self) -> BorderConfig {
         self.border_config.unwrap_or(CONFIG.decoration.border)
+    }
+
+    /// Advance this tile's animations.
+    pub fn advance_animations(&mut self, current_time: Time<Monotonic>) -> bool {
+        let _ = self.location_animation.take_if(|anim| anim.is_finished());
+        if let Some(location_animation) = self.location_animation.as_mut() {
+            location_animation.set_current_time(current_time);
+            return true;
+        }
+
+        false
     }
 
     /// Generate render elements for this tile.
@@ -326,5 +382,10 @@ crate::fht_render_elements! {
         Element = CustomTextureShaderElement<WaylandSurfaceRenderElement<R>>,
         Background = SolidColorRenderElement,
         Border = FhtPixelShaderElement,
+        // Rescaling magic is done pretty weirdly:
+        //
+        // We render everything above then put everything inside a texture element.
+        // Then, we actually rescale the texture.
+        Rescaling = RescaleRenderElement<FhtTextureElement>,
     }
 }

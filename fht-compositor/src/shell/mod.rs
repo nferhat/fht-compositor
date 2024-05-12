@@ -391,6 +391,9 @@ impl Fht {
             animation.animation.set_current_time(current_time);
             animations_running = true;
         }
+        for tile in wset.workspaces_mut().flat_map(|ws| &mut ws.tiles) {
+            animations_running |= tile.advance_animations(current_time);
+        }
 
         animations_running
     }
@@ -438,8 +441,7 @@ impl crate::state::State {
             return;
         }
 
-        let window_geo = self.fht.window_geometry(&window).unwrap();
-        let mut initial_window_location = window_geo.loc;
+        let mut window_geo = self.fht.window_geometry(&window).unwrap();
 
         // Unmaximize/Unfullscreen if it already is.
         let is_maximized = window.maximized();
@@ -461,15 +463,14 @@ impl crate::state::State {
             //     x if x < 0.5
             // }
             let pos = pointer.current_location();
-            initial_window_location = (pos.x as i32, pos.y as i32).into();
+            window_geo.loc = (pos.x as i32, pos.y as i32).into();
         }
 
-        let grab = MoveSurfaceGrab {
+        let grab = MoveSurfaceGrab::new(
             start_data,
             window,
-            initial_window_location,
-            last_location: Point::default(),
-        };
+            window_geo,
+        );
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
