@@ -115,9 +115,6 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     /// cfacts.
     pub cfact: f32,
 
-    /// The Z-index of this element,
-    pub z_index: usize,
-
     /// The border configuration for this tile.
     ///
     /// This can be user specified using window rules, falling back to the global configuration if
@@ -165,7 +162,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             element,
             location: Point::default(),
             cfact: 1.0,
-            z_index: 1,
             border_config: None,
             background_buffer,
             background_buffer_color: buffer_color,
@@ -225,7 +221,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Return whether the workspace holding this tile should draw it above others.
     pub fn draw_above_others(&self) -> bool {
-        self.temporary_render_location.is_some()
+        self.temporary_render_location.is_some() || self.element.activated()
     }
 
     /// Return whether we need to draw a border for this tile.
