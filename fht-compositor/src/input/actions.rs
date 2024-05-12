@@ -401,14 +401,7 @@ impl Into<MouseButton> for FhtMouseButton {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MouseAction {
     /// Move the window under the cursor
-    MoveTile {
-        /// Should this move window action affect only floating windows.
-        ///
-        /// In other terms, if this is true, only floating windows will be affected by the grab,
-        /// otherwise, every window, including tiled ones (that will get untiled when the action is
-        /// active) will be affected by this action.
-        floating_only: bool,
-    },
+    MoveTile,
 }
 
 /// A mouse pattern.
@@ -428,7 +421,7 @@ impl State {
         let pointer_loc = self.fht.pointer.current_location().as_global();
 
         match action {
-            MouseAction::MoveTile { .. } => {
+            MouseAction::MoveTile => {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {

@@ -175,7 +175,7 @@ FhtConfig(
     //
     // The same logic from the key bindings. (But there's only MoveWindow right now...)
     mousebinds: {
-        ([SUPER], Left): MoveWindow(floating_only: false),
+        ([SUPER], Left): MoveWindow,
     },
 
     // Input configuration.
