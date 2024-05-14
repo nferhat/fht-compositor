@@ -8,19 +8,23 @@
 
 pub mod custom_texture_shader_element;
 pub mod egui;
+pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;
+pub mod rounded_element;
 pub mod rounded_outline_shader;
-pub mod rounded_quad_shader;
 pub mod texture_element;
 
+use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
-use smithay::backend::renderer::gles::{GlesError, GlesRenderbuffer, GlesTexture};
+use smithay::backend::renderer::gles::{
+    GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
+};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 #[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
@@ -53,6 +57,11 @@ crate::fht_render_elements! {
         Wayland = WaylandSurfaceRenderElement<R>,
         WorkspaceSet = WorkspaceSetRenderElement<R>,
     }
+}
+
+pub struct SplitRenderElements<E> {
+    pub normal: Vec<E>,
+    pub popups: Vec<E>,
 }
 
 pub struct OutputElementsResult<R: FhtRenderer> {
@@ -407,7 +416,7 @@ impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
 
 /// Initialize shaders for this renderer.
 pub fn init_shaders(renderer: &mut impl AsGlowRenderer) {
-    rounded_quad_shader::RoundedQuadShader::init(renderer);
+    rounded_element::RoundedElementShader::init(renderer);
     rounded_outline_shader::RoundedOutlineShader::init(renderer);
 }
 
@@ -457,4 +466,14 @@ pub fn layer_elements<R: FhtRenderer>(
     }
 
     elements
+}
+
+pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {
+    Uniform::new(
+        name,
+        UniformValue::Matrix3x3 {
+            matrices: vec![mat.to_cols_array()],
+            transpose: false,
+        },
+    )
 }

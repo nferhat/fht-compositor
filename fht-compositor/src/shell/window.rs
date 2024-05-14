@@ -10,10 +10,9 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
-use super::workspaces::tile::{WorkspaceElement, WorkspaceTileRenderElement};
-use crate::renderer::custom_texture_shader_element::CustomTextureShaderElement;
-use crate::renderer::FhtRenderer;
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
+use super::workspaces::tile::WorkspaceElement;
+use crate::renderer::{FhtRenderer, SplitRenderElements};
+use crate::utils::geometry::{Local, PointExt, SizeExt};
 
 impl WorkspaceElement for Window {
     fn uid(&self) -> u64 {
@@ -145,16 +144,14 @@ impl WorkspaceElement for Window {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<WorkspaceTileRenderElement<R>> {
+    ) -> SplitRenderElements<WaylandSurfaceRenderElement<R>> {
         let surface = self.wl_surface().unwrap();
-        let render_offset = self.render_location_offset().as_logical();
-
-        let mut render_elements = PopupManager::popups_for_surface(&surface)
+        let popups = PopupManager::popups_for_surface(&surface)
             .flat_map(|(popup, popup_offset)| {
-                let offset = (render_offset + popup_offset - popup.geometry().loc)
+                let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
                     .to_physical_precise_round(scale);
 
-                render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+                render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
                     location + offset,
@@ -162,26 +159,18 @@ impl WorkspaceElement for Window {
                     alpha,
                     Kind::Unspecified,
                 )
-                .into_iter()
-                .map(CustomTextureShaderElement::from_element_no_shader)
-                .map(WorkspaceTileRenderElement::Element)
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        render_elements.extend(
-            render_elements_from_surface_tree(
-                renderer,
-                &surface,
-                location,
-                scale,
-                alpha,
-                Kind::Unspecified,
-            )
-            .into_iter()
-            .map(CustomTextureShaderElement::from_element_no_shader)
-            .map(WorkspaceTileRenderElement::Element),
+        let normal = render_elements_from_surface_tree(
+            renderer,
+            &surface,
+            location,
+            scale,
+            alpha,
+            Kind::Unspecified,
         );
 
-        render_elements
+        SplitRenderElements { popups, normal }
     }
 }
