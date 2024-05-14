@@ -27,7 +27,11 @@ pub struct MoveSurfaceGrab {
 }
 
 impl MoveSurfaceGrab {
-    pub fn new(start_data: PointerGrabStartData<State>, window: Window, initial_window_geometry: Rectangle<i32, Global>) -> Self {
+    pub fn new(
+        start_data: PointerGrabStartData<State>,
+        window: Window,
+        initial_window_geometry: Rectangle<i32, Global>,
+    ) -> Self {
         Self {
             start_data,
             window,
@@ -60,12 +64,13 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         // At the old window location will be drawn a solid rectangle meant to represent a
         // placeholder for the old window.
 
-
         let position_delta = (event.location - self.start_data.location).as_global();
         let mut new_location = self.initial_window_geometry.loc.to_f64() + position_delta;
         new_location = data.clamp_coords(new_location);
 
-        let Some(ws) = data.fht.ws_mut_for(&self.window) else { return };
+        let Some(ws) = data.fht.ws_mut_for(&self.window) else {
+            return;
+        };
         let new_location = new_location.to_local(&ws.output).to_i32_round();
 
         self.last_pointer_location = event.location.as_global();
@@ -85,7 +90,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
                     serial: event.serial,
                 },
             );
-            return
+            return;
         };
         tile.temporary_render_location = Some(new_location);
     }
@@ -120,7 +125,9 @@ impl PointerGrab<State> for MoveSurfaceGrab {
                 self_tile.location = self.last_window_location;
 
                 // Though we only want to update our location when we actuall are goin to swap
-                let other_window = ws.tiles_under(self.last_pointer_location.to_f64()).find(|tile| tile.element != self.window)
+                let other_window = ws
+                    .tiles_under(self.last_pointer_location.to_f64())
+                    .find(|tile| tile.element != self.window)
                     .map(|tile| tile.element.clone());
 
                 if let Some(ref other_window) = other_window {

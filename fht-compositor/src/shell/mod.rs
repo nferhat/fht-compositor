@@ -105,23 +105,22 @@ impl Fht {
 
     /// Get a reference to the tile  holding this window
     pub fn tile_for(&self, window: &Window) -> Option<&WorkspaceTile<Window>> {
-        self.workspaces().find_map(|(_, wset)| {
-            wset.workspaces().find_map(|ws| ws.tile_for(window))
-        })
+        self.workspaces()
+            .find_map(|(_, wset)| wset.workspaces().find_map(|ws| ws.tile_for(window)))
     }
 
     /// Get a reference to the tile  holding this window
     pub fn tile_mut_for(&mut self, window: &Window) -> Option<&mut WorkspaceTile<Window>> {
-        self.workspaces_mut().find_map(|(_, wset)| {
-            wset.workspaces_mut().find_map(|ws| ws.tile_mut_for(window))
-        })
+        self.workspaces_mut()
+            .find_map(|(_, wset)| wset.workspaces_mut().find_map(|ws| ws.tile_mut_for(window)))
     }
 
     /// Get a this window's geometry.
     pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Global>> {
-        self.workspaces().find_map(|(_, wset)| wset.ws_for(window)
-            .and_then(|ws| ws.element_geometry(window))
-        )
+        self.workspaces().find_map(|(_, wset)| {
+            wset.ws_for(window)
+                .and_then(|ws| ws.element_geometry(window))
+        })
     }
 
     /// Find the first output where this [`WlSurface`] is visible.
@@ -409,7 +408,6 @@ impl Fht {
     }
 }
 
-
 impl crate::state::State {
     /// Process a move request for this given window.
     pub fn handle_move_request(&mut self, window: Window, serial: Serial) {
@@ -466,13 +464,8 @@ impl crate::state::State {
             window_geo.loc = (pos.x as i32, pos.y as i32).into();
         }
 
-        let grab = MoveSurfaceGrab::new(
-            start_data,
-            window,
-            window_geo,
-        );
+        let grab = MoveSurfaceGrab::new(start_data, window, window_geo);
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 }
-

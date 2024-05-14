@@ -46,8 +46,9 @@ impl Animatable for f64 {
 /// A trait representing any kind of animation for the compositor needs.
 #[derive(Clone, Copy, Debug)]
 pub struct Animation<T = f64>
-    where T: Animatable
-    {
+where
+    T: Animatable,
+{
     pub start: T,
     pub end: T,
     current_value: T,

@@ -425,9 +425,9 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        state.handle_move_request(window, serial)
-                    });
+                    self.fht
+                        .loop_handle
+                        .insert_idle(move |state| state.handle_move_request(window, serial));
                 }
             }
         }

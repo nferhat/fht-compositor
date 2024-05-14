@@ -435,7 +435,8 @@ impl WorkspaceSwitchAnimation {
             1.0,
             CONFIG.animation.workspace_switch.curve,
             Duration::from_millis(CONFIG.animation.workspace_switch.duration),
-        ).expect("Should never fail!");
+        )
+        .expect("Should never fail!");
 
         Self {
             animation,
@@ -887,8 +888,12 @@ impl<E: WorkspaceElement> Workspace<E> {
     ///
     /// This will give the focus to b
     pub fn swap_elements(&mut self, a: &E, b: &E) {
-        let Some(a_idx) = self.tiles.iter().position(|tile| tile.element == *a) else { return };
-        let Some(b_idx) = self.tiles.iter().position(|tile| tile.element == *b) else { return };
+        let Some(a_idx) = self.tiles.iter().position(|tile| tile.element == *a) else {
+            return;
+        };
+        let Some(b_idx) = self.tiles.iter().position(|tile| tile.element == *b) else {
+            return;
+        };
         self.focused_tile_idx = b_idx;
         self.tiles.swap(a_idx, b_idx);
         self.arrange_tiles();
@@ -1105,29 +1110,31 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Get the elements under the pointer in this workspace.
     #[profiling::function]
-    pub fn tiles_under(&self, point: Point<f64, Global>) -> impl Iterator<Item = &WorkspaceTile<E>> {
+    pub fn tiles_under(
+        &self,
+        point: Point<f64, Global>,
+    ) -> impl Iterator<Item = &WorkspaceTile<E>> {
         let point = point.to_local(&self.output);
-        self.tiles
-            .iter()
-            .filter(move |tile| {
-                if !tile.bbox().to_f64().contains(point) {
-                    return false;
-                }
+        self.tiles.iter().filter(move |tile| {
+            if !tile.bbox().to_f64().contains(point) {
+                return false;
+            }
 
-                let render_location = tile.render_location();
-                tile.element.is_in_input_region(&(point - render_location.to_f64()).as_logical())
-            })
-            // .filter(|tile| {
-            //     let render_location = tile.render_location();
-            //     if tile
-            //         .element
-            //         .is_in_input_region(&(point - render_location.to_f64()).as_logical())
-            //     {
-            //         Some((tile.element(), render_location.to_global(&self.output)))
-            //     } else {
-            //         None
-            //     }
-            // })
+            let render_location = tile.render_location();
+            tile.element
+                .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+        })
+        // .filter(|tile| {
+        //     let render_location = tile.render_location();
+        //     if tile
+        //         .element
+        //         .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+        //     {
+        //         Some((tile.element(), render_location.to_global(&self.output)))
+        //     } else {
+        //         None
+        //     }
+        // })
     }
 
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
@@ -1139,7 +1146,8 @@ impl<E: WorkspaceElement> Workspace<E> {
         alpha: f32,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
         let mut above_render_elements = vec![];
-        let render_elements: Vec<_> = self.tiles
+        let render_elements: Vec<_> = self
+            .tiles
             .iter()
             .enumerate()
             .filter_map(|(idx, tile)| {
@@ -1149,7 +1157,6 @@ impl<E: WorkspaceElement> Workspace<E> {
                 } else {
                     Some(tile.render_elements(renderer, scale, alpha, idx == self.focused_tile_idx))
                 }
-
             })
             .flatten()
             .collect();
