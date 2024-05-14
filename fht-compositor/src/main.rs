@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     color_eyre::install()?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::from_str(if cfg!(debug) || cfg!(debug_assertions) {
-            "trace"
+            "debug"
         } else {
             "error,warn,fht_compositor=info"
         })
