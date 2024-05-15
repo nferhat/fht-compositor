@@ -172,49 +172,21 @@ impl Fht {
             })
     }
 
-    /// Find every output where this window (and it's subsurfaces) is displayed.
-    pub fn visible_outputs_for_window(
-        &self,
-        window: &Window,
-    ) -> Box<dyn Iterator<Item = &Output> + '_> {
-        let Some(ws) = self.ws_for(window) else {
-            return Box::new(std::iter::empty());
-        };
-        let Some(window_geo) = ws.element_geometry(window) else {
-            return Box::new(std::iter::empty());
-        };
-        Box::new(
-            self.outputs()
-                .filter(move |o| o.geometry().intersection(window_geo).is_some()),
-        )
-    }
-
     /// Find every window that is curently displayed on this output
     #[profiling::function]
-    pub fn visible_windows_for_output(
-        &self,
-        output: &Output,
-    ) -> Box<dyn Iterator<Item = &Window> + '_> {
+    pub fn visible_windows_for_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
         let wset = self.wset_for(output);
-        let mut windows = Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &Window>>;
 
-        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = wset.switch_animation.as_ref() {
-            let target = &wset.workspaces[*target_idx];
-            // if let Some(fullscreen) = target.fullscreen.as_ref().map(|f| &f.inner) {
-            //     windows = Box::new(windows.chain(std::iter::once(fullscreen)));
-            // } else {
-            windows = Box::new(windows.chain(target.tiles.iter().map(WorkspaceTile::element)));
-            // }
-        }
+        let switching_windows = wset.switch_animation.as_ref().map(|anim| {
+            wset.workspaces[anim.target_idx].tiles.iter().map(WorkspaceTile::element)
+        }).into_iter().flatten();
 
-        let active = wset.active();
-        // if let Some(fullscreen) = active.fullscreen.as_ref().map(|f| &f.inner) {
-        //     windows = Box::new(windows.chain(std::iter::once(fullscreen)))
-        // } else {
-        windows = Box::new(windows.chain(active.tiles.iter().map(WorkspaceTile::element)));
-        // };
+        let active = wset.get_active_idx();
+        eprintln!("{active}, {}", wset.workspaces[active].tiles.is_empty());
 
-        Box::new(windows)
+        wset.active().tiles.iter()
+            .map(WorkspaceTile::element)
+            .chain(switching_windows).into_iter()
     }
 
     /// Prepapre a pending window to be mapped.
@@ -350,22 +322,9 @@ impl Fht {
             return;
         };
 
-        let mut outputs_for_window = self.visible_outputs_for_window(window);
-        if outputs_for_window.next().is_none() {
-            return;
-        }
-
-        let mut outputs_geo = outputs_for_window
-            .next()
-            .unwrap_or_else(|| self.outputs().next().unwrap())
-            .geometry();
-        for output in outputs_for_window {
-            outputs_geo = outputs_geo.merge(output.geometry());
-        }
-
         // The target (aka the popup) geometry should be relative to the parent (aka the window's)
         // geometry, based on the xdg_shell protocol requirements.
-        let mut target = outputs_geo;
+        let mut target = workspace.output.geometry();
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
         target.loc -= workspace.element_location(window).unwrap();
 
