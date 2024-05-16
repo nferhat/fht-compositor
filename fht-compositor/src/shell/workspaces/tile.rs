@@ -354,7 +354,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             })
             .collect::<Vec<_>>();
 
-        let damage = need_extra_damage
+        // If we are rendering a border, it will act as our damage, otherwise, with no border, we
+        // need to damage ourselves
+        let damage = (need_extra_damage && border_config.thickness == 0)
             .then(|| {
                 let damage = self.rounded_corner_damage.clone().with_location(
                     (self.render_location() + self.element.render_location_offset()).as_logical(),
