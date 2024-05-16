@@ -177,16 +177,24 @@ impl Fht {
     pub fn visible_windows_for_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
         let wset = self.wset_for(output);
 
-        let switching_windows = wset.switch_animation.as_ref().map(|anim| {
-            wset.workspaces[anim.target_idx].tiles.iter().map(WorkspaceTile::element)
-        }).into_iter().flatten();
+        let switching_windows = wset
+            .switch_animation
+            .as_ref()
+            .map(|anim| {
+                wset.workspaces[anim.target_idx]
+                    .tiles
+                    .iter()
+                    .map(WorkspaceTile::element)
+            })
+            .into_iter()
+            .flatten();
 
-        let active = wset.get_active_idx();
-        eprintln!("{active}, {}", wset.workspaces[active].tiles.is_empty());
-
-        wset.active().tiles.iter()
+        wset.active()
+            .tiles
+            .iter()
             .map(WorkspaceTile::element)
-            .chain(switching_windows).into_iter()
+            .chain(switching_windows)
+            .into_iter()
     }
 
     /// Prepapre a pending window to be mapped.
