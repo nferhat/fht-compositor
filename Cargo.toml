@@ -19,13 +19,13 @@ ron = "0.8.1"
 serde = { version = "1.0.196", features = ["derive"] }
 
 [workspace.dependencies.smithay]
-git = "https://github.com/nferhat/Smithay"
-rev = "2d86a43"
+git = "https://github.com/smithay/Smithay"
+rev = "0398269"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "c293ec7"
+rev = "0398269"
 
 [workspace.dependencies.iced]
 git = "https://github.com/nferhat/iced"

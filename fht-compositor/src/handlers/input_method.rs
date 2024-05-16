@@ -13,6 +13,8 @@ impl InputMethodHandler for State {
         }
     }
 
+    fn popup_repositioned(&mut self, _: PopupSurface) {}
+
     fn dismiss_popup(&mut self, surface: PopupSurface) {
         if let Some(parent) = surface.get_parent().map(|parent| parent.surface.clone()) {
             let _ = PopupManager::dismiss_popup(&parent, &PopupKind::from(surface));
