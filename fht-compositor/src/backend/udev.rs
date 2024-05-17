@@ -18,7 +18,8 @@ use smithay::backend::egl::context::ContextPriority;
 use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
-use smithay::backend::renderer::damage::Error as OutputDamageTrackerError;
+use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::gles::{Capability, GlesRenderbuffer, GlesRenderer};
 use smithay::backend::renderer::glow::GlowRenderer;
@@ -67,7 +68,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
 use crate::config::CONFIG;
-use crate::renderer::{init_shaders, FhtRenderElement};
+use crate::renderer::{init_shaders, FhtRenderElement, OutputElementsResult};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -879,9 +880,27 @@ impl UdevData {
 
         surface.fps.start();
 
-        let output_elements_result =
-            fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
-        surface.fps.elements();
+        let output_elements_result = {
+            let OutputElementsResult { render_elements, mut cursor_elements_len }= fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
+            surface.fps.elements();
+
+            // To render damage we just use solid color elements,
+            let damage_elements = CONFIG.renderer.damage_color.map(|damage_color| {
+                let mut state = OutputState::get(output);
+                draw_damage(
+                    &mut state.damage_tracker,
+                    &render_elements,
+                    damage_color
+                )
+            }).into_iter().flatten().collect::<Vec<_>>();
+            // Also skip rendering damage in screencopy.
+            cursor_elements_len += damage_elements.len();
+
+            OutputElementsResult {
+                render_elements: damage_elements.into_iter().chain(render_elements).collect(),
+                cursor_elements_len
+            }
+        };
 
         let res = surface
             .compositor
@@ -1451,4 +1470,27 @@ fn render_screencopy<'a>(
         Ok(_) => screencopy.submit(false),
         Err(err) => error!(?err, "Failed to submit screencopy!"),
     }
+}
+
+/// Draw rectangles incidacting damaged areas, if any.
+fn draw_damage<'a>(
+    dt: &mut OutputDamageTracker,
+    elements: &[FhtRenderElement<UdevRenderer<'a>>],
+    damage_color: [f32; 4],
+) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
+    let Ok((Some(damage), _)) = dt.damage_output(1, elements) else { return vec![] };
+
+    let mut damage_elements = vec![];
+    for damage_rect in damage {
+        let solid = SolidColorRenderElement::new(
+            smithay::backend::renderer::element::Id::new(),
+            *damage_rect,
+            CommitCounter::default(),
+            damage_color,
+            smithay::backend::renderer::element::Kind::Unspecified,
+        ).into();
+        damage_elements.push(solid)
+    }
+
+    damage_elements
 }

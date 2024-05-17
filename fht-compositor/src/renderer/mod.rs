@@ -16,6 +16,7 @@ pub mod texture_element;
 
 use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
@@ -52,6 +53,7 @@ use crate::utils::output::OutputExt;
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
+        Color = SolidColorRenderElement,
         Egui = FhtTextureElement,
         Wayland = WaylandSurfaceRenderElement<R>,
         WorkspaceSet = WorkspaceSetRenderElement<R>,

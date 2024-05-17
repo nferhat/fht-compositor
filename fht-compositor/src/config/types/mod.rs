@@ -230,6 +230,10 @@ pub struct RenderConfig {
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
 
+    /// Color to set for damaged areas.
+    #[serde(default)]
+    pub damage_color: Option<[f32; 4]>,
+
     /// Enable color transformation support from the Smithay renderer.
     ///
     /// These are optional, and don't do much for people (generally). Disabling them give you a
@@ -249,6 +253,7 @@ impl Default for RenderConfig {
             disable_10bit: default_disable_10bit(),
             #[cfg(feature = "udev_backend")]
             disable_overlay_planes: default_disable_overlay_planes(),
+            damage_color: None,
             enable_color_transformations: false,
             #[cfg(feature = "udev_backend")]
             render_node: default_render_node(),
