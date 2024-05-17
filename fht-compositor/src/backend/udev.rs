@@ -881,24 +881,29 @@ impl UdevData {
         surface.fps.start();
 
         let output_elements_result = {
-            let OutputElementsResult { render_elements, mut cursor_elements_len }= fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
+            let OutputElementsResult {
+                render_elements,
+                mut cursor_elements_len,
+            } = fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
             surface.fps.elements();
 
             // To render damage we just use solid color elements,
-            let damage_elements = CONFIG.renderer.damage_color.map(|damage_color| {
-                let mut state = OutputState::get(output);
-                draw_damage(
-                    &mut state.damage_tracker,
-                    &render_elements,
-                    damage_color
-                )
-            }).into_iter().flatten().collect::<Vec<_>>();
+            let damage_elements = CONFIG
+                .renderer
+                .damage_color
+                .map(|damage_color| {
+                    let mut state = OutputState::get(output);
+                    draw_damage(&mut state.damage_tracker, &render_elements, damage_color)
+                })
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
             // Also skip rendering damage in screencopy.
             cursor_elements_len += damage_elements.len();
 
             OutputElementsResult {
                 render_elements: damage_elements.into_iter().chain(render_elements).collect(),
-                cursor_elements_len
+                cursor_elements_len,
             }
         };
 
@@ -1478,7 +1483,9 @@ fn draw_damage<'a>(
     elements: &[FhtRenderElement<UdevRenderer<'a>>],
     damage_color: [f32; 4],
 ) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
-    let Ok((Some(damage), _)) = dt.damage_output(1, elements) else { return vec![] };
+    let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
+        return vec![];
+    };
 
     let mut damage_elements = vec![];
     for damage_rect in damage {
@@ -1488,7 +1495,8 @@ fn draw_damage<'a>(
             CommitCounter::default(),
             damage_color,
             smithay::backend::renderer::element::Kind::Unspecified,
-        ).into();
+        )
+        .into();
         damage_elements.push(solid)
     }
 

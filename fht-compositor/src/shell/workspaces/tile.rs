@@ -320,14 +320,16 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 |s, _, search| {
                     found_surface.fetch_or(s == *search, Ordering::SeqCst);
                 },
-                |_, _, _| !found_surface.load(Ordering::SeqCst)
+                |_, _, _| !found_surface.load(Ordering::SeqCst),
             );
-            if found_surface.load(Ordering::SeqCst) { return true }
+            if found_surface.load(Ordering::SeqCst) {
+                return true;
+            }
         }
 
         if surface_type.contains(WindowSurfaceType::POPUP) {
             return PopupManager::popups_for_surface(&element_surface)
-            .any(|(popup, _)| popup.wl_surface() == surface)
+                .any(|(popup, _)| popup.wl_surface() == surface);
         }
 
         false
