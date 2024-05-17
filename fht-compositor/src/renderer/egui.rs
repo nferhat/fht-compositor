@@ -37,12 +37,12 @@ pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht,
     };
 
     let (max_frametime, min_frametime, avg_frametime, avg_fps) = (
-        fps.max_frametime().as_secs_f64() * 1_000.0,
-        fps.min_frametime().as_secs_f64() * 1_000.0,
-        fps.avg_frametime().as_secs_f64() * 1_000.0,
-        fps.avg_fps(),
+        fps.max_frametime().as_millis_f64(),
+        fps.min_frametime().as_millis_f64(),
+        fps.avg_frametime().as_millis_f64(),
+        fps.avg_fps().round() as i32,
     );
-    let avg_rendertime = fps.avg_rendertime(5).as_secs_f64();
+    let avg_rendertime = fps.avg_rendertime(5).as_millis_f64();
 
     let format_info = |ui: &mut egui::Ui, name, data| {
         ui.horizontal_wrapped(|ui| {
@@ -54,15 +54,15 @@ pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht,
 
     area.show(context, |ui| {
         ui.collapsing("Framerate information", |ui| {
-            format_info(ui, "FPS", format!("{:0>07.3}", avg_fps));
+            format_info(ui, "FPS", avg_fps.to_string());
             format_info(
                 ui,
                 "Average rendertime",
-                format!("{:0>07.3}", avg_rendertime),
+                format!("{:0>07.3}ms", avg_rendertime),
             );
-            format_info(ui, "Minimum frametime", format!("{:0>07.3}", min_frametime));
-            format_info(ui, "Average frametime", format!("{:0>07.3}", avg_frametime));
-            format_info(ui, "Maximum frametime", format!("{:0>07.3}", max_frametime));
+            format_info(ui, "Minimum frametime", format!("{:04.1}ms", min_frametime));
+            format_info(ui, "Average frametime", format!("{:04.1}ms", avg_frametime));
+            format_info(ui, "Maximum frametime", format!("{:04.1}ms", max_frametime));
         });
 
         ui.collapsing("Mode information", |ui| {

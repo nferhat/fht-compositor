@@ -3,6 +3,7 @@
 #![feature(sync_unsafe_cell)]
 #![feature(option_take_if)]
 #![feature(let_chains)]
+#![feature(duration_millis_float)]
 // lints
 #![allow(clippy::ignored_unit_patterns)]
 #![allow(clippy::module_name_repetitions)]

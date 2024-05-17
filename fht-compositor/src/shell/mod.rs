@@ -345,7 +345,9 @@ impl Fht {
 
     /// Advance all the active animations for this given output
     pub fn advance_animations(&mut self, output: &Output, current_time: Time<Monotonic>) -> bool {
-        let mut animations_running = false;
+        // First check, egui running
+        let mut animations_running =
+            CONFIG.renderer.debug_overlay || CONFIG.greet || self.last_config_error.is_none();
         let wset = self.wset_mut_for(output);
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
             wset.switch_animation.take_if(|a| a.animation.is_finished())
