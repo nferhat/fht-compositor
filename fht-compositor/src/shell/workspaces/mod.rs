@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use async_std::task::spawn;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
-use smithay::desktop::layer_map_for_output;
+use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::calloop::{self, LoopHandle, RegistrationToken};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -627,7 +627,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     /// Find the element with this [`WlSurface`]
     pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
         self.tiles.iter().find_map(|tile| {
-            (tile.element.wl_surface().as_ref() == Some(surface)).then_some(&tile.element)
+            tile.has_surface(surface, WindowSurfaceType::ALL).then_some(&tile.element)
         })
     }
 
@@ -648,9 +648,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Return whether this workspace has an element  with this [`WlSurface`].
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.tiles
-            .iter()
-            .any(|tile| tile.element.wl_surface().as_ref() == Some(surface))
+        self.tiles.iter().any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
     }
 
     /// Return the focused element, giving priority to the fullscreen element first, then the

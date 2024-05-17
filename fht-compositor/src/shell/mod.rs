@@ -154,7 +154,7 @@ impl Fht {
                     if active
                         .tiles
                         .iter()
-                        .any(|w| w.element().wl_surface().as_ref() == Some(surface))
+                        .any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
                     {
                         return Some(o);
                     }

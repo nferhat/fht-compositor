@@ -5,8 +5,11 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::space::SpaceElement;
+use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_output;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Monotonic, Physical, Point, Rectangle, Scale, Size, Time};
+use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::config::{BorderConfig, ColorConfig, CONFIG};
@@ -294,6 +297,37 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         if let Some(location_animation) = self.location_animation.as_mut() {
             location_animation.set_current_time(current_time);
             return true;
+        }
+
+        false
+    }
+
+    /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
+    pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
+        let element_surface = self.element.wl_surface().unwrap();
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && element_surface == *surface {
+            return true;
+        }
+
+        if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
+            use std::sync::atomic::{AtomicBool, Ordering}; // thank you.
+
+            let found_surface: AtomicBool = false.into();
+            with_surface_tree_downward(
+                &element_surface,
+                surface,
+                |_, _, e| TraversalAction::DoChildren(e),
+                |s, _, search| {
+                    found_surface.fetch_or(s == *search, Ordering::SeqCst);
+                },
+                |_, _, _| !found_surface.load(Ordering::SeqCst)
+            );
+            if found_surface.load(Ordering::SeqCst) { return true }
+        }
+
+        if surface_type.contains(WindowSurfaceType::POPUP) {
+            return PopupManager::popups_for_surface(&element_surface)
+            .any(|(popup, _)| popup.wl_surface() == surface)
         }
 
         false
