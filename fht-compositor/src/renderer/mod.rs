@@ -17,11 +17,9 @@ pub mod texture_element;
 use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, Kind, RenderElement};
+use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
 };
@@ -29,8 +27,8 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 #[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture};
+use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
-use smithay::desktop::{layer_map_for_output, PopupManager};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Scale};
@@ -47,7 +45,7 @@ use crate::shell::cursor::CursorRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
 use crate::state::{egui_state_for_output, Fht, OutputState};
 use crate::utils::fps::Fps;
-use crate::utils::geometry::RectGlobalExt;
+use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
 crate::fht_render_elements! {
@@ -369,8 +367,7 @@ pub trait AsGlowRenderer: Renderer {
 }
 
 pub trait AsGlowFrame<'frame>: Frame {
-    fn glow_frame(&self) -> &GlowFrame<'frame>;
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame>;
+    fn glow_frame(&mut self) -> &mut GlowFrame<'frame>;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -384,11 +381,7 @@ impl AsGlowRenderer for GlowRenderer {
 }
 
 impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
+    fn glow_frame(&mut self) -> &mut GlowFrame<'frame> {
         self
     }
 }
@@ -406,11 +399,7 @@ impl<'a> AsGlowRenderer for UdevRenderer<'a> {
 
 #[cfg(feature = "udev_backend")]
 impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self.as_ref()
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
+    fn glow_frame(&mut self) -> &mut GlowFrame<'frame> {
         self.as_mut()
     }
 }
@@ -428,45 +417,22 @@ pub fn layer_elements<R: FhtRenderer>(
     layer: Layer,
 ) -> Vec<FhtRenderElement<R>> {
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
-
     let layer_map = layer_map_for_output(output);
-    let mut elements = vec![];
 
-    for (location, layer) in layer_map
+    layer_map
         .layers_on(layer)
         .rev()
         .filter_map(|l| layer_map.layer_geometry(l).map(|geo| (geo.loc, l)))
-    {
-        let location = location.to_physical_precise_round(output_scale);
-        let wl_surface = layer.wl_surface();
-
-        elements.extend(PopupManager::popups_for_surface(wl_surface).flat_map(
-            |(popup, offset)| {
-                let offset = (offset - popup.geometry().loc)
-                    .to_f64()
-                    .to_physical_precise_round(output_scale);
-                render_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    location + offset,
-                    output_scale,
-                    1.0,
-                    Kind::Unspecified,
-                )
-            },
-        ));
-
-        elements.extend(render_elements_from_surface_tree(
-            renderer,
-            wl_surface,
-            location,
-            output_scale,
-            1.0,
-            Kind::Unspecified,
-        ));
-    }
-
-    elements
+        .flat_map(|(loc, layer)| {
+            let loc = loc.as_local().to_global(output).as_logical();
+            layer.render_elements::<FhtRenderElement<R>>(
+                renderer,
+                loc.to_physical_precise_round(output_scale),
+                output_scale,
+                1.0,
+            )
+        })
+        .collect()
 }
 
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {

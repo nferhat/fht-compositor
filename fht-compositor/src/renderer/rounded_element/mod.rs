@@ -1,5 +1,4 @@
 use std::borrow::BorrowMut;
-use std::ops::{Div, Mul};
 
 use glam::{Mat3, Vec2};
 use smithay::backend::egl::EGLContext;
@@ -267,7 +266,7 @@ where
             self.element.draw(frame, src, dst, damage)
         } else {
             // Override texture shader with our uniforms
-            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
+            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame());
             let program = RoundedElementShader::get(gles_frame.egl_context());
 
             let additional_uniforms = vec![
@@ -280,7 +279,7 @@ where
             let res = self.element.draw(frame, src, dst, damage);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
-            BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();
+            BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame()).clear_tex_program_override();
 
             res
         }

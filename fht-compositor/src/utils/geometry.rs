@@ -26,6 +26,7 @@ pub trait PointLocalExt<C: Coordinate> {
     fn as_logical(self) -> Point<C, Logical>;
 }
 
+#[allow(unused)]
 pub trait SizeExt<C: Coordinate> {
     fn as_logical(self) -> Size<C, Logical>;
     fn as_local(self) -> Size<C, Local>;
@@ -41,11 +42,13 @@ pub trait RectCenterExt<C: Coordinate, Kind> {
     fn center(self) -> Point<C, Kind>;
 }
 
+#[allow(unused)]
 pub trait RectGlobalExt<C: Coordinate> {
     fn to_local(self, output: &Output) -> Rectangle<C, Local>;
     fn as_logical(self) -> Rectangle<C, Logical>;
 }
 
+#[allow(unused)]
 pub trait RectLocalExt<C: Coordinate> {
     fn to_global(self, output: &Output) -> Rectangle<C, Global>;
     fn as_logical(self) -> Rectangle<C, Logical>;

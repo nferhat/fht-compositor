@@ -225,6 +225,7 @@ macro_rules! delegate_screencopy {
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)] // TODO: Make overlay cursor work.
 pub struct ScreencopyFrameInfo {
     output: Output,
     physical_region: Rectangle<i32, Physical>,
@@ -353,6 +354,7 @@ impl Drop for Screencopy {
     }
 }
 
+#[allow(unused)] // TODO: Make overlay cursor work.
 impl Screencopy {
     pub fn buffer(&self) -> &WlBuffer {
         &self.buffer

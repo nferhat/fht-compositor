@@ -1,9 +1,6 @@
-use std::collections::hash_map::Entry;
-use std::sync::Mutex;
-
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
-use smithay::desktop::{layer_map_for_output, PopupKind};
+use smithay::desktop::PopupKind;
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
@@ -13,8 +10,7 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::wlr_layer::LayerSurfaceAttributes;
-use smithay::wayland::shell::xdg::XdgPopupSurfaceRoleAttributes;
+use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
 use crate::state::{Fht, OutputState, State};
 
@@ -111,54 +107,31 @@ impl State {
         }
     }
 
-    /// Process a potential commit request for a layer shell
-    fn maybe_map_pending_layer_shell(surface: &WlSurface, state: &mut Fht) {
-        let Entry::Occupied(entry) = state.pending_layers.entry(surface.clone()) else {
+    /// Process a popup surface commit request.
+    fn process_popup_commit(surface: &WlSurface, state: &mut Fht) {
+        if let Some(popup) = state.popups.find_popup(surface) {
+            // InputMethod popups dont need initial configure message
+            let PopupKind::Xdg(ref popup) = popup else {
+                return;
+            };
+
+            let initial_configure_sent = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<XdgPopupSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+            if !initial_configure_sent {
+                // NOTE: This should never fail as the initial configure is always
+                // allowed.
+                popup.send_configure().expect("initial configure failed");
+            }
+
             return;
         };
-
-        // Goofy process but we need it before
-        let (layer_surface, _) = entry.get();
-        let initial_configure_sent = with_states(layer_surface.wl_surface(), |states| {
-            states
-                .data_map
-                .get::<Mutex<LayerSurfaceAttributes>>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-        if !initial_configure_sent {
-            layer_surface.layer_surface().send_configure();
-            return;
-        }
-
-        let (layer_surface, output) = entry.remove();
-        if let Err(err) = layer_map_for_output(&output).map_layer(&layer_surface) {
-            warn!(?err, "Failed to map layer surface!");
-        };
-        state.output_resized(&output);
-    }
-}
-
-/// Ensures that the initial configure event is sent for a popup.
-fn popup_ensure_initial_configure(popup: &PopupKind) {
-    let PopupKind::Xdg(ref popup) = popup else {
-        return;
-    };
-
-    let initial_configure_sent = with_states(popup.wl_surface(), |states| {
-        states
-            .data_map
-            .get::<Mutex<XdgPopupSurfaceRoleAttributes>>()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .initial_configure_sent
-    });
-    if !initial_configure_sent {
-        // NOTE: A popup initial configure should never fail
-        popup.send_configure().expect("Initial configure failed!");
     }
 }
 
@@ -235,14 +208,11 @@ impl CompositorHandler for State {
 
         if surface == &root_surface {
             State::process_window_commit(&surface, &mut self.fht);
-            State::maybe_map_pending_layer_shell(&surface, &mut self.fht);
+            State::process_layer_shell_commit(&surface, &mut self.fht);
         }
 
-        // Or maybe a popup/subsurface
-        if let Some(popup) = self.fht.popups.find_popup(surface) {
-            popup_ensure_initial_configure(&popup);
-        }
         self.fht.popups.commit(surface);
+        State::process_popup_commit(surface, &mut self.fht);
 
         // Try to redraw the output
         if let Some(output) = self.fht.visible_output_for_surface(surface) {

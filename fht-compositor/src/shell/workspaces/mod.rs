@@ -633,11 +633,6 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     /// Find the tile with this [`WlSurface`]
-    pub fn tile_for(&self, element: &E) -> Option<&WorkspaceTile<E>> {
-        self.tiles.iter().find(|tile| *tile == element)
-    }
-
-    /// Find the tile with this [`WlSurface`]
     pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
         self.tiles.iter_mut().find(|tile| *tile == element)
     }
@@ -1153,10 +1148,17 @@ impl<E: WorkspaceElement> Workspace<E> {
             .enumerate()
             .filter_map(|(idx, tile)| {
                 if tile.draw_above_others() {
-                    above_render_elements = tile.render_elements(renderer, scale, alpha, true);
+                    above_render_elements =
+                        tile.render_elements(renderer, &self.output, scale, alpha, true);
                     None
                 } else {
-                    Some(tile.render_elements(renderer, scale, alpha, idx == self.focused_tile_idx))
+                    Some(tile.render_elements(
+                        renderer,
+                        &self.output,
+                        scale,
+                        alpha,
+                        idx == self.focused_tile_idx,
+                    ))
                 }
             })
             .flatten()

@@ -1,5 +1,5 @@
 use std::cell::{RefCell, RefMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
     OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, Window};
+use smithay::desktop::{layer_map_for_output, PopupManager, Window};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -257,7 +257,6 @@ pub struct Fht {
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
-    pub pending_layers: HashMap<WlSurface, (LayerSurface, Output)>,
     // Pending windows did not receive an initial configure yet.
     // Unmapped have and are waiting to be remapped/get a new buffer.
     pub pending_windows: Vec<smithay::desktop::Window>,
@@ -389,7 +388,6 @@ impl Fht {
             dnd_icon: None,
             cursor_theme_manager,
             workspaces: IndexMap::new(),
-            pending_layers: HashMap::new(),
             pending_windows: vec![],
             unmapped_windows: vec![],
             popups: PopupManager::default(),
@@ -458,7 +456,7 @@ impl Fht {
         // TODO: Add output management config + wlr_output_management protocol.
         let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
         trace!(?x, y = 0, "Using fallback output location.");
-        output.change_current_state(None, None, None, Some((x, 0).into()));
+        output.change_current_state(None, None, None, Some((200, 150).into()));
 
         let workspace_set = WorkspaceSet::new(output.clone(), self.loop_handle.clone());
         self.workspaces.insert(output.clone(), workspace_set);

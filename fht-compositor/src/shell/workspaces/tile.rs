@@ -6,6 +6,7 @@ use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Monotonic, Physical, Point, Rectangle, Scale, Size, Time};
@@ -20,8 +21,11 @@ use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutli
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{FhtRenderer, SplitRenderElements};
 use crate::utils::animation::Animation;
-use crate::utils::geometry::{Local, PointLocalExt, RectExt, SizeExt};
+use crate::utils::geometry::{
+    Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
+};
 
+#[allow(unused)] // I did not finish implementing everything using this trait.
 pub trait WorkspaceElement:
     Clone + std::fmt::Debug + SpaceElement + WaylandFocus + IsAlive + Sized + PartialEq
 {
@@ -339,13 +343,15 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
+        output: &Output,
         scale: Scale<f64>,
         alpha: f32,
         focused: bool,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
-        let render_location = self.render_location().as_logical();
+        let render_location = self.render_location().to_global(output).as_logical();
         let render_location_phys = self
             .render_location()
+            .to_global(&output)
             .as_logical()
             .to_physical_precise_round(scale);
         // Our tile visual geometry, this will be used to crop out rounded corners
@@ -404,9 +410,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         let border_element = need_border
             .then(|| {
                 let border_location =
-                    self.render_location() + self.element.render_location_offset();
+                    render_location + self.element.render_location_offset().as_logical();
                 let mut border_geo =
-                    Rectangle::from_loc_and_size(border_location, self.element.size());
+                    Rectangle::from_loc_and_size(border_location, self.element.size().as_logical());
                 let thickness = border_config.thickness as i32;
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();
@@ -448,7 +454,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
                 // Render again where the buffer is
                 let mut border_geo =
-                    Rectangle::from_loc_and_size(self.location, self.element.size());
+                    Rectangle::from_loc_and_size(self.location, self.element.size())
+                        .to_global(output)
+                        .as_logical();
                 let thickness = border_config.thickness as i32;
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();

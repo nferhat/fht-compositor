@@ -9,12 +9,11 @@ use smithay::backend::renderer::gles::{
     GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType,
 };
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::Rectangle;
+use smithay::utils::{Logical, Rectangle};
 
 use super::pixel_shader_element::FhtPixelShaderElement;
 use super::AsGlowRenderer;
 use crate::config::ColorConfig;
-use crate::utils::geometry::{Local, RectLocalExt};
 
 pub type RoundedOutlineShaderCache =
     HashMap<WlSurface, (RoundedOutlineShaderSettings, PixelShaderElement)>;
@@ -88,7 +87,7 @@ impl RoundedOutlineShader {
         scale: f64,
         alpha: f32,
         wl_surface: &WlSurface,
-        geo: Rectangle<i32, Local>,
+        geo: Rectangle<i32, Logical>,
         settings: RoundedOutlineShaderSettings,
     ) -> FhtPixelShaderElement {
         let scaled_thickness = settings.thickness as f32 * scale as f32;
@@ -100,8 +99,8 @@ impl RoundedOutlineShader {
             .get_mut(wl_surface)
             .filter(|(old_settings, _)| &settings == old_settings)
         {
-            if element.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
-                element.resize(geo.as_logical(), None);
+            if element.geometry(1.0.into()).to_logical(1) != geo {
+                element.resize(geo, None);
             }
             return FhtPixelShaderElement(element.clone());
         }
@@ -112,7 +111,7 @@ impl RoundedOutlineShader {
         };
         let mut element = PixelShaderElement::new(
             shader.program.clone(),
-            geo.as_logical(),
+            geo,
             None, //TODO
             alpha,
             vec![
@@ -125,8 +124,8 @@ impl RoundedOutlineShader {
             Kind::Unspecified,
         );
 
-        if element.geometry(1.0.into()).to_logical(1) != geo.as_logical() {
-            element.resize(geo.as_logical(), None);
+        if element.geometry(1.0.into()).to_logical(1) != geo {
+            element.resize(geo, None);
         }
 
         element_cache.insert(wl_surface.clone(), (settings, element.clone()));

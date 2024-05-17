@@ -103,18 +103,6 @@ impl Fht {
             .find_map(|(_, wset)| wset.ws_mut_for(window))
     }
 
-    /// Get a reference to the tile  holding this window
-    pub fn tile_for(&self, window: &Window) -> Option<&WorkspaceTile<Window>> {
-        self.workspaces()
-            .find_map(|(_, wset)| wset.workspaces().find_map(|ws| ws.tile_for(window)))
-    }
-
-    /// Get a reference to the tile  holding this window
-    pub fn tile_mut_for(&mut self, window: &Window) -> Option<&mut WorkspaceTile<Window>> {
-        self.workspaces_mut()
-            .find_map(|(_, wset)| wset.workspaces_mut().find_map(|ws| ws.tile_mut_for(window)))
-    }
-
     /// Get a this window's geometry.
     pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Global>> {
         self.workspaces().find_map(|(_, wset)| {
@@ -134,18 +122,6 @@ impl Fht {
                 layer_map
                     .layer_for_surface(surface, WindowSurfaceType::ALL)
                     .is_some()
-            })
-            .or_else(|| {
-                // Pending layer_surface?
-                self.pending_layers.iter().find_map(|(_, (l, output))| {
-                    let mut found = false;
-                    l.with_surfaces(|s, _| {
-                        if s == surface {
-                            found = true;
-                        }
-                    });
-                    found.then_some(output)
-                })
             })
             .or_else(|| {
                 // Mapped window?

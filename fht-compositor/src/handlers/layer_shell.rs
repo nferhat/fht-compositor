@@ -1,10 +1,14 @@
 use smithay::delegate_layer_shell;
-use smithay::desktop::{layer_map_for_output, LayerSurface};
+use smithay::desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output;
-use smithay::wayland::shell::wlr_layer::{self, WlrLayerShellHandler, WlrLayerShellState};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::wayland::compositor::with_states;
+use smithay::wayland::shell::wlr_layer::{
+    self, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
+};
 
-use crate::state::State;
+use crate::state::{Fht, State};
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -25,19 +29,15 @@ impl WlrLayerShellHandler for State {
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| self.fht.workspaces.keys().next().unwrap().clone());
-        let wl_surface = surface.wl_surface().clone();
         let layer_surface = LayerSurface::new(surface, namespace);
-        self.fht
-            .pending_layers
-            .insert(wl_surface, (layer_surface, output));
+        let mut map = layer_map_for_output(&output);
+        map.map_layer(&layer_surface)
+            .expect("Failed to map layer shell!");
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
         let mut layer_output = None;
-        if let Some((layer_surface, _)) = self.fht.pending_layers.remove(surface.wl_surface()) {
-            // This was a pending layer, it was not mapped, just close it.
-            layer_surface.layer_surface().send_close();
-        } else if let Some((mut layer_map, layer, output)) = self.fht.outputs().find_map(|o| {
+        if let Some((mut layer_map, layer, output)) = self.fht.outputs().find_map(|o| {
             let layer_map = layer_map_for_output(o);
             let layer = layer_map
                 .layers()
@@ -53,6 +53,47 @@ impl WlrLayerShellHandler for State {
 
         if let Some(output) = layer_output {
             self.fht.output_resized(&output);
+        }
+    }
+}
+
+impl State {
+    /// Process a potential commit request for a layer shell
+    pub fn process_layer_shell_commit(surface: &WlSurface, state: &mut Fht) {
+        let mut layer_output = None;
+        if let Some(output) = state.outputs().find(|o| {
+            let map = layer_map_for_output(o);
+            map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .is_some()
+        }) {
+            layer_output = Some(output.clone());
+            let initial_configure_sent = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<LayerSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+
+            let mut map = layer_map_for_output(&output);
+
+            // arrange the layers before sending the initial configure
+            // to respect any size the client may have sent
+            map.arrange();
+            // send the initial configure if relevant
+            if !initial_configure_sent {
+                let layer = map
+                    .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                    .unwrap();
+
+                layer.layer_surface().send_configure();
+            }
+        }
+        if let Some(output) = layer_output {
+            // fighting rust's borrow checker episode 32918731287
+            state.output_resized(&output);
         }
     }
 }
