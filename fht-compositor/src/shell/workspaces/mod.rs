@@ -749,7 +749,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
         tile.element.output_leave(&self.output);
         tile.element.set_bounds(None);
-        self.focused_tile_idx = self.focused_tile_idx.clamp(0, self.tiles.len() - 1);
+        self.focused_tile_idx = self.focused_tile_idx.clamp(0, self.tiles.len().saturating_sub(1));
 
         {
             let ipc_path = self.ipc_path.clone();
