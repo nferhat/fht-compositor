@@ -61,6 +61,7 @@ use crate::config::CONFIG;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
+use crate::shell::workspaces::tile::WorkspaceTile;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -257,10 +258,10 @@ pub struct Fht {
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
-    // Pending windows did not receive an initial configure yet.
-    // Unmapped have and are waiting to be remapped/get a new buffer.
-    pub pending_windows: Vec<smithay::desktop::Window>,
-    pub unmapped_windows: Vec<(smithay::desktop::Window, Output, usize)>,
+    /// Windows that did not receive an initial configure message.
+    pub pending_windows: Vec<PendingWindow>,
+    /// Windows that received an initial configure message and is still not mapped.
+    pub unmapped_tiles: Vec<UnmappedTile>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
 
@@ -389,7 +390,7 @@ impl Fht {
             cursor_theme_manager,
             workspaces: IndexMap::new(),
             pending_windows: vec![],
-            unmapped_windows: vec![],
+            unmapped_tiles: vec![],
             popups: PopupManager::default(),
 
             last_config_error: None,
@@ -456,7 +457,7 @@ impl Fht {
         // TODO: Add output management config + wlr_output_management protocol.
         let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
         trace!(?x, y = 0, "Using fallback output location.");
-        output.change_current_state(None, None, None, Some((200, 150).into()));
+        output.change_current_state(None, None, None, Some((x, 0).into()));
 
         let workspace_set = WorkspaceSet::new(output.clone(), self.loop_handle.clone());
         self.workspaces.insert(output.clone(), workspace_set);
@@ -1084,4 +1085,37 @@ impl RenderState {
             value => value,
         }
     }
+}
+
+/// An pending window.
+///
+/// Some clients set their initial_configure to be true even when they are NOT, so we just store
+/// this property on our own here.
+#[derive(Debug, Clone)]
+pub struct PendingWindow {
+    pub inner: Window,
+    pub initial_configure_sent: bool,
+}
+
+impl Into<PendingWindow> for Window {
+    fn into(self) -> PendingWindow {
+        PendingWindow {
+            inner: self,
+            initial_configure_sent: false,
+        }
+    }
+}
+
+impl Into<Window> for PendingWindow {
+    fn into(self) -> Window {
+        self.inner
+    }
+}
+
+/// An unmapped tile.
+#[derive(Debug)]
+pub struct UnmappedTile {
+    pub inner: WorkspaceTile<Window>,
+    pub last_output: Option<Output>,
+    pub last_workspace_idx: Option<usize>,
 }

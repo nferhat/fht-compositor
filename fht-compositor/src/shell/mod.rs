@@ -5,17 +5,18 @@ pub mod window;
 pub mod workspaces;
 
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind, Window, WindowSurfaceType
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface, PopupKind, Window, WindowSurfaceType
 };
 use smithay::input::pointer::Focus;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Monotonic, Point, Rectangle, Serial, Time};
+use smithay::utils::{Logical, Monotonic, Point, Rectangle, Serial, Time};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
@@ -23,7 +24,7 @@ use self::grabs::MoveSurfaceGrab;
 use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
-use crate::state::Fht;
+use crate::state::{Fht, UnmappedTile};
 use crate::utils::geometry::{
     Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
 };
@@ -49,22 +50,77 @@ impl Fht {
 
         let mut under = None;
 
-        if let Some(layer) = layer_map.layer_under(Layer::Overlay, point.as_logical()) {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
-            under = Some((layer.clone().into(), layer_loc.to_global(output)))
-        } else if let Some((fullscreen, loc)) = wset.current_fullscreen() {
-            under = Some((fullscreen.clone().into(), loc))
-        } else if let Some(layer) = layer_map.layer_under(Layer::Top, point.as_logical()) {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
-            under = Some((layer.clone().into(), layer_loc.to_global(output)))
-        } else if let Some((window, loc)) = wset.window_under(point) {
-            under = Some((window.clone().into(), loc))
-        } else if let Some(layer) = layer_map
+        let layer_surface_under = |layer: &LayerSurface, loc: Point<i32, Logical>| {
+            layer
+                .surface_under(
+                    point.to_local(output).as_logical() - loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
+                .map(|(surface, surface_loc)| {
+                    (
+                        PointerFocusTarget::from(surface),
+                        (surface_loc + loc).as_local().to_global(output),
+                    )
+                })
+        };
+
+        let window_surface_under = |window: &Window, loc: Point<i32, Logical>| {
+            let window_wl_surface = window.wl_surface().unwrap();
+            window
+                .surface_under(point.as_logical() - loc.to_f64(), WindowSurfaceType::ALL)
+                .map(|(surface, surface_loc)| {
+                    if surface == window_wl_surface {
+                        // Use the window immediatly when we are the toplevel surface.
+                        // PointerFocusTarget::Window to proceed (namely
+                        // State::process_mouse_action).
+                        (
+                            PointerFocusTarget::Window(window.clone()),
+                            loc.as_global(), // window loc is already global
+                        )
+                    } else {
+                        (
+                            PointerFocusTarget::from(surface),
+                            (surface_loc + loc).as_global(), // window loc is already global
+                        )
+                    }
+                })
+        };
+
+        if let Some(layer_focus) = layer_map
+            .layer_under(Layer::Overlay, point.as_logical())
+            .and_then(|layer| {
+                let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
+                layer_surface_under(layer, layer_loc)
+            })
+        {
+            under = Some(layer_focus);
+        } else if let Some(fullscreen_focus) = wset
+            .current_fullscreen()
+            .and_then(|(fullscreen, loc)| window_surface_under(fullscreen, loc.as_logical()))
+        {
+            under = Some(fullscreen_focus)
+        } else if let Some(layer_focus) = layer_map
+            .layer_under(Layer::Top, point.as_logical())
+            .and_then(|layer| {
+                let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
+                layer_surface_under(layer, layer_loc)
+            })
+        {
+            under = Some(layer_focus)
+        } else if let Some(window_focus) = wset
+            .element_under(point)
+            .and_then(|(window, loc)| window_surface_under(window, loc.as_logical()))
+        {
+            under = Some(window_focus)
+        } else if let Some(layer_focus) = layer_map
             .layer_under(Layer::Bottom, point.as_logical())
             .or_else(|| layer_map.layer_under(Layer::Background, point.as_logical()))
+            .and_then(|layer| {
+                let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
+                layer_surface_under(layer, layer_loc)
+            })
         {
-            let layer_loc = layer_map.layer_geometry(layer).unwrap().loc.as_local();
-            under = Some((layer.clone().into(), layer_loc.to_global(output)))
+            under = Some(layer_focus)
         }
 
         under
@@ -176,7 +232,8 @@ impl Fht {
     /// Prepapre a pending window to be mapped.
     pub fn prepare_pending_window(&mut self, window: Window) {
         let mut output = self.focus_state.output.clone().unwrap();
-        let wl_surface = window.wl_surface().unwrap();
+        let toplevel = window.toplevel().unwrap();
+        let wl_surface = toplevel.wl_surface();
 
         // Get the matching mapping setting, if the user specified one.
         let workspace_idx = self.wset_for(&output).get_active_idx();
@@ -218,17 +275,27 @@ impl Fht {
         }
 
         let wset = self.wset_mut_for(&output);
-
-        let workspace_idx = match map_settings.workspace {
+        let mut workspace_idx = match map_settings.workspace {
             None => wset.get_active_idx(),
             Some(idx) => idx.clamp(0, 9),
         };
+
+        // Even if the user set rules, we still always prefer the output and workspace of this
+        // window's toplevel parent.
+        if let Some((_, parent_workspace)) = toplevel
+            .parent()
+            .and_then(|parent_surface| self.find_window_and_workspace(&parent_surface))
+        {
+            workspace_idx = parent_workspace.index;
+            output = parent_workspace.output.clone();
+        }
+
+        let wset = self.wset_mut_for(&output);
         let workspace = &mut wset.workspaces[workspace_idx];
         let layout = workspace.get_active_layout();
 
         // Pre compute window geometry for insertion.
-        // Bogus tile so we can use the arrange_tiles
-        let mut tile = WorkspaceTile::new(window, None);
+        let mut tile = WorkspaceTile::new(window.clone(), None);
         let inner_gaps = CONFIG.general.inner_gaps;
         let outer_gaps = CONFIG.general.outer_gaps;
 
@@ -247,35 +314,58 @@ impl Fht {
             inner_gaps,
         );
 
-        let WorkspaceTile {
-            element: window, ..
-        } = tile;
+        // We dont want to animate the movement of opening windows.
+        tile.location_animation = None;
 
         // Client side-decorations
         let allow_csd = map_settings
             .allow_csd
             .unwrap_or(CONFIG.decoration.allow_csd);
-        let toplevel = window.toplevel().unwrap();
         toplevel.with_pending_state(|state| {
             if allow_csd {
-                state.decoration_mode = Some(DecorationMode::ClientSide)
+                state.decoration_mode = Some(DecorationMode::ClientSide);
             } else {
-                state.decoration_mode = Some(DecorationMode::ServerSide)
+                state.decoration_mode = Some(DecorationMode::ServerSide);
+                // For some reason clients still draw decorations even when asked not to.
+                // Some dont if you set their state to tiled (wow)
+                state.states.set(XdgToplevelState::TiledTop);
+                state.states.set(XdgToplevelState::TiledLeft);
+                state.states.set(XdgToplevelState::TiledRight);
+                state.states.set(XdgToplevelState::TiledBottom);
             }
         });
 
-        toplevel.send_configure();
-        self.unmapped_windows.push((window, output, workspace_idx));
+        tile.element.toplevel().unwrap().send_configure();
+
+        self.unmapped_tiles.push(UnmappedTile {
+            inner: tile,
+            last_output: Some(output),
+            last_workspace_idx: Some(workspace_idx),
+        })
     }
 
     /// Map a pending window, if it's found.
-    pub fn map_window(&mut self, window: Window, output: Output, workspace_idx: usize) {
+    ///
+    /// Returns the output where this tile has been mapped.
+    pub fn map_tile(&mut self, unmapped_tile: UnmappedTile) -> Output {
         let loop_handle = self.loop_handle.clone();
+
+        // Make sure we have valid values before insertion.
+        let UnmappedTile {
+            inner: tile,
+            last_output,
+            last_workspace_idx,
+        } = unmapped_tile;
+        let output = last_output.unwrap_or_else(|| self.active_output());
         let wset = self.wset_mut_for(&output);
+        let active_idx = wset.get_active_idx();
+        let workspace_idx = last_workspace_idx.unwrap_or(active_idx);
+
         let is_active = workspace_idx == wset.get_active_idx();
         let workspace = &mut wset.workspaces[workspace_idx];
 
-        workspace.insert_element(window.clone(), None);
+        let window = tile.element.clone();
+        workspace.insert_tile(tile);
 
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
@@ -292,6 +382,8 @@ impl Fht {
                 state.set_focus_target(Some(window.clone().into()));
             });
         }
+
+        output
     }
 
     /// Unconstraint a popup.

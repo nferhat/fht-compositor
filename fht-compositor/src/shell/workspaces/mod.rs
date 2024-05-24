@@ -57,7 +57,13 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             let output = output.clone();
             let loop_handle = loop_handle.clone();
             let ipc_path = format!("{path_base}/Workspaces/{index}");
-            workspaces.push(Workspace::new(output, loop_handle, index == 0, ipc_path));
+            workspaces.push(Workspace::new(
+                index,
+                output,
+                loop_handle,
+                index == 0,
+                ipc_path,
+            ));
         }
 
         Self {
@@ -233,7 +239,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
-    pub fn window_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
+    pub fn element_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
         if self.switch_animation.is_none() {
             // It's just the active one, so no need to do additional calculations.
             return self.active().element_under(point);
@@ -462,6 +468,9 @@ pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
     pub output: Output,
 
+    /// The index of the workspace.
+    pub index: usize,
+
     /// The tiles this workspace contains.
     ///
     /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
@@ -518,6 +527,7 @@ impl<E: WorkspaceElement> Drop for Workspace<E> {
 impl<E: WorkspaceElement> Workspace<E> {
     /// Create a new [`Workspace`] for this output.
     pub fn new(
+        index: usize,
         output: Output,
         loop_handle: LoopHandle<'static, State>,
         active: bool,
@@ -542,6 +552,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         Self {
             output,
+            index,
 
             tiles: vec![],
             // fullscreen: None,
@@ -659,6 +670,12 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Return the focused tile, giving priority to the fullscreen elementj first, then the
     /// possible active non-fullscreen element.
+    pub fn focused_tile(&self) -> Option<&WorkspaceTile<E>> {
+        self.tiles.get(self.focused_tile_idx)
+    }
+
+    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
+    /// possible active non-fullscreen element.
     pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
         self.tiles.get_mut(self.focused_tile_idx)
     }
@@ -749,7 +766,9 @@ impl<E: WorkspaceElement> Workspace<E> {
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
         tile.element.output_leave(&self.output);
         tile.element.set_bounds(None);
-        self.focused_tile_idx = self.focused_tile_idx.clamp(0, self.tiles.len().saturating_sub(1));
+        self.focused_tile_idx = self
+            .focused_tile_idx
+            .clamp(0, self.tiles.len().saturating_sub(1));
 
         {
             let ipc_path = self.ipc_path.clone();
@@ -1088,6 +1107,19 @@ impl<E: WorkspaceElement> Workspace<E> {
     #[profiling::function]
     pub fn element_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
         let point = point.to_local(&self.output);
+
+        // Start with focused tile.
+        if let Some(tile) = self.focused_tile() {
+            let render_location = tile.render_location();
+            if tile.bbox().to_f64().contains(point)
+                && tile
+                    .element
+                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+            {
+                return Some((tile.element(), render_location.to_global(&self.output)));
+            }
+        }
+
         self.tiles
             .iter()
             .filter(|tile| tile.bbox().to_f64().contains(point))

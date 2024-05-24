@@ -5,14 +5,12 @@ use smithay::desktop::{
 };
 use smithay::input::pointer::Focus;
 use smithay::input::Seat;
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
-use crate::config::CONFIG;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::State;
 
@@ -22,21 +20,8 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
-        // Basic configuration that isn't affected by the window rules.
-        toplevel.with_pending_state(|state| {
-            // For some reason, when we mark the window as tiled, it will not draw any csd. Atleast
-            // this is what happens with alot of wayland clients, regardless of what xdg_decoration
-            // advertises.
-            if !CONFIG.decoration.allow_csd {
-                state.states.set(XdgToplevelState::TiledLeft);
-                state.states.set(XdgToplevelState::TiledRight);
-                state.states.set(XdgToplevelState::TiledTop);
-                state.states.set(XdgToplevelState::TiledBottom);
-            }
-        });
-
         let window = Window::new_wayland_window(toplevel);
-        self.fht.pending_windows.push(window);
+        self.fht.pending_windows.push(window.into());
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
