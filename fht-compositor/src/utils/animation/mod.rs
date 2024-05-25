@@ -16,6 +16,10 @@ pub trait Animatable:
     + Copy
     + PartialEq
 {
+    /// Return the scaled value by x, where x is contained in [0.0, 1.0]
+    ///
+    /// You are free to change the x value as much as you want, but to avoid wonky cutoffs in your
+    /// animations, make sure that remains 0.0 and 1.0 at the edges of your custom function.
     fn y(&self, x: f64) -> Self;
 }
 
@@ -43,7 +47,9 @@ impl Animatable for f64 {
     }
 }
 
-/// A trait representing any kind of animation for the compositor needs.
+/// An animatable variable.
+///
+/// See [`Animatable`]
 #[derive(Clone, Copy, Debug)]
 pub struct Animation<T = f64>
 where

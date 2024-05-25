@@ -11,6 +11,16 @@ use crate::state::State;
 use crate::utils::geometry::{PointExt, RectCenterExt};
 use crate::utils::output::OutputExt;
 
+/// A list of modifiers you can use in a key pattern.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum Modifiers {
+    ALT,
+    CTRL,
+    SHIFT,
+    SUPER,
+}
+
+/// Custom adaptation of [`ModifiersState`] to allow for custom (de)serialization
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct FhtModifiersState {
     alt: bool,
@@ -129,15 +139,6 @@ pub enum KeyAction {
     ///
     /// This is the same as disabling the key pattern for this action.
     None,
-}
-
-/// A list of modifiers you can use in a key pattern.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum Modifiers {
-    ALT,
-    CTRL,
-    SHIFT,
-    SUPER,
 }
 
 /// A key pattern.

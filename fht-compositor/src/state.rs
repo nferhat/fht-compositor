@@ -29,7 +29,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Monotonic, Point, SERIAL_COUNTER};
+use smithay::utils::{Clock, IsAlive, Monotonic, SERIAL_COUNTER};
 use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -65,28 +65,27 @@ use crate::shell::workspaces::tile::WorkspaceTile;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::dbus::DBUS_CONNECTION;
-use crate::utils::geometry::{Global, RectCenterExt, SizeExt};
+use crate::utils::geometry::{RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::PipeWire;
 
 pub struct State {
+    /// Backend-agnostic state.
     pub fht: Fht,
+    /// Backend-specific state.
     pub backend: Backend,
 }
 
 impl State {
     /// Creates a new instance of the state.
-    ///
-    /// For backend initialization, use a module from [`crate::backend`] or use
-    /// [`crate::backend::init_backend_auto`] to initiate an appropriate one.
     pub fn new(
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
-        socket_name: String,
+        _socket_name: String,
     ) -> Self {
-        let mut fht = Fht::new(dh, loop_handle, loop_signal, socket_name);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal);
         let backend: crate::backend::Backend = if let Ok(backend_name) =
             std::env::var("FHTC_BACKEND")
         {
@@ -238,39 +237,65 @@ impl State {
     }
 }
 
-#[allow(unused, dead_code)] // some globals need to be registered but never read
 pub struct Fht {
-    pub socket_name: String,
+    /// A handle to our wayland display.
     pub display_handle: DisplayHandle,
+    /// A handle to our event loop.
     pub loop_handle: LoopHandle<'static, State>,
+    /// A signal to our loop to control it.
     pub loop_signal: LoopSignal,
+    /// Whether we should stop every operation.
     pub stop: Arc<AtomicBool>,
 
-    pub clock: Clock<Monotonic>,
-    pub suppressed_keys: HashSet<Keysym>,
-    pub seat: Seat<State>,
-    pub tablet_cursor_location: Option<Point<i32, Global>>,
-    pub devices: Vec<input::Device>,
+    /// wl_seat global.
     pub seat_state: SeatState<State>,
+    /// Our main wl_seat instance.
+    ///
+    /// For now, the scope of this compositor is rather small, it should be a standalone compositor
+    /// for a single head system. Supporting multi-seat/multi-head systems is not a priority.
+    pub seat: Seat<State>,
+    /// The exposed seat keyboard.
     pub keyboard: KeyboardHandle<State>,
+    /// The exposed seat pointer.
     pub pointer: PointerHandle<State>,
+    /// A monotonic clock to tie frame events and input events.
+    pub clock: Clock<Monotonic>,
+    /// A list of suppressed keys to not pass to the focused client.
+    pub suppressed_keys: HashSet<Keysym>,
+    /// A list of devices managed by the compositor.
+    pub devices: Vec<input::Device>,
 
+    /// The currently drawn drag and drop icon.
+    ///
+    /// TODO: Maybe move this to cursor_theme_manager?
     pub dnd_icon: Option<WlSurface>,
+    /// The cursor theme manager.
+    ///
+    /// This handles the cursor theme with its bitmaps and icons (based on the Xcursor standard)
     pub cursor_theme_manager: CursorThemeManager,
+    /// The list of registered outputs, and their associated [`WorkspaceSet`]s
     pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
     /// Windows that did not receive an initial configure message.
     pub pending_windows: Vec<PendingWindow>,
     /// Windows that received an initial configure message and is still not mapped.
     pub unmapped_tiles: Vec<UnmappedTile>,
+    /// Focus state of the compositor.
     pub focus_state: FocusState,
+    /// xdg_popup manager
     pub popups: PopupManager,
 
+    /// The last configuration error.
+    ///
+    /// TODO: Maybe use a custom error struct to tailor and customize the error messages?
     pub last_config_error: Option<anyhow::Error>,
 
+    /// PipeWire initialization.
+    ///
+    /// We can't start PipeWire immediatly since pipewire may not be running yet, but when the
+    /// ScreenCast application starts it should be started by then.
     #[cfg(feature = "xdg-screencast-portal")]
-    // We can't start PipeWire immediatly since pipewire may not be running yet, but when the
-    // ScreenCast application starts it should be started by then.
     pub pipewire_initialised: std::sync::Once,
+    /// PipeWire instance, for the XDG desktop screencast portal.
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire: Option<PipeWire>,
 
@@ -278,16 +303,11 @@ pub struct Fht {
     pub data_control_state: DataControlState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
-    pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub layer_shell_state: WlrLayerShellState,
-    pub output_manager_state: OutputManagerState,
-    pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub shm_state: ShmState,
-    pub viewporter_state: ViewporterState,
     pub xdg_activation_state: XdgActivationState,
-    pub xdg_decoration_state: XdgDecorationState,
     pub xdg_shell_state: XdgShellState,
 }
 
@@ -297,7 +317,6 @@ impl Fht {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
-        socket_name: String,
     ) -> Self {
         let clock = Clock::<Monotonic>::new();
         info!("Initialized monotonic clock.");
@@ -308,15 +327,10 @@ impl Fht {
             DataControlState::new::<State, _>(dh, Some(&primary_selection_state), |_| true);
         let data_device_state = DataDeviceState::new::<State>(dh);
         let dmabuf_state = DmabufState::new();
-        let fractional_scale_manager_state = FractionalScaleManagerState::new::<State>(dh);
         let layer_shell_state = WlrLayerShellState::new::<State>(dh);
-        let output_manager_state = OutputManagerState::new_with_xdg_output::<State>(dh);
-        let presentation_state = PresentationState::new::<State>(dh, clock.id() as u32);
         let shm_state =
             ShmState::new::<State>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
-        let viewporter_state = ViewporterState::new::<State>(dh);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
-        let xdg_decoration_state = XdgDecorationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         TextInputManagerState::new::<State>(&dh);
         InputMethodManagerState::new::<State, _>(&dh, |_| true);
@@ -336,6 +350,11 @@ impl Fht {
                 .get_data::<ClientState>()
                 .map_or(true, |data| data.security_context.is_none())
         });
+        XdgDecorationState::new::<State>(dh);
+        FractionalScaleManagerState::new::<State>(dh);
+        OutputManagerState::new_with_xdg_output::<State>(dh);
+        PresentationState::new::<State>(dh, clock.id() as u32);
+        ViewporterState::new::<State>(dh);
 
         // Initialize a seat and immediatly attach a keyboard and pointer to it.
         // If clients try to connect and do not find any of them they will try to initialize them
@@ -370,7 +389,6 @@ impl Fht {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 
         Self {
-            socket_name,
             display_handle: dh.clone(),
             loop_handle,
             loop_signal,
@@ -380,7 +398,6 @@ impl Fht {
             suppressed_keys: HashSet::new(),
             seat,
             devices: vec![],
-            tablet_cursor_location: None,
             seat_state,
             keyboard,
             pointer,
@@ -404,16 +421,11 @@ impl Fht {
             data_control_state,
             data_device_state,
             dmabuf_state,
-            fractional_scale_manager_state,
             keyboard_shortcuts_inhibit_state,
             layer_shell_state,
-            output_manager_state,
-            presentation_state,
             primary_selection_state,
             shm_state,
-            viewporter_state,
             xdg_activation_state,
-            xdg_decoration_state,
             xdg_shell_state,
         }
     }

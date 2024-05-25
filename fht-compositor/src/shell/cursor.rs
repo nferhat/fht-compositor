@@ -44,6 +44,10 @@ fn get_fallback_cursor_data(_: impl std::error::Error) -> Rc<CursorImage> {
 pub type CursorImageCache = HashMap<(CursorIcon, i32), Rc<CursorImage>>;
 pub type CursorTextureCache = HashMap<(CursorIcon, i32), Vec<(Image, Box<dyn Any>)>>;
 
+/// A cursor theme manager.
+///
+/// This will manage the active cursor theme expressed by the [`FhtConfig`], and cache the images
+/// to render them later.
 pub struct CursorThemeManager {
     /// A cache of the different cursor images associated with their cursor icons and scale.
     image_cache: RefCell<CursorImageCache>,
@@ -62,7 +66,7 @@ pub struct CursorThemeManager {
 }
 
 impl CursorThemeManager {
-    /// Intiaillize the cursor theme manager.
+    /// Initialize the cursor theme manager.
     pub fn new() -> Self {
         let CursorConfig { name, size } = CONFIG.general.cursor.clone();
         let image_status = CursorImageStatus::default_named();

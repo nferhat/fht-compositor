@@ -30,6 +30,8 @@ use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, Re
 use crate::utils::output::OutputExt;
 
 impl State {
+    /// Update the current keyboard focus with whatever [`KeyboardFocusTarget`] is under the
+    /// pointer.
     #[profiling::function]
     fn update_keyboard_focus(&mut self) {
         let keyboard = self.fht.keyboard.clone();
@@ -123,6 +125,10 @@ impl State {
         }
     }
 
+    /// Update our focus target.
+    ///
+    /// This will handle additional state changes regarding the old focus and the new focus
+    /// targets.
     pub fn set_focus_target(&mut self, ft: Option<KeyboardFocusTarget>) {
         let old_focus = self.fht.focus_state.focus_target.take();
         if let Some(KeyboardFocusTarget::Window(w)) = old_focus.as_ref() {
@@ -140,6 +146,9 @@ impl State {
             .set_focus(self, ft, SERIAL_COUNTER.next_serial());
     }
 
+    /// Move the pointe to a specific point.
+    ///
+    /// This will handle pointer constrains and account for them when moving the pointer.
     pub fn move_pointer(&mut self, point: Point<f64, Global>) {
         let pointer = self.fht.pointer.clone();
         let under = self.fht.focus_target_under(point);
@@ -169,6 +178,10 @@ impl State {
         }
     }
 
+    /// Clamp the cursor coordinates so that they dont overflow outside of compositor coordinate
+    /// space.
+    ///
+    /// In other terms make sure they are clamped to stay in output bounds.
     pub fn clamp_coords(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
         let (pos_x, pos_y) = pos.into();
         let max_x = self
@@ -190,6 +203,7 @@ impl State {
         }
     }
 
+    /// Process an input event from the backend.
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         let mut output = self.fht.active_output();
