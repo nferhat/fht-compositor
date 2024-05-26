@@ -54,7 +54,9 @@ impl State {
 
             // FIXME: Why this doesn't commit by itself?
             let surface = surface.clone();
-            state.loop_handle.insert_idle(move |state| state.commit(&surface));
+            state
+                .loop_handle
+                .insert_idle(move |state| state.commit(&surface));
 
             return None;
         }
@@ -71,7 +73,9 @@ impl State {
             if !has_render_buffer(surface) {
                 // FIXME: Why this doesn't commit by itself?
                 let surface = surface.clone();
-                state.loop_handle.insert_idle(move |state| state.commit(&surface));
+                state
+                    .loop_handle
+                    .insert_idle(move |state| state.commit(&surface));
 
                 // We still cant map.
                 return None;
@@ -95,7 +99,7 @@ impl State {
     }
 
     /// Process a popup surface commit request.
-    fn process_popup_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output>{
+    fn process_popup_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
         let popup = state.popups.find_popup(surface)?;
 
         match popup {
@@ -213,7 +217,7 @@ impl CompositorHandler for State {
         self.fht.popups.commit(surface);
         if let Some(output) = State::process_popup_commit(surface, &mut self.fht) {
             OutputState::get(&output).render_state.queue();
-            return
+            return;
         }
 
         // 2nd case if this isnt a root surface; some kind of subsurface.

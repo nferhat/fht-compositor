@@ -1,6 +1,5 @@
 use std::cell::{RefCell, RefMut};
 use std::collections::HashSet;
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,7 +64,7 @@ use crate::shell::workspaces::tile::WorkspaceTile;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::dbus::DBUS_CONNECTION;
-use crate::utils::geometry::{RectCenterExt, SizeExt};
+use crate::utils::geometry::RectCenterExt;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::PipeWire;

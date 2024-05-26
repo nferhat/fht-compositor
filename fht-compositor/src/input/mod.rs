@@ -317,7 +317,7 @@ impl State {
                             key_state == KeyState::Pressed,
                             *modifiers,
                         ) {
-                            return FilterResult::Intercept(KeyAction::None)
+                            return FilterResult::Intercept(KeyAction::None);
                         }
 
                         #[cfg(feature = "udev_backend")]
@@ -530,14 +530,13 @@ impl State {
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
 
-
                 if event.button().is_some_and(|button| {
                     egui.input_event_pointer_button(
                         button,
                         state == wl_pointer::ButtonState::Pressed,
                     )
                 }) {
-                    return
+                    return;
                 }
 
                 if state == wl_pointer::ButtonState::Pressed {
