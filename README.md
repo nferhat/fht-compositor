@@ -10,6 +10,9 @@ workspace window.
 Each workspace provides a *dynamic tiling* layout (currently supporting bottom stack and tile), with
 a system of "tiles" that contain windows.
 
+https://github.com/nferhat/fht-compositor/assets/104871514/43e6832f-f851-4f58-a8a8-9aa529aa9c9d
+> Sorry for compression, github wants videos less than 10mb
+
 ## Features
 
 - Can be ran user an X11 window, or under a TTY.
