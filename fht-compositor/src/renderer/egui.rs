@@ -1,7 +1,6 @@
 //! Helper functions to build the egui debug overlay.
 
 use smithay::output::Output;
-use smithay_egui::{egui, egui_extras};
 
 use crate::shell::workspaces::WorkspaceSwitchAnimation;
 use crate::state::Fht;
@@ -10,10 +9,16 @@ use crate::utils::geometry::{PointExt, PointGlobalExt};
 use crate::utils::output::OutputExt;
 
 #[profiling::function]
-pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht, fps: &mut Fps) {
+pub fn egui_output_debug_overlay(
+    context: &egui::Context,
+    output: &Output,
+    state: &Fht,
+    fps: &mut Fps,
+) {
     let area = egui::Window::new(output.name())
-        .resizable(false)
-        .collapsible(false)
+        .default_width(200.0)
+        .min_width(200.0)
+        .collapsible(true)
         .movable(true);
     let mode = output.current_mode().unwrap();
     let scale = output.current_scale().fractional_scale();
@@ -53,7 +58,10 @@ pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht,
     };
 
     area.show(context, |ui| {
-        ui.collapsing("Framerate information", |ui| {
+        let collapse = egui::CollapsingHeader::new("Framerate information")
+            .default_open(true)
+            .open(Some(true));
+        collapse.show(ui, |ui| {
             format_info(ui, "FPS", avg_fps.to_string());
             format_info(
                 ui,
@@ -65,7 +73,10 @@ pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht,
             format_info(ui, "Maximum frametime", format!("{:04.1}ms", max_frametime));
         });
 
-        ui.collapsing("Mode information", |ui| {
+        let collapse = egui::CollapsingHeader::new("Mode information")
+            .default_open(true)
+            .open(Some(true));
+        collapse.show(ui, |ui| {
             format_info(ui, "Refresh rate", format!("{}", mode.refresh / 1_000));
             format_info(
                 ui,
@@ -80,14 +91,16 @@ pub fn egui_debug_overlay(context: &egui::Context, output: &Output, state: &Fht,
             format_info(ui, "Current scale", format!("{:0>04.2}", scale))
         });
 
-        ui.collapsing("Misc information", |ui| {
+        let collapse = egui::CollapsingHeader::new("Misc information")
+            .default_open(true)
+            .open(Some(true));
+        collapse.show(ui, |ui| {
             format_info(
                 ui,
                 "Pointer location",
                 format!("({:0>09.4}, {:0>09.4})", pointer_loc.x, pointer_loc.y),
             );
             format_info(ui, "Active workspace idx", active_idx_str);
-            format_info(ui, "Animations ongoing", format!("Figure this out"));
         });
     });
 }

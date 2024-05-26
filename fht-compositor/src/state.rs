@@ -54,10 +54,10 @@ use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
-use smithay_egui::EguiState;
 
 use crate::backend::Backend;
 use crate::config::CONFIG;
+use crate::egui::Egui;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
@@ -289,6 +289,9 @@ pub struct Fht {
     /// TODO: Maybe use a custom error struct to tailor and customize the error messages?
     pub last_config_error: Option<anyhow::Error>,
 
+    /// Egui debug overlay state.
+    pub egui: Egui,
+
     /// PipeWire initialization.
     ///
     /// We can't start PipeWire immediatly since pipewire may not be running yet, but when the
@@ -412,6 +415,8 @@ impl Fht {
 
             last_config_error: None,
 
+            egui: Egui::default(),
+
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire_initialised: std::sync::Once::new(),
             #[cfg(feature = "xdg-screencast-portal")]
@@ -473,6 +478,15 @@ impl Fht {
 
         let workspace_set = WorkspaceSet::new(output.clone(), self.loop_handle.clone());
         self.workspaces.insert(output.clone(), workspace_set);
+
+        let pointer_devices = self
+            .devices
+            .iter()
+            .filter(|d| d.has_capability(input::DeviceCapability::Pointer))
+            .count();
+        let modifiers = self.keyboard.modifier_state();
+        self.egui
+            .add_output(output.clone(), pointer_devices, modifiers);
 
         {
             let output = output.clone();
@@ -981,16 +995,6 @@ impl ClientData for ClientState {
         _reason: smithay::reexports::wayland_server::backend::DisconnectReason,
     ) {
     }
-}
-
-/// Retrieve the [`EguiState`] for a given [`Output`]
-///
-/// If none existed before a new [`EguiState`] will be created for this output
-pub fn egui_state_for_output(output: &Output) -> Rc<EguiState> {
-    output
-        .user_data()
-        .get_or_insert(|| Rc::new(EguiState::new(output.geometry().size.as_logical())))
-        .clone()
 }
 
 #[derive(Default, Debug)]

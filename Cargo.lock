@@ -1248,19 +1248,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_demo_lib"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "157bdb4408d324d9035c1b5cc517c6c4f0b8067195a931402a282c464f366cd7"
-dependencies = [
- "egui",
- "egui_extras",
- "egui_plot",
- "log",
- "unicode_names2",
-]
-
-[[package]]
 name = "egui_extras"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1286,15 +1273,6 @@ dependencies = [
  "memoffset 0.6.5",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "egui_plot"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f33a00fe8eb1ba56535b3dbacdecc7a1365a328908a97c5f3c81bb466be72b"
-dependencies = [
- "egui",
 ]
 
 [[package]]
@@ -1537,6 +1515,9 @@ dependencies = [
  "bitflags 2.4.2",
  "color-eyre",
  "colors-transform",
+ "egui",
+ "egui_extras",
+ "egui_glow",
  "fht-config",
  "glam 0.27.0",
  "indexmap",
@@ -1551,7 +1532,6 @@ dependencies = [
  "serde_arrays",
  "smithay",
  "smithay-drm-extras",
- "smithay-egui",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -2237,7 +2217,7 @@ dependencies = [
  "web-sys",
  "winapi",
  "window_clipboard",
- "winit 0.29.15",
+ "winit",
 ]
 
 [[package]]
@@ -2249,20 +2229,6 @@ dependencies = [
  "block2",
  "dispatch",
  "objc2",
-]
-
-[[package]]
-name = "image"
-version = "0.24.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "034bbe799d1909622a74d1193aa50147769440040ff36cb2baa947609b0a4e23"
-dependencies = [
- "bytemuck",
- "byteorder",
- "color_quant",
- "jpeg-decoder",
- "num-traits",
- "png",
 ]
 
 [[package]]
@@ -3863,13 +3829,11 @@ dependencies = [
  "tracing",
  "udev",
  "wayland-backend",
- "wayland-egl",
  "wayland-protocols",
  "wayland-protocols-misc",
  "wayland-protocols-wlr",
  "wayland-server",
  "wayland-sys",
- "winit 0.29.10",
  "x11rb 0.13.0",
  "xkbcommon",
 ]
@@ -3917,25 +3881,6 @@ source = "git+https://github.com/smithay/Smithay?rev=0398269#0398269eab5e0e1be21
 dependencies = [
  "drm 0.12.0",
  "edid-rs",
-]
-
-[[package]]
-name = "smithay-egui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cgmath",
- "egui",
- "egui_demo_lib",
- "egui_extras",
- "egui_glow",
- "image",
- "lazy_static",
- "log",
- "memoffset 0.9.0",
- "smithay",
- "tracing-subscriber",
- "xkbcommon",
 ]
 
 [[package]]
@@ -4446,12 +4391,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f962df74c8c05a667b5ee8bcf162993134c104e96440b663c8daa176dc772d8c"
 
 [[package]]
-name = "unicode_names2"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446c96c6dd42604779487f0a981060717156648c1706aa1f464677f03c6cc059"
-
-[[package]]
 name = "usvg"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4694,16 +4633,6 @@ dependencies = [
  "rustix 0.38.31",
  "wayland-client",
  "xcursor",
-]
-
-[[package]]
-name = "wayland-egl"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355f652e5a24ae02d2ad536c8fc2d3dcc6c2bd635027cd6103a193e7d75eeda2"
-dependencies = [
- "wayland-backend",
- "wayland-sys",
 ]
 
 [[package]]
@@ -5216,53 +5145,6 @@ name = "windows_x86_64_msvc"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
-
-[[package]]
-name = "winit"
-version = "0.29.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c824f11941eeae66ec71111cc2674373c772f482b58939bb4066b642aa2ffcf"
-dependencies = [
- "ahash 0.8.8",
- "android-activity",
- "atomic-waker",
- "bitflags 2.4.2",
- "bytemuck",
- "calloop 0.12.4",
- "cfg_aliases 0.1.1",
- "core-foundation",
- "core-graphics",
- "cursor-icon",
- "icrate",
- "js-sys",
- "libc",
- "log",
- "memmap2 0.9.4",
- "ndk",
- "ndk-sys",
- "objc2",
- "once_cell",
- "orbclient",
- "percent-encoding",
- "raw-window-handle",
- "redox_syscall 0.3.5",
- "rustix 0.38.31",
- "smithay-client-toolkit",
- "smol_str",
- "unicode-segmentation",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "web-sys",
- "web-time",
- "windows-sys 0.48.0",
- "x11-dl",
- "x11rb 0.13.0",
- "xkbcommon-dl",
-]
 
 [[package]]
 name = "winit"

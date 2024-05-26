@@ -18,7 +18,6 @@ use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
@@ -43,10 +42,9 @@ use crate::config::CONFIG;
 use crate::portals::CursorMode;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
-use crate::state::{egui_state_for_output, Fht, OutputState};
+use crate::state::{Fht, OutputState};
 use crate::utils::fps::Fps;
-use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
-use crate::utils::output::OutputExt;
+use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt};
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
@@ -93,7 +91,7 @@ impl Fht {
 
         // Then EGUI, for debug overlay, config error notification, and greeting.
         if let Some(egui) = self.egui_elements(renderer.glow_renderer_mut(), output, fps) {
-            elements.push(FhtRenderElement::Egui(FhtTextureElement(egui)))
+            elements.push(FhtRenderElement::Egui(egui))
         }
 
         // Then overlay layer shells + their popups
@@ -200,32 +198,38 @@ impl Fht {
     /// egui.
     #[profiling::function]
     fn egui_elements(
-        &self,
+        &mut self,
         renderer: &mut GlowRenderer,
         output: &Output,
         fps: &mut Fps,
-    ) -> Option<TextureRenderElement<GlesTexture>> {
+    ) -> Option<FhtTextureElement> {
         let scale = output.current_scale().fractional_scale();
-        let egui = egui_state_for_output(output);
+        let int_scale = output.current_scale().integer_scale();
+        let egui = self.egui.outputs.get(output).cloned().unwrap();
+
+        let mut egui = egui.lock().unwrap();
+        let time = self.clock.now().into();
         if !CONFIG.renderer.debug_overlay && !CONFIG.greet && self.last_config_error.is_none() {
             // Even if we are rendering nothing, make sure egui understands we are really doing
             // nothing, because not running the context will make it use the last frame it was
             // drawn.
             //
             // It's also so we dispatch input events that we collected during the last frame
-            egui.run(|_| (), scale);
-            return None;
+            egui.run(|_| (), time, int_scale);
+            self.egui.active = false;
+            None
         } else {
             let is_focused = self
                 .focus_state
                 .output
                 .as_ref()
                 .is_some_and(|o| o == output);
+            self.egui.active = true;
 
             egui.render(
                 |ctx| {
                     if CONFIG.renderer.debug_overlay {
-                        egui::egui_debug_overlay(ctx, output, self, fps);
+                        egui::egui_output_debug_overlay(ctx, output, self, fps);
                     }
 
                     if is_focused && CONFIG.greet {
@@ -236,12 +240,13 @@ impl Fht {
                         if let Some(err) = self.last_config_error.as_ref() {
                             egui::egui_config_error(ctx, err);
                         }
+                        // TODO: Other non-output specific information
                     }
                 },
                 renderer,
-                output.geometry().as_logical().loc,
                 scale,
                 1.0,
+                self.clock.now().into(),
             )
             .ok()
         }

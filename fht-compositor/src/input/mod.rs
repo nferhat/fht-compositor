@@ -25,7 +25,7 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
-use crate::state::{egui_state_for_output, OutputState, State};
+use crate::state::{OutputState, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
@@ -154,8 +154,9 @@ impl State {
         let under = self.fht.focus_target_under(point);
 
         if let Some(output) = self.fht.focus_state.output.as_ref() {
-            let position = point.to_i32_round().to_local(output).as_logical();
-            egui_state_for_output(output).handle_pointer_motion(position);
+            let position = point.to_i32_round().to_local(output);
+            let egui = self.fht.egui.outputs.get(output).cloned().unwrap();
+            egui.lock().unwrap().input_event_pointer_position(position);
         }
 
         pointer.motion(
@@ -207,6 +208,8 @@ impl State {
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         let mut output = self.fht.active_output();
+        let egui = self.fht.egui.outputs.get(&output).cloned().unwrap();
+        let mut egui = egui.lock().unwrap();
 
         match event {
             InputEvent::DeviceAdded { device } => {
@@ -216,8 +219,7 @@ impl State {
                         &TabletDescriptor::from(&device),
                     );
                 }
-                // TODO: Handle touch devices.
-                egui_state_for_output(&output).handle_device_added(&device);
+                egui.input_event_device_added(&device);
             }
             InputEvent::DeviceRemoved { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {
@@ -228,7 +230,7 @@ impl State {
                         tablet_seat.clear_tools();
                     }
                 }
-                egui_state_for_output(&output).handle_device_removed(&device);
+                egui.input_event_device_removed(&device);
             }
             InputEvent::Keyboard { event } => {
                 let keycode = event.key_code();
@@ -309,6 +311,14 @@ impl State {
                         // This also ignores non-qwerty keyboards too, I have to think about this
                         // sometime
                         let keysym = *handle.raw_syms().first().unwrap();
+
+                        if egui.input_event_keyboard(
+                            keysym.raw(),
+                            key_state == KeyState::Pressed,
+                            *modifiers,
+                        ) {
+                            return FilterResult::Intercept(KeyAction::None)
+                        }
 
                         #[cfg(feature = "udev_backend")]
                         if key_state == KeyState::Pressed
@@ -464,11 +474,8 @@ impl State {
                 pointer.frame(self);
 
                 {
-                    let location = pointer_location
-                        .to_local(&output)
-                        .to_i32_round()
-                        .as_logical();
-                    egui_state_for_output(&output).handle_pointer_motion(location);
+                    let location = pointer_location.to_local(&output).to_i32_round();
+                    egui.input_event_pointer_position(location);
                 }
 
                 // If pointer is now in a constraint region, activate it
@@ -502,11 +509,8 @@ impl State {
                 let under = self.fht.focus_target_under(pointer_location);
 
                 {
-                    let local_pos = pointer_location
-                        .to_i32_round()
-                        .to_local(&output)
-                        .as_logical();
-                    egui_state_for_output(&output).handle_pointer_motion(local_pos);
+                    let local_pos = pointer_location.to_i32_round().to_local(&output);
+                    egui.input_event_pointer_position(local_pos);
                 }
 
                 pointer.motion(
@@ -526,17 +530,14 @@ impl State {
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
 
-                {
-                    let egui = egui_state_for_output(&output);
-                    if egui.wants_pointer()
-                        && let Some(button) = event.button()
-                    {
-                        egui.handle_pointer_button(
-                            button,
-                            state == wl_pointer::ButtonState::Pressed,
-                        );
-                        return;
-                    }
+
+                if event.button().is_some_and(|button| {
+                    egui.input_event_pointer_button(
+                        button,
+                        state == wl_pointer::ButtonState::Pressed,
+                    )
+                }) {
+                    return
                 }
 
                 if state == wl_pointer::ButtonState::Pressed {
@@ -606,12 +607,8 @@ impl State {
                         }
                     }
 
-                    {
-                        let egui = egui_state_for_output(&output);
-                        if egui.wants_pointer() {
-                            egui.handle_pointer_axis(horizontal_amount, vertical_amount);
-                            return;
-                        }
+                    if egui.input_event_pointer_axis(horizontal_amount, vertical_amount) {
+                        return;
                     }
 
                     let pointer = self.fht.pointer.clone();

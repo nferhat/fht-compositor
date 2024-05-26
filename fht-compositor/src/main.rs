@@ -28,6 +28,7 @@ use crate::config::{CompositorConfig, CONFIG};
 
 mod backend;
 mod config;
+mod egui;
 mod handlers;
 mod input;
 mod ipc;

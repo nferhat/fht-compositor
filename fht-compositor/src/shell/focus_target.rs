@@ -15,7 +15,6 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Serial};
 use smithay::wayland::seat::WaylandFocus;
-use smithay_egui::EguiState;
 
 use crate::state::State;
 
@@ -158,7 +157,6 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
 pub enum PointerFocusTarget {
     WlSurface(WlSurface),
     Window(Window),
-    Egui(EguiState),
 }
 
 impl From<KeyboardFocusTarget> for PointerFocusTarget {
@@ -187,12 +185,6 @@ impl From<LayerSurface> for PointerFocusTarget {
     }
 }
 
-impl From<EguiState> for PointerFocusTarget {
-    fn from(value: EguiState) -> Self {
-        Self::Egui(value)
-    }
-}
-
 impl From<Window> for PointerFocusTarget {
     fn from(value: Window) -> Self {
         Self::Window(value)
@@ -204,14 +196,12 @@ impl WaylandFocus for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => w.wl_surface(),
             Self::Window(w) => w.wl_surface(),
-            Self::Egui(_) => None,
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
             Self::WlSurface(w) => w.same_client_as(object_id),
             Self::Window(w) => w.same_client_as(object_id),
-            Self::Egui(_) => false,
         }
     }
 }
@@ -221,7 +211,6 @@ impl IsAlive for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => w.alive(),
             Self::Window(w) => w.alive(),
-            Self::Egui(e) => e.alive(),
         }
     }
 }
@@ -233,7 +222,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 PointerTarget::enter(w.toplevel().unwrap().wl_surface(), seat, data, event)
             }
-            Self::Egui(e) => PointerTarget::enter(e, seat, data, event),
         }
     }
 
@@ -243,7 +231,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 PointerTarget::motion(w.toplevel().unwrap().wl_surface(), seat, data, event)
             }
-            Self::Egui(e) => PointerTarget::motion(e, seat, data, event),
         }
     }
 
@@ -256,7 +243,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::relative_motion(e, seat, data, event),
         }
     }
 
@@ -266,7 +252,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 PointerTarget::button(w.toplevel().unwrap().wl_surface(), seat, data, event)
             }
-            Self::Egui(e) => PointerTarget::button(e, seat, data, event),
         }
     }
 
@@ -276,7 +261,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 PointerTarget::axis(w.toplevel().unwrap().wl_surface(), seat, data, frame)
             }
-            Self::Egui(e) => PointerTarget::axis(e, seat, data, frame),
         }
     }
 
@@ -284,7 +268,6 @@ impl PointerTarget<State> for PointerFocusTarget {
         match self {
             Self::WlSurface(w) => PointerTarget::frame(w, seat, data),
             Self::Window(w) => PointerTarget::frame(w.toplevel().unwrap().wl_surface(), seat, data),
-            Self::Egui(e) => PointerTarget::frame(e, seat, data),
         }
     }
 
@@ -302,7 +285,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_swipe_begin(e, seat, data, event),
         }
     }
 
@@ -320,7 +302,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_swipe_update(e, seat, data, event),
         }
     }
 
@@ -338,7 +319,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_swipe_end(e, seat, data, event),
         }
     }
 
@@ -356,7 +336,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_pinch_begin(e, seat, data, event),
         }
     }
 
@@ -374,7 +353,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_pinch_update(e, seat, data, event),
         }
     }
 
@@ -392,7 +370,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_pinch_end(e, seat, data, event),
         }
     }
 
@@ -410,7 +387,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_hold_begin(e, seat, data, event),
         }
     }
 
@@ -423,7 +399,6 @@ impl PointerTarget<State> for PointerFocusTarget {
                 data,
                 event,
             ),
-            Self::Egui(e) => PointerTarget::gesture_hold_end(e, seat, data, event),
         }
     }
 
@@ -433,7 +408,6 @@ impl PointerTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 PointerTarget::leave(w.toplevel().unwrap().wl_surface(), seat, data, serial, time)
             }
-            Self::Egui(e) => PointerTarget::leave(e, seat, data, serial, time),
         }
     }
 }
@@ -451,7 +425,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::down(w.toplevel().unwrap().wl_surface(), seat, data, event, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -467,7 +440,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::up(w.toplevel().unwrap().wl_surface(), seat, data, event, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -483,7 +455,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::motion(w.toplevel().unwrap().wl_surface(), seat, data, event, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -493,7 +464,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::frame(w.toplevel().unwrap().wl_surface(), seat, data, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -503,7 +473,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::cancel(w.toplevel().unwrap().wl_surface(), seat, data, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -519,7 +488,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::shape(w.toplevel().unwrap().wl_surface(), seat, data, event, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 
@@ -535,7 +503,6 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::Window(w) => {
                 TouchTarget::orientation(w.toplevel().unwrap().wl_surface(), seat, data, event, seq)
             }
-            Self::Egui(_) => (),
         }
     }
 }
