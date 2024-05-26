@@ -14,7 +14,12 @@ serde.workspace = true
 xdg.workspace = true
 color-eyre.workspace = true
 ron.workspace = true
-smithay = { workspace = true, features = ["desktop", "wayland_frontend", "backend_libinput"] }
+smithay = { workspace = true, features = [
+    "desktop",
+    "wayland_frontend",
+    "renderer_glow",
+    "backend_libinput"
+] }
 smithay-drm-extras = { workspace = true, optional = true }
 colors-transform = "0.2.11"
 regex = "1.10.4"
