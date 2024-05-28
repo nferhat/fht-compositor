@@ -387,7 +387,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 // To counter this, we check here if the surface is going to clip.
                 if RoundedCornerElement::will_clip(&e, scale, tile_geo, border_config.radius) {
                     let rounded =
-                        RoundedCornerElement::new(e, border_config.radius, tile_geo, scale);
+                        RoundedCornerElement::new(e, border_config.radius(), tile_geo, scale);
                     need_extra_damage = true;
                     WorkspaceTileRenderElement::RoundedElement(rounded)
                 } else {
@@ -424,8 +424,8 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                     self.element.wl_surface().as_ref().unwrap(),
                     border_geo,
                     RoundedOutlineShaderSettings {
-                        thickness: thickness as u8,
-                        radius: border_config.radius,
+                        half_thickness: border_config.half_thickness(),
+                        radius: border_config.radius(),
                         color: if focused {
                             border_config.focused_color
                         } else {
@@ -468,7 +468,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                     self.element.wl_surface().as_ref().unwrap(),
                     border_geo,
                     RoundedOutlineShaderSettings {
-                        thickness: thickness as u8,
+                        half_thickness: border_config.half_thickness(),
                         radius: 0.0, // TODO: Round off solid color element too.
                         color: ColorConfig::Solid([
                             self.background_buffer_color[0] * 1.5,

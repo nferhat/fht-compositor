@@ -29,6 +29,11 @@ uniform mat3 input_to_geo;
 float rounding_alpha(vec2 coords, vec2 size) {
     vec2 center;
     float radius;
+    // HACK: To avoid a visual gap between the rounded surface and the border around it, subtract two
+    // from the corner radius.
+    //
+    // Hacky? Yeah, can't do anything abt it.
+    float corner_radius = corner_radius - 2.;
 
     if (coords.x < corner_radius && coords.y < corner_radius) {
         radius = corner_radius;

@@ -21,8 +21,9 @@ pub type RoundedOutlineShaderCache =
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Settings to control a rounded outline shader element
 pub struct RoundedOutlineShaderSettings {
-    /// The thickness to use.
-    pub thickness: u8,
+    /// The half thickness to use.
+    /// The shader uses this anyway
+    pub half_thickness: f32,
     /// The radius.
     pub radius: f32,
     /// The color, either a solid one or a gradient.
@@ -90,7 +91,7 @@ impl RoundedOutlineShader {
         geo: Rectangle<i32, Logical>,
         settings: RoundedOutlineShaderSettings,
     ) -> FhtPixelShaderElement {
-        let scaled_thickness = settings.thickness as f32 * scale as f32;
+        let scaled_half_thickness = settings.half_thickness as f32 * scale as f32;
 
         let shader = Self::get(renderer);
         let mut element_cache = RefCell::borrow_mut(&shader.element_cache);
@@ -118,7 +119,7 @@ impl RoundedOutlineShader {
                 Uniform::new("v_start_color", start_color),
                 Uniform::new("v_end_color", end_color),
                 Uniform::new("v_gradient_angle", angle),
-                Uniform::new("half_thickness", scaled_thickness as f32 / 2f32),
+                Uniform::new("half_thickness", scaled_half_thickness),
                 Uniform::new("radius", settings.radius),
             ],
             Kind::Unspecified,

@@ -61,6 +61,20 @@ mod border {
             }
         }
     }
+
+    impl BorderConfig {
+        /// Get the radius of the border.
+        ///
+        /// We subtract half_thickness to get more accurate radius with varying thicknesses
+        pub fn radius(&self) -> f32 {
+            self.radius - self.half_thickness()
+        }
+
+        /// Get the half_thickness of the border
+        pub fn half_thickness(&self) -> f32 {
+            self.thickness as f32 / 2.0
+        }
+    }
 }
 
 mod color_parser {
