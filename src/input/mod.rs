@@ -371,6 +371,7 @@ impl State {
 
                 self.fht.suppressed_keys = suppressed_keys;
                 if let Some(action) = action {
+                    drop(egui);
                     self.process_key_action(action);
                 }
             }
