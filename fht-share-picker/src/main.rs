@@ -1,4 +1,12 @@
+//! fht-compositor screencast source picker.
+//!
+//! Look I get its not the best looking application in the world but it does the job
+//!
+//! I'm willing to rework the visuals when I implement a custom theme for iced
 use std::str::FromStr;
+
+use iced::{widget as w, Element};
+mod theme;
 
 #[macro_use]
 extern crate tracing;
@@ -9,9 +17,10 @@ fn main() -> iced::Result {
     color_eyre::install().unwrap();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::from_str(if cfg!(debug) || cfg!(debug_assertions) {
-            "trace"
+            "debug"
         } else {
-            "error,warn,fht_compositor=info"
+            // We only care about the fatal stuff here
+            "error"
         })
         .unwrap()
     });
@@ -39,64 +48,105 @@ fn main() -> iced::Result {
         }
     }
 
-    let size = iced::Size {
-        width: 510.0,
-        height: 300.0,
-    };
-    iced::program(
-        "Select screencast source",
-        ScreenCastSourcePicker::update,
-        ScreenCastSourcePicker::view,
-    )
-    .settings(iced::Settings {
-        window: iced::window::Settings {
-            decorations: false,
-            platform_specific: iced::window::settings::PlatformSpecific {
-                application_id: String::from("fht.desktop.ScreenCastSourcePicker"),
+    iced::program("Select screencast source", State::update, State::view)
+        .settings(iced::Settings {
+            window: iced::window::Settings {
+                decorations: false,
+                platform_specific: iced::window::settings::PlatformSpecific {
+                    application_id: String::from("fht.desktop.ScreenCastSourcePicker"),
+                },
+                ..Default::default()
             },
-            size,
+            default_text_size: 13.0.into(),
+            default_font: iced::Font {
+                weight: iced::font::Weight::Normal,
+                ..iced::Font::with_name("Zed Mono")
+            },
+            fonts: vec![include_bytes!("../res/zed-mono-extended.ttf")
+                .as_slice()
+                .into()],
+            antialiasing: true,
             ..Default::default()
-        },
-        ..Default::default()
-    })
-    .theme(|_| iced::Theme::Dark)
-    .centered()
-    .run()
-}
-
-struct ScreenCastSourcePicker {
-    active_pane: Pane,
+        })
+        .theme(|_| iced::Theme::Dark)
+        .run()
 }
 
 #[derive(Default)]
 enum Pane {
+    /// Show the user the possible source types.
     #[default]
     SourceType,
+    /// Show the user the list of select outputs.
     Outputs(Vec<Output>),
 }
 
-#[derive(Debug)]
-struct Output {
-    name: String,
-    location: (i32, i32),
-    size: (i32, i32),
+impl Pane {
+    fn view(&self) -> Element<'_, Message> {
+        match self {
+            Self::SourceType => w::column![
+                simple_button("Select area".into(), Message::SelectArea),
+                simple_button("Select output".into(), Message::SelectOutput),
+            ]
+            .spacing(5)
+            .into(),
+            Self::Outputs(outputs) => {
+                let mut outputs_col = w::column![].spacing(10);
+                for Output {
+                    name,
+                    location,
+                    size,
+                } in outputs
+                {
+                    let content =
+                        format!("Output {name} located on {location:?} with size {size:?}");
+                    let content =
+                        simple_button(content, Message::SelectedOutput { name: name.clone() });
+                    outputs_col = outputs_col.push(content);
+                }
+
+                outputs_col.into()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
-pub enum ScreenCastSourcePickerMessage {
+pub enum Message {
+    /// Go back to the [`SourceType`] pane
+    GoBack,
+    /// The user requested to select a specific area.
     SelectArea,
+    /// The user requested to select an output.
     SelectOutput,
-    SelectedOutput(String),
+    /// The user select an output.
+    SelectedOutput { name: String },
 }
 
-impl Default for ScreenCastSourcePicker {
+struct State {
+    /// The active displayed pane.
+    active_pane: Pane,
+}
+
+/// A representation of output data.
+#[derive(Debug)]
+struct Output {
+    /// The name of the output, exposed by fht-compositor dbus api.
+    name: String,
+    /// The location of the output, exposed by fht-compositor dbus api.
+    location: (i32, i32),
+    /// The size of the output, exposed by fht-compositor dbus api.
+    size: (i32, i32),
+}
+
+impl Default for State {
     fn default() -> Self {
         let initial_message = std::env::args()
             .skip(1)
             .next()
             .and_then(|arg| match arg.as_str() {
-                "select_outputs" => Some(ScreenCastSourcePickerMessage::SelectOutput),
-                "select_area" => Some(ScreenCastSourcePickerMessage::SelectArea),
+                "select_outputs" => Some(Message::SelectOutput),
+                "select_area" => Some(Message::SelectArea),
                 _ => None,
             });
 
@@ -112,13 +162,13 @@ impl Default for ScreenCastSourcePicker {
     }
 }
 
-impl ScreenCastSourcePicker {
-    fn update(
-        &mut self,
-        message: ScreenCastSourcePickerMessage,
-    ) -> iced::Command<ScreenCastSourcePickerMessage> {
+impl State {
+    fn update(&mut self, message: Message) -> iced::Command<Message> {
         match message {
-            ScreenCastSourcePickerMessage::SelectArea => {
+            Message::GoBack => self.active_pane = Pane::SourceType,
+            // TODO: Use ron to serialize the message data (instead of whathever sorcery we are
+            // doing here that is prone to failure, but for now we are simple enough.)
+            Message::SelectArea => {
                 let mut command = std::process::Command::new("slurp");
                 let output = match command.output() {
                     Ok(output) => output,
@@ -175,7 +225,7 @@ impl ScreenCastSourcePicker {
                 eprintln!("[select-area]/({x}, {y}, {w}, {h})");
                 std::process::exit(0);
             }
-            ScreenCastSourcePickerMessage::SelectOutput => {
+            Message::SelectOutput => {
                 // Again, the compositor will get the right coordinates from the passed in output.
                 let connection = match zbus::blocking::Connection::session() {
                     Ok(conn) => conn,
@@ -215,8 +265,7 @@ impl ScreenCastSourcePicker {
                     .collect();
                 self.active_pane = Pane::Outputs(outputs);
             }
-            ScreenCastSourcePickerMessage::SelectedOutput(name) => {
-                // The compositor part will parse the named output and that's it really.
+            Message::SelectedOutput { name } => {
                 eprintln!("[select-output]/{name}");
                 std::process::exit(0);
             }
@@ -225,62 +274,68 @@ impl ScreenCastSourcePicker {
         iced::Command::none()
     }
 
-    fn view(&self) -> iced::Element<ScreenCastSourcePickerMessage> {
-        use iced::widget::{column, container};
+    fn view(&self) -> iced::Element<Message> {
+        let pane_content = self.active_pane.view();
+        let pane_content = w::container(pane_content)
+            .padding(10.0)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .align_y(iced::alignment::Vertical::Top)
+            .style(|_| theme::container::surface());
 
-        match &self.active_pane {
-            Pane::SourceType => {
-                let content = column![
-                    create_button(
-                        "Select area".into(),
-                        ScreenCastSourcePickerMessage::SelectArea
-                    ),
-                    create_button(
-                        "Select output".into(),
-                        ScreenCastSourcePickerMessage::SelectOutput
-                    ),
-                ]
-                .spacing(10);
+        let top_row: iced::Element<Message> = match &self.active_pane {
+            Pane::SourceType => w::row!["fht-compositor screencast source picker"]
+                .align_items(iced::Alignment::Center)
+                .height(50.0)
+                .into(),
+            Pane::Outputs(_) => {
+                let text: iced::Element<Message> = w::container(
+                    w::text("fht-compositor screencast source picker: select output")
+                        .vertical_alignment(iced::alignment::Vertical::Center),
+                )
+                .align_x(iced::alignment::Horizontal::Left)
+                .center_y()
+                .into();
 
-                container(content).padding(50).center_x().center_y().into()
-            }
-            Pane::Outputs(outputs) => {
-                let mut outputs_row = column![].spacing(10);
-                for Output {
-                    name,
-                    location,
-                    size,
-                } in outputs
-                {
-                    let content =
-                        format!("Output {name} located on {location:?} with size {size:?}");
-                    let content = create_button(
-                        content,
-                        ScreenCastSourcePickerMessage::SelectedOutput(name.clone()),
-                    );
-                    outputs_row = outputs_row.push(content);
-                }
+                let button = w::container(
+                    w::button(w::text("Go back"))
+                        .width(iced::Length::Shrink)
+                        .height(iced::Length::Shrink)
+                        .style(|_, _| theme::button::primary())
+                        .on_press(Message::GoBack),
+                )
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Center);
 
-                container(outputs_row)
-                    .padding(50)
-                    .center_x()
-                    .center_y()
+                w::row![text, w::horizontal_space(), button]
+                    .align_items(iced::Alignment::Center)
+                    .height(50.0)
                     .into()
             }
-        }
+        };
+        let top_row = w::container(top_row)
+            .padding(5)
+            .height(iced::Length::Fixed(40.0))
+            .width(iced::Length::Fill)
+            .align_y(iced::alignment::Vertical::Top)
+            .style(|_| theme::container::default());
+
+        w::container(w::column![top_row, pane_content]).into()
     }
 }
 
-fn create_button<'a>(
-    content: String,
-    on_press: ScreenCastSourcePickerMessage,
-) -> iced::Element<'a, ScreenCastSourcePickerMessage> {
+fn simple_button<'a>(content: String, on_press: Message) -> iced::Element<'a, Message> {
     use iced::widget::{button, container, text};
     container(
-        button(container(text(content)).center_x().center_y())
-            .width(410)
-            .height(40)
-            .on_press(on_press),
+        button(
+            container(text(content))
+                .center_x()
+                .center_y(),
+        )
+        .width(iced::Length::Fill)
+        .height(iced::Length::Shrink)
+        .style(|_, _| theme::button::elevated())
+        .on_press(on_press),
     )
     .into()
 }
