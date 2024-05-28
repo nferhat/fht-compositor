@@ -47,14 +47,17 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         tracing_subscriber::EnvFilter::from_str(if cfg!(debug) || cfg!(debug_assertions) {
             "debug"
         } else {
-            "error,warn,fht_compositor=info"
+            // Allow fatal errors from every crate, for fht-compositor show everything including
+            // info and non-fatal warnings
+            "error,fht_compositor=info"
         })
         .unwrap()
     });
     tracing_subscriber::fmt()
         .compact()
         .with_env_filter(filter)
-        // .without_time()
+        .without_time() // no need to see the time (maybe add a cli option for this?)
+        .with_target(false) // no need to see the module where the log was from
         .init();
 
     info!(

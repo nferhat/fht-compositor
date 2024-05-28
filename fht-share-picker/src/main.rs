@@ -28,6 +28,7 @@ fn main() -> iced::Result {
         .compact()
         .with_env_filter(filter)
         .without_time()
+        .with_target(false)
         .init();
 
     info!(
