@@ -208,8 +208,6 @@ impl CompositorHandler for State {
             {
                 OutputState::get(&output).render_state.queue();
             }
-
-            return;
         }
 
         // 1st case if this isnt a root surface; a popup.
