@@ -113,7 +113,7 @@ impl<E: Element> RoundedCornerElement<E> {
 
         // Even if we round and get up a little more, its no big deal if the ORs are offset by one
         // pixel or two.
-        let corner_radius = corner_radius.round() as i32;
+        let corner_radius = corner_radius.clamp(0.0, f32::INFINITY).round() as i32;
         let corner_radius_size: Size<_, _> = (corner_radius, corner_radius).into();
 
         [
