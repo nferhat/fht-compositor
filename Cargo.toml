@@ -5,7 +5,7 @@ members = ["fht-config", "fht-share-picker"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha"
+version = "0.1.0"
 description = "A dynamic tiling Wayland compositor"
 authors = ["Nadjib Ferhat <nferhat20@gmail.com>"]
 license = "GPL-3.0"
