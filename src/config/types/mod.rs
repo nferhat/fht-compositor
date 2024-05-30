@@ -109,6 +109,10 @@ pub struct GeneralConfig {
     #[serde(default = "default_true")]
     pub focus_new_windows: bool,
 
+    /// How should we insert windows inside workspaces.
+    #[serde(default)]
+    pub insert_window_strategy: InsertWindowStrategy,
+
     /// Cursor configuration.
     ///
     /// Basically the icon used to indicate *where* the pointer is.
@@ -133,6 +137,7 @@ impl Default for GeneralConfig {
         Self {
             cursor_warps: true,
             focus_new_windows: true,
+            insert_window_strategy: InsertWindowStrategy::default(),
             cursor: CursorConfig::default(),
             layouts: vec![WorkspaceLayout::Tile {
                 nmaster: 1,
@@ -142,6 +147,17 @@ impl Default for GeneralConfig {
             inner_gaps: 0,
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, Hash)]
+pub enum InsertWindowStrategy {
+    #[default]
+    /// Insert the window at the end of the slave stack
+    EndOfSlaveStack,
+    /// Replace the master window with the new window
+    ReplaceMaster,
+    /// Insert the window after the currently focused one
+    AfterFocused,
 }
 
 fn default_cursor_theme() -> String {

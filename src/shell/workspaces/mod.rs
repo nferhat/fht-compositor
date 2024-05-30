@@ -15,7 +15,9 @@ use smithay::utils::{Physical, Point, Rectangle, Scale};
 
 pub use self::layout::WorkspaceLayout;
 use self::tile::{WorkspaceElement, WorkspaceTile, WorkspaceTileRenderElement};
-use crate::config::{BorderConfig, WorkspaceSwitchAnimationDirection, CONFIG};
+use crate::config::{
+    BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
+};
 use crate::fht_render_elements;
 use crate::ipc::{IpcOutput, IpcWorkspace, IpcWorkspaceRequest};
 use crate::renderer::FhtRenderer;
@@ -747,9 +749,30 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         let tile = WorkspaceTile::new(window, border_config);
-        self.tiles.push(tile);
+        let new_idx = match CONFIG.general.insert_window_strategy {
+            InsertWindowStrategy::EndOfSlaveStack => {
+                self.tiles.push(tile);
+                self.tiles.len() - 1
+            }
+            InsertWindowStrategy::ReplaceMaster => {
+                self.tiles.insert(0, tile);
+                0
+            }
+            InsertWindowStrategy::AfterFocused => {
+                let new_focused_idx = self.focused_tile_idx + 1;
+                if new_focused_idx == self.tiles.len() {
+                    // Dont wrap around if we are on the last window, to avoid cyclic confusion.
+                    self.tiles.push(tile);
+                    self.tiles.len() - 1
+                } else {
+                    self.tiles.insert(new_focused_idx, tile);
+                    new_focused_idx
+                }
+            }
+        };
+
         if CONFIG.general.focus_new_windows {
-            self.focused_tile_idx = self.tiles.len() - 1;
+            self.focused_tile_idx = new_idx;
         }
         self.arrange_tiles();
     }

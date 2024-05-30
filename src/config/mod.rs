@@ -7,8 +7,9 @@ use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
 #[allow(unused_imports)]
 pub use self::types::{
     AnimationConfig, BorderConfig, ColorConfig, CompositorConfig, CursorConfig, GeneralConfig,
-    InputConfig, KeyboardConfig, MouseConfig, PerDeviceInputConfig, WindowMapSettings,
-    WindowRulePattern, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
+    InputConfig, InsertWindowStrategy, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
+    WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
+    WorkspaceSwitchAnimationDirection,
 };
 use crate::state::State;
 
