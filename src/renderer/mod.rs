@@ -12,6 +12,7 @@ pub mod pixel_shader_element;
 pub mod render_elements;
 pub mod rounded_element;
 pub mod rounded_outline_shader;
+pub mod shaders;
 pub mod texture_element;
 
 use glam::Mat3;
@@ -372,7 +373,8 @@ pub trait AsGlowRenderer: Renderer {
 }
 
 pub trait AsGlowFrame<'frame>: Frame {
-    fn glow_frame(&mut self) -> &mut GlowFrame<'frame>;
+    fn glow_frame(&self) -> &GlowFrame<'frame>;
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame>;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -386,7 +388,11 @@ impl AsGlowRenderer for GlowRenderer {
 }
 
 impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
-    fn glow_frame(&mut self) -> &mut GlowFrame<'frame> {
+    fn glow_frame(&self) -> &GlowFrame<'frame> {
+        self
+    }
+
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self
     }
 }
@@ -404,18 +410,16 @@ impl<'a> AsGlowRenderer for UdevRenderer<'a> {
 
 #[cfg(feature = "udev_backend")]
 impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
-    fn glow_frame(&mut self) -> &mut GlowFrame<'frame> {
+    fn glow_frame(&self) -> &GlowFrame<'frame> {
+        self.as_ref()
+    }
+
+    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self.as_mut()
     }
 }
 
-/// Initialize shaders for this renderer.
-pub fn init_shaders(renderer: &mut impl AsGlowRenderer) {
-    rounded_element::RoundedElementShader::init(renderer);
-    rounded_outline_shader::RoundedOutlineShader::init(renderer);
-}
-
-// / Generate the layer shell elements for a given layer for a given output layer map.
+/// Generate the layer shell elements for a given layer for a given output layer map.
 pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,

@@ -1,26 +1,16 @@
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-
-use smithay::backend::renderer::element::{Element, Kind};
+use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::element::PixelShaderElement;
-use smithay::backend::renderer::gles::{
-    GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType,
-};
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::backend::renderer::gles::{GlesPixelProgram, Uniform};
 use smithay::utils::{Logical, Rectangle};
 
 use super::pixel_shader_element::FhtPixelShaderElement;
+use super::shaders::Shaders;
 use super::AsGlowRenderer;
 use crate::config::ColorConfig;
 
-pub type RoundedOutlineShaderCache =
-    HashMap<WlSurface, (RoundedOutlineShaderSettings, PixelShaderElement)>;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Settings to control a rounded outline shader element
-pub struct RoundedOutlineShaderSettings {
+pub struct RoundedOutlineSettings {
     /// The half thickness to use.
     /// The shader uses this anyway
     pub half_thickness: f32,
@@ -30,52 +20,12 @@ pub struct RoundedOutlineShaderSettings {
     pub color: ColorConfig,
 }
 
-pub struct RoundedOutlineShader {
-    pub program: GlesPixelProgram,
-    pub element_cache: Rc<RefCell<RoundedOutlineShaderCache>>,
-}
+pub struct RoundedOutlineElement; // this does nothing expect be there.
 
-impl RoundedOutlineShader {
-    const SRC: &'static str = include_str!("./shader.frag");
-
-    /// Initialize the shader for the given renderer.
-    ///
-    /// The shader is stored inside the renderer's EGLContext user data.
-    pub fn init(renderer: &mut impl AsGlowRenderer) {
-        let renderer = renderer.glow_renderer_mut();
-        let program = {
-            let gles_renderer: &mut GlesRenderer = renderer.borrow_mut();
-            gles_renderer
-                .compile_custom_pixel_shader(
-                    Self::SRC,
-                    &[
-                        UniformName::new("v_start_color", UniformType::_4f),
-                        UniformName::new("v_end_color", UniformType::_4f),
-                        UniformName::new("v_gradient_angle", UniformType::_1f),
-                        UniformName::new("radius", UniformType::_1f),
-                        UniformName::new("half_thickness", UniformType::_1f),
-                    ],
-                )
-                .expect("Failed to compile rounded outline shader!")
-        };
-        renderer
-            .egl_context()
-            .user_data()
-            .insert_if_missing(|| RoundedOutlineShader {
-                program,
-                element_cache: Rc::new(RefCell::new(RoundedOutlineShaderCache::new())),
-            });
-    }
-
-    /// Get a reference to the shader instance stored in this renderer EGLContext userdata.
-    ///
-    /// If you didn't initialize the shader before, this function will do it for you.
-    pub fn get(renderer: &mut impl AsGlowRenderer) -> &Self {
-        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
-            .egl_context()
-            .user_data()
-            .get::<RoundedOutlineShader>()
-            .expect("Shaders didn't initialize!")
+impl RoundedOutlineElement {
+    /// Get the gles shader program for a rounded outline.
+    pub fn program(renderer: &impl AsGlowRenderer) -> GlesPixelProgram {
+        Shaders::get(renderer).rounded_outline.clone()
     }
 
     /// Create a rounded outline element.
@@ -87,31 +37,18 @@ impl RoundedOutlineShader {
         renderer: &mut impl AsGlowRenderer,
         scale: f64,
         alpha: f32,
-        wl_surface: &WlSurface,
         geo: Rectangle<i32, Logical>,
-        settings: RoundedOutlineShaderSettings,
+        settings: RoundedOutlineSettings,
     ) -> FhtPixelShaderElement {
         let scaled_half_thickness = settings.half_thickness as f32 * scale as f32;
-
-        let shader = Self::get(renderer);
-        let mut element_cache = RefCell::borrow_mut(&shader.element_cache);
-
-        if let Some((_, element)) = element_cache
-            .get_mut(wl_surface)
-            .filter(|(old_settings, _)| &settings == old_settings)
-        {
-            if element.geometry(1.0.into()).to_logical(1) != geo {
-                element.resize(geo, None);
-            }
-            return FhtPixelShaderElement(element.clone());
-        }
+        let program = Self::program(renderer);
 
         let (start_color, end_color, angle) = match settings.color {
             ColorConfig::Solid(color) => (color, color, 0.0),
             ColorConfig::Gradient { start, end, angle } => (start, end, angle),
         };
         let mut element = PixelShaderElement::new(
-            shader.program.clone(),
+            program,
             geo,
             None, //TODO
             alpha,
@@ -124,12 +61,8 @@ impl RoundedOutlineShader {
             ],
             Kind::Unspecified,
         );
+        element.resize(geo, None);
 
-        if element.geometry(1.0.into()).to_logical(1) != geo {
-            element.resize(geo, None);
-        }
-
-        element_cache.insert(wl_surface.clone(), (settings, element.clone()));
         FhtPixelShaderElement(element)
     }
 }

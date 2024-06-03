@@ -26,7 +26,7 @@ use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, UnmappedTile};
 use crate::utils::geometry::{
-    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt,
+    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -356,6 +356,7 @@ impl Fht {
             last_output,
             last_workspace_idx,
         } = unmapped_tile;
+        let wl_surface = tile.element().wl_surface().unwrap();
         let output = last_output.unwrap_or_else(|| self.active_output());
         let wset = self.wset_mut_for(&output);
         let active_idx = wset.get_active_idx();
@@ -367,14 +368,18 @@ impl Fht {
         let window = tile.element.clone();
         workspace.insert_tile(tile);
 
+        let tile = workspace.find_tile(&wl_surface).unwrap();
+        // we dont want to animate the tile now.
+        tile.location_animation.take();
+        let tile_geo = tile.geometry().to_global(&output);
+
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
         let is_switching = wset.switch_animation.is_some();
         let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
 
         if should_focus {
-            let center = workspace.element_geometry(&window).unwrap().center();
-
+            let center = tile_geo.center();
             loop_handle.insert_idle(move |state| {
                 if CONFIG.general.cursor_warps {
                     state.move_pointer(center.to_f64());

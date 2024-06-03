@@ -17,7 +17,7 @@ use crate::config::{BorderConfig, ColorConfig, CONFIG};
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
-use crate::renderer::rounded_outline_shader::{RoundedOutlineShader, RoundedOutlineShaderSettings};
+use crate::renderer::rounded_outline_shader::{RoundedOutlineElement, RoundedOutlineSettings};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{FhtRenderer, SplitRenderElements};
 use crate::utils::animation::Animation;
@@ -228,20 +228,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         );
     }
 
-    /// Set this tile's geometry without animating.
-    ///
-    /// See [`Self::set_geometry`]
-    pub fn set_geometry_instant(&mut self, mut new_geo: Rectangle<i32, Local>) {
-        if self.need_border() {
-            let thickness = self.border_config().thickness as i32;
-            new_geo.loc += (thickness, thickness).into();
-            new_geo.size -= (2 * thickness, 2 * thickness).into();
-        }
-
-        self.element.set_size(new_geo.size);
+    /// Send a pending configure message to the window
+    pub fn send_pending_configure(&mut self) {
         self.element.send_pending_configure();
-        self.background_buffer.resize(new_geo.size.as_logical());
-        self.location = new_geo.loc;
     }
 
     /// Get this tile's geometry.
@@ -417,13 +406,12 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();
 
-                let border_element = RoundedOutlineShader::element(
+                let border_element = RoundedOutlineElement::element(
                     renderer,
                     scale.x.max(scale.y),
                     alpha,
-                    self.element.wl_surface().as_ref().unwrap(),
                     border_geo,
-                    RoundedOutlineShaderSettings {
+                    RoundedOutlineSettings {
                         half_thickness: border_config.half_thickness(),
                         radius: border_config.radius(),
                         color: if focused {
@@ -461,13 +449,12 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();
 
-                let border_element = RoundedOutlineShader::element(
+                let border_element = RoundedOutlineElement::element(
                     renderer,
                     scale.x.max(scale.y),
                     alpha,
-                    self.element.wl_surface().as_ref().unwrap(),
                     border_geo,
-                    RoundedOutlineShaderSettings {
+                    RoundedOutlineSettings {
                         half_thickness: border_config.half_thickness(),
                         radius: 0.0, // TODO: Round off solid color element too.
                         color: ColorConfig::Solid([

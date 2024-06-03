@@ -618,7 +618,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         // Refresh internal state of windows
         let output_geometry = self.output.geometry();
-        for (idx, tile) in self.tiles.iter().enumerate() {
+        for (idx, tile) in self.tiles.iter_mut().enumerate() {
             // This is now managed globally with focus targets
             tile.element.set_activated(idx == self.focused_tile_idx);
 
@@ -632,7 +632,7 @@ impl<E: WorkspaceElement> Workspace<E> {
                     .output_enter(&self.output, overlap.as_logical());
             }
 
-            tile.element.send_pending_configure();
+            tile.send_pending_configure();
             tile.element.refresh();
         }
     }
@@ -643,6 +643,13 @@ impl<E: WorkspaceElement> Workspace<E> {
             tile.has_surface(surface, WindowSurfaceType::ALL)
                 .then_some(&tile.element)
         })
+    }
+
+    /// Find the tile with this [`WlSurface`]
+    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+        self.tiles
+            .iter_mut()
+            .find(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
     }
 
     /// Find the tile with this [`WlSurface`]
@@ -814,13 +821,6 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         self.arrange_tiles();
         Some(tile)
-    }
-
-    /// Removes an element from this [`Workspace`], returning it if it was found.
-    ///
-    /// This function also undones the configuration that was done in [`Self::insert_window`]
-    pub fn remove_element(&mut self, element: &E) -> Option<E> {
-        self.remove_tile(element).map(|t| t.element)
     }
 
     /// Focus a given element, if this [`Workspace`] contains it.

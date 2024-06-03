@@ -457,7 +457,9 @@ impl State {
                     }
                 }
             }
-            _ => (),
+            Request::StopCast { session_handle } => {
+                self.fht.stop_cast(session_handle);
+            }
         }
     }
 }

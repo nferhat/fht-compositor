@@ -1,16 +1,14 @@
 use std::borrow::BorrowMut;
 
 use glam::{Mat3, Vec2};
-use smithay::backend::egl::EGLContext;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::{
-    GlesError, GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformName, UniformType,
-};
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
-use super::{AsGlowFrame, AsGlowRenderer};
+use super::shaders::Shaders;
+use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
@@ -225,8 +223,8 @@ where
             self.element.draw(frame, src, dst, damage)
         } else {
             // Override texture shader with our uniforms
+            let program = Shaders::get_from_frame(frame).rounded_quad.clone();
             let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame);
-            let program = RoundedElementShader::get(gles_frame.egl_context());
 
             let additional_uniforms = vec![
                 Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
@@ -266,8 +264,9 @@ where
             self.element.draw(frame, src, dst, damage)
         } else {
             // Override texture shader with our uniforms
-            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame());
-            let program = RoundedElementShader::get(gles_frame.egl_context());
+            let glow_frame = frame.glow_frame_mut();
+            let program = Shaders::get_from_frame(glow_frame).rounded_quad.clone();
+            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
 
             let additional_uniforms = vec![
                 Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
@@ -279,7 +278,7 @@ where
             let res = self.element.draw(frame, src, dst, damage);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
-            BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame()).clear_tex_program_override();
+            BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();
 
             res
         }
@@ -287,45 +286,5 @@ where
 
     fn underlying_storage(&self, renderer: &mut UdevRenderer<'a>) -> Option<UnderlyingStorage> {
         self.element.underlying_storage(renderer)
-    }
-}
-
-pub struct RoundedElementShader(pub GlesTexProgram);
-
-impl RoundedElementShader {
-    const SRC: &'static str = include_str!("./shader.frag");
-
-    /// Initialize the shader for the given renderer.
-    ///
-    /// The shader is stored inside the renderer's EGLContext user data.
-    pub fn init(renderer: &mut impl AsGlowRenderer) {
-        let renderer = BorrowMut::<GlesRenderer>::borrow_mut(renderer.glow_renderer_mut());
-
-        let program = renderer
-            .compile_custom_texture_shader(
-                Self::SRC,
-                &[
-                    UniformName::new("corner_radius", UniformType::_1f),
-                    UniformName::new("geo_size", UniformType::_2f),
-                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
-                ],
-            )
-            .expect("Failed to compile rounded outline shader!");
-        renderer
-            .egl_context()
-            .user_data()
-            .insert_if_missing(|| Self(program));
-    }
-
-    /// Get a reference to the shader instance stored in this renderer EGLContext userdata.
-    ///
-    /// If you didn't initialize the shader before, this function will do it for you.
-    pub fn get(egl_context: &EGLContext) -> GlesTexProgram {
-        egl_context
-            .user_data()
-            .get::<Self>()
-            .expect("Shaders didn't initialize!")
-            .0
-            .clone()
     }
 }

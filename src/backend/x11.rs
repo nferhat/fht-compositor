@@ -24,7 +24,7 @@ use smithay::wayland::dmabuf::{
     DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
 };
 
-use crate::renderer::init_shaders;
+use crate::renderer::shaders::Shaders;
 use crate::state::{Fht, OutputState, RenderState, State};
 use crate::utils::fps::Fps;
 
@@ -72,7 +72,7 @@ impl X11Data {
         #[cfg_attr(not(feature = "egl"), allow(unsued_mut))]
         let mut renderer =
             unsafe { GlowRenderer::new(context) }.context("Failed to create Gles renderer!")?;
-        init_shaders(&mut renderer);
+        Shaders::init(&mut renderer);
 
         #[cfg(feature = "egl")]
         if renderer.bind_wl_display(&state.display_handle).is_ok() {

@@ -30,10 +30,6 @@ impl ExtraDamage {
         self.commit.increment();
     }
 
-    pub fn damage_all(&mut self) {
-        self.commit.increment();
-    }
-
     pub fn with_location(mut self, location: Point<i32, Logical>) -> Self {
         self.geometry.loc = location;
         self

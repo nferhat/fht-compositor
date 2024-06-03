@@ -118,7 +118,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
-        let frame = frame.glow_frame();
+        let frame = frame.glow_frame_mut();
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
             &self.0, frame, src, dst, damage,
         )

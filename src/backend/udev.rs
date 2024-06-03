@@ -68,7 +68,8 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
 use crate::config::CONFIG;
-use crate::renderer::{init_shaders, FhtRenderElement, OutputElementsResult};
+use crate::renderer::shaders::Shaders;
+use crate::renderer::{AsGlowRenderer, FhtRenderElement, OutputElementsResult};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -367,7 +368,7 @@ impl UdevData {
         }
 
         let mut renderer = data.gpu_manager.single_renderer(&primary_gpu).unwrap();
-        init_shaders(&mut renderer);
+        Shaders::init(renderer.glow_renderer_mut());
 
         state.shm_state.update_formats(renderer.shm_formats());
 

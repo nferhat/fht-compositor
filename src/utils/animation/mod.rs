@@ -73,6 +73,10 @@ impl<T: Animatable> Animation<T> {
             return None;
         }
 
+        if duration.is_zero() {
+            return None;
+        }
+
         // This is basically the same as smithay's monotonic clock struct
         let kernel_timespec = clock_gettime(ClockId::Monotonic);
         let started_at = Duration::new(

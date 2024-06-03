@@ -16,7 +16,6 @@ struct PendingFrame {
     duration_elements: Option<Duration>,
     duration_render: Option<Duration>,
     duration_screencast: Option<Duration>,
-    duration_displayed: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -25,7 +24,6 @@ pub struct Frame {
     pub duration_elements: Duration,
     pub duration_render: Duration,
     pub duration_screencopy: Option<Duration>,
-    pub duration_displayed: Duration,
 }
 
 impl Frame {
@@ -47,7 +45,6 @@ impl From<PendingFrame> for Frame {
             duration_elements: pending.duration_elements.unwrap_or(Duration::ZERO),
             duration_render: pending.duration_render.unwrap_or(Duration::ZERO),
             duration_screencopy: pending.duration_screencast,
-            duration_displayed: pending.duration_displayed.unwrap_or(Duration::ZERO),
         }
     }
 }
@@ -61,7 +58,6 @@ impl Fps {
             duration_elements: None,
             duration_render: None,
             duration_screencast: None,
-            duration_displayed: None,
         });
     }
 
@@ -92,14 +88,7 @@ impl Fps {
     }
 
     pub fn displayed(&mut self) {
-        if let Some(mut frame) = self.pending_frame.take() {
-            frame.duration_displayed = Some(
-                Instant::now().duration_since(frame.start)
-                    - frame.duration_elements.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_render.clone().unwrap_or(Duration::ZERO)
-                    - frame.duration_screencast.clone().unwrap_or(Duration::ZERO),
-            );
-
+        if let Some(frame) = self.pending_frame.take() {
             self.frames.push_back(frame.into());
             while self.frames.len() > Fps::WINDOW_SIZE {
                 self.frames.pop_front();
