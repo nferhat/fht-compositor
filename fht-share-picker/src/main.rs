@@ -328,15 +328,11 @@ impl State {
 fn simple_button<'a>(content: String, on_press: Message) -> iced::Element<'a, Message> {
     use iced::widget::{button, container, text};
     container(
-        button(
-            container(text(content))
-                .center_x()
-                .center_y(),
-        )
-        .width(iced::Length::Fill)
-        .height(iced::Length::Shrink)
-        .style(|_, _| theme::button::elevated())
-        .on_press(on_press),
+        button(container(text(content)).center_x().center_y())
+            .width(iced::Length::Fill)
+            .height(iced::Length::Shrink)
+            .style(|_, _| theme::button::elevated())
+            .on_press(on_press),
     )
     .into()
 }
