@@ -103,9 +103,9 @@ impl Fht {
         // Then we come to Top layer shells and windows.
         // If we have a fullscreen window, it should be drawn above the Top layer shell, otherwise
         // draw the top layer then the rest of the windows.
-        let (has_fullscreen, wset_elements) =
-            self.wset_for(output)
-                .render_elements(renderer, output_scale.into(), 1.0);
+        let (has_fullscreen, wset_elements) = self
+            .wset_for(output)
+            .render_elements(renderer, output_scale.into());
         if !has_fullscreen {
             elements.extend(layer_elements(renderer, output, Layer::Top));
             elements.extend(

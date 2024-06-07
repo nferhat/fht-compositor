@@ -314,7 +314,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-        alpha: f32,
     ) -> (bool, Vec<WorkspaceSetRenderElement<R>>) {
         let mut elements = vec![];
         let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
@@ -325,8 +324,8 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             .to_physical_precise_round(scale);
 
         // No switch, just give what's active.
-        let active_elements = active.render_elements(renderer, scale, alpha);
-        if self.switch_animation.is_none() {
+        let active_elements = active.render_elements(renderer, scale);
+        let Some(animation) = self.switch_animation.as_ref() else {
             elements.extend(
                 active_elements
                     .into_iter()
@@ -334,12 +333,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             );
 
             return (false, elements);
-        }
+        };
 
         // Switching
-        let animation = self.switch_animation.as_ref().unwrap();
         let target = &self.workspaces[animation.target_idx];
-        let target_elements = target.render_elements(renderer, scale, alpha);
+        let target_elements = target.render_elements(renderer, scale);
 
         // Switch finished, avoid blank frame and return target elements immediatly
         if animation.animation.is_finished() {
@@ -567,6 +565,11 @@ impl<E: WorkspaceElement> Workspace<E> {
             ipc_token,
             loop_handle,
         }
+    }
+
+    /// Get an iterator over this workspace's tiles.
+    pub fn tiles(&self) -> impl Iterator<Item = &WorkspaceTile<E>> {
+        self.tiles.iter()
     }
 
     /// Refresh internal state of the [`Workspace`]
@@ -1194,33 +1197,37 @@ impl<E: WorkspaceElement> Workspace<E> {
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-        alpha: f32,
     ) -> Vec<WorkspaceTileRenderElement<R>> {
-        let mut above_render_elements = vec![];
-        let render_elements: Vec<_> = self
-            .tiles
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, tile)| {
-                if tile.draw_above_others() {
-                    above_render_elements =
-                        tile.render_elements(renderer, &self.output, scale, alpha, true);
-                    None
-                } else {
-                    Some(tile.render_elements(
-                        renderer,
-                        &self.output,
-                        scale,
-                        alpha,
-                        idx == self.focused_tile_idx,
-                    ))
-                }
-            })
-            .flatten()
-            .collect();
+        let mut render_elements = vec![];
+        if self.tiles.is_empty() {
+            return render_elements;
+        }
 
-        above_render_elements.extend(render_elements);
-        above_render_elements
+        if let Some(tile) = self.focused_tile() {
+            render_elements.extend(tile.render_elements(
+                renderer,
+                &self.output,
+                scale,
+                CONFIG.decoration.focused_window_opacity,
+                true,
+            ));
+        }
+
+        for (idx, tile) in self.tiles().enumerate() {
+            if idx == self.focused_tile_idx {
+                continue;
+            }
+
+            render_elements.extend(tile.render_elements(
+                renderer,
+                &self.output,
+                scale,
+                CONFIG.decoration.normal_window_opacity,
+                false,
+            ));
+        }
+
+        render_elements
     }
 }
 

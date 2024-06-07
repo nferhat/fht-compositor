@@ -264,11 +264,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         self.temporary_render_location.is_some()
     }
 
-    /// Return whether the workspace holding this tile should draw it above others.
-    pub fn draw_above_others(&self) -> bool {
-        self.temporary_render_location.is_some() || self.element.activated()
-    }
-
     /// Return whether we need to draw a border for this tile.
     pub fn need_border(&self) -> bool {
         !self.element.fullscreen()
@@ -336,7 +331,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         scale: Scale<f64>,
         alpha: f32,
         focused: bool,
-    ) -> Vec<WorkspaceTileRenderElement<R>> {
+    ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
         let render_location = self.render_location().to_global(output).as_logical();
         let render_location_phys = self
             .render_location()
@@ -481,7 +476,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             .chain(border_element)
             .chain(surface_elements)
             .chain(background_element)
-            .collect()
     }
 }
 

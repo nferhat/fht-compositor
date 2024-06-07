@@ -4,10 +4,26 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub use self::border::BorderConfig;
 pub use self::color::ColorConfig;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+const fn default_window_opacity() -> f32 {
+    1.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecorationConfig {
     /// The configuration for the border around the windows.
     pub border: BorderConfig,
+
+    /// The opacity modifier of focused windows.
+    ///
+    /// Note that this will be multiplied on windows opacities, not override them.
+    #[serde(default = "default_window_opacity")]
+    pub focused_window_opacity: f32,
+
+    /// The opacity modifier of normal/unfocused windows.
+    ///
+    /// Note that this will be multiplied on windows opacities, not override them.
+    #[serde(default = "default_window_opacity")]
+    pub normal_window_opacity: f32,
 
     /// Should we allow clients to draw their own decorations.
     ///
@@ -21,6 +37,17 @@ pub struct DecorationConfig {
     /// hardstuck on the idea that CSD is the superior option. Don't send issues about this.
     #[serde(default)]
     pub allow_csd: bool,
+}
+
+impl Default for DecorationConfig {
+    fn default() -> Self {
+        Self {
+            border: Default::default(),
+            focused_window_opacity: default_window_opacity(),
+            normal_window_opacity: default_window_opacity(),
+            allow_csd: false,
+        }
+    }
 }
 
 mod border {
