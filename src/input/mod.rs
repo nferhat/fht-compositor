@@ -264,7 +264,7 @@ impl State {
                             cloned
                         });
                         if let Some(surface) = surface {
-                            keyboard.set_focus(self, Some(surface.into()), serial);
+                            self.set_focus_target(Some(surface.into()));
                             keyboard.input::<(), _>(
                                 self,
                                 keycode,

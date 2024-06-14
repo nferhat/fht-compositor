@@ -356,10 +356,9 @@ impl State {
                 wset.workspaces[idx].insert_tile(tile);
 
                 if let Some(window) = new_focus {
-                    self.fht.focus_state.focus_target = Some(window.into())
+                    self.set_focus_target(Some(window.into()));
                 }
             }
-
             _ => {}
         }
     }

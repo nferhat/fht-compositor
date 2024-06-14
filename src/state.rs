@@ -151,26 +151,24 @@ impl State {
             .fht
             .focus_state
             .focus_target
-            .take_if(|f| !f.alive())
-            .is_some();
+            .as_ref()
+            .is_some_and(|ft| !ft.alive());
         {
+            dbg!("XD?");
             profiling::scope!("refresh_focus");
             if old_focus_dead {
-                // Focus target died, just remove it.
-                self.fht
-                    .keyboard
-                    .clone()
-                    .set_focus(self, None, SERIAL_COUNTER.next_serial());
-            }
-
-            if self.fht.focus_state.focus_target.is_none() {
                 // We are focusing nothing, default to the active workspace focused window.
                 if let Some(window) = self.fht.focus_state.output.as_ref().and_then(|o| {
+                    dbg!("Ok output?");
                     let active = self.fht.wset_for(o).active();
                     active.focused().cloned()
                 }) {
-                    window.set_activated(true);
+                    eprintln!("Ok good?");
                     self.set_focus_target(Some(window.into()));
+                } else {
+                    // just reset
+                    eprintln!("Ok reset?");
+                    self.set_focus_target(None);
                 }
             }
         }
