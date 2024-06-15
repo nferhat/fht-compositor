@@ -11,7 +11,7 @@ pub use self::types::{
     WindowMapSettings, WindowRulePattern, WorkspaceSwitchAnimationConfig,
     WorkspaceSwitchAnimationDirection,
 };
-use crate::state::State;
+use crate::state::{OutputState, State};
 
 pub static CONFIG: ConfigWrapper<CompositorConfig> = ConfigWrapper::new();
 
@@ -112,6 +112,10 @@ impl State {
 
         // I assume that if you have gone this far the config has reloaded sucessfully
         let _ = self.fht.last_config_error.take();
+
+        for output in self.fht.outputs() {
+            OutputState::get(output).render_state.queue();
+        }
     }
 }
 
