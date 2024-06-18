@@ -32,6 +32,7 @@ mod egui;
 mod handlers;
 mod input;
 mod ipc;
+mod lua;
 mod portals;
 mod protocols;
 mod renderer;
@@ -149,6 +150,9 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             CONFIG.set(CompositorConfig::default())
         }
     }
+
+    // TODO: Handle lua messages.
+    let (from_lua, to_lua) = lua::start();
 
     let mut state = State::new(
         &dh,
