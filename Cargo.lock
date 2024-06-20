@@ -2755,7 +2755,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e340c022072f3208a4105458286f4985ba5355bfe243c3073afe45cbe9ecf491"
 dependencies = [
  "bstr",
- "futures-util",
  "mlua-sys",
  "mlua_derive",
  "num-traits",

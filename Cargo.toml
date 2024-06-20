@@ -103,7 +103,7 @@ glam = "0.27.0"
 egui = "0.23"
 egui_glow = "0.23"
 egui_extras = "0.23"
-mlua = { version = "0.9.8", features = ["luajit", "async", "send", "vendored", "macros"] }
+mlua = { version = "0.9.8", features = ["luajit", "vendored", "macros"] }
 
 [features]
 default = ["egl", "x11_backend", "udev_backend", "all-portals"]

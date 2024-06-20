@@ -64,6 +64,9 @@ impl State {
             }
         };
 
+        // TODO: Only do this instead of all the lua stuff.
+        self.fht.to_lua.send(crate::lua::CompositorMessage::ReloadConfig).unwrap();
+
         if new_config.general.layouts.len() == 0 {
             self.fht.last_config_error =
                 Some(anyhow::anyhow!("You have to specify at least one layout!"));

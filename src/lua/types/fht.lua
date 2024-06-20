@@ -1,6 +1,7 @@
 ---@meta _
 
 ---@class _fht
+---@field bind_manager _bind_manager
 fht = {}
 
 ---Log an info message to stdout, via tracing.

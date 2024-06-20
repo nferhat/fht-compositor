@@ -1,7 +1,9 @@
+use std::str::FromStr;
+
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
-use smithay::input::keyboard::{Keysym, ModifiersState};
+use smithay::input::keyboard::{xkb, Keysym, ModifiersState};
 use smithay::utils::Serial;
 
 use crate::config::CONFIG;
@@ -14,10 +16,72 @@ use crate::utils::output::OutputExt;
 /// A list of modifiers you can use in a key pattern.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Modifiers {
-    ALT,
+    ALT = 1,
     CTRL,
     SHIFT,
     SUPER,
+}
+
+impl<'lua> mlua::IntoLua<'lua> for Modifiers {
+    fn into_lua(self, _: &'lua mlua::Lua) -> mlua::Result<mlua::Value<'lua>> {
+        Ok(mlua::Value::Integer(self as i64))
+    }
+}
+
+impl TryFrom<i64> for Modifiers {
+    type Error = ();
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::ALT),
+            2 => Ok(Self::CTRL),
+            3 => Ok(Self::SHIFT),
+            4 => Ok(Self::SUPER),
+            _ => Err(()),
+        }
+    }
+}
+
+impl FromStr for Modifiers {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "alt" | "A" => Ok(Self::ALT),
+            "ctrl" | "C" => Ok(Self::CTRL),
+            "shift" | "S" => Ok(Self::SHIFT),
+            "super" | "M" => Ok(Self::SUPER),
+            _ => Err(()),
+        }
+    }
+}
+
+impl<'lua> mlua::FromLua<'lua> for Modifiers {
+    fn from_lua(value: mlua::Value<'lua>, _: &'lua mlua::Lua) -> mlua::Result<Self> {
+        match value {
+            mlua::Value::String(s) => {
+                match Modifiers::from_str(s.to_str()?.to_lowercase().trim()) {
+                    Ok(mod_) => Ok(mod_),
+                    _ => Err(mlua::Error::FromLuaConversionError {
+                        from: "string",
+                        to: "Modifiers",
+                        message: Some("No such modifier!".to_string()),
+                    }),
+                }
+            }
+            mlua::Value::Integer(int) => match Modifiers::try_from(int) {
+                Ok(mod_) => Ok(mod_),
+                _ => Err(mlua::Error::FromLuaConversionError {
+                    from: "string",
+                    to: "Modifiers",
+                    message: Some("No such modifier!".to_string()),
+                }),
+            },
+            _ => Err(mlua::Error::FromLuaConversionError {
+                from: format!("{value:?}").leak(),
+                to: "Modifiers",
+                message: Some("Invalid value!".to_string()),
+            }),
+        }
+    }
 }
 
 /// Custom adaptation of [`ModifiersState`] to allow for custom (de)serialization
@@ -37,6 +101,37 @@ impl From<ModifiersState> for FhtModifiersState {
             logo: value.logo,
             shift: value.shift,
         }
+    }
+}
+
+impl From<Vec<Modifiers>> for FhtModifiersState {
+    fn from(value: Vec<Modifiers>) -> Self {
+        Self {
+            alt: value.contains(&Modifiers::ALT),
+            ctrl: value.contains(&Modifiers::CTRL),
+            logo: value.contains(&Modifiers::SUPER),
+            shift: value.contains(&Modifiers::SHIFT),
+        }
+    }
+}
+
+impl Into<Vec<Modifiers>> for FhtModifiersState {
+    fn into(self) -> Vec<Modifiers> {
+        let mut vec = vec![];
+        if self.alt {
+            vec.push(Modifiers::ALT);
+        }
+        if self.ctrl {
+            vec.push(Modifiers::CTRL);
+        }
+        if self.logo {
+            vec.push(Modifiers::SUPER);
+        }
+        if self.shift {
+            vec.push(Modifiers::SHIFT);
+        }
+
+        vec
     }
 }
 
@@ -152,13 +247,90 @@ pub enum KeyAction {
 /// ([SUPER, CTRL], "e")
 /// ([SUPER], "k")
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct KeyPattern(
     pub FhtModifiersState,
     #[serde(serialize_with = "ser::serialize_keysym")]
     #[serde(deserialize_with = "ser::deserialize_keysym")]
     pub Keysym,
 );
+
+impl<'lua> mlua::IntoLua<'lua> for KeyPattern {
+    fn into_lua(self, lua: &'lua mlua::Lua) -> mlua::Result<mlua::Value<'lua>> {
+        let table = lua.create_table()?;
+        table.push(Into::<Vec<Modifiers>>::into(self.0))?;
+        table.push(xkb::keysym_to_utf8(self.1))?;
+        Ok(mlua::Value::Table(table))
+    }
+}
+
+impl<'lua> mlua::FromLua<'lua> for KeyPattern {
+    fn from_lua(value: mlua::Value<'lua>, _: &'lua mlua::Lua) -> mlua::Result<Self> {
+        let values: Vec<_> = match value {
+            mlua::Value::Table(table) => table
+                .sequence_values::<String>()
+                .filter_map(Result::ok)
+                .collect(),
+            mlua::Value::String(string) => string
+                .to_str()?
+                .split("-")
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
+            _ => {
+                return Err(mlua::Error::FromLuaConversionError {
+                    from: value.type_name(),
+                    to: "KeyPattern",
+                    message: None,
+                })
+            }
+        };
+
+        // A user friendly way to parse key patterns.
+        //
+        // We get from the lua virtual machine a bunch of strings, in any order the user gives us.
+        // The strings are meant to represent either modifiers or keys, for example we may get
+        // 1. ["super", "alt", "k"] or ["alt", "k", "super"]
+        // 2. ["k"]
+        // 3. ["super", "j", "ctrl"]
+        //
+        // Note that you can precise as much modifiers as you want, but only one key, so, something
+        // like this is invalid: ["super", "j", "k"]
+        //
+        // We also support emacs-like key patterns, like `M-S-c` (super shift c)
+        let mut key = Option::<String>::None;
+        let mut modifiers: Vec<Modifiers> = vec![];
+
+        for value in values {
+            let value = value.trim(); // cant to lowercase here since some mods are uppercase
+            if let Some(mod_) = Modifiers::from_str(value).ok() {
+                modifiers.push(mod_);
+                continue;
+            }
+
+            // we have to make the value to lowercase since when we check for key patterns in the
+            // input code, we turn the keysym to its lowercase form.
+            if key.replace(value.to_lowercase()).is_some() {
+                return Err(mlua::Error::FromLuaConversionError {
+                    from: "table",
+                    to: "KeyPattern",
+                    message: Some("You can't specify two keys to bind!".to_string()),
+                });
+            }
+        }
+
+        let Some(key) = key else {
+            return Err(mlua::Error::FromLuaConversionError {
+                from: "table",
+                to: "KeyPattern",
+                message: Some("You have to specify atleast one key!".to_string()),
+            });
+        };
+        let key = xkb::keysym_from_name(&key, xkb::KEYSYM_NO_FLAGS);
+
+        Ok(Self(modifiers.into(), key))
+    }
+}
 
 mod ser {
 

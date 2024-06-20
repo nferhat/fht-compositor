@@ -57,7 +57,9 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::egui::Egui;
+use crate::input::KeyPattern;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
+use crate::lua::{CompositorMessage, LuaMessage};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::tile::WorkspaceTile;
@@ -82,9 +84,10 @@ impl State {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        to_lua: std::sync::mpsc::Sender<CompositorMessage>,
         _socket_name: String,
     ) -> Self {
-        let mut fht = Fht::new(dh, loop_handle, loop_signal);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, to_lua);
         let backend: crate::backend::Backend = if let Ok(backend_name) =
             std::env::var("FHTC_BACKEND")
         {
@@ -228,6 +231,22 @@ impl State {
         // Send frame callbacks
         self.fht.send_frames(&output);
     }
+
+    /// Handle a received [`LuaMessage`] from the lua virtual machine thread.
+    ///
+    /// Lua lives in another thread to avoid blocking main compositor activity. The only way to
+    /// communicate between it and the compositor is by using two channels (one from it and one to
+    /// it)
+    pub fn handle_lua_message(&mut self, msg: LuaMessage) {
+        match msg {
+            LuaMessage::NewKeybind { key_pattern } => {
+                self.fht.bound_keys.insert(key_pattern);
+            }
+            LuaMessage::RemoveKeybind { key_pattern } => {
+                self.fht.bound_keys.remove(&key_pattern);
+            }
+        }
+    }
 }
 
 pub struct Fht {
@@ -237,6 +256,8 @@ pub struct Fht {
     pub loop_handle: LoopHandle<'static, State>,
     /// A signal to our loop to control it.
     pub loop_signal: LoopSignal,
+    /// A sender for [`CompositorMessage`]s directed to the lua virtual machine thread.
+    pub to_lua: std::sync::mpsc::Sender<CompositorMessage>,
     /// Whether we should stop every operation.
     pub stop: Arc<AtomicBool>,
 
@@ -253,6 +274,8 @@ pub struct Fht {
     pub pointer: PointerHandle<State>,
     /// A monotonic clock to tie frame events and input events.
     pub clock: Clock<Monotonic>,
+    /// A list of bound keys (I.E: The ones that have a lua callback attached to them)
+    pub bound_keys: HashSet<KeyPattern>,
     /// A list of suppressed keys to not pass to the focused client.
     pub suppressed_keys: HashSet<Keysym>,
     /// A list of devices managed by the compositor.
@@ -313,6 +336,7 @@ impl Fht {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        to_lua: std::sync::mpsc::Sender<CompositorMessage>,
     ) -> Self {
         let clock = Clock::<Monotonic>::new();
         info!("Initialized monotonic clock.");
@@ -388,9 +412,11 @@ impl Fht {
             display_handle: dh.clone(),
             loop_handle,
             loop_signal,
+            to_lua,
             stop: Arc::new(AtomicBool::new(false)),
 
             clock,
+            bound_keys: HashSet::new(),
             suppressed_keys: HashSet::new(),
             seat,
             devices: vec![],

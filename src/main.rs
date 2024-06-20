@@ -18,6 +18,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use fht_config::Config;
+use smithay::reexports::calloop;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
@@ -153,11 +154,18 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 
     // TODO: Handle lua messages.
     let (from_lua, to_lua) = lua::start();
+    let _lua_token = loop_handle.insert_source(from_lua, |event, (), state| {
+        let calloop::channel::Event::Msg(msg) = event else {
+            return;
+        };
+        state.handle_lua_message(msg);
+    });
 
     let mut state = State::new(
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
+        to_lua,
         socket_name.clone(),
     );
     state.fht.last_config_error = last_config_error;

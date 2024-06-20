@@ -24,6 +24,7 @@ use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurf
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::config::CONFIG;
+use crate::lua::CompositorMessage;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::{OutputState, State};
 use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
@@ -352,8 +353,17 @@ impl State {
 
                         if key_state == KeyState::Pressed && !inhibited {
                             let key_pattern = KeyPattern(modifiers.into(), keysym);
-                            let action = CONFIG.keybinds.get(&key_pattern).cloned();
+                            let mut action = CONFIG.keybinds.get(&key_pattern).cloned();
                             debug!(?keysym, ?key_pattern, ?action);
+
+                            if state.fht.bound_keys.contains(&key_pattern) {
+                                state
+                                    .fht
+                                    .to_lua
+                                    .send(CompositorMessage::KeyPatternPressed { key_pattern })
+                                    .unwrap();
+                                action = Some(KeyAction::None);
+                            }
 
                             if let Some(action) = action {
                                 suppressed_keys.insert(keysym);
