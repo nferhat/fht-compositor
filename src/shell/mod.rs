@@ -18,6 +18,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+use workspaces::FullscreenTile;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
@@ -183,21 +184,9 @@ impl Fht {
                 // Mapped window?
                 self.workspaces().find_map(|(o, wset)| {
                     let active = wset.active();
-                    if active
-                        .tiles
-                        .iter()
-                        .any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
-                    {
-                        return Some(o);
+                    if active.has_surface(surface) {
+                        return Some(o)
                     }
-
-                    // if active
-                    //     .fullscreen
-                    //     .as_ref()
-                    //     .is_some_and(|f| f.inner.has_surface(surface, WindowSurfaceType::ALL))
-                    // {
-                    //     return Some(o);
-                    // }
 
                     None
                 })
@@ -213,20 +202,26 @@ impl Fht {
             .switch_animation
             .as_ref()
             .map(|anim| {
-                wset.workspaces[anim.target_idx]
-                    .tiles
-                    .iter()
-                    .map(WorkspaceTile::element)
+                let ws = &wset.workspaces[anim.target_idx];
+
+                ws.fullscreen
+                    .as_ref()
+                    .map(|fs| fs.inner.element())
+                    .into_iter()
+                    .chain(ws.tiles.iter().map(WorkspaceTile::element))
+                    .collect::<Vec<_>>()
             })
             .into_iter()
             .flatten();
 
-        wset.active()
-            .tiles
-            .iter()
-            .map(WorkspaceTile::element)
-            .chain(switching_windows)
+        let active = wset.active();
+        active
+            .fullscreen
+            .as_ref()
+            .map(|fs| fs.inner.element())
             .into_iter()
+            .chain(active.tiles.iter().map(WorkspaceTile::element))
+            .chain(switching_windows)
     }
 
     /// Prepapre a pending window to be mapped.
@@ -407,7 +402,7 @@ impl Fht {
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = workspace.output.geometry();
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
-        target.loc -= workspace.element_location(window).unwrap();
+        target.loc -= workspace.element_geometry(window).unwrap().loc;
 
         popup.with_pending_state(|state| {
             state.geometry = state
@@ -431,8 +426,14 @@ impl Fht {
             animation.animation.set_current_time(current_time);
             animations_running = true;
         }
-        for tile in wset.workspaces_mut().flat_map(|ws| &mut ws.tiles) {
-            animations_running |= tile.advance_animations(current_time);
+        for ws in wset.workspaces_mut() {
+            if let Some(FullscreenTile { inner, .. }) = ws.fullscreen.as_mut() {
+                animations_running |= inner.advance_animations(current_time);
+            }
+
+            for window in &mut ws.tiles {
+                animations_running |= window.advance_animations(current_time);
+            }
         }
 
         animations_running

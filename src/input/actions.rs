@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
 use smithay::input::keyboard::{Keysym, ModifiersState};
 use smithay::utils::Serial;
+use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
 use crate::shell::workspaces::tile::WorkspaceElement;
@@ -107,6 +108,11 @@ pub enum KeyAction {
     ///
     /// NOTE: You cant' have 2 maximized windows at a time.
     MaximizeFocusedWindow,
+
+    /// Fullscreenthe focused window on the current workspace.
+    ///
+    /// NOTE: You cant' have 2 maximized windows at a time.
+    FullscreenFocusedWindow,
 
     /// Focus the next available window on the current workspace.
     FocusNextWindow,
@@ -233,6 +239,18 @@ impl State {
                     let new_maximized = !window.maximized();
                     window.set_maximized(new_maximized);
                     active.arrange_tiles();
+                }
+            }
+            KeyAction::FullscreenFocusedWindow => {
+                dbg!("hi");
+                if let Some(window) = active.focused().cloned() {
+                    if window.fullscreen() {
+                        window.set_fullscreen(false);
+                        window.set_fullscreen_output(None);
+                    } else {
+                        let toplevel = window.toplevel().unwrap().clone();
+                        self.fullscreen_request(toplevel, None);
+                    }
                 }
             }
             KeyAction::FocusNextWindow => {

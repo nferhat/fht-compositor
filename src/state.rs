@@ -60,7 +60,7 @@ use crate::egui::Egui;
 use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::tile::WorkspaceTile;
+use crate::shell::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -941,8 +941,8 @@ impl Fht {
             );
         }
 
-        for tile in &self.wset_for(output).active().tiles {
-            tile.element().take_presentation_feedback(
+        for window in self.visible_windows_for_output(output) {
+            window.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {

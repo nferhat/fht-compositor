@@ -5,12 +5,15 @@ use smithay::desktop::{
 };
 use smithay::input::pointer::Focus;
 use smithay::input::Seat;
-use smithay::reexports::wayland_server::protocol::wl_seat;
+use smithay::output::Output;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
+use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
+use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::State;
 
@@ -99,14 +102,53 @@ impl XdgShellHandler for State {
     fn fullscreen_request(
         &mut self,
         surface: ToplevelSurface,
-        _wl_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        wl_output: Option<wl_output::WlOutput>,
     ) {
+        if surface
+            .current_state()
+            .capabilities
+            .contains(WmCapabilities::Fullscreen)
+        {
+            let wl_surface = surface.wl_surface();
+            let requested_output = wl_output.as_ref().and_then(Output::from_resource);
+
+            // If the surface request for a specific output to be fullscreened on, move it to the
+            // active workspace of that output, then fullscreen it.
+            //
+            // If not, then fullscreen it inside its active workspace.
+            if let Some((window, requested_output, mut output)) =
+                requested_output.and_then(|requested_output| {
+                    let (window, current_output) = self.fht.find_window_and_output(wl_surface)?;
+                    Some((window.clone(), requested_output, current_output.clone()))
+                })
+            {
+                if requested_output != output {
+                    output = requested_output;
+
+                    let ws = self.fht.ws_mut_for(&window).unwrap();
+                    let tile = ws.remove_tile(&window).unwrap();
+
+                    let new_ws = self.fht.wset_mut_for(&output).active_mut();
+                    new_ws.insert_tile(tile);
+                }
+
+                let ws = self.fht.ws_mut_for(&window).unwrap();
+                ws.fullscreen_element(&window);
+            } else if let Some(window) = self.fht.find_window(wl_surface).cloned() {
+                let ws = self.fht.ws_mut_for(&window).unwrap();
+                ws.fullscreen_element(&window);
+            }
+        }
+
         // TODO: Make xdg_shell request work.
         surface.send_configure();
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        // TODO: Make xdg_shell request work.
+        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+            window.set_fullscreen(false);
+        }
+
         surface.send_configure();
     }
 

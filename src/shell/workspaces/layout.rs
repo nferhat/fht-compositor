@@ -94,7 +94,6 @@ impl WorkspaceLayout {
                             (master_geo.size.w, master_height),
                         );
                         tile.set_geometry(geo);
-                        tile.send_pending_configure();
 
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
@@ -107,7 +106,6 @@ impl WorkspaceLayout {
                             (stack_geo.size.w, stack_height),
                         );
                         tile.set_geometry(new_geo);
-                        tile.send_pending_configure();
 
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
@@ -149,7 +147,6 @@ impl WorkspaceLayout {
                             (master_width, master_geo.size.h),
                         );
                         tile.set_geometry(geo);
-                        tile.send_pending_configure();
 
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
@@ -162,7 +159,6 @@ impl WorkspaceLayout {
                             (stack_width, stack_geo.size.h),
                         );
                         tile.set_geometry(geo);
-                        tile.send_pending_configure();
 
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
@@ -244,7 +240,6 @@ impl WorkspaceLayout {
                             (master_geo.size.w, master_height),
                         );
                         tile.set_geometry(geo);
-                        tile.send_pending_configure();
 
                         master_geo.loc.y += master_height + inner_gaps;
                     } else if ((idx - nmaster) % 2 != 0) {
@@ -269,7 +264,6 @@ impl WorkspaceLayout {
                             (right_geo.size.w, right_height),
                         );
                         tile.set_geometry(geo);
-                        tile.send_pending_configure();
 
                         right_geo.loc.y += right_height + inner_gaps;
                     }
