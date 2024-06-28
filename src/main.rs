@@ -1,10 +1,3 @@
-// rust 1.77.0
-#![feature(lazy_cell)]
-#![feature(sync_unsafe_cell)]
-#![feature(option_take_if)]
-#![feature(let_chains)]
-#![feature(duration_millis_float)]
-// lints
 #![allow(clippy::ignored_unit_patterns)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::too_many_lines)]
@@ -43,14 +36,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // color_eyre for pretty panics
     color_eyre::install()?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::from_str(if cfg!(debug) || cfg!(debug_assertions) {
-            "debug"
-        } else {
-            // Allow fatal errors from every crate, for fht-compositor show everything including
-            // info and non-fatal warnings
-            "error,fht_compositor=info"
-        })
-        .unwrap()
+        // Allow fatal errors from every crate, compositor can log anything
+        tracing_subscriber::EnvFilter::from_str("error,fht_compositor=info").unwrap()
     });
     tracing_subscriber::fmt()
         .compact()

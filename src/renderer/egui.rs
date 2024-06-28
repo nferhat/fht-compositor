@@ -42,12 +42,12 @@ pub fn egui_output_debug_overlay(
     };
 
     let (max_frametime, min_frametime, avg_frametime, avg_fps) = (
-        fps.max_frametime().as_millis_f64(),
-        fps.min_frametime().as_millis_f64(),
-        fps.avg_frametime().as_millis_f64(),
+        fps.max_frametime().as_millis(),
+        fps.min_frametime().as_millis(),
+        fps.avg_frametime().as_millis(),
         fps.avg_fps().round() as i32,
     );
-    let avg_rendertime = fps.avg_rendertime(5).as_millis_f64();
+    let avg_rendertime = fps.avg_rendertime(5).as_millis();
 
     let format_info = |ui: &mut egui::Ui, name, data| {
         ui.horizontal_wrapped(|ui| {
