@@ -277,11 +277,18 @@ impl Fht {
 
         // Even if the user set rules, we still always prefer the output and workspace of this
         // window's toplevel parent.
-        if let Some((_, parent_workspace)) = toplevel
+        if let Some((index, parent_workspace)) = toplevel
             .parent()
-            .and_then(|parent_surface| self.find_window_and_workspace(&parent_surface))
+            .and_then(|parent_surface| {
+                self.workspaces()
+                    .enumerate()
+                    .find_map(|(idx, (_, wset))| {
+                        let (_, ws) = wset.find_element_and_workspace(&parent_surface)?;
+                        Some((idx, ws))
+                    })
+            })
         {
-            workspace_idx = parent_workspace.index;
+            workspace_idx = index;
             output = parent_workspace.output.clone();
         }
 

@@ -21,26 +21,14 @@ https://github.com/nferhat/fht-compositor/assets/104871514/b5484cb5-65e8-4936-85
 - Some basic animations .
 - Window borders, with rounded corners support
 - Configuration:
-- D-bus based IPC (see [IPC](#-IPC) below)
-    - Input configuration (global and per-device), with both keybinds and mousebinds.
-    - Window rules (based on title/app_id/current workspace/etc.)
+- Input configuration (global and per-device), with both keybinds and mousebinds.
+- Window rules (based on title/app_id/current workspace/etc.)
 - Output Screencast/Screen recording support through the XDG ScreenCast portal interface.
 
 ## TO-DOs
 
 - Xwayland support (very unlikely, but you can use a Xwayland rootful window)
 - Session lock support
-
-## IPC
-
-fht-compositor exposes an IPC under the `fht.desktop.Compositor` service name. It exposes the
-following objects for you to query
-
-> TIP: You can use something like `d-spy` to inspect the IPC interface.
-
-- `/fht/desktop/Compositor` (`fht.desktop.Compositor.Ipc`): Global IPC
-- `/fht/desktop/Compositor/Output/{name}` (`fht.desktop.Compositor.Output`): Exposed IPC output.
-  - `/fht/desktop/Compositor/Output/{name}/Workspaces/{0..9}` (`fht.desktop.Compositor.Workspace`): Workspaces for exposed IPC output.
 
 ## Install
 

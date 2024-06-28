@@ -22,13 +22,13 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{self, LoopHandle, LoopSignal, RegistrationToken};
+use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
 use smithay::reexports::input;
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Monotonic, SERIAL_COUNTER};
+use smithay::utils::{Clock, IsAlive, Monotonic};
 use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -57,13 +57,11 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::egui::Egui;
-use crate::ipc::{IpcOutput, IpcOutputRequest};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::tile::{WorkspaceElement, WorkspaceTile};
+use crate::shell::workspaces::tile::WorkspaceTile;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
-use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::geometry::RectCenterExt;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
@@ -435,16 +433,6 @@ impl Fht {
         self.workspaces.keys()
     }
 
-    /// Handle an IPC output request.
-    fn handle_ipc_output_request(&mut self, req: IpcOutputRequest, output: &Output) {
-        match req {
-            IpcOutputRequest::SetActiveWorkspaceIndex { index } => {
-                self.wset_mut_for(output)
-                    .set_active_idx(index as usize, true);
-            }
-        }
-    }
-
     /// Register an output to the wayland state.
     ///
     /// # PANICS
@@ -469,7 +457,7 @@ impl Fht {
         trace!(?x, y = 0, "Using fallback output location.");
         output.change_current_state(None, None, None, Some((x, 0).into()));
 
-        let workspace_set = WorkspaceSet::new(output.clone(), self.loop_handle.clone());
+        let workspace_set = WorkspaceSet::new(output.clone());
         self.workspaces.insert(output.clone(), workspace_set);
 
         let pointer_devices = self
@@ -480,25 +468,6 @@ impl Fht {
         let modifiers = self.keyboard.modifier_state();
         self.egui
             .add_output(output.clone(), pointer_devices, modifiers);
-
-        {
-            let output = output.clone();
-            let (ipc_output, ipc_path, from_ipc_channel) = IpcOutput::new(&output);
-
-            self.loop_handle
-                .insert_source(from_ipc_channel, move |event, _, state| {
-                    let calloop::channel::Event::Msg(req) = event else {
-                        return;
-                    };
-                    state.fht.handle_ipc_output_request(req, &output);
-                })
-                .expect("Failed to insert output IPC source!");
-
-            assert!(DBUS_CONNECTION
-                .object_server()
-                .at(ipc_path, ipc_output)
-                .unwrap());
-        }
 
         // Focus output now.
         if CONFIG.general.cursor_warps {
@@ -554,90 +523,17 @@ impl Fht {
             layer.layer_surface().send_close()
         }
 
-        // Unregister from IPC.
-        {
-            let path = format!(
-                "/fht/desktop/Compositor/Output/{}",
-                output.name().replace("-", "_")
-            );
-            match DBUS_CONNECTION
-                .object_server()
-                .remove::<crate::ipc::IpcOutput, _>(path)
-            {
-                Err(err) => warn!(?err, "Failed to de-adversite output to IPC!"),
-                Ok(destroyed) => assert!(destroyed),
-            }
-        }
-
         wset.refresh();
         wset.arrange();
     }
 
-    /// Arrange the output workspaces, layer shells, and inform IPC about changes.
+    /// Arrange the output workspaces, layer shells.
     ///
     /// You are expected to call this after you applied your changes to the output, like changing
     /// the current mode, mapping a layer shell, etc.
     pub fn output_resized(&mut self, output: &Output) {
         self.wset_mut_for(output).arrange();
         layer_map_for_output(output).arrange();
-
-        let geometry = output.geometry();
-        let refresh_rate = output.current_mode().unwrap().refresh as f32 / 1_000.0;
-        let scale = output.current_scale();
-        let (int_scale, frac_scale) = (scale.integer_scale(), scale.fractional_scale());
-        {
-            let path = format!(
-                "/fht/desktop/Compositor/Output/{}",
-                output.name().replace("-", "_")
-            );
-            async_std::task::block_on(async {
-                let iface_ref = DBUS_CONNECTION
-                    .object_server()
-                    .interface::<_, IpcOutput>(path.as_str())
-                    .unwrap();
-                let mut iface = iface_ref.get_mut();
-
-                if iface.location != (geometry.loc.x, geometry.loc.y) {
-                    iface.location = (geometry.loc.x, geometry.loc.y);
-                    iface
-                        .location_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                }
-
-                if iface.size != (geometry.size.w, geometry.size.h) {
-                    iface.size = (geometry.size.w, geometry.size.h);
-                    iface
-                        .size_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                }
-
-                if iface.refresh_rate != refresh_rate {
-                    iface.refresh_rate = refresh_rate;
-                    iface
-                        .refresh_rate_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                }
-
-                if iface.integer_scale != int_scale {
-                    iface.integer_scale = int_scale;
-                    iface
-                        .integer_scale_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                }
-
-                if iface.fractional_scale != frac_scale {
-                    iface.fractional_scale = frac_scale;
-                    iface
-                        .fractional_scale_changed(iface_ref.signal_context())
-                        .await
-                        .unwrap();
-                }
-            });
-        }
     }
 
     /// Get the active output, generally the one with the cursor on it, fallbacking to the first

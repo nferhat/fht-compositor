@@ -31,7 +31,6 @@ mod config;
 mod egui;
 mod handlers;
 mod input;
-mod ipc;
 mod portals;
 mod protocols;
 mod renderer;
@@ -131,8 +130,9 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     if let Err(err) = config::init_config_file_watcher(&loop_handle) {
         error!(?err, "Failed to start config file watcher!");
     }
-    ipc::start(&loop_handle).expect("Failed to start IPC connection!");
-    portals::start(&loop_handle).expect("Failed to setup portal!");
+    if let Err(err) = portals::start(&loop_handle) {
+        error!(?err, "Failed to start XDG portals!");
+    }
 
     // Load the configuration before the state, since the state itself uses the config.
     let mut last_config_error = None;
