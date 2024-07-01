@@ -438,7 +438,6 @@ pub struct Workspace<E: WorkspaceElement> {
     /// The focused window index.
     focused_tile_idx: usize,
 
-    // TODO: Reimplement fullscreening
     /// The layouts list for this workspace.
     pub layouts: Vec<WorkspaceLayout>,
 

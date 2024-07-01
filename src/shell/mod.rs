@@ -142,6 +142,15 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_element_and_workspace(surface))
     }
 
+    /// Find the window associated with this [`WlSurface`]
+    pub fn find_window_and_workspace_mut(
+        &mut self,
+        surface: &WlSurface,
+    ) -> Option<(Window, &mut Workspace<Window>)> {
+        self.workspaces_mut()
+            .find_map(|(_, wset)| wset.find_element_and_workspace_mut(surface))
+    }
+
     /// Find the window associated with this [`WlSurface`], and the output the window is mapped
     /// onto
     pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, &Output)> {

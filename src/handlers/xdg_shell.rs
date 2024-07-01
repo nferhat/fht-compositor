@@ -89,14 +89,28 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn maximize_request(&mut self, surface: ToplevelSurface) {
-        // TODO: Make xdg_shell request work.
-        surface.send_configure();
+    fn maximize_request(&mut self, toplevel: ToplevelSurface) {
+        if let Some((window, ws)) = self
+            .fht
+            .find_window_and_workspace_mut(toplevel.wl_surface())
+        {
+            window.set_maximized(true);
+            ws.arrange_tiles();
+        }
+
+        toplevel.send_configure();
     }
 
-    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        // TODO: Make xdg_shell request work.
-        surface.send_configure();
+    fn unmaximize_request(&mut self, toplevel: ToplevelSurface) {
+        if let Some((window, ws)) = self
+            .fht
+            .find_window_and_workspace_mut(toplevel.wl_surface())
+        {
+            window.set_maximized(false);
+            ws.arrange_tiles();
+        }
+
+        toplevel.send_configure();
     }
 
     fn fullscreen_request(
@@ -140,7 +154,6 @@ impl XdgShellHandler for State {
             }
         }
 
-        // TODO: Make xdg_shell request work.
         surface.send_configure();
     }
 
@@ -155,11 +168,16 @@ impl XdgShellHandler for State {
     fn reposition_request(
         &mut self,
         surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32,
+        positioner: PositionerState,
+        token: u32,
     ) {
-        // TODO: Make xdg_shell request work.
-        let _ = surface.send_configure();
+        surface.with_pending_state(|state| {
+            let geometry = positioner.get_geometry();
+            state.geometry = geometry;
+            state.positioner = positioner;
+        });
+        self.fht.unconstrain_popup(&surface);
+        surface.send_repositioned(token);
     }
 }
 
