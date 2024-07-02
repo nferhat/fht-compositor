@@ -209,7 +209,6 @@ impl State {
         let Some(ref output) = self.fht.focus_state.output.clone() else {
             return;
         };
-        let current_focus = self.fht.focus_state.focus_target.clone();
         let wset = self.fht.wset_mut_for(output);
         let active = wset.active_mut();
 
