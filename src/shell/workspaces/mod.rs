@@ -191,8 +191,12 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
     pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Global>)> {
-        // TODO: Reimplement fullscreen
-        None
+        let active = self.active();
+        let location = active.output.geometry().loc;
+        active
+            .fullscreen
+            .as_ref()
+            .map(|fs| (fs.inner.element(), location))
     }
 
     /// Get the element in under the cursor and it's location in global coordinate space.

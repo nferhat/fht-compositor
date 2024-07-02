@@ -15,7 +15,6 @@ impl KeyboardShortcutsInhibitHandler for State {
         inhibitor: smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor,
     ) {
         // Just allow it
-        // TODO: Maybe filter?
         inhibitor.activate();
     }
 }

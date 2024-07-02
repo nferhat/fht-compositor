@@ -138,7 +138,6 @@ impl State {
                 })
                 .collect::<Vec<_>>()
             {
-                // TODO: This
                 self.redraw(output);
             }
         }
@@ -257,8 +256,6 @@ pub struct Fht {
     pub devices: Vec<input::Device>,
 
     /// The currently drawn drag and drop icon.
-    ///
-    /// TODO: Maybe move this to cursor_theme_manager?
     pub dnd_icon: Option<WlSurface>,
     /// The cursor theme manager.
     ///
@@ -276,8 +273,6 @@ pub struct Fht {
     pub popups: PopupManager,
 
     /// The last configuration error.
-    ///
-    /// TODO: Maybe use a custom error struct to tailor and customize the error messages?
     pub last_config_error: Option<anyhow::Error>,
 
     /// Egui debug overlay state.

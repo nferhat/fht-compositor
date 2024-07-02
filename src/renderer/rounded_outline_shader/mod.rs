@@ -50,7 +50,7 @@ impl RoundedOutlineElement {
         let mut element = PixelShaderElement::new(
             program,
             geo,
-            None, //TODO
+            None,
             alpha,
             vec![
                 Uniform::new("v_start_color", start_color),

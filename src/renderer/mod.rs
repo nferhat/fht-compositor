@@ -237,11 +237,11 @@ impl Fht {
                         egui::egui_greeting_message(ctx);
                     }
 
-                    if is_focused {
-                        if let Some(err) = self.last_config_error.as_ref() {
-                            egui::egui_config_error(ctx, err);
-                        }
-                        // TODO: Other non-output specific information
+                    if let Some(err) = is_focused
+                        .then(|| self.last_config_error.as_ref())
+                        .flatten()
+                    {
+                        egui::egui_config_error(ctx, err);
                     }
                 },
                 renderer,
