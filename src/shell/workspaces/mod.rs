@@ -481,8 +481,15 @@ impl<E: WorkspaceElement> Workspace<E> {
             .take_if(|fs| !fs.inner.element.alive())
             .is_some();
 
-        if self.fullscreen.as_ref().is_some_and(|fs| !fs.inner.element.fullscreen()) {
-            let FullscreenTile { inner, last_known_idx } = self.take_fullscreen().unwrap();
+        if self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|fs| !fs.inner.element.fullscreen())
+        {
+            let FullscreenTile {
+                inner,
+                last_known_idx,
+            } = self.take_fullscreen().unwrap();
             self.tiles.insert(last_known_idx, inner);
             should_refresh_geometries = true;
         }
@@ -497,7 +504,9 @@ impl<E: WorkspaceElement> Workspace<E> {
                 // output_enter excepts the overlap to be relative to the element, weird choice
                 // bu I comply.
                 overlap.loc -= bbox.loc;
-                fullscreen.inner.element
+                fullscreen
+                    .inner
+                    .element
                     .output_enter(&self.output, overlap.as_logical());
             }
 
@@ -642,7 +651,11 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Get the global geometry of a given element.
     pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Global>> {
-        if self.fullscreen.as_ref().is_some_and(|fs| fs.inner == *element) {
+        if self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|fs| fs.inner == *element)
+        {
             return Some(self.output.geometry());
         }
         self.tiles
@@ -909,7 +922,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_mut() {
             // NOTE: Output top left is always (0,0) locally
             let mut output_geo = self.output.geometry().as_logical().as_local();
-            output_geo.loc = (0,0).into();
+            output_geo.loc = (0, 0).into();
             inner.set_geometry(output_geo);
         }
 

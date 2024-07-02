@@ -194,7 +194,7 @@ impl Fht {
                 self.workspaces().find_map(|(o, wset)| {
                     let active = wset.active();
                     if active.has_surface(surface) {
-                        return Some(o)
+                        return Some(o);
                     }
 
                     None
