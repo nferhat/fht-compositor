@@ -286,19 +286,20 @@ impl Fht {
 
         // Even if the user set rules, we still always prefer the output and workspace of this
         // window's toplevel parent.
-        if let Some((index, parent_workspace)) = toplevel
-            .parent()
-            .and_then(|parent_surface| {
-                self.workspaces()
+        //
+        // You can for example imagine a gtk4 application opening a child window or prompt, for
+        // example. Or, opening a new window from your browser main one.
+        if let Some((parent_index, parent_output)) = toplevel.parent().and_then(|parent_surface| {
+            self.workspaces().find_map(|(output, wset)| {
+                let idx = wset
+                    .workspaces()
                     .enumerate()
-                    .find_map(|(idx, (_, wset))| {
-                        let (_, ws) = wset.find_element_and_workspace(&parent_surface)?;
-                        Some((idx, ws))
-                    })
+                    .position(|(_, ws)| ws.has_surface(&parent_surface))?;
+                Some((idx, output.clone()))
             })
-        {
-            workspace_idx = index;
-            output = parent_workspace.output.clone();
+        }) {
+            workspace_idx = parent_index;
+            output = parent_output;
         }
 
         let wset = self.wset_mut_for(&output);
