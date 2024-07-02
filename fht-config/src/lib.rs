@@ -127,8 +127,3 @@ pub enum Error {
     #[error("Error while parsing the config: {0:?}")]
     Parse(#[from] ron::Error),
 }
-
-// TODO: Write tests.
-//
-// This should be easy since we are using generics to parse everything, but still, have to write
-// down and think about which cases we should test here.

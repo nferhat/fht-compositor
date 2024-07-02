@@ -91,7 +91,6 @@ impl State {
         // Other check: its a mapped window.
         if let Some((window, output)) = state.find_window_and_output(surface) {
             window.on_commit();
-            // TODO: Handle window unmaps
             return Some(output.clone());
         }
 

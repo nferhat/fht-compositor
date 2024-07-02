@@ -434,9 +434,6 @@ pub struct Workspace<E: WorkspaceElement> {
     ///
     /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
     /// logic will PANIC.
-    ///
-    /// WARNING: We shouldn't expose this to keep the dbus interface in sync, but here its symbol
-    /// to drain the windows when deleting an output, soo it should be fine
     pub tiles: Vec<WorkspaceTile<E>>,
 
     /// The focused window index.
