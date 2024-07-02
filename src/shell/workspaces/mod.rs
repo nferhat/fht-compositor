@@ -749,6 +749,8 @@ impl<E: WorkspaceElement> Workspace<E> {
             .is_some_and(|fs| fs.inner == *element)
         {
             let FullscreenTile { inner, .. } = self.take_fullscreen().unwrap();
+            self.arrange_tiles();
+
             return Some(inner);
         }
 
@@ -777,6 +779,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             }) = self.take_fullscreen()
             {
                 self.tiles.insert(last_known_idx, inner);
+                self.arrange_tiles();
             }
 
             self.focused_tile_idx = idx;
@@ -797,6 +800,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.arrange_tiles();
         }
 
         let tiles_len = self.tiles.len();
@@ -823,6 +827,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.arrange_tiles();
         }
 
         let windows_len = self.tiles.len();
