@@ -3,7 +3,10 @@ use smithay::input::Seat;
 use smithay::reexports::wayland_server::protocol::wl_surface;
 use smithay::wayland::xdg_activation::{self, XdgActivationHandler};
 
+use crate::config::CONFIG;
 use crate::state::State;
+use crate::utils::geometry::RectCenterExt;
+use crate::utils::output::OutputExt;
 
 /// NOTE: This is really just an arbitrary value that I copied from Anvil's code
 /// Optimally this should be checked based on the client but eh.
@@ -36,10 +39,45 @@ impl XdgActivationHandler for State {
         &mut self,
         _token: xdg_activation::XdgActivationToken,
         token_data: xdg_activation::XdgActivationTokenData,
-        _surface: wl_surface::WlSurface,
+        surface: wl_surface::WlSurface,
     ) {
         if token_data.timestamp.elapsed() < ACTIVATION_TIMEOUT {
-            // TODO: Activate the window lmao
+            // First part: focus the window inside the workspace.
+            let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(&surface) else {
+                return;
+            };
+            workspace.focus_element(&window);
+
+            // Second part: focus the workspace of the workspace set.
+            let (window, output) = self.fht.find_window_and_output(&surface).unwrap();
+            let (window, output) = (window.clone(), output.clone());
+            // This is quite tricky, since we need to find *the* workspace with this window.
+            //
+            // If we care about performance we'd use workspace ids and stuff, but this is just not
+            // it. But this is for this little task unnecessary, just use Iter::position.
+            let wset = self.fht.wset_mut_for(&output);
+            let workspace_idx = wset
+                .workspaces()
+                .position(|ws| ws.has_element(&window))
+                .unwrap();
+            wset.set_active_idx(workspace_idx, true);
+
+            // Finally, focus the output.
+            // This code is copied from src/input/actions.rs, for Focus{Next,Previous}Output
+            // actions
+            if self
+                .fht
+                .focus_state
+                .output
+                .as_ref()
+                .is_some_and(|o| *o != output)
+            {
+                if CONFIG.general.cursor_warps {
+                    let center = output.geometry().center();
+                    self.move_pointer(center.to_f64());
+                }
+                let _ = self.fht.focus_state.output.replace(output);
+            }
         }
     }
 }
