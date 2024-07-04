@@ -446,8 +446,6 @@ impl Fht {
         // When adding an output, put it to the right of every other output.
         // Right now this assumption can be false for alot of users, but this is just as a
         // fallback.
-        //
-        // TODO: Add output management config + wlr_output_management protocol.
         let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
         trace!(?x, y = 0, "Using fallback output location.");
         output.change_current_state(None, None, None, Some((x, 0).into()));

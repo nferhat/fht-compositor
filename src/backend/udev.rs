@@ -672,8 +672,6 @@ impl UdevData {
 
         // Get the first preferred mode from the connector mode list, falling back to the first
         // available mode if nothing is preferred (for some obscure reason)
-        //
-        // TODO: Query output mode from user config and use the one that matches the most
         let drm_mode = *connector
             .modes()
             .iter()
