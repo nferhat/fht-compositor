@@ -10,9 +10,8 @@ impl PointerConstraintsHandler for State {
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
         if pointer
             .current_focus()
-            .and_then(|x| x.wl_surface())
-            .as_ref()
-            != Some(surface)
+            .and_then(|x| x.wl_surface().map(|s| s.into_owned()))
+            .is_some_and(|s| s == *surface)
         {
             return;
         }

@@ -47,7 +47,10 @@ impl Element for FhtPixelShaderElement {
         self.0.damage_since(scale, commit)
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(
+        &self,
+        scale: Scale<f64>,
+    ) -> smithay::backend::renderer::utils::OpaqueRegions<i32, Physical> {
         self.0.opaque_regions(scale)
     }
 
@@ -67,8 +70,16 @@ impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(&self.0, frame, src, dst, damage)
+        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+            &self.0,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+        )
     }
 
     fn underlying_storage(
@@ -87,10 +98,18 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
         let frame = frame.glow_frame_mut();
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(&self.0, frame, src, dst, damage)
-            .map_err(|err| UdevRenderError::Render(err))
+        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+            &self.0,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+        )
+        .map_err(|err| UdevRenderError::Render(err))
     }
 
     fn underlying_storage(

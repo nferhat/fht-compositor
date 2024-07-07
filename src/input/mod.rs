@@ -11,7 +11,7 @@ use smithay::backend::input::{
 #[cfg(feature = "udev_backend")]
 use smithay::backend::session::Session;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
-use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
+use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
 use smithay::utils::{Point, SERIAL_COUNTER};
@@ -250,7 +250,10 @@ impl State {
                 // layer shell
                 for layer in self.fht.layer_shell_state.layer_surfaces().rev() {
                     let data = with_states(layer.wl_surface(), |state| {
-                        *state.cached_state.current::<LayerSurfaceCachedState>()
+                        *state
+                            .cached_state
+                            .get::<LayerSurfaceCachedState>()
+                            .current()
                     });
                     if data.keyboard_interactivity == KeyboardInteractivity::Exclusive
                         && (data.layer == Layer::Top || data.layer == Layer::Overlay)
@@ -321,19 +324,23 @@ impl State {
                         }
 
                         #[cfg(feature = "udev_backend")]
-                        if key_state == KeyState::Pressed
-                            && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
-                                .contains(&handle.modified_sym().raw())
                         {
-                            if let crate::backend::Backend::Udev(data) = &mut state.backend {
-                                if let Err(err) = data.session.change_vt(
-                                    (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
-                                        + 1) as i32,
-                                ) {
-                                    error!(?err, "Failed switching virtual terminal.");
+                            use smithay::input::keyboard::Keysym;
+                            if key_state == KeyState::Pressed
+                                && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
+                                    .contains(&handle.modified_sym().raw())
+                            {
+                                #[allow(irrefutable_let_patterns)]
+                                if let crate::backend::Backend::Udev(data) = &mut state.backend {
+                                    if let Err(err) = data.session.change_vt(
+                                        (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
+                                            + 1) as i32,
+                                    ) {
+                                        error!(?err, "Failed switching virtual terminal.");
+                                    }
+                                    suppressed_keys.insert(keysym);
+                                    return FilterResult::Intercept(KeyAction::None);
                                 }
-                                suppressed_keys.insert(keysym);
-                                return FilterResult::Intercept(KeyAction::None);
                             }
                         }
 
@@ -343,7 +350,7 @@ impl State {
                         // under a parent compositor that already has binds with the super key.
                         #[cfg(feature = "x11_backend")]
                         if matches!(&mut state.backend, crate::backend::Backend::X11(_)) {
-                            modifiers = ModifiersState {
+                            modifiers = smithay::input::keyboard::ModifiersState {
                                 alt: modifiers.logo,
                                 logo: modifiers.alt,
                                 ..modifiers
@@ -396,8 +403,9 @@ impl State {
                                 // defined region
                                 if !constraint.region().map_or(true, |region| {
                                     region.contains(
-                                        (pointer_location.to_i32_round() - *surface_loc)
-                                            .as_logical(),
+                                        (pointer_location - *surface_loc)
+                                            .as_logical()
+                                            .to_i32_round(),
                                     )
                                 }) {
                                     return;
@@ -455,7 +463,7 @@ impl State {
                             return;
                         }
                         if confine_region.is_some_and(|region| {
-                            region.contains((pointer_location.to_i32_round() - *loc).as_logical())
+                            region.contains((pointer_location - *loc).as_logical().to_i32_round())
                         }) {
                             pointer.frame(self);
                             return;
@@ -482,16 +490,15 @@ impl State {
                 // If pointer is now in a constraint region, activate it
                 // TODO: Anywhere else pointer is moved needs to do this (in the self.move_pointer
                 // function)
-                if let Some((under, surface_location)) =
-                    new_under.and_then(|(target, loc)| Some((target.wl_surface()?, loc)))
+                if let Some((under, surface_location)) = new_under
+                    .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
                 {
                     with_pointer_constraint(&under, &pointer, |constraint| match constraint {
                         Some(constraint) if !constraint.is_active() => {
                             let point = pointer_location.to_i32_round() - surface_location;
-                            if constraint
-                                .region()
-                                .map_or(true, |region| region.contains(point.as_logical()))
-                            {
+                            if constraint.region().map_or(true, |region| {
+                                region.contains(point.as_logical().to_i32_round())
+                            }) {
                                 constraint.activate();
                             }
                         }
@@ -669,7 +676,9 @@ impl State {
 
                     tool.motion(
                         pointer_location.as_logical(),
-                        under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc.as_logical()))),
+                        under.and_then(|(f, loc)| {
+                            f.wl_surface().map(|s| (s.into_owned(), loc.as_logical()))
+                        }),
                         &tablet,
                         SERIAL_COUNTER.next_serial(),
                         event.time_msec(),
@@ -714,7 +723,9 @@ impl State {
                 pointer.frame(self);
 
                 if let (Some(under), Some(tablet), Some(tool)) = (
-                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s, loc.as_logical()))),
+                    under.and_then(|(f, loc)| {
+                        f.wl_surface().map(|s| (s.into_owned(), loc.as_logical()))
+                    }),
                     tablet,
                     tool,
                 ) {

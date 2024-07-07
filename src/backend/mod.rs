@@ -37,6 +37,7 @@ impl Backend {
     /// This panics if the current backend is not X11.
     #[cfg(feature = "x11_backend")]
     pub fn x11(&mut self) -> &mut x11::X11Data {
+        #[allow(irrefutable_let_patterns)]
         if let Self::X11(data) = self {
             return data;
         }
@@ -50,6 +51,7 @@ impl Backend {
     /// This panics if the current backend is not udev.
     #[cfg(feature = "udev_backend")]
     pub fn udev(&mut self) -> &mut udev::UdevData {
+        #[allow(irrefutable_let_patterns)]
         if let Self::Udev(data) = self {
             return data;
         }
@@ -69,8 +71,10 @@ impl Backend {
     ) -> anyhow::Result<bool> {
         match self {
             #[cfg(feature = "x11_backend")]
+            #[allow(irrefutable_let_patterns)]
             Self::X11(ref mut data) => data.render(fht, output, current_time.into()),
             #[cfg(feature = "udev_backend")]
+            #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.render(fht, output, current_time.into()),
         }
     }

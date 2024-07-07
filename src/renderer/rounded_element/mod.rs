@@ -4,7 +4,7 @@ use glam::{Mat3, Vec2};
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::shaders::Shaders;
@@ -172,7 +172,7 @@ impl<E: Element> Element for RoundedCornerElement<E> {
         self.element.damage_since(scale, commit)
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         let regions = self.element.opaque_regions(scale);
 
         // Intersect with geometry, since we're clipping by it.
@@ -195,7 +195,7 @@ impl<E: Element> Element for RoundedCornerElement<E> {
             rect
         });
 
-        Rectangle::subtract_rects_many(regions, corners)
+        OpaqueRegions::from_slice(Rectangle::subtract_rects_many(regions, corners).as_slice())
     }
 
     fn alpha(&self) -> f32 {
@@ -218,9 +218,10 @@ where
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         if self.corner_radius == 0.0 {
-            self.element.draw(frame, src, dst, damage)
+            self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             // Override texture shader with our uniforms
             let program = Shaders::get_from_frame(frame).rounded_quad.clone();
@@ -233,7 +234,7 @@ where
             ];
             gles_frame.override_default_tex_program(program, additional_uniforms);
 
-            let res = self.element.draw(frame, src, dst, damage);
+            let res = self.element.draw(frame, src, dst, damage, opaque_regions);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
             BorrowMut::<GlesFrame>::borrow_mut(frame).clear_tex_program_override();
@@ -259,9 +260,10 @@ where
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
         if self.corner_radius == 0.0 {
-            self.element.draw(frame, src, dst, damage)
+            self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             // Override texture shader with our uniforms
             let glow_frame = frame.glow_frame_mut();
@@ -275,7 +277,7 @@ where
             ];
             gles_frame.override_default_tex_program(program, additional_uniforms);
 
-            let res = self.element.draw(frame, src, dst, damage);
+            let res = self.element.draw(frame, src, dst, damage, opaque_regions);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
             BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();

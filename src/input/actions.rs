@@ -7,7 +7,7 @@ use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
 use crate::shell::workspaces::tile::WorkspaceElement;
-use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
+use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::geometry::{PointExt, RectCenterExt};
 use crate::utils::output::OutputExt;

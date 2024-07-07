@@ -77,7 +77,7 @@ macro_rules! fht_render_elements {
                 }
             }
 
-            fn opaque_regions(&self, scale: smithay::utils::Scale<f64>) -> Vec<smithay::utils::Rectangle<i32, smithay::utils::Physical>> {
+            fn opaque_regions(&self, scale: smithay::utils::Scale<f64>) -> smithay::backend::renderer::utils::OpaqueRegions<i32, smithay::utils::Physical> {
                 match self {
                     $($name::$variant(elem) => elem.opaque_regions(scale)),+
                 }
@@ -105,10 +105,11 @@ macro_rules! fht_render_elements {
                 src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
                 dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
                 damage: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
+                opaque_regions: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
             ) -> Result<(), smithay::backend::renderer::gles::GlesError> {
                 match self {
                     $($name::$variant(elem) => {
-                        smithay::backend::renderer::element::RenderElement::<smithay::backend::renderer::glow::GlowRenderer>::draw(elem, frame, src, dst, damage)
+                        smithay::backend::renderer::element::RenderElement::<smithay::backend::renderer::glow::GlowRenderer>::draw(elem, frame, src, dst, damage, opaque_regions)
                     })+
                 }
             }
@@ -130,10 +131,11 @@ macro_rules! fht_render_elements {
                 src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
                 dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
                 damage: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
+                opaque_regions: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
             ) -> Result<(), $crate::backend::udev::UdevRenderError<'render>> {
                 match self {
                     $($name::$variant(elem) => {
-                        smithay::backend::renderer::element::RenderElement::<$crate::backend::udev::UdevRenderer<'render>>::draw(elem, frame, src, dst, damage)
+                        smithay::backend::renderer::element::RenderElement::<$crate::backend::udev::UdevRenderer<'render>>::draw(elem, frame, src, dst, damage, opaque_regions)
                     })+
                 }
             }

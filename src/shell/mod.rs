@@ -44,7 +44,7 @@ impl Fht {
     pub fn focus_target_under(
         &self,
         point: Point<f64, Global>,
-    ) -> Option<(PointerFocusTarget, Point<i32, Global>)> {
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         let output = self.focus_state.output.as_ref()?;
         let wset = self.wset_for(output);
         let layer_map = layer_map_for_output(output);
@@ -60,7 +60,7 @@ impl Fht {
                 .map(|(surface, surface_loc)| {
                     (
                         PointerFocusTarget::from(surface),
-                        (surface_loc + loc).as_local().to_global(output),
+                        (surface_loc + loc).as_local().to_global(output).to_f64(),
                     )
                 })
         };
@@ -70,18 +70,19 @@ impl Fht {
             window
                 .surface_under(point.as_logical() - loc.to_f64(), WindowSurfaceType::ALL)
                 .map(|(surface, surface_loc)| {
-                    if surface == window_wl_surface {
+                    if surface == *window_wl_surface {
                         // Use the window immediatly when we are the toplevel surface.
                         // PointerFocusTarget::Window to proceed (namely
                         // State::process_mouse_action).
                         (
                             PointerFocusTarget::Window(window.clone()),
-                            loc.as_global(), // window loc is already global
+                            loc.to_f64().as_global(), // window loc is already global
                         )
                     } else {
                         (
                             PointerFocusTarget::from(surface),
-                            (surface_loc + loc).as_global(), // window loc is already global
+                            (surface_loc + loc).to_f64().as_global(), /* window loc is already
+                                                                       * global */
                         )
                     }
                 })
@@ -368,7 +369,7 @@ impl Fht {
             last_output,
             last_workspace_idx,
         } = unmapped_tile;
-        let wl_surface = tile.element().wl_surface().unwrap();
+        let wl_surface = tile.element().wl_surface().unwrap().into_owned();
         let output = last_output.unwrap_or_else(|| self.active_output());
         let wset = self.wset_mut_for(&output);
         let active_idx = wset.get_active_idx();

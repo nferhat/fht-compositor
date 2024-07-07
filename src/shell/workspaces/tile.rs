@@ -293,7 +293,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
         let element_surface = self.element.wl_surface().unwrap();
-        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && element_surface == *surface {
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*element_surface == surface {
             return true;
         }
 

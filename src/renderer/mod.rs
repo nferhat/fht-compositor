@@ -19,7 +19,7 @@ use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
+use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
 };
@@ -40,10 +40,9 @@ use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::config::CONFIG;
-use crate::portals::CursorMode;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
-use crate::state::{Fht, OutputState};
+use crate::state::Fht;
 use crate::utils::fps::Fps;
 use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt};
 
@@ -262,7 +261,7 @@ impl Fht {
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
     ) where
-        FhtRenderElement<R>: RenderElement<R>,
+        FhtRenderElement<R>: smithay::backend::renderer::element::RenderElement<R> ,
     {
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
@@ -278,7 +277,7 @@ impl Fht {
             return;
         }
 
-        let dt = &mut OutputState::get(output).damage_tracker;
+        let dt = &mut crate::state::OutputState::get(output).damage_tracker;
         let mut casts = std::mem::take(&mut pipewire.casts);
         let mut casts_to_stop = vec![];
 
@@ -312,7 +311,10 @@ impl Fht {
                 let fd = data.as_raw().fd as i32;
                 let dmabuf = cast.dmabufs.borrow()[&fd].clone();
 
-                let elements = if cast.cursor_mode.contains(CursorMode::EMBEDDED) {
+                let elements = if cast
+                    .cursor_mode
+                    .contains(crate::portals::CursorMode::EMBEDDED)
+                {
                     &output_elements_result.render_elements
                 } else {
                     &output_elements_result.render_elements

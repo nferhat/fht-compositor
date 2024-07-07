@@ -250,13 +250,6 @@ pub struct RenderConfig {
     #[serde(default)]
     pub damage_color: Option<[f32; 4]>,
 
-    /// Enable color transformation support from the Smithay renderer.
-    ///
-    /// These are optional, and don't do much for people (generally). Disabling them give you a
-    /// great performance boost.
-    #[serde(default)]
-    pub enable_color_transformations: bool,
-
     /// Whether to show a debug overlay for each output.
     #[serde(default)]
     pub debug_overlay: bool,
@@ -270,7 +263,6 @@ impl Default for RenderConfig {
             #[cfg(feature = "udev_backend")]
             disable_overlay_planes: default_disable_overlay_planes(),
             damage_color: None,
-            enable_color_transformations: false,
             #[cfg(feature = "udev_backend")]
             render_node: default_render_node(),
             debug_overlay: false,

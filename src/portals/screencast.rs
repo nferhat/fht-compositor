@@ -376,7 +376,9 @@ impl State {
                 }
                 #[cfg(feature = "udev_backend")]
                 {
-                    let Backend::Udev(ref mut data) = &mut self.backend else {
+                    #[allow(irrefutable_let_patterns)]
+                    let Backend::Udev(ref mut data) = &mut self.backend
+                    else {
                         warn!("ScreenCast is only supported on udev backend!");
                         return;
                     };

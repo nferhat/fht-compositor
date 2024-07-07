@@ -67,6 +67,7 @@ impl<R: Renderer> RenderElement<R> for ExtraDamage {
         _src: Rectangle<f64, Buffer>,
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
+        _or: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         Ok(())
     }

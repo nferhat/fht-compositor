@@ -32,7 +32,7 @@ impl State {
         if let Some(idx) = state
             .pending_windows
             .iter()
-            .position(|w| w.inner.wl_surface().as_ref() == Some(surface))
+            .position(|w| w.inner.wl_surface().is_some_and(|s| &*s == surface))
         {
             let pending_window = state.pending_windows.get_mut(idx).unwrap();
             pending_window.inner.refresh();
@@ -61,11 +61,12 @@ impl State {
             return None;
         }
 
-        if let Some(idx) = state
-            .unmapped_tiles
-            .iter()
-            .position(|t| t.inner.element().wl_surface().as_ref() == Some(surface))
-        {
+        if let Some(idx) = state.unmapped_tiles.iter().position(|t| {
+            t.inner
+                .element()
+                .wl_surface()
+                .is_some_and(|s| &*s == surface)
+        }) {
             let unmapped_tile = state.unmapped_tiles.get(idx).unwrap();
             unmapped_tile.inner.element().refresh();
             unmapped_tile.inner.element().on_commit();
@@ -148,11 +149,12 @@ impl CompositorHandler for State {
             let maybe_dmabuf = with_states(surface, |surface_data| {
                 surface_data
                     .cached_state
-                    .pending::<SurfaceAttributes>()
+                    .get::<SurfaceAttributes>()
+                    .pending()
                     .buffer
                     .as_ref()
                     .and_then(|assignment| match assignment {
-                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).ok(),
+                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(&buffer).cloned().ok(),
                         _ => None,
                     })
             });
@@ -185,6 +187,7 @@ impl CompositorHandler for State {
         // buffer management
         on_commit_buffer_handler::<Self>(surface);
         #[cfg(feature = "udev_backend")]
+        #[allow(irrefutable_let_patterns)]
         if let crate::backend::Backend::Udev(ref mut data) = &mut self.backend {
             data.early_import(surface);
         }

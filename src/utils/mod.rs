@@ -3,7 +3,9 @@ use std::os::unix::process::CommandExt;
 use std::process::Stdio;
 
 pub mod animation;
+#[cfg(feature = "dbus")]
 pub mod dbus;
+#[cfg(feature = "udev_backend")]
 pub mod drm;
 pub mod fps;
 pub mod geometry;

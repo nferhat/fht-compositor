@@ -1,7 +1,7 @@
 # {{{ Workspace
 
 [workspace]
-members = ["fht-config", "fht-share-picker"]
+members = ["fht-config"]
 resolver = "2"
 
 [workspace.package]
@@ -17,29 +17,25 @@ anyhow = "1.0.79"
 async-std = "1.12.0"
 profiling = "1.0.14"
 # dbus IPC
-zbus = "4.1.2"
-zvariant = { version = "4.0.0", features = ["option-as-array"] }
+zbus = "4.3.1"
+zvariant = { version = "4.1.2", features = ["option-as-array"] }
 # Basic logging setup
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-color-eyre = "0.6.2"
+color-eyre = "0.6.3"
 # Config file support
 xdg = "2.5.2"
 ron = "0.8.1"
-serde = { version = "1.0.196", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-rev = "0398269"
+rev = "f208cd7"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "0398269"
-
-[workspace.dependencies.iced]
-git = "https://github.com/nferhat/iced"
-rev = "b70a0ca"
+rev = "f208cd7"
 
 [profile.opt]
 inherits = "release"
@@ -67,7 +63,7 @@ readme = "README.md"
 
 [dependencies]
 anyhow.workspace = true
-indexmap = { version = "2.1.0", features = ["serde"] }
+indexmap = { version = "2.2.6", features = ["serde"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
@@ -82,23 +78,22 @@ smithay = { workspace = true, features = [
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
 colors-transform = "0.2.11"
-regex = "1.10.4"
-bitflags = "2.4.2"
-thiserror = "1.0.56"
-libc = "0.2.153"
+regex = "1.10.5"
+bitflags = "2.6.0"
+thiserror = "1.0.61"
+libc = "0.2.155"
 profiling.workspace = true
 puffin_http = { version = "0.16.0", optional = true }
 keyframe = { version = "1.1.1", default-features = false }
-zbus.workspace = true
-zvariant.workspace = true
-uuid = { version = "1.7.0", features = ["v4"] }
+zbus = { workspace = true, optional = true }
+zvariant = { workspace = true, optional = true }
+uuid = { version = "1.9.1", features = ["v4"] }
 pipewire = { version = "0.8.0", optional = true }
 async-std = { workspace = true, features = ["unstable"] }
-xcursor = "0.3.3"
+xcursor = "0.3.5"
 x11rb = { version = "0.12.0", optional = true, default-features = false, features = ["composite"] }
-serde_arrays = "0.1.0"
 fht-config.path = "./fht-config"
-glam = "0.27.0"
+glam = "0.28.0"
 # TODO: Update this to 0.27 when smithay updates glow from 0.12 to 0.13
 egui = "0.23"
 egui_glow = "0.23"
@@ -108,6 +103,7 @@ egui_extras = "0.23"
 default = ["egl", "x11_backend", "udev_backend", "all-portals"]
 egl = ["smithay/use_system_lib", "smithay/backend_egl"]
 x11_backend = ["smithay/backend_x11", "x11rb", "smithay/renderer_glow", "smithay/backend_vulkan"]
+dbus = ["zbus", "zvariant"] # marker feature to enable the dbus connection
 udev_backend = [
     "smithay-drm-extras",
     "smithay/backend_libinput",
@@ -122,7 +118,7 @@ udev_backend = [
 profile-with-puffin = ["profiling/profile-with-puffin", "puffin_http"]
 profile-with-tracy = ["profiling/profile-with-tracy"]
 all-portals = ["xdg-screencast-portal"]
-xdg-screencast-portal = ["pipewire"]
+xdg-screencast-portal = ["pipewire", "dbus"]
 
 # }}}
 

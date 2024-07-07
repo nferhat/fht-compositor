@@ -17,8 +17,10 @@ impl DmabufHandler for State {
     ) {
         match self.backend {
             #[cfg(feature = "x11_backend")]
+            #[allow(irrefutable_let_patterns)]
             Backend::X11(ref mut data) => data.dmabuf_imported(&dmabuf, notifier),
             #[cfg(feature = "udev_backend")]
+            #[allow(irrefutable_let_patterns)]
             Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
         };
     }

@@ -53,10 +53,6 @@ impl<E: Texture + Clone + 'static> Element for FhtTextureElement<E> {
         self.0.damage_since(scale, commit)
     }
 
-    fn opaque_regions(&self, scale: Scale<f64>) -> Vec<Rectangle<i32, Physical>> {
-        self.0.opaque_regions(scale)
-    }
-
     fn alpha(&self) -> f32 {
         self.0.alpha()
     }
@@ -73,9 +69,15 @@ impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
-            &self.0, frame, src, dst, damage,
+            &self.0,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
         )
     }
 
@@ -95,9 +97,15 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
         <TextureRenderElement<MultiTexture> as RenderElement<UdevRenderer<'a>>>::draw(
-            &self.0, frame, src, dst, damage,
+            &self.0,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
         )
     }
 
@@ -117,10 +125,16 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
         let frame = frame.glow_frame_mut();
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
-            &self.0, frame, src, dst, damage,
+            &self.0,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
         )
         .map_err(UdevRenderError::Render)
     }

@@ -49,7 +49,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         // While the grab handle is active, no client should have focus, otherwise bad stuff WILL
@@ -99,7 +99,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         handle.relative_motion(data, focus, event);

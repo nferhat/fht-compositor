@@ -22,7 +22,7 @@ use pipewire::spa::sys::{
 use pipewire::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Fraction, Rectangle, SpaTypes};
 use pipewire::stream::{Stream, StreamFlags, StreamState};
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
-use smithay::backend::allocator::gbm::GbmDevice;
+use smithay::backend::allocator::gbm::{GbmBuffer, GbmDevice};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::output::Output;
@@ -281,7 +281,8 @@ impl PipeWire {
                                 return;
                             }
                         };
-                        let dmabuf = match bo.export() {
+                        let gbm_buffer = GbmBuffer::from_bo(bo, true);
+                        let dmabuf = match gbm_buffer.export() {
                             Ok(dmabuf) => dmabuf,
                             Err(err) => {
                                 warn!("error exporting GBM buffer object as dmabuf: {err:?}");

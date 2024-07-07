@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use libc::dev_t;
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags};
+use smithay::backend::allocator::gbm::{GbmAllocator, GbmBuffer, GbmBufferFlags};
 use smithay::backend::allocator::{Buffer, Fourcc};
 use smithay::backend::drm::compositor::{
     DrmCompositor, PrimaryPlaneElement, RenderFrameError, RenderFrameResult,
@@ -14,14 +14,13 @@ use smithay::backend::drm::gbm::GbmFramebuffer;
 use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
 };
-use smithay::backend::egl::context::ContextPriority;
-use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
+use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::Element;
-use smithay::backend::renderer::gles::{Capability, GlesRenderbuffer, GlesRenderer};
+use smithay::backend::renderer::gles::GlesRenderbuffer;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
@@ -29,11 +28,12 @@ use smithay::backend::renderer::multigpu::{
 };
 use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
-use smithay::backend::renderer::{
-    buffer_type, Bind, Blit, BufferType, ExportMem, Offscreen, TextureFilter,
-};
 #[cfg(feature = "egl")]
-use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
+use smithay::backend::renderer::ImportEgl;
+use smithay::backend::renderer::{
+    buffer_type, Bind, Blit, BufferType, ExportMem, ImportDma, ImportMemWl, Offscreen,
+    TextureFilter,
+};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -50,7 +50,7 @@ use smithay::reexports::drm::control::connector::{
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
 use smithay::reexports::drm::control::ModeTypeFlags;
 use smithay::reexports::drm::Device as _;
-use smithay::reexports::gbm::{BufferObject, Device as GbmDevice};
+use smithay::reexports::gbm::Device as GbmDevice;
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
@@ -262,22 +262,7 @@ impl UdevData {
             })
             .map_err(|_| anyhow::anyhow!("Failed to insert libseat event source!"))?;
 
-        let gpu_manager = GbmGlesBackend::with_factory(|egl_display: &EGLDisplay| {
-            let egl_context = EGLContext::new_with_priority(egl_display, ContextPriority::High)?;
-
-            // Thank you cmeissl for guiding me here, this helps with drawing egui since we don't
-            // have to create a shadow buffer anymore (atleast if this is false)
-            let renderer = if CONFIG.renderer.enable_color_transformations {
-                unsafe { GlesRenderer::new(egl_context)? }
-            } else {
-                let capabilities = unsafe { GlesRenderer::supported_capabilities(&egl_context) }?
-                    .into_iter()
-                    .filter(|c| *c != Capability::ColorTransformations);
-                unsafe { GlesRenderer::with_capabilities(egl_context, capabilities)? }
-            };
-
-            Ok(renderer)
-        });
+        let gpu_manager = GbmGlesBackend::default();
 
         let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
 
@@ -452,6 +437,7 @@ impl UdevData {
         if device_node == self.primary_node {
             debug!("Adding primary node.");
 
+            #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
             let mut renderer = self
                 .gpu_manager
                 .single_renderer(&render_node)
@@ -470,7 +456,7 @@ impl UdevData {
             }
 
             // Init dmabuf support with format list from our primary gpu
-            let dmabuf_formats = renderer.dmabuf_formats().collect::<Vec<_>>();
+            let dmabuf_formats = renderer.dmabuf_formats();
             let default_feedback = DmabufFeedbackBuilder::new(device_node.dev_id(), dmabuf_formats)
                 .build()
                 .unwrap();
@@ -1235,14 +1221,12 @@ fn get_surface_dmabuf_feedback(
     let primary_formats = gpu_manager
         .single_renderer(&primary_gpu)
         .ok()?
-        .dmabuf_formats()
-        .collect::<HashSet<_>>();
+        .dmabuf_formats();
 
     let render_formats = gpu_manager
         .single_renderer(&render_node)
         .ok()?
-        .dmabuf_formats()
-        .collect::<HashSet<_>>();
+        .dmabuf_formats();
 
     let all_render_formats = primary_formats
         .iter()
@@ -1256,10 +1240,11 @@ fn get_surface_dmabuf_feedback(
     // We limit the scan-out tranche to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let planes_formats = planes
-        .primary
+    let planes_formats = surface
+        .plane_info()
         .formats
-        .into_iter()
+        .iter()
+        .copied()
         .chain(planes.overlay.into_iter().flat_map(|p| p.formats))
         .collect::<HashSet<_>>()
         .intersection(&all_render_formats)
@@ -1300,7 +1285,7 @@ fn render_screencopy<'a>(
     surface: &mut Surface,
     render_frame_result: &RenderFrameResult<
         'a,
-        BufferObject<()>,
+        GbmBuffer,
         GbmFramebuffer,
         FhtRenderElement<UdevRenderer<'a>>,
     >,
@@ -1383,7 +1368,7 @@ fn render_screencopy<'a>(
 
         (|| -> anyhow::Result<Option<SyncPoint>> {
             if screencopy_region == Rectangle::from_loc_and_size((0, 0), output_size) {
-                renderer.bind(dmabuf)?;
+                renderer.bind(dmabuf.clone())?;
                 let blit_frame_result = render_frame_result.blit_frame_result(
                     screencopy_region.size,
                     Transform::Normal,
@@ -1415,7 +1400,7 @@ fn render_screencopy<'a>(
                 // They both run the same internal code and I don't understand why there's
                 // different behaviour. Even adding a missing `self.unbind()?` thats missing from
                 // blit_to doesn't fix it.
-                renderer.bind(dmabuf)?;
+                renderer.bind(dmabuf.clone())?;
                 renderer.blit_from(
                     offscreen,
                     screencopy_region,

@@ -16,7 +16,6 @@ use smithay::backend::vulkan::version::Version;
 use smithay::backend::vulkan::{Instance, PhysicalDevice};
 use smithay::backend::x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Surface};
 use smithay::output::{Mode, Output};
-use smithay::reexports::ash::vk::ExtPhysicalDeviceDrmFn;
 use smithay::reexports::gbm;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::utils::{DeviceFd, Physical, Size};
@@ -69,7 +68,7 @@ impl X11Data {
             unsafe { EGLDisplay::new(device.clone()).context("Failed to create EGL display!") }?;
         let context = EGLContext::new(&egl_display).context("Failed to create EGL context!")?;
 
-        #[cfg_attr(not(feature = "egl"), allow(unsued_mut))]
+        #[cfg_attr(not(feature = "egl"), allow(unused))]
         let mut renderer =
             unsafe { GlowRenderer::new(context) }.context("Failed to create Gles renderer!")?;
         Shaders::init(&mut renderer);
@@ -79,7 +78,7 @@ impl X11Data {
             info!("EGL hardware-acceleration enabled.");
         }
 
-        let dmabuf_formats = renderer.dmabuf_formats().collect::<Vec<_>>();
+        let dmabuf_formats = renderer.dmabuf_formats();
         let dmabuf_default_feedback = DmabufFeedbackBuilder::new(drm_node.dev_id(), dmabuf_formats)
             .build()
             .context("Failed to get the default dmabuf feedback!")?;
@@ -195,7 +194,9 @@ impl X11Data {
                         .and_then(|devices| {
                             devices
                                 .filter(|phd| {
-                                    phd.has_device_extension(ExtPhysicalDeviceDrmFn::name())
+                                    phd.has_device_extension(
+                                        smithay::reexports::ash::ext::physical_device_drm::NAME,
+                                    )
                                 })
                                 .find(|phd| {
                                     phd.primary_node().unwrap() == Some(self.drm_node)

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 pub use smithay::backend::input::KeyState;
 use smithay::desktop::Window;
 pub use smithay::desktop::{LayerSurface, PopupKind};
@@ -44,11 +46,11 @@ impl From<PopupKind> for KeyboardFocusTarget {
 }
 
 impl WaylandFocus for KeyboardFocusTarget {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<WlSurface>> {
         match self {
             Self::Window(w) => w.wl_surface(),
-            Self::LayerSurface(l) => Some(l.wl_surface().clone()),
-            Self::Popup(p) => Some(p.wl_surface().clone()),
+            Self::LayerSurface(l) => Some(Cow::Owned(l.wl_surface().clone())),
+            Self::Popup(p) => Some(Cow::Owned(p.wl_surface().clone())),
         }
     }
 
@@ -192,7 +194,7 @@ impl From<Window> for PointerFocusTarget {
 }
 
 impl WaylandFocus for PointerFocusTarget {
-    fn wl_surface(&self) -> Option<WlSurface> {
+    fn wl_surface(&self) -> Option<Cow<WlSurface>> {
         match self {
             Self::WlSurface(w) => w.wl_surface(),
             Self::Window(w) => w.wl_surface(),
