@@ -4,6 +4,7 @@
 //! [smithay-egui](https://github.com/smithay/smithay-egui), with additional tailoring to fit the
 //! compositor's needs.
 
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -12,7 +13,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::{Device, DeviceCapability, MouseButton};
 use smithay::backend::renderer::element::texture::{TextureRenderBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::gles::{GlesError, GlesTexture};
+use smithay::backend::renderer::gles::{self, GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Frame, Offscreen, Renderer, Unbind};
 use smithay::input::keyboard::{xkb, ModifiersState};
@@ -261,8 +262,8 @@ impl EguiOverlay {
             events: self.events.drain(..).collect(),
             hovered_files: Vec::with_capacity(0),
             dropped_files: Vec::with_capacity(0),
-            focused: true,          // does not make a big change
-            max_texture_side: None, // TODO query from GlState somehow
+            focused: true,
+            max_texture_side: self.painter.as_ref().map(|painter| painter.max_texture_size),
             ..Default::default()
         };
 
@@ -290,6 +291,15 @@ impl EguiOverlay {
         let painter = match self.painter.as_mut() {
             Some(painter) => painter,
             None => {
+                let mut max_texture_size = 0;
+                {
+                    let gles_renderer: &mut gles::GlesRenderer = renderer.borrow_mut();
+                    let _ = gles_renderer.with_context(|gles| unsafe {
+                        gles.GetIntegerv(gles::ffi::MAX_TEXTURE_SIZE, &mut max_texture_size);
+                    });
+                }
+                dbg!(max_texture_size);
+
                 let mut frame = renderer
                     .render(output_size, Transform::Normal)
                     .map_err(|err| {
@@ -312,6 +322,7 @@ impl EguiOverlay {
                 self.painter.insert(EguiGlowPainter {
                     painter,
                     render_buffers: HashMap::new(),
+                    max_texture_size: max_texture_size as usize,
                 })
             }
         };
@@ -350,8 +361,8 @@ impl EguiOverlay {
             events: self.events.drain(..).collect(),
             hovered_files: Vec::with_capacity(0),
             dropped_files: Vec::with_capacity(0),
-            focused: true,          // does not make a big change
-            max_texture_side: None, // TODO query from GlState somehow
+            focused: true,
+            max_texture_side: Some(painter.max_texture_size),
             ..Default::default()
         };
 
@@ -400,6 +411,7 @@ impl EguiOverlay {
 pub struct EguiGlowPainter {
     painter: egui_glow::Painter,
     render_buffers: HashMap<usize, TextureRenderBuffer<GlesTexture>>,
+    max_texture_size: usize,
 }
 
 impl std::fmt::Debug for EguiGlowPainter {
@@ -407,6 +419,7 @@ impl std::fmt::Debug for EguiGlowPainter {
         f.debug_struct("EguiGlowPainter")
             .field("painter", &"...")
             .field("render_buffers", &self.render_buffers)
+            .field("max_texture_size", &self.max_texture_size)
             .finish()
     }
 }
