@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
@@ -6,13 +8,19 @@ use smithay::desktop::{
 use smithay::input::pointer::Focus;
 use smithay::input::Seat;
 use smithay::output::Output;
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
+    self, WmCapabilities,
+};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    XdgToplevelSurfaceData,
 };
 
+use crate::shell::grabs::ResizeState;
 use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::State;
@@ -37,6 +45,70 @@ impl XdgShellHandler for State {
     fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
         if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
             self.handle_move_request(window, serial);
+        }
+    }
+
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
+            self.handle_resize_request(window, serial, edges.into())
+        }
+    }
+
+    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
+        if let Configure::Toplevel(configure) = configure {
+            if let Some(serial) = with_states(&surface, |states| {
+                if let Some(data) = states.data_map.get::<RefCell<ResizeState>>() {
+                    if let ResizeState::WaitingForFinalAck(_, serial) = *data.borrow() {
+                        return Some(serial);
+                    }
+                }
+
+                None
+            }) {
+                // When the resize grab is released the surface
+                // resize state will be set to WaitingForFinalAck
+                // and the client will receive a configure request
+                // without the resize state to inform the client
+                // resizing has finished. Here we will wait for
+                // the client to acknowledge the end of the
+                // resizing. To check if the surface was resizing
+                // before sending the configure we need to use
+                // the current state as the received acknowledge
+                // will no longer have the resize state set
+                let is_resizing = with_states(&surface, |states| {
+                    states
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .current
+                        .states
+                        .contains(xdg_toplevel::State::Resizing)
+                });
+
+                if configure.serial >= serial && is_resizing {
+                    with_states(&surface, |states| {
+                        let state = &mut *states
+                            .data_map
+                            .get::<RefCell<ResizeState>>()
+                            .unwrap()
+                            .borrow_mut();
+                        *state = match std::mem::take(state) {
+                            ResizeState::WaitingForFinalAck(data, _) => {
+                                ResizeState::WaitingForCommit(data)
+                            }
+                            _ => unreachable!(),
+                        }
+                    });
+                }
+            }
         }
     }
 

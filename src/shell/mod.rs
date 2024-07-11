@@ -4,13 +4,15 @@ pub mod grabs;
 pub mod window;
 pub mod workspaces;
 
+use std::cell::RefCell;
+
+use grabs::{PointerResizeSurfaceGrab, ResizeData, ResizeState};
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface, PopupKind, Window, WindowSurfaceType
 };
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Monotonic, Point, Rectangle, Serial, Time};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
@@ -27,7 +29,7 @@ use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, UnmappedTile};
 use crate::utils::geometry::{
-    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt,
+    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -175,6 +177,14 @@ impl Fht {
         self.workspaces().find_map(|(_, wset)| {
             wset.ws_for(window)
                 .and_then(|ws| ws.element_geometry(window))
+        })
+    }
+
+    /// Get a this window's geometry.
+    pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Global>> {
+        self.workspaces().find_map(|(_, wset)| {
+            wset.ws_for(window)
+                .and_then(|ws| ws.element_visual_geometry(window))
         })
     }
 
@@ -480,24 +490,10 @@ impl crate::state::State {
         if !pointer.has_grab(serial) {
             return;
         }
-        let Some(start_data) = pointer.grab_start_data() else {
-            return;
-        };
 
-        let Some(wl_surface) = window.wl_surface() else {
-            return;
-        };
-        // Make sure we are moving the same window
-        if start_data.focus.is_none()
-            || !start_data
-                .focus
-                .as_ref()
-                .unwrap()
-                .0
-                .same_client_as(&wl_surface.id())
-        {
-            return;
-        }
+        let mut start_data = pointer.grab_start_data().unwrap();
+        start_data.focus = None;
+
 
         let mut window_geo = self.fht.window_geometry(&window).unwrap();
 
@@ -525,6 +521,80 @@ impl crate::state::State {
         }
 
         let grab = MoveSurfaceGrab::new(start_data, window, window_geo);
+
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    /// Process a resize request for this given window.
+    pub fn handle_resize_request(
+        &mut self,
+        window: Window,
+        serial: Serial,
+        edges: grabs::ResizeEdge,
+    ) {
+        // NOTE: About internal handling.
+        // ---
+        // Even though `XdgShellHandler::move_request` has a seat argument, we only advertise one
+        // single seat to clients (why would we support multi-seat for a standalone compositor?)
+        // So the only pointer we have is the advertised seat pointer.
+        let pointer = self.fht.pointer.clone();
+        if !pointer.has_grab(serial) {
+            return;
+        }
+        let mut start_data = pointer.grab_start_data().unwrap();
+        start_data.focus = None;
+
+        let Some(wl_surface) = window.wl_surface() else {
+            return;
+        };
+
+        let mut window_geo = self.fht.window_geometry(&window).unwrap();
+
+        // Unmaximize/Unfullscreen if it already is.
+        let is_maximized = window.maximized();
+        let is_fullscreen = window.fullscreen();
+        window.set_maximized(false);
+        window.set_fullscreen(false);
+        window.set_fullscreen_output(None);
+
+        if is_maximized || is_fullscreen {
+            if let Some(toplevel) = window.toplevel() {
+                toplevel.send_configure();
+            }
+
+            // let pos = pointer.current_location().as_global();
+            // let mut window_pos = pos - window_geo.to_f64().loc;
+            // window_pos.x = window_pos.x.clamp(0.0, window_geo.size.w.to_f64());
+            //
+            // match window_pos.x / window_geo.size.w.to_f64() {
+            //     x if x < 0.5
+            // }
+            let pos = pointer.current_location();
+            window_geo.loc = (pos.x as i32, pos.y as i32).into();
+        }
+
+        with_states(&wl_surface, move |states| {
+            let mut state = states
+                .data_map
+                .get_or_insert(|| RefCell::new(ResizeState::default()))
+                .borrow_mut();
+            *state = ResizeState::Resizing(ResizeData {
+                edges: edges.into(),
+                initial_window_location: window_geo.loc.as_logical(),
+                initial_window_size: window_geo.size.as_logical(),
+            });
+        });
+
+        self.fht.loop_handle.insert_idle(move |state| {
+            // Set the cursor icon.
+            let icon = edges.cursor_icon();
+            let mut lock = state.fht.cursor_theme_manager.image_status.lock().unwrap();
+            *lock = CursorImageStatus::Named(icon);
+            state.fht.resize_grab_active = true;
+        });
+
+        let grab =
+            PointerResizeSurfaceGrab::new(start_data, window, edges, window_geo.size.as_local());
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }

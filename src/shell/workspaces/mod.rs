@@ -19,7 +19,7 @@ use crate::fht_render_elements;
 use crate::renderer::FhtRenderer;
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
-    Global, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
+    Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
 };
 use crate::utils::output::OutputExt;
 
@@ -446,7 +446,7 @@ pub struct Workspace<E: WorkspaceElement> {
     pub fullscreen: Option<FullscreenTile<E>>,
 
     /// The active layout index.
-    active_layout_idx: usize,
+    pub active_layout_idx: usize,
 }
 
 impl<E: WorkspaceElement> Workspace<E> {
@@ -662,6 +662,23 @@ impl<E: WorkspaceElement> Workspace<E> {
             .iter()
             .find(|tile| *tile == element)
             .map(|tile| tile.geometry().to_global(&self.output))
+    }
+
+    /// Get the visual global geometry of a given element.
+    ///
+    /// See [`WorkspaceTile::visual_geometry`]
+    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Global>> {
+        if self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|fs| fs.inner == *element)
+        {
+            return Some(self.output.geometry());
+        }
+        self.tiles
+            .iter()
+            .find(|tile| *tile == element)
+            .map(|tile| tile.visual_geometry().to_global(&self.output))
     }
 
     /// Insert a tile in this [`Workspace`]
@@ -919,6 +936,19 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles();
     }
 
+    /// Get the area used to tile the elements.
+    ///
+    /// This is the area that is used with [`Self::arrange_tiles`]
+    pub fn tile_area(&self) -> Rectangle<i32, Local> {
+        let mut area = layer_map_for_output(&self.output)
+            .non_exclusive_zone()
+            .as_local();
+        let outer_gaps = CONFIG.general.outer_gaps;
+        area.size -= (2 * outer_gaps, 2 * outer_gaps).into();
+        area.loc += (outer_gaps, outer_gaps).into();
+        area
+    }
+
     /// Refresh the geometries of the tiles contained in this [`Workspace`].
     ///
     /// This ensures geometry for maximized and tiled elements.
@@ -935,23 +965,17 @@ impl<E: WorkspaceElement> Workspace<E> {
             return;
         }
 
+        let inner_gaps = CONFIG.general.inner_gaps;
+        let tile_area = self.tile_area();
+
         let layout = self.get_active_layout();
         let (maximized, tiled) = self
             .tiles
             .iter_mut()
             .partition::<Vec<_>, _>(|tile| tile.element.maximized());
 
-        let inner_gaps = CONFIG.general.inner_gaps;
-        let outer_gaps = CONFIG.general.outer_gaps;
-
-        let usable_geo = layer_map_for_output(&self.output)
-            .non_exclusive_zone()
-            .as_local();
-        let mut maximized_geo = usable_geo;
-        maximized_geo.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-        maximized_geo.loc += (outer_gaps, outer_gaps).into();
         for tile in maximized {
-            tile.set_geometry(maximized_geo)
+            tile.set_geometry(tile_area)
         }
 
         if tiled.is_empty() {
@@ -959,7 +983,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         let tiled_len = tiled.len();
-        layout.arrange_tiles(tiled.into_iter(), tiled_len, maximized_geo, inner_gaps);
+        layout.arrange_tiles(tiled.into_iter(), tiled_len, tile_area, inner_gaps);
     }
 
     /// Get the active layout that arranges the tiles
@@ -997,7 +1021,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Change the master_width_factor of the active [`WorkspaceLayout`]
     ///
-    /// This clamps the value between (0.0..=0.95).
+    /// This clamps the value between (0.05..=0.95).
     pub fn change_mwfact(&mut self, delta: f32) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile {
@@ -1014,7 +1038,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         } = active_layout
         {
             *master_width_factor += delta;
-            *master_width_factor = master_width_factor.clamp(0.0, 0.95);
+            *master_width_factor = master_width_factor.clamp(0.05, 0.95);
         }
         self.arrange_tiles();
     }

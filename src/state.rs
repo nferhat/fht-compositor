@@ -254,6 +254,11 @@ pub struct Fht {
     pub suppressed_keys: HashSet<Keysym>,
     /// A list of devices managed by the compositor.
     pub devices: Vec<input::Device>,
+    /// Whether the interactive resize grab.
+    ///
+    /// This is a hacky way since we can't get the type of grab we current have with the pointer
+    /// api.
+    pub resize_grab_active: bool,
 
     /// The currently drawn drag and drop icon.
     pub dnd_icon: Option<WlSurface>,
@@ -398,6 +403,7 @@ impl Fht {
             pending_windows: vec![],
             unmapped_tiles: vec![],
             popups: PopupManager::default(),
+            resize_grab_active: false,
 
             last_config_error: None,
 

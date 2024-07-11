@@ -1,15 +1,17 @@
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
+use smithay::desktop::space::SpaceElement;
 use smithay::input::keyboard::{Keysym, ModifiersState};
-use smithay::utils::Serial;
+use smithay::utils::{Rectangle, Serial};
 use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
+use crate::shell::grabs::ResizeEdge;
 use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{PointExt, RectCenterExt};
+use crate::utils::geometry::{PointExt, PointGlobalExt, RectCenterExt};
 use crate::utils::output::OutputExt;
 
 /// A list of modifiers you can use in a key pattern.
@@ -422,6 +424,8 @@ impl Into<MouseButton> for FhtMouseButton {
 pub enum MouseAction {
     /// Move the window under the cursor
     MoveTile,
+    /// Resize the window under the cursor.
+    ResizeTile,
 }
 
 /// A mouse pattern.
@@ -448,6 +452,38 @@ impl State {
                     self.fht
                         .loop_handle
                         .insert_idle(move |state| state.handle_move_request(window, serial));
+                }
+            }
+            MouseAction::ResizeTile => {
+                if let Some((PointerFocusTarget::Window(window), _)) =
+                    self.fht.focus_target_under(pointer_loc)
+                {
+                    let pointer_loc = self.fht.pointer.current_location().as_global();
+                    let Rectangle { loc, size } =
+                        self.fht.window_visual_geometry(&window).unwrap().to_f64();
+
+                    let pointer_loc = (pointer_loc - loc).as_logical();
+                    if !window.is_in_input_region(&pointer_loc) {
+                        return;
+                    }
+
+                    // We divide the window into 9 sections, so that if you grab for example
+                    // somewhere in the middle of the bottom edge, you can only resize vertically.
+                    let mut edges = ResizeEdge::empty();
+                    if pointer_loc.x < size.w / 3. {
+                        edges |= ResizeEdge::LEFT;
+                    } else if 2. * size.w / 3. < pointer_loc.x {
+                        edges |= ResizeEdge::RIGHT;
+                    }
+                    if pointer_loc.y < size.h / 3. {
+                        edges |= ResizeEdge::TOP;
+                    } else if 2. * size.h / 3. < pointer_loc.y {
+                        edges |= ResizeEdge::BOTTOM;
+                    }
+
+                    self.fht.loop_handle.insert_idle(move |state| {
+                        state.handle_resize_request(window, serial, edges)
+                    });
                 }
             }
         }

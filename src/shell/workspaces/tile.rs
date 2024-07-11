@@ -240,6 +240,14 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         geo
     }
 
+    /// Get this tile's visual geometry, the geometry containing actual window content, excluding
+    /// for example shadows.
+    pub fn visual_geometry(&self) -> Rectangle<i32, Local> {
+        let mut geo = self.element.geometry().as_local();
+        geo.loc = self.render_location();
+        geo
+    }
+
     /// Get this tile's bounding box.
     pub fn bbox(&self) -> Rectangle<i32, Local> {
         let mut bbox = self.element.bbox().as_local();
