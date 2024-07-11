@@ -1,5 +1,14 @@
+//! Very simple and rudimentary Freedesktop XDG ScreenCast portal implementation.
+//!
+//! This currently only supports screencasting outputs to dmabuf buffers. Currently planned TODOs
+//! are the following:
+//! - Support SHM (software rendering) as a fallback if we can't decide on a dmabuf format/modifier
+//! - Support window and area screencasting (needs changes to the pipewire support code)
+//! - Support persistent session with resume tokens.
+
 use std::collections::HashMap;
 
+use anyhow::Context;
 use smithay::reexports::calloop;
 use smithay::utils::Rectangle;
 use zbus::object_server::SignalContext;
@@ -144,7 +153,7 @@ impl Portal {
         &self,
         _request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
-        _app_id: String,
+        app_id: String,
         options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
@@ -154,23 +163,24 @@ impl Portal {
             .unwrap();
         let mut session = session_ref.get_mut().await;
 
-        let cursor_mode =
-            CursorMode::from_bits(u32::try_from(options.get("cursor_mode").unwrap()).unwrap())
-                .unwrap();
+        let cursor_mode = get_option_value::<u32>(&options, "cursor_mode")
+            .ok()
+            .and_then(CursorMode::from_bits)
+            .unwrap_or_else(|| {
+                warn!("Failed to get 'cursor_mode' from options, using EMBEDDED");
+                CursorMode::EMBEDDED
+            });
+        let source_type = get_option_value::<u32>(&options, "source_type")
+            .ok()
+            .and_then(SourceType::from_bits)
+            .unwrap_or_else(|| {
+                warn!("Failed to get 'source_type' from options, using MONITOR");
+                SourceType::MONITOR
+            });
 
-        let source_type =
-            SourceType::from_bits(u32::try_from(options.get("types").unwrap()).unwrap()).unwrap();
-        // TODO: Support multiple sources
-        // TODO: Handle persist_mode
-        let arg = match source_type {
-            SourceType::MONITOR => "select_outputs",
-            SourceType::VIRTUAL | SourceType::WINDOW => "select_area",
-            value if value == SourceType::MONITOR | SourceType::VIRTUAL => "",
-            _ => unreachable!(),
-        };
         let output = async_std::process::Command::new("fht-share-picker")
             .stdout(std::process::Stdio::null())
-            .arg(arg)
+            .arg(app_id)
             .output()
             .await
             .expect("Failed to spawn command!");
@@ -223,7 +233,6 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
-        // TODO: Support multiple sessions
         let session_ref = object_server
             .interface::<_, Session>(&session_handle)
             .await
@@ -310,7 +319,6 @@ pub struct Session {
     request_handle: zvariant::OwnedObjectPath,
     handle: zvariant::OwnedObjectPath,
     cursor_mode: CursorMode,
-    // TODO: Multiple source support
     source_type: SourceType,
     source: SessionSource,
 }
@@ -500,4 +508,13 @@ impl Fht {
         });
         debug!(session_handle = session_handle.to_string(), "Stopped cast!");
     }
+}
+
+/// Get the value of an option of type [`T`] from a dbus option dict.
+fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
+    options: &'value HashMap<&str, zvariant::Value<'value>>,
+    name: &str,
+) -> anyhow::Result<T> {
+    T::try_from(options.get(name).context("Failed to get value!")?)
+        .map_err(|_| anyhow::anyhow!("Failed to convert value!"))
 }
