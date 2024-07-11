@@ -494,7 +494,6 @@ impl crate::state::State {
         let mut start_data = pointer.grab_start_data().unwrap();
         start_data.focus = None;
 
-
         let mut window_geo = self.fht.window_geometry(&window).unwrap();
 
         // Unmaximize/Unfullscreen if it already is.

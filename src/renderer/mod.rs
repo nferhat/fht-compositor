@@ -261,7 +261,7 @@ impl Fht {
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
     ) where
-        FhtRenderElement<R>: smithay::backend::renderer::element::RenderElement<R> ,
+        FhtRenderElement<R>: smithay::backend::renderer::element::RenderElement<R>,
     {
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();

@@ -327,13 +327,15 @@ impl State {
                         {
                             use smithay::input::keyboard::Keysym;
                             if key_state == KeyState::Pressed
-                                && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
+                                && (Keysym::XF86_Switch_VT_1.raw()
+                                    ..=Keysym::XF86_Switch_VT_12.raw())
                                     .contains(&handle.modified_sym().raw())
                             {
                                 #[allow(irrefutable_let_patterns)]
                                 if let crate::backend::Backend::Udev(data) = &mut state.backend {
                                     if let Err(err) = data.session.change_vt(
-                                        (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw()
+                                        (handle.modified_sym().raw()
+                                            - Keysym::XF86_Switch_VT_1.raw()
                                             + 1) as i32,
                                     ) {
                                         error!(?err, "Failed switching virtual terminal.");

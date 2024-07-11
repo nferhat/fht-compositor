@@ -19,7 +19,7 @@ impl TabletSeatHandler for State {
     ) {
         if self.fht.resize_grab_active {
             // The resize grab itself sets a cursor icon.
-            return
+            return;
         }
 
         *self.fht.cursor_theme_manager.image_status.lock().unwrap() = image;

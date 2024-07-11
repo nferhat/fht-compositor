@@ -263,7 +263,10 @@ impl EguiOverlay {
             hovered_files: Vec::with_capacity(0),
             dropped_files: Vec::with_capacity(0),
             focused: true,
-            max_texture_side: self.painter.as_ref().map(|painter| painter.max_texture_size),
+            max_texture_side: self
+                .painter
+                .as_ref()
+                .map(|painter| painter.max_texture_size),
             ..Default::default()
         };
 
