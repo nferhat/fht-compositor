@@ -16,14 +16,14 @@ https://github.com/nferhat/fht-compositor/assets/104871514/b5484cb5-65e8-4936-85
 
 ## Features
 
-- Can be ran user an X11 window, or under a TTY.
+- Can be ran user an X11 window, or under a TTY
 - Workspaces with dynamic layout system
-- Some basic animations .
+- Some basic animations
 - Window borders, with rounded corners support
 - Configuration:
-- Input configuration (global and per-device), with both keybinds and mousebinds.
-- Window rules (based on title/app_id/current workspace/etc.)
-- Output Screencast/Screen recording support through the XDG ScreenCast portal interface.
+    - Input configuration (global and per-device), with both keybinds and mousebinds
+    - Window rules (based on title/app_id/current workspace/etc.)
+- Output Screencast/Screen recording support through the XDG ScreenCast portal interface
 
 ## TO-DOs
 
