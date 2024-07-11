@@ -1201,7 +1201,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         {
             self.tiles.insert(last_known_idx, inner);
         }
-        dbg!(element);
 
         let Some(idx) = self.tiles.iter().position(|t| t == element) else {
             return;

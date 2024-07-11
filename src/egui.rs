@@ -301,7 +301,6 @@ impl EguiOverlay {
                         gles.GetIntegerv(gles::ffi::MAX_TEXTURE_SIZE, &mut max_texture_size);
                     });
                 }
-                dbg!(max_texture_size);
 
                 let mut frame = renderer
                     .render(output_size, Transform::Normal)

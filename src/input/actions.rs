@@ -243,7 +243,6 @@ impl State {
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
-                dbg!("hi");
                 if let Some(window) = active.focused().cloned() {
                     if window.fullscreen() {
                         window.set_fullscreen(false);
