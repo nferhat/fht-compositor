@@ -335,10 +335,8 @@ impl Fht {
             tiles_len,
             tile_area,
             inner_gaps,
+            false,
         );
-
-        // We dont want to animate the movement of opening windows.
-        tile.location_animation = None;
 
         // Client side-decorations
         let allow_csd = map_settings
@@ -389,7 +387,7 @@ impl Fht {
         let workspace = &mut wset.workspaces[workspace_idx];
 
         let window = tile.element.clone();
-        workspace.insert_tile(tile);
+        workspace.insert_tile(tile, false);
 
         let tile = workspace.find_tile(&wl_surface).unwrap();
         // we dont want to animate the tile now.

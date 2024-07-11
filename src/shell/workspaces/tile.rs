@@ -201,7 +201,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Set this tile's geometry.
     ///
     /// The tile automatically accounts for border geometry if it needs to.
-    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Local>) {
+    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Local>, animate: bool) {
         if self.need_border() {
             let thickness = self.border_config().thickness as i32;
             new_geo.loc += (thickness, thickness).into();
@@ -220,12 +220,14 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         // By that point our offset should be equal to 0
         let old_location = self.location;
         self.location = new_geo.loc;
-        self.location_animation = Animation::new(
-            old_location - new_geo.loc,
-            Point::default(),
-            CONFIG.animation.window_geometry.curve,
-            Duration::from_millis(CONFIG.animation.window_geometry.duration),
-        );
+        if animate {
+            self.location_animation = Animation::new(
+                old_location - new_geo.loc,
+                Point::default(),
+                CONFIG.animation.window_geometry.curve,
+                Duration::from_millis(CONFIG.animation.window_geometry.duration),
+            );
+        }
     }
 
     /// Send a pending configure message to the window

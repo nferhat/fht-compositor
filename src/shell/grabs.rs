@@ -138,10 +138,10 @@ impl PointerGrab<State> for MoveSurfaceGrab {
                     .map(|tile| tile.element.clone());
 
                 if let Some(ref other_window) = other_window {
-                    ws.swap_elements(&self.window, other_window)
+                    ws.swap_elements(&self.window, other_window, true)
                 } else {
                     // If we didnt find anything to swap with, still animate the window back.
-                    ws.arrange_tiles();
+                    ws.arrange_tiles(true);
                 }
             }
 
@@ -582,7 +582,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
         }
 
         if arrange {
-            ws.arrange_tiles();
+            ws.arrange_tiles(false);
         }
     }
 

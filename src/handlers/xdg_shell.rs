@@ -167,7 +167,7 @@ impl XdgShellHandler for State {
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
             window.set_maximized(true);
-            ws.arrange_tiles();
+            ws.arrange_tiles(true);
         }
 
         toplevel.send_configure();
@@ -179,7 +179,7 @@ impl XdgShellHandler for State {
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
             window.set_maximized(false);
-            ws.arrange_tiles();
+            ws.arrange_tiles(true);
         }
 
         toplevel.send_configure();
@@ -212,17 +212,17 @@ impl XdgShellHandler for State {
                     output = requested_output;
 
                     let ws = self.fht.ws_mut_for(&window).unwrap();
-                    let tile = ws.remove_tile(&window).unwrap();
+                    let tile = ws.remove_tile(&window, true).unwrap();
 
                     let new_ws = self.fht.wset_mut_for(&output).active_mut();
-                    new_ws.insert_tile(tile);
+                    new_ws.insert_tile(tile, true);
                 }
 
                 let ws = self.fht.ws_mut_for(&window).unwrap();
-                ws.fullscreen_element(&window);
+                ws.fullscreen_element(&window, true);
             } else if let Some(window) = self.fht.find_window(wl_surface).cloned() {
                 let ws = self.fht.ws_mut_for(&window).unwrap();
-                ws.fullscreen_element(&window);
+                ws.fullscreen_element(&window, true);
             }
         }
 

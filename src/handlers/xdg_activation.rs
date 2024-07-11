@@ -46,7 +46,7 @@ impl XdgActivationHandler for State {
             let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(&surface) else {
                 return;
             };
-            workspace.focus_element(&window);
+            workspace.focus_element(&window, true);
 
             // Second part: focus the workspace of the workspace set.
             let (window, output) = self.fht.find_window_and_output(&surface).unwrap();

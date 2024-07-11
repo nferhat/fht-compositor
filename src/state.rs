@@ -513,7 +513,7 @@ impl Fht {
             // Due to how we manage windows, a window can't be in two workspaces at a time, let
             // alone from different outputs
             new_workspace.tiles.extend(old_workspace.tiles.drain(..));
-            new_workspace.arrange_tiles();
+            new_workspace.arrange_tiles(true);
         }
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing

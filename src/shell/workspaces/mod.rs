@@ -143,7 +143,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     /// You need to call this when this [`WorkspaceSet`] output changes geometry to ensure that
     /// the tiled window geometries actually fill the output space.
     pub fn arrange(&mut self) {
-        self.workspaces_mut().for_each(Workspace::arrange_tiles)
+        self.workspaces_mut().for_each(|ws| ws.arrange_tiles(true))
     }
 
     /// Find the window associated with this [`WlSurface`]
@@ -532,7 +532,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         if should_refresh_geometries {
             self.focused_tile_idx = self.focused_tile_idx.clamp(0, new_len.saturating_sub(1));
-            self.arrange_tiles();
+            self.arrange_tiles(true);
         }
 
         // Refresh internal state of windows
@@ -684,13 +684,13 @@ impl<E: WorkspaceElement> Workspace<E> {
     /// Insert a tile in this [`Workspace`]
     ///
     /// See [`Workspace::insert_element`]
-    pub fn insert_tile(&mut self, tile: WorkspaceTile<E>) {
+    pub fn insert_tile(&mut self, tile: WorkspaceTile<E>, animate: bool) {
         let WorkspaceTile {
             element,
             border_config,
             ..
         } = tile;
-        self.insert_element(element, border_config);
+        self.insert_element(element, border_config, animate);
     }
 
     /// Insert an element in this [`Workspace`]
@@ -700,7 +700,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     /// [`Workspace`] output.
     ///
     /// This doesn't reinsert the element if it's already inserted.
-    pub fn insert_element(&mut self, element: E, border_config: Option<BorderConfig>) {
+    pub fn insert_element(&mut self, element: E, border_config: Option<BorderConfig>, animate: bool) {
         if self.has_element(&element) {
             return;
         }
@@ -753,20 +753,20 @@ impl<E: WorkspaceElement> Workspace<E> {
             });
         }
 
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Removes a tile from this [`Workspace`], returning it if it was found.
     ///
     /// This function also undones the configuration that was done in [`Self::insert_window`]
-    pub fn remove_tile(&mut self, element: &E) -> Option<WorkspaceTile<E>> {
+    pub fn remove_tile(&mut self, element: &E, animate: bool) -> Option<WorkspaceTile<E>> {
         if self
             .fullscreen
             .as_ref()
             .is_some_and(|fs| fs.inner == *element)
         {
             let FullscreenTile { inner, .. } = self.take_fullscreen().unwrap();
-            self.arrange_tiles();
+            self.arrange_tiles(animate);
 
             return Some(inner);
         }
@@ -783,12 +783,12 @@ impl<E: WorkspaceElement> Workspace<E> {
             .focused_tile_idx
             .clamp(0, self.tiles.len().saturating_sub(1));
 
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
         Some(tile)
     }
 
     /// Focus a given element, if this [`Workspace`] contains it.
-    pub fn focus_element(&mut self, window: &E) {
+    pub fn focus_element(&mut self, window: &E, animate: bool) {
         if let Some(idx) = self.tiles.iter().position(|w| w == window) {
             if let Some(FullscreenTile {
                 inner,
@@ -796,7 +796,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             }) = self.take_fullscreen()
             {
                 self.tiles.insert(last_known_idx, inner);
-                self.arrange_tiles();
+                self.arrange_tiles(animate);
             }
 
             self.focused_tile_idx = idx;
@@ -806,7 +806,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     /// Focus the next available element, cycling back to the first one if needed.
-    pub fn focus_next_element(&mut self) -> Option<&E> {
+    pub fn focus_next_element(&mut self, animate: bool) -> Option<&E> {
         if self.tiles.is_empty() {
             return None;
         }
@@ -817,7 +817,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
-            self.arrange_tiles();
+            self.arrange_tiles(animate);
         }
 
         let tiles_len = self.tiles.len();
@@ -833,7 +833,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     /// Focus the previous available element, cyclying all the way to the last element if needed.
-    pub fn focus_previous_element(&mut self) -> Option<&E> {
+    pub fn focus_previous_element(&mut self, animate: bool) -> Option<&E> {
         if self.tiles.is_empty() {
             return None;
         }
@@ -844,7 +844,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
-            self.arrange_tiles();
+            self.arrange_tiles(animate);
         }
 
         let windows_len = self.tiles.len();
@@ -860,7 +860,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     /// Swap the two given elements.
     ///
     /// This will give the focus to b
-    pub fn swap_elements(&mut self, a: &E, b: &E) {
+    pub fn swap_elements(&mut self, a: &E, b: &E, animate: bool) {
         if let Some(FullscreenTile {
             inner,
             last_known_idx,
@@ -877,11 +877,11 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
         self.focused_tile_idx = b_idx;
         self.tiles.swap(a_idx, b_idx);
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Swap the current element with the next element.
-    pub fn swap_with_next_element(&mut self) {
+    pub fn swap_with_next_element(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
         }
@@ -906,11 +906,11 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         self.focused_tile_idx = new_focused_idx;
         self.tiles.swap(last_focused_idx, new_focused_idx);
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Swap the current element with the previous element.
-    pub fn swap_with_previous_element(&mut self) {
+    pub fn swap_with_previous_element(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
         }
@@ -933,7 +933,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         self.focused_tile_idx = new_focused_idx;
         self.tiles.swap(last_focused_idx, new_focused_idx);
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Get the area used to tile the elements.
@@ -953,12 +953,12 @@ impl<E: WorkspaceElement> Workspace<E> {
     ///
     /// This ensures geometry for maximized and tiled elements.
     #[profiling::function]
-    pub fn arrange_tiles(&mut self) {
+    pub fn arrange_tiles(&mut self, animate: bool) {
         if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_mut() {
             // NOTE: Output top left is always (0,0) locally
             let mut output_geo = self.output.geometry().as_logical().as_local();
             output_geo.loc = (0, 0).into();
-            inner.set_geometry(output_geo);
+            inner.set_geometry(output_geo, animate);
         }
 
         if self.tiles.is_empty() {
@@ -975,7 +975,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             .partition::<Vec<_>, _>(|tile| tile.element.maximized());
 
         for tile in maximized {
-            tile.set_geometry(tile_area)
+            tile.set_geometry(tile_area, animate)
         }
 
         if tiled.is_empty() {
@@ -983,7 +983,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         let tiled_len = tiled.len();
-        layout.arrange_tiles(tiled.into_iter(), tiled_len, tile_area, inner_gaps);
+        layout.arrange_tiles(tiled.into_iter(), tiled_len, tile_area, inner_gaps, animate);
     }
 
     /// Get the active layout that arranges the tiles
@@ -993,7 +993,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Select the next available layout in this [`Workspace`], cycling back to the first one if
     /// needed.
-    pub fn select_next_layout(&mut self) {
+    pub fn select_next_layout(&mut self, animate: bool) {
         let layouts_len = self.layouts.len();
         let new_active_idx = self.active_layout_idx + 1;
         let new_active_idx = if new_active_idx == layouts_len {
@@ -1003,12 +1003,12 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
 
         self.active_layout_idx = new_active_idx;
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Select the previous available layout in this [`Workspace`], cycling all the way back to the
     /// last layout if needed.
-    pub fn select_previous_layout(&mut self) {
+    pub fn select_previous_layout(&mut self, animate: bool) {
         let layouts_len = self.layouts.len();
         let new_active_idx = match self.active_layout_idx.checked_sub(1) {
             Some(idx) => idx,
@@ -1016,13 +1016,13 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
 
         self.active_layout_idx = new_active_idx;
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Change the master_width_factor of the active [`WorkspaceLayout`]
     ///
     /// This clamps the value between (0.05..=0.95).
-    pub fn change_mwfact(&mut self, delta: f32) {
+    pub fn change_mwfact(&mut self, delta: f32, animate: bool) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile {
             master_width_factor,
@@ -1040,13 +1040,13 @@ impl<E: WorkspaceElement> Workspace<E> {
             *master_width_factor += delta;
             *master_width_factor = master_width_factor.clamp(0.05, 0.95);
         }
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Change the nmaster of the active [`WorkspaceLayout`]
     ///
     /// This clamps the value between (1.0, +inf).
-    pub fn change_nmaster(&mut self, delta: i32) {
+    pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile { nmaster, .. }
         | WorkspaceLayout::BottomStack { nmaster, .. }
@@ -1057,7 +1057,7 @@ impl<E: WorkspaceElement> Workspace<E> {
                 .clamp(1, usize::MAX);
             *nmaster = new_nmaster;
         }
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 
     /// Get the element under the pointer in this workspace.
@@ -1193,7 +1193,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     /// Fullscreen an element.
-    pub fn fullscreen_element(&mut self, element: &E) {
+    pub fn fullscreen_element(&mut self, element: &E, animate: bool) {
         if let Some(FullscreenTile {
             inner,
             last_known_idx,
@@ -1205,13 +1205,13 @@ impl<E: WorkspaceElement> Workspace<E> {
         let Some(idx) = self.tiles.iter().position(|t| t == element) else {
             return;
         };
-        let tile = self.remove_tile(element).unwrap();
+        let tile = self.remove_tile(element, true).unwrap();
         tile.element.set_fullscreen(true);
         self.fullscreen = Some(FullscreenTile {
             inner: tile,
             last_known_idx: idx,
         });
-        self.arrange_tiles();
+        self.arrange_tiles(animate);
     }
 }
 

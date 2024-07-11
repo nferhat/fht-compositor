@@ -221,10 +221,10 @@ impl State {
                 .store(true, std::sync::atomic::Ordering::SeqCst),
             KeyAction::ReloadConfig => self.reload_config(),
             KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
-            KeyAction::SelectNextLayout => active.select_next_layout(),
-            KeyAction::SelectPreviousLayout => active.select_previous_layout(),
-            KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta),
-            KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta),
+            KeyAction::SelectNextLayout => active.select_next_layout(true),
+            KeyAction::SelectPreviousLayout => active.select_previous_layout(true),
+            KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta, true),
+            KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta, true),
             KeyAction::ChangeCfact(delta) => {
                 let mut arrange = false;
                 if let Some(tile) = active.focused_tile_mut() {
@@ -232,14 +232,14 @@ impl State {
                     arrange = true;
                 }
                 if arrange {
-                    active.arrange_tiles();
+                    active.arrange_tiles(true);
                 }
             }
             KeyAction::MaximizeFocusedWindow => {
                 if let Some(window) = active.focused().cloned() {
                     let new_maximized = !window.maximized();
                     window.set_maximized(new_maximized);
-                    active.arrange_tiles();
+                    active.arrange_tiles(true);
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
@@ -254,7 +254,7 @@ impl State {
                 }
             }
             KeyAction::FocusNextWindow => {
-                let new_focus = active.focus_next_element().cloned();
+                let new_focus = active.focus_next_element(true).cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
                         let center = active.element_geometry(&window).unwrap().center();
@@ -264,7 +264,7 @@ impl State {
                 }
             }
             KeyAction::FocusPreviousWindow => {
-                let new_focus = active.focus_previous_element().cloned();
+                let new_focus = active.focus_previous_element(true).cloned();
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
                         let center = active.element_geometry(&window).unwrap().center();
@@ -274,7 +274,7 @@ impl State {
                 }
             }
             KeyAction::SwapWithNextWindow => {
-                active.swap_with_next_element();
+                active.swap_with_next_element(true);
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
                         let center = active.element_geometry(&window).unwrap().center();
@@ -284,7 +284,7 @@ impl State {
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
-                active.swap_with_previous_element();
+                active.swap_with_previous_element(true);
                 if let Some(window) = active.focused().cloned() {
                     if CONFIG.general.cursor_warps {
                         let center = active.element_geometry(&window).unwrap().center();
@@ -357,7 +357,7 @@ impl State {
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
-                let closed_tile = active.remove_tile(&window).unwrap();
+                let closed_tile = active.remove_tile(&window, true).unwrap();
                 closed_tile.element.toplevel().unwrap().send_close();
                 let new_focus = active.focused().cloned().map(Into::into);
                 self.set_focus_target(new_focus); // reset focus
@@ -371,10 +371,10 @@ impl State {
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
-                let tile = active.remove_tile(&window).unwrap();
+                let tile = active.remove_tile(&window, true).unwrap();
                 let new_focus = active.focused().cloned();
                 let idx = idx.clamp(0, 9);
-                wset.workspaces[idx].insert_tile(tile);
+                wset.workspaces[idx].insert_tile(tile, true);
 
                 if let Some(window) = new_focus {
                     self.set_focus_target(Some(window.into()));
