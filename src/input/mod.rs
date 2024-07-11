@@ -315,13 +315,15 @@ impl State {
                         // sometime
                         let keysym = *handle.raw_syms().first().unwrap();
 
-                        if egui.input_event_keyboard(
-                            keysym.raw(),
-                            key_state == KeyState::Pressed,
-                            *modifiers,
-                        ) {
-                            return FilterResult::Intercept(KeyAction::None);
-                        }
+                        // FIXME: This sometimes grabs the focus and locks up the keyboard?
+                        // Go figure out why this happens, probably something with [`egui::Context`]
+                        // if egui.input_event_keyboard(
+                        //     keysym.raw(),
+                        //     key_state == KeyState::Pressed,
+                        //     *modifiers,
+                        // ) {
+                        //     return FilterResult::Intercept(KeyAction::None);
+                        // }
 
                         #[cfg(feature = "udev_backend")]
                         {
