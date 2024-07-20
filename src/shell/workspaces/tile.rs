@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
-use smithay::backend::renderer::element::Kind;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
@@ -13,7 +11,7 @@ use smithay::utils::{IsAlive, Monotonic, Physical, Point, Rectangle, Scale, Size
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
-use crate::config::{BorderConfig, ColorConfig, CONFIG};
+use crate::config::{BorderConfig, CONFIG};
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
@@ -22,7 +20,7 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{FhtRenderer, SplitRenderElements};
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
-    Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
+    Local, PointGlobalExt, PointLocalExt, RectExt, SizeExt,
 };
 
 #[allow(unused)] // I did not finish implementing everything using this trait.
@@ -138,10 +136,6 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     /// This is achieved using this.
     pub rounded_corner_damage: ExtraDamage,
 
-    /// The solid color buffer used when dragging this tile away from its location
-    background_buffer: SolidColorBuffer,
-    background_buffer_color: [f32; 4],
-
     /// The temporary render location of this tile.
     /// Used when dragging it using MoveTile mouse action.
     pub temporary_render_location: Option<Point<i32, Local>>,
@@ -167,27 +161,12 @@ impl<E: WorkspaceElement> PartialEq<E> for WorkspaceTile<E> {
 impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Create a new tile.
     pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
-        let buffer_size = element.geometry().size;
-        let mut buffer_color = border_config
-            .as_ref()
-            .map(|cfg| cfg.focused_color.components())
-            .unwrap_or(CONFIG.decoration.border.focused_color.components());
-        buffer_color[0] *= 0.5; // arbitrary value, just making the inner border dimmer.
-        buffer_color[1] *= 0.5; // yeah pretty lame, I know right.
-        buffer_color[2] *= 0.5; //                             - nferhat
-        buffer_color[3] *= 0.5; // TODO: Instead of using a Solid color buffer use a shader instead
-                                // (users can write patterns idk...)
-
-        let background_buffer = SolidColorBuffer::new(buffer_size, buffer_color);
-
         Self {
             element,
             location: Point::default(),
             cfact: 1.0,
-            border_config: None,
+            border_config,
             rounded_corner_damage: ExtraDamage::default(),
-            background_buffer,
-            background_buffer_color: buffer_color,
             temporary_render_location: None,
             location_animation: None,
         }
@@ -210,7 +189,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
         self.element.set_size(new_geo.size);
         self.element.send_pending_configure();
-        self.background_buffer.resize(new_geo.size.as_logical());
         self.rounded_corner_damage
             .set_size(new_geo.size.as_logical());
 
@@ -267,11 +245,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
 
         render_location
-    }
-
-    /// Return whether we need to draw the placeholder background buffer.
-    pub fn need_background_buffer(&self) -> bool {
-        self.temporary_render_location.is_some()
     }
 
     /// Return whether we need to draw a border for this tile.
@@ -357,7 +330,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         let border_config = self.border_config();
         let need_border = self.need_border();
         let need_rounding = self.need_rounding();
-        let need_background_buffer = self.need_background_buffer();
 
         let window_elements =
             self.element
@@ -431,53 +403,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             })
             .into_iter();
 
-        let background_element = need_background_buffer
-            .then(|| {
-                let mut render_elements = vec![];
-
-                let render_location = self.location.as_logical().to_physical_precise_round(scale); // render it where the border should be.
-                let render_element = SolidColorRenderElement::from_buffer(
-                    &self.background_buffer,
-                    render_location,
-                    scale,
-                    alpha,
-                    Kind::Unspecified,
-                );
-                render_elements.push(WorkspaceTileRenderElement::Background(render_element));
-
-                // Render again where the buffer is
-                let mut border_geo =
-                    Rectangle::from_loc_and_size(self.location, self.element.size())
-                        .to_global(output)
-                        .as_logical();
-                let thickness = border_config.thickness as i32;
-                border_geo.loc -= (thickness, thickness).into();
-                border_geo.size += (2 * thickness, 2 * thickness).into();
-
-                let border_element = RoundedOutlineElement::element(
-                    renderer,
-                    scale.x.max(scale.y),
-                    alpha,
-                    border_geo,
-                    RoundedOutlineSettings {
-                        half_thickness: border_config.half_thickness(),
-                        radius: 0.0, // TODO: Round off solid color element too.
-                        color: ColorConfig::Solid([
-                            self.background_buffer_color[0] * 1.5,
-                            self.background_buffer_color[1] * 1.5,
-                            self.background_buffer_color[2] * 1.5,
-                            self.background_buffer_color[3] * 1.5,
-                        ]),
-                    },
-                );
-
-                render_elements.push(WorkspaceTileRenderElement::Border(border_element));
-
-                render_elements
-            })
-            .into_iter()
-            .flatten();
-
         window_elements
             .popups
             .into_iter()
@@ -485,7 +410,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             .chain(damage)
             .chain(border_element)
             .chain(surface_elements)
-            .chain(background_element)
     }
 }
 
@@ -494,7 +418,6 @@ crate::fht_render_elements! {
         Element = WaylandSurfaceRenderElement<R>,
         RoundedElement = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
         RoundedElementDamage = ExtraDamage,
-        Background = SolidColorRenderElement,
         Border = FhtPixelShaderElement,
         // Rescaling magic is done pretty weirdly:
         //

@@ -6,7 +6,6 @@
 //!
 //! This module also has some helpers to create render elements.
 
-pub mod egui;
 pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;
@@ -34,12 +33,10 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
-use self::texture_element::FhtTextureElement;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
-use crate::config::CONFIG;
 use crate::shell::cursor::CursorRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
 use crate::state::Fht;
@@ -50,7 +47,6 @@ crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
         Color = SolidColorRenderElement,
-        Egui = FhtTextureElement,
         Wayland = WaylandSurfaceRenderElement<R>,
         WorkspaceSet = WorkspaceSetRenderElement<R>,
     }
@@ -88,11 +84,6 @@ impl Fht {
         let cursor_elements = self.cursor_elements(renderer, output);
         let cursor_elements_len = cursor_elements.len();
         elements.extend(cursor_elements);
-
-        // Then EGUI, for debug overlay, config error notification, and greeting.
-        if let Some(egui) = self.egui_elements(renderer.glow_renderer_mut(), output, fps) {
-            elements.push(FhtRenderElement::Egui(egui))
-        }
 
         // Then overlay layer shells + their popups
         let output_scale = output.current_scale().fractional_scale();
@@ -186,70 +177,6 @@ impl Fht {
         }
 
         elements
-    }
-
-    /// Generate the egui elements for a given [`Output`]
-    ///
-    /// However, this function does more than simply render egui, due to how smithay-egui works (the
-    /// integration of egui for smithay), calling the render function also runs the underlying
-    /// context and sends events to it.
-    ///
-    /// This doesn't render anything if it figures that it's useless, but still dispatchs events to
-    /// egui.
-    #[profiling::function]
-    fn egui_elements(
-        &mut self,
-        renderer: &mut GlowRenderer,
-        output: &Output,
-        fps: &mut Fps,
-    ) -> Option<FhtTextureElement> {
-        let scale = output.current_scale().fractional_scale();
-        let int_scale = output.current_scale().integer_scale();
-        let egui = self.egui.outputs.get(output).cloned().unwrap();
-
-        let mut egui = egui.lock().unwrap();
-        let time = self.clock.now().into();
-        if !CONFIG.renderer.debug_overlay && !CONFIG.greet && self.last_config_error.is_none() {
-            // Even if we are rendering nothing, make sure egui understands we are really doing
-            // nothing, because not running the context will make it use the last frame it was
-            // drawn.
-            //
-            // It's also so we dispatch input events that we collected during the last frame
-            egui.run(|_| (), time, int_scale);
-            self.egui.active = false;
-            None
-        } else {
-            let is_focused = self
-                .focus_state
-                .output
-                .as_ref()
-                .is_some_and(|o| o == output);
-            self.egui.active = true;
-
-            egui.render(
-                |ctx| {
-                    if CONFIG.renderer.debug_overlay {
-                        egui::egui_output_debug_overlay(ctx, output, self, fps);
-                    }
-
-                    if is_focused && CONFIG.greet {
-                        egui::egui_greeting_message(ctx);
-                    }
-
-                    if let Some(err) = is_focused
-                        .then(|| self.last_config_error.as_ref())
-                        .flatten()
-                    {
-                        egui::egui_config_error(ctx, err);
-                    }
-                },
-                renderer,
-                scale,
-                1.0,
-                self.clock.now().into(),
-            )
-            .ok()
-        }
     }
 
     /// Render and submit screencopy buffers using given renderer.

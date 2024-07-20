@@ -5,102 +5,233 @@
 //! compositor's needs.
 
 use std::borrow::BorrowMut;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use indexmap::IndexMap;
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::input::{Device, DeviceCapability, MouseButton};
+use smithay::backend::input::MouseButton;
 use smithay::backend::renderer::element::texture::{TextureRenderBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{self, GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Frame, Offscreen, Renderer, Unbind};
 use smithay::input::keyboard::{xkb, ModifiersState};
-use smithay::output::Output;
-use smithay::utils::{Buffer, Point, Rectangle, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
 
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::utils::geometry::{Local, RectGlobalExt, SizeExt};
-use crate::utils::output::OutputExt;
+use crate::utils::geometry::Local;
 
-/// Egui debug overlays state.
+/// A single Egui element.
 ///
-/// This will manage the egui state of each output this gets registered on.
-///
-/// For input to work, you hagve to hook your compositor input management and use the associated
-/// [`Self::handle_input_event`] function to let egui know of your input.
-#[derive(Debug, Default)]
-pub struct Egui {
-    /// The registered outputs.
-    pub outputs: IndexMap<Output, Arc<Mutex<EguiOverlay>>>,
-    /// Whether the overlays are active or not.
-    ///
-    /// This is false, handling of inputs will be ignored, and rendering will not be effective.
-    pub active: bool,
+/// This element holds a single egui window in which egui's [`Context`] will draw,
+pub struct EguiElement {
+    size: Size<i32, Logical>,
+    inner: Arc<Mutex<EguiElementInner>>,
 }
 
-impl Egui {
-    /// Create an overlay for this output.
-    pub fn add_output(
-        &mut self,
-        output: Output,
-        pointer_devices: usize,
-        modifiers: ModifiersState,
-    ) {
-        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-        let xkb_keymap = xkb::Keymap::new_from_names(
-            &context,
+impl EguiElement {
+    /// Create a new [`EguiElement`] with a given `size`
+    fn new(size: Size<i32, Logical>) -> Self {
+        let xkb_keymap= xkb::Keymap::new_from_names(
+            &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
             "",
             "",
             "",
             "",
             None,
             xkb::KEYMAP_COMPILE_NO_FLAGS,
-        )
-        .expect("Failed to create XKB keymap from constants?");
+        ).unwrap();
         let xkb_state = xkb::State::new(&xkb_keymap);
+        Self {
+            size,
+            inner: Arc::new(Mutex::new(EguiElementInner {
+                context: egui::Context::default(),
+                painter: None,
+                last_pointer_position: None,
+                last_modifiers: ModifiersState::default(),
+                xkb_keymap,
+                xkb_state,
+                events: Vec::new(),
+            })),
+        }
+    }
 
-        let state = EguiOverlay {
-            output: output.clone(),
-            context: egui::Context::default(),
-            painter: None, // initialized on first draw call
-            pointer_devices,
-            last_pointer_position: Point::default(),
-            focused: false,
-            xkb_keymap,
-            xkb_state,
-            last_modifiers: modifiers,
-            events: vec![],
+    /// Run the element's context, sending all the queued up events to the context.
+    ///
+    /// - `ui` is your function used to render the context.
+    /// - `time` is the current system monotonic time.
+    pub fn run(&mut self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
+        let mut guard = self.inner.lock().unwrap();
+        let size = self.size.to_physical(scale);
+
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect {
+                min: egui::pos2(0.0, 0.0),
+                max: egui::pos2(size.w as f32, size.h as f32),
+            }),
+            time: Some(time.as_secs_f64()),
+            predicted_dt: 1.0 / 60.0,
+            modifiers: convert_modifiers(guard.last_modifiers),
+            events: guard.events.drain(..).collect(),
+            hovered_files: Vec::with_capacity(0),
+            dropped_files: Vec::with_capacity(0),
+            focused: true,
+            max_texture_side: guard
+                .painter
+                .as_ref()
+                .map(|painter| painter.max_texture_size),
+            ..Default::default()
         };
 
-        assert!(
-            self.outputs
-                .insert(output, Arc::new(Mutex::new(state)))
-                .is_none(),
-            "Can't register egui overlay for an output twice!"
-        );
+        let _ = guard.context.run(input, ui);
+    }
+
+    /// Run the element's context, sending all the queued up events to the context.
+    ///
+    /// - `ui` is your function used to render the context.
+    /// - `time` is the current system monotonic time.
+    pub fn render(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        scale: i32,
+        alpha: f32,
+        location: Point<i32, Physical>,
+        ui: impl FnOnce(&egui::Context),
+        time: std::time::Duration,
+    ) -> Result<FhtTextureElement, GlesError> {
+        let guard = &mut *self.inner.lock().unwrap();
+
+        let size = self.size.to_physical(scale);
+        let buffer_size = self.size.to_buffer(scale, Transform::Normal);
+
+        let painter = match guard.painter.as_mut() {
+            Some(painter) => painter,
+            None => {
+                let mut max_texture_size = 0;
+                {
+                    let gles_renderer: &mut gles::GlesRenderer = renderer.borrow_mut();
+                    let _ = gles_renderer.with_context(|gles| unsafe {
+                        gles.GetIntegerv(gles::ffi::MAX_TEXTURE_SIZE, &mut max_texture_size);
+                    });
+                }
+
+                let mut frame = renderer
+                    .render(size, Transform::Normal)
+                    .map_err(|err| {
+                        warn!(?err, "Failed to create egui glow painter for output!");
+                        err
+                    })
+                    .expect("Failed to create frame");
+
+                let painter = frame
+                    .with_context(|context| {
+                        // SAFETY: In the context of this compositor, the glow renderer/context
+                        // lives for 'static, so the pointer to it should always be valid.
+                        egui_glow::Painter::new(context.clone(), "", None)
+                    })?
+                    .map_err(|err| {
+                        warn!(?err, "Failed to create egui glow painter for output!");
+                        GlesError::ShaderCompileError
+                    })?;
+
+                guard.painter.insert(EguiGlowPainter {
+                    painter,
+                    render_buffer: None,
+                    max_texture_size: max_texture_size as usize,
+                })
+            }
+        };
+
+        let _ = painter.render_buffer.take_if(|(s, _)| *s != scale);
+        let render_buffer = match painter.render_buffer.as_mut() {
+            Some((_, render_buffer)) => render_buffer,
+            None => {
+                let render_texture: GlesTexture = renderer
+                    .create_buffer(Fourcc::Abgr8888, buffer_size)
+                    .map_err(|err| {
+                        warn!(?err, "Failed to create egui overlay texture buffer!!");
+                        err
+                    })?;
+
+                let texture_buffer = TextureRenderBuffer::from_texture(
+                    renderer,
+                    render_texture,
+                    scale,
+                    Transform::Flipped180, // egui glow painter wants this.
+                    None,                  // TODO: Calc opaque regions?
+                );
+
+                let render_buffer = painter.render_buffer.insert((scale, texture_buffer));
+                &mut render_buffer.1
+            }
+        };
+
+        let max_texture_size = painter.max_texture_size;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect {
+                min: egui::pos2(0.0, 0.0),
+                max: egui::pos2(size.w as f32, size.h as f32),
+            }),
+            time: Some(time.as_secs_f64()),
+            predicted_dt: 1.0 / 60.0,
+            modifiers: convert_modifiers(guard.last_modifiers),
+            events: guard.events.drain(..).collect(),
+            hovered_files: Vec::with_capacity(0),
+            dropped_files: Vec::with_capacity(0),
+            focused: true,
+            max_texture_side: Some(max_texture_size),
+            ..Default::default()
+        };
+        let egui::FullOutput {
+            shapes,
+            textures_delta,
+            ..
+        } = guard.context.run(input.clone(), ui);
+
+        render_buffer.render().draw(|texture| {
+            renderer.bind(texture.clone())?;
+            {
+                let mut frame = renderer.render(size, Transform::Normal)?;
+                frame.clear([0.; 4], &[Rectangle::from_loc_and_size((0, 0), size)])?;
+                painter.painter.paint_and_update_textures(
+                    [size.w as u32, size.h as u32],
+                    scale as f32,
+                    &guard.context.tessellate(shapes),
+                    &textures_delta,
+                );
+            };
+
+            renderer.unbind()?;
+            // TODO: Better damage tracking?
+            // Without this it leaves weird artifacts from previous frames
+            Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Buffer>::from_loc_and_size(
+                (0, 0),
+                (buffer_size.w, buffer_size.h),
+            )])
+        })?;
+
+        let texture_element = TextureRenderElement::from_texture_render_buffer(
+            location.to_f64(),
+            &render_buffer,
+            Some(alpha),
+            None,
+            Some(self.size),
+            Kind::Unspecified,
+        )
+        .into();
+        Ok(texture_element)
     }
 }
 
-pub struct EguiOverlay {
-    /// The associated output.
-    output: Output,
+pub struct EguiElementInner {
     /// The egui context used to run and draw our UI.
     context: egui::Context,
     /// Glow painter state.
-    ///
     /// This may not be always Some, as it gets initialized on the first [`Self::render`] call.
     painter: Option<EguiGlowPainter>,
 
-    /// How many pointer devices do we have.
-    pointer_devices: usize,
-    /// The last registered pointer position of this overlay, local to the output its being drawn
-    /// on.
-    last_pointer_position: Point<i32, Local>,
-    /// Whether we are focused.
-    focused: bool,
-
+    /// The last pointer position on this element.
+    /// If this is `None`, this means there's no pointer on the element.
+    last_pointer_position: Option<Point<i32, Local>>,
     /// Last registered modifiers state for keyboard input events.
     last_modifiers: ModifiersState,
     /// XKB keyboard keymap layout.
@@ -118,14 +249,11 @@ pub struct EguiOverlay {
     events: Vec<egui::Event>,
 }
 
-impl std::fmt::Debug for EguiOverlay {
+impl std::fmt::Debug for EguiElementInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EguiOutputState")
-            .field("output", &self.output.name())
             .field("context", &self.context)
             .field("painter", &self.painter)
-            .field("pointer_devices", &self.pointer_devices)
-            .field("focused", &self.focused)
             .field("last_modifiers", &self.last_modifiers)
             .field("xkb_keymap", &"...")
             .field("xkb_state", &"...")
@@ -134,27 +262,14 @@ impl std::fmt::Debug for EguiOverlay {
     }
 }
 
-impl EguiOverlay {
-    /// Send a device added event to this context.
-    pub fn input_event_device_added(&mut self, device: &impl Device) {
-        self.pointer_devices += device.has_capability(DeviceCapability::Pointer) as usize;
-    }
-
-    /// Send a device removed event to this context.
-    pub fn input_event_device_removed(&mut self, device: &impl Device) {
-        self.pointer_devices -= device.has_capability(DeviceCapability::Pointer) as usize;
-        if self.pointer_devices > 0 {
-            self.events.push(egui::Event::PointerGone)
-        }
-    }
-
+impl EguiElementInner {
     /// Send a pointer position event to this context.
     ///
     /// This expects the position to be relative to this output.
     pub fn input_event_pointer_position(&mut self, position: Point<i32, Local>) {
         // NOTE: No need to check for wants_pointer_input since it tries to base this off the
         // pointer position, so it must be updated regardless.
-        self.last_pointer_position = position;
+        self.last_pointer_position = Some(position);
         self.events.push(egui::Event::PointerMoved(egui::pos2(
             position.x as f32,
             position.y as f32,
@@ -187,17 +302,21 @@ impl EguiOverlay {
             return false;
         }
 
+        let Some(last_pointer_position) = self.last_pointer_position else {
+            return false;
+        };
+
         let button = match button {
             MouseButton::Left => egui::PointerButton::Primary,
-            MouseButton::Middle => egui::PointerButton::Primary,
-            MouseButton::Right => egui::PointerButton::Primary,
+            MouseButton::Middle => egui::PointerButton::Middle,
+            MouseButton::Right => egui::PointerButton::Secondary,
             _ => return false,
         };
 
         self.events.push(egui::Event::PointerButton {
             pos: egui::pos2(
-                self.last_pointer_position.x as f32,
-                self.last_pointer_position.y as f32,
+                last_pointer_position.x as f32,
+                last_pointer_position.y as f32,
             ),
             button,
             pressed,
@@ -245,174 +364,15 @@ impl EguiOverlay {
 
         self.context.wants_keyboard_input()
     }
-
-    /// Run this context for a single frame.
-    ///
-    /// This will dispatch all the queued events to the context.
-    pub fn run(&mut self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
-        let output_size = self.output.geometry().size.as_logical().to_physical(scale);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect {
-                min: egui::pos2(0.0, 0.0),
-                max: egui::pos2(output_size.w as f32, output_size.h as f32),
-            }),
-            time: Some(time.as_secs_f64()),
-            predicted_dt: 1.0 / 60.0,
-            modifiers: convert_modifiers(self.last_modifiers),
-            events: self.events.drain(..).collect(),
-            hovered_files: Vec::with_capacity(0),
-            dropped_files: Vec::with_capacity(0),
-            focused: true,
-            max_texture_side: self
-                .painter
-                .as_ref()
-                .map(|painter| painter.max_texture_size),
-            ..Default::default()
-        };
-
-        let _ = self.context.run(input, ui);
-    }
-
-    /// Produce a new frame of the overlay and render it inside a render element.
-    ///
-    /// If you need to only run the overlay without rendering it, see [`Self::run`]
-    pub fn render(
-        &mut self,
-        ui: impl FnOnce(&egui::Context),
-        renderer: &mut GlowRenderer,
-        scale: f64,
-        alpha: f32,
-        time: std::time::Duration,
-    ) -> Result<FhtTextureElement, GlesError> {
-        let id = std::ptr::addr_of!(*self) as usize;
-        let int_scale = scale.ceil() as i32;
-        let output_geo = self.output.geometry().as_logical();
-        let output_size = output_geo.size.to_physical(int_scale);
-        let buffer_size = output_geo.size.to_buffer(int_scale, Transform::Normal);
-
-        // Init painter.
-        let painter = match self.painter.as_mut() {
-            Some(painter) => painter,
-            None => {
-                let mut max_texture_size = 0;
-                {
-                    let gles_renderer: &mut gles::GlesRenderer = renderer.borrow_mut();
-                    let _ = gles_renderer.with_context(|gles| unsafe {
-                        gles.GetIntegerv(gles::ffi::MAX_TEXTURE_SIZE, &mut max_texture_size);
-                    });
-                }
-
-                let mut frame = renderer
-                    .render(output_size, Transform::Normal)
-                    .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output!");
-                        err
-                    })?;
-
-                let painter = frame
-                    .with_context(|context| {
-                        // SAFETY: In the context of this compositor, the glow renderer/context
-                        // lives for 'static, so the pointer to it should
-                        // always be valid.
-                        egui_glow::Painter::new(context.clone(), "", None)
-                    })?
-                    .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output!");
-                        GlesError::ShaderCompileError
-                    })?;
-
-                self.painter.insert(EguiGlowPainter {
-                    painter,
-                    render_buffers: HashMap::new(),
-                    max_texture_size: max_texture_size as usize,
-                })
-            }
-        };
-
-        let render_buffer = match painter.render_buffers.get_mut(&id) {
-            Some(render_buffer) => render_buffer,
-            None => {
-                let render_texture: GlesTexture = renderer
-                    .create_buffer(Fourcc::Abgr8888, buffer_size)
-                    .map_err(|err| {
-                        warn!(?err, "Failed to create egui overlay texture buffer!!");
-                        err
-                    })?;
-
-                let texture_buffer = TextureRenderBuffer::from_texture(
-                    renderer,
-                    render_texture,
-                    int_scale,
-                    Transform::Flipped180, // egui glow painter wants this.
-                    None,                  // TODO: Calc opaque regions?
-                );
-
-                painter.render_buffers.insert(id, texture_buffer);
-                painter.render_buffers.get_mut(&id).unwrap() // ^^^
-            }
-        };
-
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect {
-                min: egui::pos2(0.0, 0.0),
-                max: egui::pos2(output_size.w as f32, output_size.h as f32),
-            }),
-            time: Some(time.as_secs_f64()),
-            predicted_dt: 1.0 / 60.0,
-            modifiers: convert_modifiers(self.last_modifiers),
-            events: self.events.drain(..).collect(),
-            hovered_files: Vec::with_capacity(0),
-            dropped_files: Vec::with_capacity(0),
-            focused: true,
-            max_texture_side: Some(painter.max_texture_size),
-            ..Default::default()
-        };
-
-        let egui::FullOutput {
-            shapes,
-            textures_delta,
-            ..
-        } = self.context.run(input.clone(), ui);
-
-        render_buffer.render().draw(|texture| {
-            renderer.bind(texture.clone())?;
-            {
-                let mut frame = renderer.render(output_size, Transform::Normal)?;
-                frame.clear([0.; 4], &[output_geo.to_physical(int_scale)])?;
-                painter.painter.paint_and_update_textures(
-                    [output_size.w as u32, output_size.h as u32],
-                    int_scale as f32,
-                    &self.context.tessellate(shapes),
-                    &textures_delta,
-                );
-            };
-
-            renderer.unbind()?;
-            // TODO: Better damage tracking?
-            // Without this it leaves weird artifacts from previous frames
-            Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Buffer>::from_loc_and_size(
-                (0, 0),
-                (buffer_size.w, buffer_size.h),
-            )])
-        })?;
-
-        Ok(FhtTextureElement(
-            TextureRenderElement::from_texture_render_buffer(
-                output_geo.loc.to_f64().to_physical(scale),
-                &render_buffer,
-                Some(alpha),
-                None,
-                Some(output_geo.size),
-                Kind::Unspecified,
-            ),
-        ))
-    }
 }
 
 /// An egui glow painter, based on [`egui_glow`], integrated with the smithay rendering pipewire.
 pub struct EguiGlowPainter {
     painter: egui_glow::Painter,
-    render_buffers: HashMap<usize, TextureRenderBuffer<GlesTexture>>,
+    // We need a buffer in which the painter will draw and track damage.
+    // This should get invalidated on each scale change
+    render_buffer: Option<(i32, TextureRenderBuffer<GlesTexture>)>,
+    /// `GL_MAX_TEXTURE_SIZE`
     max_texture_size: usize,
 }
 
@@ -420,7 +380,7 @@ impl std::fmt::Debug for EguiGlowPainter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EguiGlowPainter")
             .field("painter", &"...")
-            .field("render_buffers", &self.render_buffers)
+            .field("render_buffers", &self.render_buffer)
             .field("max_texture_size", &self.max_texture_size)
             .finish()
     }

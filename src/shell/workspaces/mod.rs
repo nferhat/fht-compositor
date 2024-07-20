@@ -700,7 +700,12 @@ impl<E: WorkspaceElement> Workspace<E> {
     /// [`Workspace`] output.
     ///
     /// This doesn't reinsert the element if it's already inserted.
-    pub fn insert_element(&mut self, element: E, border_config: Option<BorderConfig>, animate: bool) {
+    pub fn insert_element(
+        &mut self,
+        element: E,
+        border_config: Option<BorderConfig>,
+        animate: bool,
+    ) {
         if self.has_element(&element) {
             return;
         }

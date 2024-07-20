@@ -153,12 +153,6 @@ impl State {
         let pointer = self.fht.pointer.clone();
         let under = self.fht.focus_target_under(point);
 
-        if let Some(output) = self.fht.focus_state.output.as_ref() {
-            let position = point.to_i32_round().to_local(output);
-            let egui = self.fht.egui.outputs.get(output).cloned().unwrap();
-            egui.lock().unwrap().input_event_pointer_position(position);
-        }
-
         pointer.motion(
             self,
             under.map(|(ft, loc)| (ft, loc.as_logical())),
@@ -207,10 +201,6 @@ impl State {
     /// Process an input event from the backend.
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
-        let mut output = self.fht.active_output();
-        let egui = self.fht.egui.outputs.get(&output).cloned().unwrap();
-        let mut egui = egui.lock().unwrap();
-
         match event {
             InputEvent::DeviceAdded { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {
@@ -219,7 +209,6 @@ impl State {
                         &TabletDescriptor::from(&device),
                     );
                 }
-                egui.input_event_device_added(&device);
             }
             InputEvent::DeviceRemoved { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {
@@ -230,7 +219,6 @@ impl State {
                         tablet_seat.clear_tools();
                     }
                 }
-                egui.input_event_device_removed(&device);
             }
             InputEvent::Keyboard { event } => {
                 let keycode = event.key_code();
@@ -315,16 +303,6 @@ impl State {
                         // sometime
                         let keysym = *handle.raw_syms().first().unwrap();
 
-                        // FIXME: This sometimes grabs the focus and locks up the keyboard?
-                        // Go figure out why this happens, probably something with [`egui::Context`]
-                        // if egui.input_event_keyboard(
-                        //     keysym.raw(),
-                        //     key_state == KeyState::Pressed,
-                        //     *modifiers,
-                        // ) {
-                        //     return FilterResult::Intercept(KeyAction::None);
-                        // }
-
                         #[cfg(feature = "udev_backend")]
                         {
                             use smithay::input::keyboard::Keysym;
@@ -382,7 +360,6 @@ impl State {
 
                 self.fht.suppressed_keys = suppressed_keys;
                 if let Some(action) = action {
-                    drop(egui);
                     self.process_key_action(action);
                 }
             }
@@ -454,8 +431,7 @@ impl State {
                     .find(|output| output.geometry().to_f64().contains(pointer_location))
                     .cloned();
                 if let Some(new_output) = maybe_new_output {
-                    self.fht.focus_state.output = Some(new_output.clone());
-                    output = new_output;
+                    self.fht.focus_state.output = Some(new_output);
                 }
 
                 // Confine pointer if possible.
@@ -486,11 +462,6 @@ impl State {
                 );
                 pointer.frame(self);
 
-                {
-                    let location = pointer_location.to_local(&output).to_i32_round();
-                    egui.input_event_pointer_position(location);
-                }
-
                 // If pointer is now in a constraint region, activate it
                 // TODO: Anywhere else pointer is moved needs to do this (in the self.move_pointer
                 // function)
@@ -511,7 +482,7 @@ impl State {
                 }
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                let output_geo = output.geometry().as_logical();
+                let output_geo = self.fht.active_output().geometry().as_logical();
                 let pointer_location = (event.position_transformed(output_geo.size)
                     + output_geo.loc.to_f64())
                 .as_global();
@@ -519,11 +490,6 @@ impl State {
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
-
-                {
-                    let local_pos = pointer_location.to_i32_round().to_local(&output);
-                    egui.input_event_pointer_position(local_pos);
-                }
 
                 pointer.motion(
                     self,
@@ -541,15 +507,6 @@ impl State {
                 let button = event.button_code();
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
-
-                if event.button().is_some_and(|button| {
-                    egui.input_event_pointer_button(
-                        button,
-                        state == wl_pointer::ButtonState::Pressed,
-                    )
-                }) {
-                    return;
-                }
 
                 if state == wl_pointer::ButtonState::Pressed {
                     self.update_keyboard_focus();
@@ -616,10 +573,6 @@ impl State {
                         if event.amount(Axis::Vertical) == Some(0.0) {
                             frame = frame.stop(Axis::Vertical);
                         }
-                    }
-
-                    if egui.input_event_pointer_axis(horizontal_amount, vertical_amount) {
-                        return;
                     }
 
                     let pointer = self.fht.pointer.clone();

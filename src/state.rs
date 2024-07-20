@@ -56,7 +56,6 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
 use crate::config::CONFIG;
-use crate::egui::Egui;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::tile::WorkspaceTile;
@@ -280,9 +279,6 @@ pub struct Fht {
     /// The last configuration error.
     pub last_config_error: Option<anyhow::Error>,
 
-    /// Egui debug overlay state.
-    pub egui: Egui,
-
     /// PipeWire initialization.
     ///
     /// We can't start PipeWire immediatly since pipewire may not be running yet, but when the
@@ -407,8 +403,6 @@ impl Fht {
 
             last_config_error: None,
 
-            egui: Egui::default(),
-
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire_initialised: std::sync::Once::new(),
             #[cfg(feature = "xdg-screencast-portal")]
@@ -458,15 +452,6 @@ impl Fht {
 
         let workspace_set = WorkspaceSet::new(output.clone());
         self.workspaces.insert(output.clone(), workspace_set);
-
-        let pointer_devices = self
-            .devices
-            .iter()
-            .filter(|d| d.has_capability(input::DeviceCapability::Pointer))
-            .count();
-        let modifiers = self.keyboard.modifier_state();
-        self.egui
-            .add_output(output.clone(), pointer_devices, modifiers);
 
         // Focus output now.
         if CONFIG.general.cursor_warps {

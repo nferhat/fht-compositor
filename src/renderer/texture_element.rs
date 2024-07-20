@@ -20,6 +20,12 @@ pub struct FhtTextureElement<E = GlesTexture>(pub TextureRenderElement<E>)
 where
     E: Texture + Clone + 'static;
 
+impl<E: Texture + Clone + 'static> From<TextureRenderElement<E>> for FhtTextureElement<E> {
+    fn from(value: TextureRenderElement<E>) -> Self {
+        Self(value)
+    }
+}
+
 impl<E: Texture + Clone + 'static> Element for FhtTextureElement<E> {
     fn id(&self) -> &Id {
         self.0.id()
