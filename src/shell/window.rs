@@ -154,7 +154,10 @@ impl<R: FhtRenderer> AsSplitRenderElements<R> for Window {
             return vec![];
         };
 
-        location -= self.render_location_offset().as_logical().to_physical_precise_round(scale);
+        location -= self
+            .render_location_offset()
+            .as_logical()
+            .to_physical_precise_round(scale);
         render_elements_from_surface_tree(
             renderer,
             &surface,

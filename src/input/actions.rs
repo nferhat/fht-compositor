@@ -11,7 +11,7 @@ use crate::shell::grabs::ResizeEdge;
 use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{PointExt, PointGlobalExt, RectCenterExt};
+use crate::utils::geometry::{PointExt, PointGlobalExt, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
 
 /// A list of modifiers you can use in a key pattern.
@@ -142,6 +142,9 @@ pub enum KeyAction {
 
     /// Send the focused window to the workspace at a given index on the focused output.
     SendFocusedWindowToWorkspace(usize),
+
+    /// Toggle the debug overlay on the focused window.
+    ToggleDebugOverlayOnFocusedTile,
 
     /// Do nothing.
     ///
@@ -378,6 +381,17 @@ impl State {
 
                 if let Some(window) = new_focus {
                     self.set_focus_target(Some(window.into()));
+                }
+            }
+            KeyAction::ToggleDebugOverlayOnFocusedTile => {
+                let Some(tile) = active.focused_tile_mut() else {
+                    return;
+                };
+
+                if tile.debug_overlay.take().is_none() {
+                    tile.debug_overlay = Some(crate::egui::EguiElement::new(
+                        tile.element.size().as_logical(),
+                    ))
                 }
             }
             _ => {}

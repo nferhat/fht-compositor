@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
@@ -12,11 +11,11 @@ use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::config::{BorderConfig, CONFIG};
+use crate::egui::{EguiElement, EguiRenderElement};
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineElement, RoundedOutlineSettings};
-use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{AsSplitRenderElements, FhtRenderer};
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{Local, PointGlobalExt, PointLocalExt, RectExt, SizeExt};
@@ -94,7 +93,6 @@ pub trait WorkspaceElement:
 /// A workspace tile is responsible for managing an inner [`WorkspaceElement`] by giving a
 /// position, border, and other properties. This tile is useful only if you store it inside a
 /// [`Workspace`](super::Workspace)
-#[derive(Debug)]
 pub struct WorkspaceTile<E: WorkspaceElement> {
     /// The inner element.
     pub(crate) element: E,
@@ -130,6 +128,9 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     ///
     /// This value should be an offset getting closer to zero.
     pub location_animation: Option<Animation<Point<i32, Local>>>,
+
+    /// The egui debug overlay for this element.
+    pub debug_overlay: Option<EguiElement>,
 }
 
 impl<E: WorkspaceElement> PartialEq for WorkspaceTile<E> {
@@ -147,6 +148,7 @@ impl<E: WorkspaceElement> PartialEq<E> for WorkspaceTile<E> {
 impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Create a new tile.
     pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
+        let element_size = element.size().as_logical();
         Self {
             element,
             location: Point::default(),
@@ -155,6 +157,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             rounded_corner_damage: ExtraDamage::default(),
             temporary_render_location: None,
             location_animation: None,
+            debug_overlay: CONFIG
+                .renderer
+                .tile_debug_overlay
+                .then(|| EguiElement::new(element_size)),
         }
     }
 
@@ -179,6 +185,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         self.element.send_pending_configure();
         self.rounded_corner_damage
             .set_size(new_geo.size.as_logical());
+        if let Some(egui) = self.debug_overlay.as_mut() {
+            egui.set_size(new_geo.size.as_logical());
+        }
 
         // Location animation
         //
@@ -282,6 +291,79 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
 
         false
+    }
+
+    /// Draw an egui overlay for this tile.
+    fn egui_overlay(&self, ctx: &egui::Context) {
+        egui::Area::new("tile-debug-overlay")
+            .fixed_pos((0.0, 0.0))
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(egui::Color32::from_black_alpha((255 / 3) * 2))
+                    .inner_margin(8.0)
+                    .outer_margin(8.0)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = Default::default();
+                        let info = |ui: &mut egui::Ui, name: &str, value: &str| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.style_mut().spacing.item_spacing.x = 0.0;
+                                ui.label(name);
+                                ui.label(": ");
+                                ui.monospace(value);
+                            });
+                        };
+
+                        ui.label("Window info");
+                        ui.indent("Window info", |ui| {
+                            info(ui, "title", self.element.title().as_str());
+                            info(ui, "app-id", self.element.app_id().as_str());
+                        });
+
+                        ui.add_space(4.0);
+
+                        ui.label("Window geometry");
+                        ui.indent("Window geometry", |ui| {
+                            info(ui, "location", {
+                                let location = self.location;
+                                format!("({}, {})", location.x, location.y).as_str()
+                            });
+                            info(ui, "size", {
+                                let size = self.element.size();
+                                format!("({}, {})", size.w, size.h).as_str()
+                            });
+                            info(ui, "cfact", self.cfact.to_string().as_str());
+                            info(ui, "render-location", {
+                                let location = self.render_location();
+                                format!("({}, {})", location.x, location.y).as_str()
+                            });
+                        });
+
+                        ui.add_space(4.0);
+
+                        ui.label("Window state");
+                        ui.indent("XDG toplevel state", |ui| {
+                            info(
+                                ui,
+                                "fullscreen",
+                                self.element.fullscreen().to_string().as_str(),
+                            );
+                            info(
+                                ui,
+                                "maximized",
+                                self.element.maximized().to_string().as_str(),
+                            );
+                            info(
+                                ui,
+                                "bounds",
+                                self.element
+                                    .bounds()
+                                    .map(|bounds| format!("({}, {})", bounds.w, bounds.h))
+                                    .unwrap_or_else(|| String::from("None"))
+                                    .as_str(),
+                            )
+                        });
+                    });
+            });
     }
 
     /// Generate the render elements for this tile.
@@ -415,7 +497,32 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             .to_global(output)
             .as_logical()
             .to_physical_precise_round(scale);
-        self.render_elements_inner(renderer, loc, scale, alpha, focused)
+
+        let debug_overlay = self
+            .debug_overlay
+            .as_ref()
+            .map(|egui| {
+                // TODO: Maybe use smithay's clock? But it just does this under the hood soo.
+                use smithay::reexports::rustix;
+                let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+                let time = Duration::new(time.tv_sec as u64, time.tv_nsec as u32);
+                let element = egui
+                    .render(
+                        renderer.glow_renderer_mut(),
+                        scale.x as i32,
+                        alpha,
+                        loc,
+                        |ctx| self.egui_overlay(ctx),
+                        time,
+                    )
+                    .unwrap();
+                WorkspaceTileRenderElement::DebugOverlay(element)
+            })
+            .into_iter();
+
+        let inner = self.render_elements_inner(renderer, loc, scale, alpha, focused);
+
+        debug_overlay.chain(inner)
     }
 }
 
@@ -425,10 +532,6 @@ crate::fht_render_elements! {
         RoundedElement = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
         RoundedElementDamage = ExtraDamage,
         Border = FhtPixelShaderElement,
-        // Rescaling magic is done pretty weirdly:
-        //
-        // We render everything above then put everything inside a texture element.
-        // Then, we actually rescale the texture.
-        Rescaling = RescaleRenderElement<FhtTextureElement>,
+        DebugOverlay = EguiRenderElement,
     }
 }

@@ -1002,7 +1002,6 @@ impl Into<Window> for PendingWindow {
 }
 
 /// An unmapped tile.
-#[derive(Debug)]
 pub struct UnmappedTile {
     pub inner: WorkspaceTile<Window>,
     pub last_output: Option<Output>,

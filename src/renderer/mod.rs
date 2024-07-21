@@ -97,7 +97,7 @@ impl Fht {
         &mut self,
         renderer: &mut R,
         output: &Output,
-        fps: &mut Fps,
+        _fps: &mut Fps,
     ) -> OutputElementsResult<R> {
         assert!(
             self.workspaces.get(output).is_some(),

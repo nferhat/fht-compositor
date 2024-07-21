@@ -30,7 +30,7 @@ pub struct EguiElement {
 
 impl EguiElement {
     /// Create a new [`EguiElement`] with a given `size`
-    fn new(size: Size<i32, Logical>) -> Self {
+    pub fn new(size: Size<i32, Logical>) -> Self {
         let xkb_keymap = xkb::Keymap::new_from_names(
             &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
             "",
@@ -56,11 +56,16 @@ impl EguiElement {
         }
     }
 
+    /// Resize the element.
+    pub fn set_size(&mut self, new_size: Size<i32, Logical>) {
+        self.size = new_size;
+    }
+
     /// Run the element's context, sending all the queued up events to the context.
     ///
     /// - `ui` is your function used to render the context.
     /// - `time` is the current system monotonic time.
-    pub fn run(&mut self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
+    pub fn run(&self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
         let mut guard = self.inner.lock().unwrap();
         let size = self.size.to_physical(scale);
 
@@ -91,14 +96,14 @@ impl EguiElement {
     /// - `ui` is your function used to render the context.
     /// - `time` is the current system monotonic time.
     pub fn render(
-        &mut self,
+        &self,
         renderer: &mut GlowRenderer,
         scale: i32,
         alpha: f32,
         location: Point<i32, Physical>,
         ui: impl FnOnce(&egui::Context),
         time: std::time::Duration,
-    ) -> Result<FhtTextureElement, GlesError> {
+    ) -> Result<EguiRenderElement, GlesError> {
         let guard = &mut *self.inner.lock().unwrap();
 
         let size = self.size.to_physical(scale);
@@ -210,7 +215,7 @@ impl EguiElement {
             )])
         })?;
 
-        let texture_element = TextureRenderElement::from_texture_render_buffer(
+        let texture_element: FhtTextureElement = TextureRenderElement::from_texture_render_buffer(
             location.to_f64(),
             &render_buffer,
             Some(alpha),
@@ -219,7 +224,7 @@ impl EguiElement {
             Kind::Unspecified,
         )
         .into();
-        Ok(texture_element)
+        Ok(texture_element.into())
     }
 }
 
@@ -458,4 +463,10 @@ fn convert_keysym(raw: u32) -> Option<egui::Key> {
         keysyms::KEY_Z => Z,
         _ => return None,
     })
+}
+
+crate::fht_render_elements! {
+    EguiRenderElement => {
+        Texture = FhtTextureElement,
+    }
 }

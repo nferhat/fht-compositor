@@ -253,6 +253,10 @@ pub struct RenderConfig {
     /// Whether to show a debug overlay for each output.
     #[serde(default)]
     pub debug_overlay: bool,
+
+    /// Whether to show a debug overlay for all the opened tiles.
+    #[serde(default)]
+    pub tile_debug_overlay: bool,
 }
 
 impl Default for RenderConfig {
@@ -266,6 +270,7 @@ impl Default for RenderConfig {
             #[cfg(feature = "udev_backend")]
             render_node: default_render_node(),
             debug_overlay: false,
+            tile_debug_overlay: false,
         }
     }
 }

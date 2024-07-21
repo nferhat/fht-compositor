@@ -434,7 +434,6 @@ fht_render_elements! {
 /// This workspace should not stand on it's own, and it's preferred you use it with a
 /// [`WorkspaceSet`], but nothing stops you from doing whatever you want with it like assigning it
 /// to a single output.
-#[derive(Debug)]
 pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
     pub output: Output,
@@ -1237,7 +1236,6 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 }
 
-#[derive(Debug)]
 pub struct FullscreenTile<E: WorkspaceElement> {
     pub inner: WorkspaceTile<E>,
     pub last_known_idx: usize,
