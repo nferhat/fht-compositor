@@ -11,8 +11,8 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
 use super::workspaces::tile::WorkspaceElement;
-use crate::renderer::{FhtRenderer, SplitRenderElements};
-use crate::utils::geometry::{Local, PointExt, SizeExt};
+use crate::renderer::{AsSplitRenderElements, FhtRenderer};
+use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
 
 impl WorkspaceElement for Window {
     fn uid(&self) -> u64 {
@@ -137,16 +137,45 @@ impl WorkspaceElement for Window {
             data.app_id.clone().unwrap_or_default()
         })
     }
+}
 
-    fn render_elements<R: FhtRenderer>(
+impl<R: FhtRenderer> AsSplitRenderElements<R> for Window {
+    type SurfaceRenderElement = WaylandSurfaceRenderElement<R>;
+    type PopupRenderElement = WaylandSurfaceRenderElement<R>;
+
+    fn render_surface_elements<C: From<Self::SurfaceRenderElement>>(
+        &self,
+        renderer: &mut R,
+        mut location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C> {
+        let Some(surface) = self.wl_surface() else {
+            return vec![];
+        };
+
+        location -= self.render_location_offset().as_logical().to_physical_precise_round(scale);
+        render_elements_from_surface_tree(
+            renderer,
+            &surface,
+            location,
+            scale,
+            alpha,
+            Kind::Unspecified,
+        )
+    }
+
+    fn render_popup_elements<C: From<Self::PopupRenderElement>>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> SplitRenderElements<WaylandSurfaceRenderElement<R>> {
-        let surface = self.wl_surface().unwrap();
-        let popups = PopupManager::popups_for_surface(&surface)
+    ) -> Vec<C> {
+        let Some(surface) = self.wl_surface() else {
+            return vec![];
+        };
+        PopupManager::popups_for_surface(&surface)
             .flat_map(|(popup, popup_offset)| {
                 let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
                     .to_physical_precise_round(scale);
@@ -160,17 +189,6 @@ impl WorkspaceElement for Window {
                     Kind::Unspecified,
                 )
             })
-            .collect();
-
-        let normal = render_elements_from_surface_tree(
-            renderer,
-            &surface,
-            location,
-            scale,
-            alpha,
-            Kind::Unspecified,
-        );
-
-        SplitRenderElements { popups, normal }
+            .collect()
     }
 }

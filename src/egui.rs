@@ -31,7 +31,7 @@ pub struct EguiElement {
 impl EguiElement {
     /// Create a new [`EguiElement`] with a given `size`
     fn new(size: Size<i32, Logical>) -> Self {
-        let xkb_keymap= xkb::Keymap::new_from_names(
+        let xkb_keymap = xkb::Keymap::new_from_names(
             &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
             "",
             "",
@@ -39,7 +39,8 @@ impl EguiElement {
             "",
             None,
             xkb::KEYMAP_COMPILE_NO_FLAGS,
-        ).unwrap();
+        )
+        .unwrap();
         let xkb_state = xkb::State::new(&xkb_keymap);
         Self {
             size,

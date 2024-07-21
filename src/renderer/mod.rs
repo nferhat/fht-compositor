@@ -18,7 +18,7 @@ use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::AsRenderElements;
+use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
 };
@@ -30,7 +30,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
-use smithay::utils::{IsAlive, Scale};
+use smithay::utils::{IsAlive, Physical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 #[cfg(feature = "udev_backend")]
@@ -52,9 +52,38 @@ crate::fht_render_elements! {
     }
 }
 
-pub struct SplitRenderElements<E> {
-    pub normal: Vec<E>,
-    pub popups: Vec<E>,
+/// Types that can be converted into a set of
+/// - Popup [`RenderElement`]s
+/// - Surface [`RenderElement`]s
+pub trait AsSplitRenderElements<R: FhtRenderer> {
+    /// Type of the main surface render element
+    type SurfaceRenderElement: RenderElement<R>;
+    /// Type of the popup render element
+    type PopupRenderElement: RenderElement<R>;
+
+    /// Render the surface elements.
+    ///
+    /// It is up to the trait implementation to actually offset the render elements to match the
+    /// given `location`, if applicable.
+    fn render_surface_elements<C: From<Self::SurfaceRenderElement>>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>;
+
+    /// Render the popup elements.
+    ///
+    /// It is up to the trait implementation to actually offset the render elements to match the
+    /// given `location`, if applicable.
+    fn render_popup_elements<C: From<Self::PopupRenderElement>>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>;
 }
 
 pub struct OutputElementsResult<R: FhtRenderer> {

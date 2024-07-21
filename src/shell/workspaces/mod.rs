@@ -4,6 +4,7 @@ pub mod tile;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
@@ -16,7 +17,7 @@ use crate::config::{
     BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
 };
 use crate::fht_render_elements;
-use crate::renderer::FhtRenderer;
+use crate::renderer::{AsSplitRenderElements, FhtRenderer};
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
     Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
@@ -272,11 +273,19 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     /// Render all the elements in this workspace set, returning them and whether it currently
     /// holds a fullscreen element.
     #[profiling::function]
-    pub fn render_elements<R: FhtRenderer>(
+    pub fn render_elements<R>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>) {
+    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
+    where
+        R: FhtRenderer,
+        E: AsSplitRenderElements<
+            R,
+            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
+            PopupRenderElement = WaylandSurfaceRenderElement<R>,
+        >,
+    {
         let mut elements = vec![];
         let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
         let output_geo: Rectangle<i32, Physical> = self
@@ -1131,11 +1140,19 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
-    pub fn render_elements<R: FhtRenderer>(
+    pub fn render_elements<R>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> Vec<WorkspaceTileRenderElement<R>> {
+    ) -> Vec<WorkspaceTileRenderElement<R>>
+    where
+        R: FhtRenderer,
+        E: AsSplitRenderElements<
+            R,
+            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
+            PopupRenderElement = WaylandSurfaceRenderElement<R>,
+        >,
+    {
         let mut render_elements = vec![];
 
         // If we have a fullscreen, render it and off we go.

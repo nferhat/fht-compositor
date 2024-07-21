@@ -17,11 +17,9 @@ use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineElement, RoundedOutlineSettings};
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::renderer::{FhtRenderer, SplitRenderElements};
+use crate::renderer::{AsSplitRenderElements, FhtRenderer};
 use crate::utils::animation::Animation;
-use crate::utils::geometry::{
-    Local, PointGlobalExt, PointLocalExt, RectExt, SizeExt,
-};
+use crate::utils::geometry::{Local, PointGlobalExt, PointLocalExt, RectExt, SizeExt};
 
 #[allow(unused)] // I did not finish implementing everything using this trait.
 pub trait WorkspaceElement:
@@ -89,18 +87,6 @@ pub trait WorkspaceElement:
     fn app_id(&self) -> String;
     /// Get the title of this element.
     fn title(&self) -> String;
-
-    /// Generate render elements for this element at a given location.
-    ///
-    /// The render elements should account for CSD: in other terms `location` should match the
-    /// usable position of the client.
-    fn render_elements<R: FhtRenderer>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> SplitRenderElements<WaylandSurfaceRenderElement<R>>;
 }
 
 /// A single workspace tile.
@@ -179,9 +165,11 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Set this tile's geometry.
     ///
-    /// The tile automatically accounts for border geometry if it needs to.
+    /// `new_geo` is assumed to be the the tile's visual geometry, excluding client side decorations
+    /// like shadows.
     pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Local>, animate: bool) {
-        if self.need_border() {
+        let thickness = self.border_config().thickness as i32;
+        if thickness > 0 {
             let thickness = self.border_config().thickness as i32;
             new_geo.loc += (thickness, thickness).into();
             new_geo.size -= (2 * thickness, 2 * thickness).into();
@@ -208,20 +196,21 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
     }
 
-    /// Send a pending configure message to the window
+    /// Send a pending configure message to the element.
     pub fn send_pending_configure(&mut self) {
         self.element.send_pending_configure();
     }
 
-    /// Get this tile's geometry.
+    /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, excluding
+    /// client side decorations like shadows.
     pub fn geometry(&self) -> Rectangle<i32, Local> {
         let mut geo = self.element.geometry().as_local();
         geo.loc = self.location;
         geo
     }
 
-    /// Get this tile's visual geometry, the geometry containing actual window content, excluding
-    /// for example shadows.
+    /// Get this tile's visual geometry, IE the topleft point of the tile's visual geometry,
+    /// excluding client side decorations like shadows.
     pub fn visual_geometry(&self) -> Rectangle<i32, Local> {
         let mut geo = self.element.geometry().as_local();
         geo.loc = self.render_location();
@@ -235,26 +224,15 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         bbox
     }
 
-    /// Get this tile's render location.
+    /// Get this tile's render location, IE the topleft point of the tile's visual geometry,
+    /// excluding client side decorations like shadows.
     pub fn render_location(&self) -> Point<i32, Local> {
         let mut render_location = self.temporary_render_location.unwrap_or(self.location);
-        render_location -= self.element.render_location_offset();
-
         if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
             render_location += offset;
         }
 
         render_location
-    }
-
-    /// Return whether we need to draw a border for this tile.
-    pub fn need_border(&self) -> bool {
-        !self.element.fullscreen()
-    }
-
-    /// Return whether we need to round this tile.
-    pub fn need_rounding(&self) -> bool {
-        !self.element.fullscreen()
     }
 
     /// Return the border settings to use when rendering this tile.
@@ -306,41 +284,44 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         false
     }
 
-    /// Generate render elements for this tile.
-    pub fn render_elements<R: FhtRenderer>(
+    /// Generate the render elements for this tile.
+    fn render_elements_inner<R>(
         &self,
         renderer: &mut R,
-        output: &Output,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         focused: bool,
-    ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
-        let render_location = self.render_location().to_global(output).as_logical();
-        let render_location_phys = self
-            .render_location()
-            .to_global(&output)
-            .as_logical()
-            .to_physical_precise_round(scale);
-        // Our tile visual geometry, this will be used to crop out rounded corners
-        let tile_geo = Rectangle::from_loc_and_size(
-            render_location + self.element.render_location_offset().as_logical(),
-            self.element.size().as_logical(),
-        );
-
-        let border_config = self.border_config();
-        let need_border = self.need_border();
-        let need_rounding = self.need_rounding();
-
-        let window_elements =
+    ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>>
+    where
+        R: FhtRenderer,
+        E: AsSplitRenderElements<
+            R,
+            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
+            PopupRenderElement = WaylandSurfaceRenderElement<R>,
+        >,
+    {
+        // The tile's physical geometry, as in where our render elements will be when drawn
+        let physical_geo = Rectangle::from_loc_and_size(
+            location,
             self.element
-                .render_elements(renderer, render_location_phys, scale, alpha);
+                .size()
+                .as_logical()
+                .to_physical_precise_round(scale),
+        );
+        // The tile geometry in compositor space, IE what the user sees as being the window.
+        let tile_geo = physical_geo.to_f64().to_logical(scale).to_i32_round();
 
-        let mut need_extra_damage = false;
-        let surface_elements = window_elements
-            .normal
+        let border_config = self.border_config.unwrap_or(CONFIG.decoration.border);
+        let need_border = !self.element.fullscreen();
+        let radius = border_config.radius();
+
+        let window_elements = self
+            .element
+            .render_surface_elements(renderer, physical_geo.loc, scale, alpha)
             .into_iter()
-            .map(|e| {
-                if !need_rounding {
+            .map(move |e| {
+                if !need_border {
                     return WorkspaceTileRenderElement::Element(e);
                 }
 
@@ -351,34 +332,37 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 // parts of their interface (for example OBs does this with the preview window)
                 //
                 // To counter this, we check here if the surface is going to clip.
-                if RoundedCornerElement::will_clip(&e, scale, tile_geo, border_config.radius) {
-                    let rounded =
-                        RoundedCornerElement::new(e, border_config.radius(), tile_geo, scale);
-                    need_extra_damage = true;
+                if RoundedCornerElement::will_clip(&e, scale, tile_geo, radius) {
+                    let rounded = RoundedCornerElement::new(e, radius, tile_geo, scale);
                     WorkspaceTileRenderElement::RoundedElement(rounded)
                 } else {
                     WorkspaceTileRenderElement::Element(e)
                 }
-            })
-            .collect::<Vec<_>>();
+            });
+        let popup_elements = self
+            .element
+            .render_popup_elements::<WorkspaceTileRenderElement<R>>(
+                renderer,
+                physical_geo.loc,
+                scale,
+                alpha,
+            );
 
-        // If we are rendering a border, it will act as our damage, otherwise, with no border, we
-        // need to damage ourselves
-        let damage = (need_extra_damage && border_config.thickness == 0)
+        // We need to have extra damage in the case we have a radius ontop of our window
+        let damage = (radius != 0.0)
             .then(|| {
-                let damage = self.rounded_corner_damage.clone().with_location(
-                    (self.render_location() + self.element.render_location_offset()).as_logical(),
-                );
+                let damage = self
+                    .rounded_corner_damage
+                    .clone()
+                    .with_location(tile_geo.loc);
                 WorkspaceTileRenderElement::RoundedElementDamage(damage)
             })
             .into_iter();
 
-        let border_element = need_border
+        // Same deal for the border, only if the thickness is non-null
+        let border_element = (border_config.thickness != 0)
             .then(|| {
-                let border_location =
-                    render_location + self.element.render_location_offset().as_logical();
-                let mut border_geo =
-                    Rectangle::from_loc_and_size(border_location, self.element.size().as_logical());
+                let mut border_geo = tile_geo;
                 let thickness = border_config.thickness as i32;
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();
@@ -403,13 +387,35 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             })
             .into_iter();
 
-        window_elements
-            .popups
+        popup_elements
             .into_iter()
-            .map(WorkspaceTileRenderElement::Element)
             .chain(damage)
+            .chain(window_elements)
             .chain(border_element)
-            .chain(surface_elements)
+    }
+
+    pub fn render_elements<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        scale: Scale<f64>,
+        alpha: f32,
+        focused: bool,
+    ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>>
+    where
+        R: FhtRenderer,
+        E: AsSplitRenderElements<
+            R,
+            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
+            PopupRenderElement = WaylandSurfaceRenderElement<R>,
+        >,
+    {
+        let loc = self
+            .render_location()
+            .to_global(output)
+            .as_logical()
+            .to_physical_precise_round(scale);
+        self.render_elements_inner(renderer, loc, scale, alpha, focused)
     }
 }
 
