@@ -67,7 +67,8 @@ impl Fht {
                 })
         };
 
-        let window_surface_under = |window: &Window, loc: Point<i32, Logical>| {
+        let window_surface_under = |window: &Window, mut loc: Point<i32, Logical>| {
+            loc -= window.geometry().loc;
             let window_wl_surface = window.wl_surface().unwrap();
             window
                 .surface_under(point.as_logical() - loc.to_f64(), WindowSurfaceType::ALL)
@@ -136,6 +137,12 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_element(surface))
     }
 
+    /// Find the tile associated with this [`WlSurface`]
+    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<Window>> {
+        self.workspaces_mut()
+            .find_map(|(_, wset)| wset.find_tile(surface))
+    }
+
     /// Find the window associated with this [`WlSurface`]
     pub fn find_window_and_workspace(
         &self,
@@ -159,6 +166,17 @@ impl Fht {
     pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, &Output)> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, &wset.output)))
+    }
+
+    /// Find the tile associated with this [`WlSurface`]
+    pub fn find_tile_and_output(
+        &mut self,
+        surface: &WlSurface,
+    ) -> Option<(&mut WorkspaceTile<Window>, Output)> {
+        self.workspaces_mut().find_map(|(_, wset)| {
+            let output = wset.output.clone();
+            wset.find_tile(surface).map(|tile| (tile, output))
+        })
     }
 
     /// Get a reference to the workspace holding this window
@@ -390,6 +408,7 @@ impl Fht {
         workspace.insert_tile(tile, false);
 
         let tile = workspace.find_tile(&wl_surface).unwrap();
+        tile.start_opening_animation();
         // we dont want to animate the tile now.
         tile.location_animation.take();
         let tile_geo = tile.geometry().to_global(&output);

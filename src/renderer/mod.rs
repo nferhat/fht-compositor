@@ -14,8 +14,10 @@ pub mod rounded_outline_shader;
 pub mod shaders;
 pub mod texture_element;
 
+use anyhow::Context;
 use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
@@ -25,12 +27,13 @@ use smithay::backend::renderer::gles::{
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 #[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
+use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture};
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
-use smithay::utils::{IsAlive, Physical, Point, Scale};
+use smithay::utils::{IsAlive, Physical, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 #[cfg(feature = "udev_backend")]
@@ -50,40 +53,6 @@ crate::fht_render_elements! {
         Wayland = WaylandSurfaceRenderElement<R>,
         WorkspaceSet = WorkspaceSetRenderElement<R>,
     }
-}
-
-/// Types that can be converted into a set of
-/// - Popup [`RenderElement`]s
-/// - Surface [`RenderElement`]s
-pub trait AsSplitRenderElements<R: FhtRenderer> {
-    /// Type of the main surface render element
-    type SurfaceRenderElement: RenderElement<R>;
-    /// Type of the popup render element
-    type PopupRenderElement: RenderElement<R>;
-
-    /// Render the surface elements.
-    ///
-    /// It is up to the trait implementation to actually offset the render elements to match the
-    /// given `location`, if applicable.
-    fn render_surface_elements<C: From<Self::SurfaceRenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C>;
-
-    /// Render the popup elements.
-    ///
-    /// It is up to the trait implementation to actually offset the render elements to match the
-    /// given `location`, if applicable.
-    fn render_popup_elements<C: From<Self::PopupRenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C>;
 }
 
 pub struct OutputElementsResult<R: FhtRenderer> {
@@ -400,6 +369,52 @@ pub fn layer_elements<R: FhtRenderer>(
             )
         })
         .collect()
+}
+
+#[profiling::function]
+pub fn render_to_texture(
+    renderer: &mut GlowRenderer,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    transform: Transform,
+    fourcc: Fourcc,
+    elements: impl Iterator<Item = impl RenderElement<GlowRenderer>>,
+) -> anyhow::Result<(GlesTexture, SyncPoint)> {
+    let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+
+    let texture: GlesTexture = renderer
+        .create_buffer(fourcc, buffer_size)
+        .context("error creating texture")?;
+
+    renderer
+        .bind(texture.clone())
+        .context("error binding texture")?;
+
+    let transform = transform.invert();
+    let output_rect = Rectangle::from_loc_and_size((0, 0), transform.transform_size(size));
+
+    let mut frame = renderer
+        .render(size, transform)
+        .context("error starting frame")?;
+
+    frame
+        .clear([0., 0., 0., 0.], &[output_rect])
+        .context("error clearing")?;
+
+    for element in elements {
+        let src = element.src();
+        let dst = element.geometry(scale);
+
+        if let Some(mut damage) = output_rect.intersection(dst) {
+            damage.loc -= dst.loc;
+            element
+                .draw(&mut frame, src, dst, &[damage], &[])
+                .context("error drawing element")?;
+        }
+    }
+
+    let sync_point = frame.finish().context("error finishing frame")?;
+    Ok((texture, sync_point))
 }
 
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {

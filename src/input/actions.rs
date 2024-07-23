@@ -360,10 +360,7 @@ impl State {
                 let Some(window) = active.focused().cloned() else {
                     return;
                 };
-                let closed_tile = active.remove_tile(&window, true).unwrap();
-                closed_tile.element.toplevel().unwrap().send_close();
-                let new_focus = active.focused().cloned().map(Into::into);
-                self.set_focus_target(new_focus); // reset focus
+                window.toplevel().unwrap().send_close();
             }
             KeyAction::FocusWorkspace(idx) => {
                 if let Some(window) = wset.set_active_idx(idx, true) {

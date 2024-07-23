@@ -1,6 +1,8 @@
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
 use smithay::utils::{Monotonic, Time};
 
+use crate::renderer::AsGlowRenderer;
 use crate::state::Fht;
 
 #[cfg(feature = "udev_backend")]
@@ -76,6 +78,24 @@ impl Backend {
             #[cfg(feature = "udev_backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.render(fht, output, current_time.into()),
+        }
+    }
+
+    /// Run a closure with the backend's primary renderer
+    pub fn with_renderer<T>(&mut self, f: impl FnOnce(&mut GlowRenderer) -> T) -> T {
+        match self {
+            #[cfg(feature = "x11_backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::X11(ref mut data) => f(&mut data.renderer),
+            #[cfg(feature = "udev_backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => {
+                let mut renderer = data
+                    .gpu_manager
+                    .single_renderer(&data.primary_gpu)
+                    .expect("No primary gpu");
+                f(renderer.glow_renderer_mut())
+            }
         }
     }
 }

@@ -1,30 +1,25 @@
+use std::cell::RefCell;
+
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::element::{Id, Kind};
 use smithay::desktop::{PopupManager, Window};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
-use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Physical, Point, Scale, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
 use super::workspaces::tile::WorkspaceElement;
-use crate::renderer::{AsSplitRenderElements, FhtRenderer};
-use crate::utils::geometry::{Local, PointExt, PointLocalExt, SizeExt};
+use crate::renderer::FhtRenderer;
+use crate::utils::geometry::{Local, PointExt, SizeExt};
+
+struct WindowOffscreenId(RefCell<Option<Id>>);
 
 impl WorkspaceElement for Window {
-    fn uid(&self) -> u64 {
-        self.toplevel().unwrap().wl_surface().id().protocol_id() as u64
-    }
-
     fn send_pending_configure(&self) {
         self.toplevel().unwrap().send_pending_configure();
-    }
-
-    fn render_location_offset(&self) -> Point<i32, Local> {
-        self.geometry().loc.as_local()
     }
 
     fn set_size(&self, new_size: smithay::utils::Size<i32, Local>) {
@@ -137,26 +132,21 @@ impl WorkspaceElement for Window {
             data.app_id.clone().unwrap_or_default()
         })
     }
-}
 
-impl<R: FhtRenderer> AsSplitRenderElements<R> for Window {
-    type SurfaceRenderElement = WaylandSurfaceRenderElement<R>;
-    type PopupRenderElement = WaylandSurfaceRenderElement<R>;
-
-    fn render_surface_elements<C: From<Self::SurfaceRenderElement>>(
+    fn render_surface_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         mut location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C> {
+    ) -> Vec<WaylandSurfaceRenderElement<R>> {
         let Some(surface) = self.wl_surface() else {
             return vec![];
         };
 
         location -= self
-            .render_location_offset()
-            .as_logical()
+            .geometry()
+            .loc
             .to_physical_precise_round(scale);
         render_elements_from_surface_tree(
             renderer,
@@ -168,20 +158,19 @@ impl<R: FhtRenderer> AsSplitRenderElements<R> for Window {
         )
     }
 
-    fn render_popup_elements<C: From<Self::PopupRenderElement>>(
+    fn render_popup_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C> {
+    ) -> Vec<WaylandSurfaceRenderElement<R>> {
         let Some(surface) = self.wl_surface() else {
             return vec![];
         };
         PopupManager::popups_for_surface(&surface)
             .flat_map(|(popup, popup_offset)| {
-                let offset = (self.geometry().loc + popup_offset - popup.geometry().loc)
-                    .to_physical_precise_round(scale);
+                let offset = (popup_offset - popup.geometry().loc).to_physical_precise_round(scale);
 
                 render_elements_from_surface_tree(
                     renderer,
@@ -193,5 +182,22 @@ impl<R: FhtRenderer> AsSplitRenderElements<R> for Window {
                 )
             })
             .collect()
+    }
+
+    fn set_offscreen_element_id(&self, id: Option<smithay::backend::renderer::element::Id>) {
+        self.user_data()
+            .insert_if_missing(|| WindowOffscreenId(RefCell::new(None)));
+        let mut guard = self
+            .user_data()
+            .get::<WindowOffscreenId>()
+            .unwrap()
+            .0
+            .borrow_mut();
+        *guard = id;
+    }
+
+    fn get_offscreen_element_id(&self) -> Option<smithay::backend::renderer::element::Id> {
+        let guard = self.user_data().get::<WindowOffscreenId>()?.0.borrow_mut();
+        guard.clone()
     }
 }

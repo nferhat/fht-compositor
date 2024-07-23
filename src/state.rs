@@ -1,7 +1,7 @@
 use std::cell::{RefCell, RefMut};
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
-    default_primary_scanout_output_compare, RenderElementStates,
+    default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
 };
 use smithay::desktop::utils::{
     send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
@@ -58,7 +58,7 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::tile::WorkspaceTile;
+use crate::shell::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::geometry::RectCenterExt;
@@ -677,17 +677,30 @@ impl Fht {
         // no need to update all the windows of the output.
 
         for tile in self.visible_windows_for_output(output) {
-            tile.with_surfaces(|surface, states| {
-                let primary_scanout_output = update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    states,
-                    render_element_states,
-                    default_primary_scanout_output_compare,
-                );
+            let offscreen_id = tile.get_offscreen_element_id();
+            tile.with_surfaces(|surface, surface_data| {
+                // We do the work of update_surface_primary_scanout_output, but use our own
+                // offscreen Id if needed.
+                surface_data
+                    .data_map
+                    .insert_if_missing_threadsafe(Mutex::<PrimaryScanoutOutput>::default);
+                let surface_primary_scanout_output = surface_data
+                    .data_map
+                    .get::<Mutex<PrimaryScanoutOutput>>()
+                    .unwrap();
+                let id = offscreen_id.clone().unwrap_or_else(|| surface.into());
+                let primary_scanout_output = surface_primary_scanout_output
+                    .lock()
+                    .unwrap()
+                    .update_from_render_element_states(
+                        id,
+                        output,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
 
                 if let Some(output) = primary_scanout_output {
-                    with_fractional_scale(states, |fraction_scale| {
+                    with_fractional_scale(surface_data, |fraction_scale| {
                         fraction_scale
                             .set_preferred_scale(output.current_scale().fractional_scale());
                     });

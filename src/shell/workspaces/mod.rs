@@ -4,12 +4,11 @@ pub mod tile;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Physical, Point, Rectangle, Scale};
+use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
 
 pub use self::layout::WorkspaceLayout;
 use self::tile::{WorkspaceElement, WorkspaceTile, WorkspaceTileRenderElement};
@@ -17,7 +16,7 @@ use crate::config::{
     BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
 };
 use crate::fht_render_elements;
-use crate::renderer::{AsSplitRenderElements, FhtRenderer};
+use crate::renderer::FhtRenderer;
 use crate::utils::animation::Animation;
 use crate::utils::geometry::{
     Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
@@ -152,6 +151,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces().find_map(|ws| ws.find_element(surface))
     }
 
+    /// Find the window associated with this [`WlSurface`]
+    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+        self.workspaces_mut().find_map(|ws| ws.find_tile(surface))
+    }
+
     /// Find the workspace containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_surface(surface))
@@ -273,19 +277,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     /// Render all the elements in this workspace set, returning them and whether it currently
     /// holds a fullscreen element.
     #[profiling::function]
-    pub fn render_elements<R>(
+    pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>)
-    where
-        R: FhtRenderer,
-        E: AsSplitRenderElements<
-            R,
-            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
-            PopupRenderElement = WaylandSurfaceRenderElement<R>,
-        >,
-    {
+    ) -> (bool, Vec<WorkspaceSetRenderElement<R>>) {
         let mut elements = vec![];
         let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
         let output_geo: Rectangle<i32, Physical> = self
@@ -484,10 +480,8 @@ impl<E: WorkspaceElement> Workspace<E> {
     pub fn refresh(&mut self) {
         let output_geometry = self.output.geometry();
 
-        let mut should_refresh_geometries = self
-            .fullscreen
-            .take_if(|fs| !fs.inner.element.alive())
-            .is_some();
+        let mut should_refresh_geometries =
+            self.fullscreen.take_if(|fs| !fs.inner.alive()).is_some();
 
         if self
             .fullscreen
@@ -523,20 +517,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         // Clean dead/zombie tiles
-        // Also ensure that we dont try to access out of bounds indexes, and sync up the IPC.
-        let mut removed_ids = vec![];
-        self.tiles.retain(|tile| {
-            if !tile.element.alive() {
-                removed_ids.push(tile.element.uid());
-                false
-            } else {
-                true
-            }
-        });
+        let old_len = self.tiles.len();
+        self.tiles.retain(IsAlive::alive);
         let new_len = self.tiles.len();
-        if !removed_ids.is_empty() {
-            should_refresh_geometries = true;
-        }
+        should_refresh_geometries |= new_len != old_len;
 
         if should_refresh_geometries {
             self.focused_tile_idx = self.focused_tile_idx.clamp(0, new_len.saturating_sub(1));
@@ -1139,19 +1123,11 @@ impl<E: WorkspaceElement> Workspace<E> {
 
     /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
-    pub fn render_elements<R>(
+    pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> Vec<WorkspaceTileRenderElement<R>>
-    where
-        R: FhtRenderer,
-        E: AsSplitRenderElements<
-            R,
-            SurfaceRenderElement = WaylandSurfaceRenderElement<R>,
-            PopupRenderElement = WaylandSurfaceRenderElement<R>,
-        >,
-    {
+    ) -> Vec<WorkspaceTileRenderElement<R>> {
         let mut render_elements = vec![];
 
         // If we have a fullscreen, render it and off we go.
