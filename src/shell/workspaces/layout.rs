@@ -1,3 +1,24 @@
+//! Layouts a [`Workspace`](super::Workspace) can use.
+//!
+//! `fht-compositor` adopts a dynamic layout system. Each workspace hold a set number of
+//! [`WorkspaceTile`](super::tile::WorkspaceTile)s that are either:
+//!
+//! - Fullscreened, being displayed above every other tile, covering all the output
+//! - Maximized, displayed about all the other tiles, but it covers the entire tiling area
+//! - Tiled, and this is the state that we care about here
+//!
+//! The layout is responsible of taking a list of tiles and arranging them in the most optimal way
+//! inside a given `tile_area`, inside two differents stacks: a master stack and a slave stack.
+//!
+//! 1. `nmaster`: The number of clients inside the master stack.
+//! 2. `master_width_factor`: The proportion, after removing inner gaps, that the master stack
+//!    should take of the `tile_area`
+//!
+//! # Acknowledgements
+//!
+//! These are all adaptations from [DWM's vanitygaps patch](https://dwm.suckless.org/patches/vanitygaps/)
+//! with some tweaking and changes to be more idiomatic.
+
 use std::cmp::min;
 
 use serde::{Deserialize, Serialize};

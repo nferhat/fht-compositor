@@ -102,9 +102,8 @@ impl Fht {
             })
         {
             under = Some(layer_focus);
-        } else if let Some(fullscreen_focus) = wset
-            .current_fullscreen()
-            .and_then(window_surface_under)
+        } else if let Some(fullscreen_focus) =
+            wset.current_fullscreen().and_then(window_surface_under)
         {
             under = Some(fullscreen_focus)
         } else if let Some(layer_focus) =
@@ -114,9 +113,7 @@ impl Fht {
             })
         {
             under = Some(layer_focus)
-        } else if let Some(window_focus) = wset
-            .element_under(point)
-            .and_then(window_surface_under)
+        } else if let Some(window_focus) = wset.element_under(point).and_then(window_surface_under)
         {
             under = Some(window_focus)
         } else if let Some(layer_focus) = layer_map
@@ -142,14 +139,14 @@ impl Fht {
     /// Find the tile associated with this [`WlSurface`]
     pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<Window>> {
         self.workspaces_mut()
-            .find_map(|(_, wset)| wset.find_tile(surface))
+            .find_map(|(_, wset)| wset.find_tile_mut(surface))
     }
 
     /// Find the window associated with this [`WlSurface`]
     pub fn find_window_and_workspace(
         &self,
         surface: &WlSurface,
-    ) -> Option<(&Window, &Workspace<Window>)> {
+    ) -> Option<(Window, &Workspace<Window>)> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_element_and_workspace(surface))
     }
@@ -177,7 +174,7 @@ impl Fht {
     ) -> Option<(&mut WorkspaceTile<Window>, Output)> {
         self.workspaces_mut().find_map(|(_, wset)| {
             let output = wset.output.clone();
-            wset.find_tile(surface).map(|tile| (tile, output))
+            wset.find_tile_mut(surface).map(|tile| (tile, output))
         })
     }
 
@@ -401,7 +398,7 @@ impl Fht {
         let window = tile.element.clone();
         workspace.insert_tile(tile, false);
 
-        let tile = workspace.find_tile(&wl_surface).unwrap();
+        let tile = workspace.find_tile_mut(&wl_surface).unwrap();
         tile.start_opening_animation();
         // we dont want to animate the tile now.
         tile.location_animation.take();
@@ -442,7 +439,7 @@ impl Fht {
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = workspace.output.geometry();
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= workspace.element_geometry(window).unwrap().loc;
+        target.loc -= workspace.element_geometry(&window).unwrap().loc;
 
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);

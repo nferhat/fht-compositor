@@ -71,18 +71,18 @@ impl State {
                     return;
                 }
             }
-        // } else if let Some(fullscreen) = wset.active().fullscreen.as_ref().map(|f| &f.inner) {
-        //     if fullscreen
-        //         .surface_under(
-        //             pointer_loc.to_local(output),
-        //             WindowSurfaceType::ALL,
-        //         )
-        //         .is_some()
-        //     {
-        //         let fullscreen = fullscreen.clone();
-        //         self.set_focus_target(Some(fullscreen.into()));
-        //         return;
-        //     }
+        } else if let Some((fullscreen, _)) = wset.current_fullscreen() {
+            if fullscreen
+                .surface_under(
+                    pointer_loc - output_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
+                .is_some()
+            {
+                let fullscreen = fullscreen.clone();
+                self.set_focus_target(Some(fullscreen.into()));
+                return;
+            }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;

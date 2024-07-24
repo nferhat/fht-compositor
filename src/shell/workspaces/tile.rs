@@ -1,3 +1,8 @@
+//! A single workspace tile.
+//!
+//! This is an abstraction over an element that implements [`WorkspaceElement`]. For more
+//! information, check [the `workspaces` module documentation](crate::shell::workspaces)
+
 use std::time::Duration;
 
 use smithay::backend::allocator::Fourcc;
@@ -127,7 +132,7 @@ pub trait WorkspaceElement:
 
 /// A single [`Workspace`] tile.
 ///
-/// A [`Workspace`] tile is responsible for managing an inner [`WorkspaceElement`] by giving a
+/// A [`WorkspaceTile`] is responsible for managing an inner [`WorkspaceElement`] by giving a
 /// position, border, and other properties. This tile is useful only if you store it inside a
 /// [`Workspace`](super::Workspace)
 pub struct WorkspaceTile<E: WorkspaceElement> {

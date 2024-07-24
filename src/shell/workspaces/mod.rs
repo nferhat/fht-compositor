@@ -1,3 +1,22 @@
+//! Workspace logic code.
+//!
+//! `fht-compositor` has a static workspace scheme, as in each output gets a fixed number of
+//! workspaces to work with using a [`WorkspaceSet`], with each workspace having a unique dynamic
+//! layout that tiles the windows inside the available space.
+//!
+//! Each workspace holds a number of [`WorkspaceTile`]s, which is a generic abstraction over an
+//! element that implements [`WorkspaceElement`], that could be windows, textures, buffers, etc.
+//!
+//! `fht-compositor` holds then the following rules when managing workspaces and windows
+//!
+//! 1. Each unique workspace can only exist in one single set
+//! 2. Each workspace set can only be assigned to one single output
+//! 3. Each tile can only exist in a single unique workspace
+//!
+//! When unplugging an output, all the tiles from its workspaces get inserted into the workspaces
+//! of the active output, matching the workspace index between the removed and the active output
+//! workspace set.
+
 pub mod layout;
 pub mod tile;
 
@@ -145,12 +164,14 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
     /// Find the window associated with this [`WlSurface`]
     pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
-        self.workspaces().find_map(|ws| ws.find_element(surface))
+        self.workspaces()
+            .find_map(|ws| ws.find_tile(surface).map(WorkspaceTile::element))
     }
 
     /// Find the window associated with this [`WlSurface`]
-    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
-        self.workspaces_mut().find_map(|ws| ws.find_tile(surface))
+    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+        self.workspaces_mut()
+            .find_map(|ws| ws.find_tile_mut(surface))
     }
 
     /// Find the [`Workspace`] containing the window associated with this [`WlSurface`].
@@ -164,9 +185,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
-    pub fn find_element_and_workspace(&self, surface: &WlSurface) -> Option<(&E, &Workspace<E>)> {
-        self.workspaces()
-            .find_map(|ws| ws.find_element(surface).map(|w| (w, ws)))
+    pub fn find_element_and_workspace(&self, surface: &WlSurface) -> Option<(E, &Workspace<E>)> {
+        self.workspaces().find_map(|ws| {
+            let element = ws.find_tile(surface).map(|w| w.element.clone())?;
+            Some((element, ws))
+        })
     }
 
     /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
@@ -174,8 +197,10 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         &mut self,
         surface: &WlSurface,
     ) -> Option<(E, &mut Workspace<E>)> {
-        self.workspaces_mut()
-            .find_map(|ws| ws.find_element(surface).cloned().map(|w| (w, ws)))
+        self.workspaces_mut().find_map(|ws| {
+            let element = ws.find_tile(surface).map(|w| w.element.clone())?;
+            Some((element, ws))
+        })
     }
 
     /// Get a reference to the [`Workspace`] holding this window, if any.
@@ -190,13 +215,75 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
     /// Get the current fullscreend element and it's location relative to the [`Workspace`]
     ///
-    /// This function also accounts for workspace switch animations.
+    /// This function also accounts for workspace switch animations, and will always prefer the
+    /// active workspace (aka previous) fullscreen before the target's (next) fullscreen.
     #[profiling::function]
     pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Logical>)> {
-        self.active().fullscreen.as_ref().map(|fs| {
-            // Fullscreen is always at (0,0)
-            (fs.inner.element(), (0, 0).into())
-        })
+        let Some(animation) = self.switch_animation.as_ref() else {
+            return self.active().fullscreen.as_ref().map(|fs| {
+                // Fullscreen is always at (0,0)
+                (fs.inner.element(), (0, 0).into())
+            });
+        };
+
+        let output_geo = self.output.geometry();
+        let (current_offset, target_offset) =
+            if animation.target_idx > self.active_idx.load(Ordering::SeqCst) {
+                // Focusing the next offset.
+                // For the active, how much should we *remove* from the current position
+                // For the target, how much should we add to the current position
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from(((-offset), 0)),
+                            Point::from(((-offset + output_geo.size.w), 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (-offset))),
+                            Point::from((0, (-offset + output_geo.size.h))),
+                        )
+                    }
+                }
+            } else {
+                // Focusing a previous workspace
+                // For the active, how much should we add to tyhe current position
+                // For the target, how much should we remove from the current position.
+                match CONFIG.animation.workspace_switch.direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.w as f64).round() as i32;
+                        (
+                            Point::from((offset, 0)),
+                            Point::from((offset - output_geo.size.w, 0)),
+                        )
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        let offset =
+                            (animation.animation.value() * output_geo.size.h as f64).round() as i32;
+                        (
+                            Point::from((0, (offset))),
+                            Point::from((0, (offset - output_geo.size.h))),
+                        )
+                    }
+                }
+            };
+
+        self.active()
+            .fullscreen
+            .as_ref()
+            .map(|fs| (fs.inner.element(), current_offset))
+            .or_else(|| {
+                self.workspaces[animation.target_idx]
+                    .fullscreen
+                    .as_ref()
+                    .map(|fs| (fs.inner.element(), target_offset))
+            })
     }
 
     /// Get the element in under a given point and it's location relative to the [`Workspace`]
@@ -294,7 +381,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
                     .map(WorkspaceSetRenderElement::Normal),
             );
 
-            return (false, elements);
+            return (active.fullscreen.is_some(), elements);
         };
 
         // Switching
@@ -310,7 +397,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
                     .into_iter()
                     .map(WorkspaceSetRenderElement::Normal),
             );
-            return (false, elements);
+            return (target.fullscreen.is_some(), elements);
         }
 
         // Otherwise to computations
@@ -377,7 +464,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }));
 
         (
-            false, // active.fullscreen.is_some() || target.fullscreen.is_some(),
+            active.fullscreen.is_some() || target.fullscreen.is_some(),
             elements,
         )
     }
@@ -539,122 +626,62 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    /// Find the element with this [`WlSurface`]
-    pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
-        self.fullscreen
-            .as_ref()
-            .and_then(|fs| {
-                fs.inner
-                    .has_surface(surface, WindowSurfaceType::ALL)
-                    .then_some(&fs.inner.element)
-            })
-            .or_else(|| {
-                self.tiles.iter().find_map(|tile| {
-                    tile.has_surface(surface, WindowSurfaceType::ALL)
-                        .then_some(&tile.element)
-                })
-            })
-    }
+    /// Render all elements in this [`Workspace`], respecting the window's Z-index.
+    #[profiling::function]
+    pub fn render_elements<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        scale: Scale<f64>,
+    ) -> Vec<WorkspaceTileRenderElement<R>> {
+        let mut render_elements = vec![];
 
-    /// Find the tile with this [`WlSurface`]
-    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
-        self.fullscreen
-            .as_mut()
-            .filter(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL))
-            .map(|fs| &mut fs.inner)
-            .or_else(|| {
-                self.tiles
-                    .iter_mut()
-                    .find(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
-            })
-    }
-
-    /// Find the tile with this [`WlSurface`]
-    pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
-        self.fullscreen
-            .as_mut()
-            .filter(|fs| fs.inner == *element)
-            .map(|fs| &mut fs.inner)
-            .or_else(|| self.tiles.iter_mut().find(|tile| *tile == element))
-    }
-
-    /// Return whether this [`Workspace`] contains this element.
-    pub fn has_element(&self, element: &E) -> bool {
-        let mut ret = false;
-        ret |= self
-            .fullscreen
-            .as_ref()
-            .is_some_and(|fs| fs.inner == *element);
-        ret |= self.tiles.iter().any(|tile| tile == element);
-        ret
-    }
-
-    /// Return whether this [`Workspace`] has an element  with this [`WlSurface`].
-    pub fn has_surface(&self, surface: &WlSurface) -> bool {
-        let mut ret = false;
-        ret |= self
-            .fullscreen
-            .as_ref()
-            .is_some_and(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL));
-        ret |= self
-            .tiles
-            .iter()
-            .any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL));
-        ret
-    }
-
-    /// Return the focused element, giving priority to the fullscreen element first, then the
-    /// possible active non-fullscreen element.
-    pub fn focused(&self) -> Option<&E> {
-        if let Some(fullscreen) = self.fullscreen.as_ref() {
-            return Some(&fullscreen.inner.element);
+        // If we have a fullscreen, render it and off we go.
+        if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_ref() {
+            return inner
+                .render_elements(
+                    renderer,
+                    &self.output,
+                    scale,
+                    CONFIG.decoration.focused_window_opacity,
+                    true,
+                )
+                .collect();
         }
 
-        self.tiles
-            .get(self.focused_tile_idx)
-            .map(WorkspaceTile::element)
-    }
-
-    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
-    /// possible active non-fullscreen element.
-    pub fn focused_tile(&self) -> Option<&WorkspaceTile<E>> {
-        if let Some(fullscreen) = self.fullscreen.as_ref() {
-            return Some(&fullscreen.inner);
+        if self.tiles.is_empty() {
+            return render_elements;
         }
-        self.tiles.get(self.focused_tile_idx)
-    }
 
-    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
-    /// possible active non-fullscreen element.
-    pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
-        if let Some(fullscreen) = self.fullscreen.as_mut() {
-            return Some(&mut fullscreen.inner);
+        if let Some(tile) = self.focused_tile() {
+            render_elements.extend(tile.render_elements(
+                renderer,
+                &self.output,
+                scale,
+                CONFIG.decoration.focused_window_opacity,
+                true,
+            ));
         }
-        self.tiles.get_mut(self.focused_tile_idx)
-    }
 
-    /// Get the geometry of a given element relative to the [`Workspace`].
-    pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        if let Some(fs) = self.fullscreen.as_ref().filter(|fs| fs.inner == *element) {
-            return Some(fs.inner.geometry());
+        for (idx, tile) in self.tiles().enumerate() {
+            if idx == self.focused_tile_idx {
+                continue;
+            }
+
+            render_elements.extend(tile.render_elements(
+                renderer,
+                &self.output,
+                scale,
+                CONFIG.decoration.normal_window_opacity,
+                false,
+            ));
         }
-        self.tiles
-            .iter()
-            .find(|tile| *tile == element)
-            .map(WorkspaceTile::geometry)
-    }
 
-    /// Get the visual geometry of a given element relative to the [`Workspace`].
-    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        if let Some(fs) = self.fullscreen.as_ref().filter(|fs| fs.inner == *element) {
-            return Some(fs.inner.visual_geometry());
-        }
-        self.tiles
-            .iter()
-            .find(|tile| *tile == element)
-            .map(WorkspaceTile::visual_geometry)
+        render_elements
     }
+}
 
+// Inserting and removing elements
+impl<E: WorkspaceElement> Workspace<E> {
     /// Insert a tile in this [`Workspace`]
     ///
     /// See [`Workspace::insert_element`]
@@ -766,6 +793,76 @@ impl<E: WorkspaceElement> Workspace<E> {
         Some(tile)
     }
 
+    /// Remove the currently fullscreened tile.
+    ///
+    /// This also configures the element state.
+    pub fn take_fullscreen(&mut self) -> Option<FullscreenTile<E>> {
+        self.fullscreen.take().map(|mut fs| {
+            fs.inner.element.output_leave(&self.output);
+            fs.inner.element.set_bounds(None);
+            fs.inner.element.set_fullscreen(false);
+            fs.inner.element.set_fullscreen_output(None);
+            fs.inner.send_pending_configure();
+
+            fs
+        })
+    }
+}
+
+// Element focus
+impl<E: WorkspaceElement> Workspace<E> {
+    /// Return the focused element, giving priority to the fullscreen element first, then the
+    /// possible active non-fullscreen element.
+    pub fn focused(&self) -> Option<&E> {
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            return Some(&fullscreen.inner.element);
+        }
+
+        self.tiles
+            .get(self.focused_tile_idx)
+            .map(WorkspaceTile::element)
+    }
+
+    /// Fullscreen an element.
+    pub fn fullscreen_element(&mut self, element: &E, animate: bool) {
+        if let Some(FullscreenTile {
+            inner,
+            last_known_idx,
+        }) = self.take_fullscreen()
+        {
+            self.tiles.insert(last_known_idx, inner);
+        }
+
+        let Some(idx) = self.tiles.iter().position(|t| t == element) else {
+            return;
+        };
+        let tile = self.remove_tile(element, true).unwrap();
+        tile.element.set_fullscreen(true);
+        self.fullscreen = Some(FullscreenTile {
+            inner: tile,
+            last_known_idx: idx,
+        });
+        self.arrange_tiles(animate);
+    }
+
+    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
+    /// possible active non-fullscreen element.
+    pub fn focused_tile(&self) -> Option<&WorkspaceTile<E>> {
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
+            return Some(&fullscreen.inner);
+        }
+        self.tiles.get(self.focused_tile_idx)
+    }
+
+    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
+    /// possible active non-fullscreen element.
+    pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
+        if let Some(fullscreen) = self.fullscreen.as_mut() {
+            return Some(&mut fullscreen.inner);
+        }
+        self.tiles.get_mut(self.focused_tile_idx)
+    }
+
     /// Focus a given element, if this [`Workspace`] contains it.
     pub fn focus_element(&mut self, window: &E, animate: bool) {
         if let Some(idx) = self.tiles.iter().position(|w| w == window) {
@@ -835,7 +932,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         let tile = &self.tiles[self.focused_tile_idx];
         Some(tile.element())
     }
+}
 
+// Element swapping
+impl<E: WorkspaceElement> Workspace<E> {
     /// Swap the two given elements.
     ///
     /// This will give the focus to b
@@ -913,6 +1013,19 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.focused_tile_idx = new_focused_idx;
         self.tiles.swap(last_focused_idx, new_focused_idx);
         self.arrange_tiles(animate);
+    }
+}
+
+// Geometry and layout
+impl<E: WorkspaceElement> Workspace<E> {
+    /// Get the geometry of a given element relative to the [`Workspace`].
+    pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
+        self.tile_for(element).map(WorkspaceTile::geometry)
+    }
+
+    /// Get the visual geometry of a given element relative to the [`Workspace`].
+    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
+        self.tile_for(element).map(WorkspaceTile::visual_geometry)
     }
 
     /// Get the area used to tile the elements, relative to the [`Workspace`]
@@ -1036,6 +1149,79 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
         self.arrange_tiles(animate);
     }
+}
+
+// Finding elements
+impl<E: WorkspaceElement> Workspace<E> {
+    /// Find the tile with this [`WlSurface`] in its surface tree.
+    pub fn find_tile(&self, surface: &WlSurface) -> Option<&WorkspaceTile<E>> {
+        self.fullscreen
+            .as_ref()
+            .filter(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL))
+            .map(|fs| &fs.inner)
+            .or_else(|| {
+                self.tiles
+                    .iter()
+                    .find(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
+            })
+    }
+
+    /// Find the tile with this [`WlSurface`] in its surface tree.
+    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+        self.fullscreen
+            .as_mut()
+            .filter(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL))
+            .map(|fs| &mut fs.inner)
+            .or_else(|| {
+                self.tiles
+                    .iter_mut()
+                    .find(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
+            })
+    }
+
+    /// Find the tile with this element.
+    pub fn tile_for(&self, element: &E) -> Option<&WorkspaceTile<E>> {
+        self.fullscreen
+            .as_ref()
+            .filter(|fs| fs.inner == *element)
+            .map(|fs| &fs.inner)
+            .or_else(|| self.tiles.iter().find(|tile| *tile == element))
+    }
+
+    /// Find the tile with this element.
+    pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
+        self.fullscreen
+            .as_mut()
+            .filter(|fs| fs.inner == *element)
+            .map(|fs| &mut fs.inner)
+            .or_else(|| self.tiles.iter_mut().find(|tile| *tile == element))
+    }
+
+    /// Return whether this [`Workspace`] contains this element.
+    pub fn has_element(&self, element: &E) -> bool {
+        let mut ret = false;
+        ret |= self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|fs| fs.inner == *element);
+        ret |= self.tiles.iter().any(|tile| tile == element);
+        ret
+    }
+
+    /// Return whether this [`Workspace`] has an element with this [`WlSurface`] in its surface
+    /// tree.
+    pub fn has_surface(&self, surface: &WlSurface) -> bool {
+        let mut ret = false;
+        ret |= self
+            .fullscreen
+            .as_ref()
+            .is_some_and(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL));
+        ret |= self
+            .tiles
+            .iter()
+            .any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL));
+        ret
+    }
 
     /// Get the topmost element under the `point` and its location relative to the [`Workspace`]
     ///
@@ -1088,8 +1274,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         &self,
         point: Point<f64, Logical>,
     ) -> impl Iterator<Item = &WorkspaceTile<E>> {
-        None.into_iter()
-            .chain(self.fullscreen.as_ref().map(|fs| &fs.inner))
+        self.fullscreen
+            .as_ref()
+            .map(|fs| &fs.inner)
+            .into_iter()
             .chain(self.tiles.iter().filter(move |tile| {
                 if !tile.bbox().to_f64().contains(point) {
                     return false;
@@ -1099,96 +1287,6 @@ impl<E: WorkspaceElement> Workspace<E> {
                 tile.element
                     .is_in_input_region(&(point - render_location.to_f64()))
             }))
-    }
-
-    /// Render all elements in this [`Workspace`], respecting the window's Z-index.
-    #[profiling::function]
-    pub fn render_elements<R: FhtRenderer>(
-        &self,
-        renderer: &mut R,
-        scale: Scale<f64>,
-    ) -> Vec<WorkspaceTileRenderElement<R>> {
-        let mut render_elements = vec![];
-
-        // If we have a fullscreen, render it and off we go.
-        if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_ref() {
-            return inner
-                .render_elements(
-                    renderer,
-                    &self.output,
-                    scale,
-                    CONFIG.decoration.focused_window_opacity,
-                    true,
-                )
-                .collect();
-        }
-
-        if self.tiles.is_empty() {
-            return render_elements;
-        }
-
-        if let Some(tile) = self.focused_tile() {
-            render_elements.extend(tile.render_elements(
-                renderer,
-                &self.output,
-                scale,
-                CONFIG.decoration.focused_window_opacity,
-                true,
-            ));
-        }
-
-        for (idx, tile) in self.tiles().enumerate() {
-            if idx == self.focused_tile_idx {
-                continue;
-            }
-
-            render_elements.extend(tile.render_elements(
-                renderer,
-                &self.output,
-                scale,
-                CONFIG.decoration.normal_window_opacity,
-                false,
-            ));
-        }
-
-        render_elements
-    }
-
-    /// Remove the currently fullscreened tile.
-    ///
-    /// This also configures the element state.
-    pub fn take_fullscreen(&mut self) -> Option<FullscreenTile<E>> {
-        self.fullscreen.take().map(|mut fs| {
-            fs.inner.element.output_leave(&self.output);
-            fs.inner.element.set_bounds(None);
-            fs.inner.element.set_fullscreen(false);
-            fs.inner.element.set_fullscreen_output(None);
-            fs.inner.send_pending_configure();
-
-            fs
-        })
-    }
-
-    /// Fullscreen an element.
-    pub fn fullscreen_element(&mut self, element: &E, animate: bool) {
-        if let Some(FullscreenTile {
-            inner,
-            last_known_idx,
-        }) = self.take_fullscreen()
-        {
-            self.tiles.insert(last_known_idx, inner);
-        }
-
-        let Some(idx) = self.tiles.iter().position(|t| t == element) else {
-            return;
-        };
-        let tile = self.remove_tile(element, true).unwrap();
-        tile.element.set_fullscreen(true);
-        self.fullscreen = Some(FullscreenTile {
-            inner: tile,
-            last_known_idx: idx,
-        });
-        self.arrange_tiles(animate);
     }
 }
 
