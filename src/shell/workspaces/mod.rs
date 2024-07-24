@@ -1311,3 +1311,397 @@ impl ToString for WorkspaceLayout {
         }
     }
 }
+
+mod tests {
+    // How stuff is tested here is very similar to Niri's layout tests, with operations that we
+    // apply to workspaces, then we check some invariants.
+    use std::borrow::Cow;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use smithay::desktop::space::SpaceElement;
+    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+    use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+    use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
+    use smithay::wayland::seat::WaylandFocus;
+
+    use super::tile::{WorkspaceElement, WorkspaceTile};
+    use super::{Workspace, WorkspaceLayout};
+    use crate::config::{BorderConfig, CONFIG};
+    use crate::utils::output::OutputExt;
+
+    #[derive(Clone)]
+    struct TestElement(Rc<RefCell<TestElementInner>>);
+    impl std::fmt::Debug for TestElement {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            std::fmt::Debug::fmt(&self.0, f)
+        }
+    }
+
+    impl TestElement {
+        fn new(bbox: Rectangle<i32, Logical>) -> Self {
+            let inner = TestElementInner {
+                bbox,
+                ..Default::default()
+            };
+
+            Self(Rc::new(RefCell::new(inner)))
+        }
+
+        fn output_entered(&self, output: &Output) -> bool {
+            let guard = self.0.borrow();
+            guard.outputs.iter().any(|o| o == output)
+        }
+    }
+
+    #[derive(Default, Debug)]
+    struct TestElementInner {
+        bbox: Rectangle<i32, Logical>,
+        requested_size: Option<Size<i32, Logical>>,
+        bounds: Option<Size<i32, Logical>>,
+        outputs: Vec<Output>,
+        fullscreen: bool,
+        maximized: bool,
+        activated: bool,
+        alive: bool,
+    }
+
+    impl SpaceElement for TestElement {
+        fn bbox(&self) -> Rectangle<i32, Logical> {
+            self.0.borrow().bbox
+        }
+
+        fn is_in_input_region(&self, point: &smithay::utils::Point<f64, Logical>) -> bool {
+            // For this, the location will already be local to the bounding box.
+            // So we change the bbox from global to local
+            let mut bbox = self.0.borrow().bbox.to_f64();
+            bbox.loc = Point::default();
+            bbox.contains(*point)
+        }
+
+        fn set_activate(&self, activated: bool) {
+            self.0.borrow_mut().activated = activated
+        }
+
+        fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
+            self.0.borrow_mut().outputs.push(output.clone())
+        }
+
+        fn output_leave(&self, output: &Output) {
+            self.0.borrow_mut().outputs.retain(|o| o != output)
+        }
+    }
+
+    impl IsAlive for TestElement {
+        fn alive(&self) -> bool {
+            self.0.borrow().alive
+        }
+    }
+
+    impl WaylandFocus for TestElement {
+        fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
+            None
+        }
+    }
+
+    impl PartialEq for TestElement {
+        fn eq(&self, other: &Self) -> bool {
+            Rc::ptr_eq(&self.0, &other.0)
+        }
+    }
+
+    impl WorkspaceElement for TestElement {
+        fn send_pending_configure(&self) {
+            let mut guard = self.0.borrow_mut();
+            if let Some(requested_size) = guard.requested_size.take() {
+                guard.bbox.size = requested_size;
+            }
+        }
+
+        fn set_size(&self, new_size: Size<i32, Logical>) {
+            let mut guard = self.0.borrow_mut();
+            guard.requested_size = Some(new_size);
+        }
+
+        fn size(&self) -> Size<i32, Logical> {
+            self.0.borrow().bbox.size
+        }
+
+        fn set_fullscreen(&self, fullscreen: bool) {
+            self.0.borrow_mut().fullscreen = fullscreen
+        }
+
+        fn set_fullscreen_output(
+            &self,
+            output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        ) {
+            let _ = output; // no need really.
+        }
+
+        fn fullscreen(&self) -> bool {
+            self.0.borrow().fullscreen
+        }
+
+        fn fullscreen_output(
+            &self,
+        ) -> Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput> {
+            None
+        }
+
+        fn set_maximized(&self, maximize: bool) {
+            self.0.borrow_mut().maximized = maximize
+        }
+
+        fn maximized(&self) -> bool {
+            self.0.borrow().maximized
+        }
+
+        fn set_bounds(&self, bounds: Option<Size<i32, Logical>>) {
+            self.0.borrow_mut().bounds = bounds;
+        }
+
+        fn bounds(&self) -> Option<Size<i32, Logical>> {
+            self.0.borrow().bounds
+        }
+
+        fn set_activated(&self, activated: bool) {
+            self.0.borrow_mut().activated = activated;
+        }
+
+        fn activated(&self) -> bool {
+            self.0.borrow_mut().activated
+        }
+
+        fn app_id(&self) -> String {
+            String::from("test.window")
+        }
+
+        fn title(&self) -> String {
+            String::from("Test Window")
+        }
+
+        fn render_surface_elements<R: crate::renderer::FhtRenderer>(
+            &self,
+            _renderer: &mut R,
+            _location: Point<i32, smithay::utils::Physical>,
+            _scale: smithay::utils::Scale<f64>,
+            _alpha: f32,
+        ) -> Vec<smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>>
+        {
+            vec![]
+        }
+
+        fn render_popup_elements<R: crate::renderer::FhtRenderer>(
+            &self,
+            _renderer: &mut R,
+            _location: Point<i32, smithay::utils::Physical>,
+            _scale: smithay::utils::Scale<f64>,
+            _alpha: f32,
+        ) -> Vec<smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>>
+        {
+            vec![]
+        }
+
+        fn set_offscreen_element_id(&self, id: Option<smithay::backend::renderer::element::Id>) {
+            let _ = id; // we are not rendering
+        }
+
+        fn get_offscreen_element_id(&self) -> Option<smithay::backend::renderer::element::Id> {
+            None //  we are not rendering
+        }
+    }
+
+    const TILE_LAYOUT: WorkspaceLayout = WorkspaceLayout::Tile {
+        nmaster: 1,
+        master_width_factor: 0.5,
+    };
+    const BOTTOM_STACK_LAYOUT: WorkspaceLayout = WorkspaceLayout::BottomStack {
+        nmaster: 1,
+        master_width_factor: 0.5,
+    };
+
+    fn create_workspace() -> Workspace<TestElement> {
+        let output = Output::new(
+            String::from("test-output-0"),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: String::from("test-make"),
+                model: String::from("test-model"),
+            },
+        );
+        let mode = Mode {
+            size: (800, 600).into(),
+            refresh: 0, // does not matter
+        };
+        output.add_mode(mode);
+        output.set_preferred(mode);
+        output.change_current_state(Some(mode), None, None, None);
+
+        Workspace {
+            output,
+            tiles: vec![],
+            focused_tile_idx: 0,
+            layouts: vec![TILE_LAYOUT, BOTTOM_STACK_LAYOUT],
+            active_layout_idx: 0,
+            fullscreen: None,
+        }
+    }
+
+    fn check_elements_bboxes(
+        workspace: &Workspace<TestElement>,
+        bboxes: &[Rectangle<i32, Logical>],
+    ) {
+        assert_eq!(
+            bboxes.len(),
+            workspace.tiles.len(),
+            "Number of bounding boxes to check does not match the tiles in workspace!"
+        );
+
+        for (&bbox, tile) in std::iter::zip(bboxes, workspace.tiles.iter()) {
+            let element_bbox = tile.element.bbox();
+            assert_eq!(bbox, element_bbox)
+        }
+    }
+
+    // TODO: Maybe get rid of the expected parameters, but for now I have no way to return values
+    enum Operation {
+        Refresh,
+        InsertTile {
+            tile: WorkspaceTile<TestElement>,
+        },
+        InsertElement {
+            element: TestElement,
+            border_config: Option<BorderConfig>,
+        },
+        RemoveTile {
+            element: TestElement,
+        },
+        TakeFullscreen,
+        FullscreenElement {
+            element: TestElement,
+        },
+        FocusElement {
+            element: TestElement,
+        },
+        FocusNextElement,
+        FocusPreviousElement,
+        SwapElements {
+            a: TestElement,
+            b: TestElement,
+        },
+        SwapWithNextElement,
+        SwapWithPreviousElement,
+        ArrangeTiles,
+        SelectNextLayout,
+        SelectPreviousLayout,
+        ChangeMwfact {
+            delta: f32,
+        },
+        ChangeNmaster {
+            delta: i32,
+        },
+    }
+
+    impl Operation {
+        fn apply(self, workspace: &mut Workspace<TestElement>) {
+            match self {
+                Operation::Refresh => workspace.refresh(),
+                Operation::InsertTile { tile } => workspace.insert_tile(tile, false),
+                Operation::InsertElement {
+                    element,
+                    border_config,
+                } => workspace.insert_element(element, border_config, false),
+                Operation::RemoveTile { element } => {
+                    let _ = workspace.remove_tile(&element, false);
+                }
+                Operation::TakeFullscreen => {
+                    let _ = workspace.fullscreen.take();
+                }
+                Operation::FullscreenElement { element } => {
+                    workspace.fullscreen_element(&element, false)
+                }
+                Operation::FocusElement { element } => workspace.focus_element(&element, false),
+                Operation::FocusNextElement => {
+                    let _ = workspace.focus_next_element(false);
+                }
+                Operation::FocusPreviousElement => {
+                    let _ = workspace.focus_previous_element(false);
+                }
+                Operation::SwapElements { a, b } => {
+                    let _ = workspace.swap_elements(&a, &b, false);
+                }
+                Operation::SwapWithNextElement => {
+                    let _ = workspace.swap_with_next_element(false);
+                }
+                Operation::SwapWithPreviousElement => {
+                    let _ = workspace.swap_with_previous_element(false);
+                }
+                Operation::ArrangeTiles => workspace.arrange_tiles(false),
+                Operation::SelectNextLayout => workspace.select_next_layout(false),
+                Operation::SelectPreviousLayout => workspace.select_previous_layout(false),
+                Operation::ChangeMwfact { delta } => workspace.change_mwfact(delta, false),
+                Operation::ChangeNmaster { delta } => workspace.change_nmaster(delta, false),
+            }
+        }
+    }
+
+    fn check_operations(operations: Vec<Operation>) {
+        // NOTE: We have to set the configuration since it never defaults.
+        // Optimally we wouldn't want a global constant here, but I digress
+        CONFIG.set(Default::default());
+
+        let mut workspace = create_workspace();
+        for operation in operations {
+            operation.apply(&mut workspace);
+        }
+
+        workspace.check_invariants();
+    }
+
+    impl Workspace<TestElement> {
+        fn check_invariants(&self) {
+            let output_geo = self.output.geometry();
+
+            // State checks.
+            assert!(
+                self.focused_tile_idx < self.tiles.len(),
+                "Focus tile index should be strictly smaller than tiles.len()"
+            );
+            assert!(
+                self.active_layout_idx < self.layouts.len(),
+                "Active layout index should be strictly smaller than layouts.len()"
+            );
+
+            // General checks for mapped tiles that abide to the layout
+            for tile in &self.tiles {
+                assert!(
+                    tile.element.output_entered(&self.output),
+                    "Tile element should enter the workspace's output!"
+                );
+
+                assert!(
+                    !tile.element.fullscreen(),
+                    "Tile element should not be in fullscreen state!"
+                );
+
+                assert_eq!(
+                    tile.element.bounds(),
+                    Some(output_geo.size),
+                    "Tile element bounds should match the output size!"
+                );
+            }
+
+            if let Some(fullscreen) = self.fullscreen.as_ref() {
+                assert!(
+                    fullscreen.inner.element.output_entered(&self.output),
+                    "Fullscreen tile element should enter the workspace's output!"
+                );
+                assert!(
+                    fullscreen.inner.element.fullscreen(),
+                    "Fullscreened tile element be in fullscreen state!"
+                );
+            }
+        }
+    }
+}
