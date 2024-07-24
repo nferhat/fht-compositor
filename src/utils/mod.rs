@@ -2,6 +2,8 @@ use std::mem::MaybeUninit;
 use std::os::unix::process::CommandExt;
 use std::process::Stdio;
 
+use smithay::utils::{Coordinate, Point, Rectangle};
+
 pub mod animation;
 #[cfg(feature = "dbus")]
 pub mod dbus;
@@ -79,5 +81,21 @@ pub fn spawn(cmd: String) {
 
     if let Err(err) = res {
         warn!(?err, "Failed to create command spawner for command!");
+    }
+}
+
+pub trait RectCenterExt<C: Coordinate, Kind> {
+    fn center(self) -> Point<C, Kind>;
+}
+
+impl<Kind> RectCenterExt<i32, Kind> for Rectangle<i32, Kind> {
+    fn center(self) -> Point<i32, Kind> {
+        self.loc + self.size.downscale(2).to_point()
+    }
+}
+
+impl<Kind> RectCenterExt<f64, Kind> for Rectangle<f64, Kind> {
+    fn center(self) -> Point<f64, Kind> {
+        self.loc + self.size.downscale(2.0).to_point()
     }
 }

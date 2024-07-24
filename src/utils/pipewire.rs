@@ -31,7 +31,6 @@ use smithay::reexports::calloop::{self, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::gbm::{BufferObjectFlags as GbmBufferFlags, Modifier};
 use smithay::utils::{Logical, Size};
 
-use super::geometry::SizeExt;
 use crate::portals::{
     CursorMode, ScreenCastRequest, ScreenCastResponse, SessionSource, SourceType,
 };
@@ -388,7 +387,7 @@ impl PipeWire {
             is_active,
             output,
             cursor_mode,
-            size: size.as_logical(),
+            size,
             dmabufs,
         };
         Ok(cast)

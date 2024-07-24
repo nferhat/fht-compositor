@@ -18,7 +18,6 @@ use smithay::input::keyboard::{xkb, ModifiersState};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
 
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::utils::geometry::Local;
 
 /// A single Egui element.
 ///
@@ -59,6 +58,11 @@ impl EguiElement {
     /// Resize the element.
     pub fn set_size(&mut self, new_size: Size<i32, Logical>) {
         self.size = new_size;
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(painter) = guard.painter.as_mut() {
+            // New size, new buffer
+            let _ = painter.render_buffer.take();
+        }
     }
 
     /// Run the element's context, sending all the queued up events to the context.
@@ -237,7 +241,7 @@ pub struct EguiElementInner {
 
     /// The last pointer position on this element.
     /// If this is `None`, this means there's no pointer on the element.
-    last_pointer_position: Option<Point<i32, Local>>,
+    last_pointer_position: Option<Point<i32, Logical>>,
     /// Last registered modifiers state for keyboard input events.
     last_modifiers: ModifiersState,
     /// XKB keyboard keymap layout.
@@ -271,8 +275,8 @@ impl std::fmt::Debug for EguiElementInner {
 impl EguiElementInner {
     /// Send a pointer position event to this context.
     ///
-    /// This expects the position to be relative to this output.
-    pub fn input_event_pointer_position(&mut self, position: Point<i32, Local>) {
+    /// This expects the position to be relative to the egui element.
+    pub fn input_event_pointer_position(&mut self, position: Point<i32, Logical>) {
         // NOTE: No need to check for wants_pointer_input since it tries to base this off the
         // pointer position, so it must be updated regardless.
         self.last_pointer_position = Some(position);

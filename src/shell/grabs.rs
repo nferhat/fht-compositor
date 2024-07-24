@@ -17,28 +17,27 @@ use super::workspaces::WorkspaceLayout;
 use super::PointerFocusTarget;
 use crate::config::CONFIG;
 use crate::state::State;
-use crate::utils::geometry::{Global, Local, PointExt, PointGlobalExt, SizeExt};
 
 #[allow(unused)]
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
     /// The concerned window.
     pub window: Window,
-    /// The initial window geometry we started with before dragging the tile.
-    pub initial_window_geometry: Rectangle<i32, Global>,
-    /// The last registered window location.
-    last_window_location: Point<i32, Local>,
-    /// The last registered pointer location.
+    /// The initial global window geometry we started with before dragging the tile.
+    pub initial_window_geometry: Rectangle<i32, Logical>,
+    /// The last registered window location, local to the workspace that holds it
+    last_window_location: Point<i32, Logical>,
+    /// The last registered pointer location in global space.
     ///
-    /// Keeping at as f64, Global marker since workspaces transform them locally automatically.
-    last_pointer_location: Point<f64, Global>,
+    /// Keeping at as f64, Logical marker since workspaces transform them locally automatically.
+    last_pointer_location: Point<f64, Logical>,
 }
 
 impl MoveSurfaceGrab {
     pub fn new(
         start_data: PointerGrabStartData<State>,
         window: Window,
-        initial_window_geometry: Rectangle<i32, Global>,
+        initial_window_geometry: Rectangle<i32, Logical>,
     ) -> Self {
         Self {
             start_data,
@@ -72,16 +71,17 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         // At the old window location will be drawn a solid rectangle meant to represent a
         // placeholder for the old window.
 
-        let position_delta = (event.location - self.start_data.location).as_global();
+        let position_delta = event.location - self.start_data.location;
         let mut new_location = self.initial_window_geometry.loc.to_f64() + position_delta;
         new_location = data.clamp_coords(new_location);
 
         let Some(ws) = data.fht.ws_mut_for(&self.window) else {
             return;
         };
-        let new_location = new_location.to_local(&ws.output).to_i32_round();
+        let output_loc = ws.output.current_location();
+        let new_location = new_location.to_i32_round() - output_loc;
 
-        self.last_pointer_location = event.location.as_global();
+        self.last_pointer_location = event.location;
         self.last_window_location = new_location;
 
         let Some(tile) = ws.tile_mut_for(&self.window) else {
@@ -126,7 +126,8 @@ impl PointerGrab<State> for MoveSurfaceGrab {
                 //
                 // So, we set our tile location so that when we swap out the two, the arrange_tiles
                 // function (used in swap_elements) will animate from this location here.
-                let location = self.last_pointer_location.to_local(&ws.output);
+                let output_loc = ws.output.current_location();
+                let location = self.last_pointer_location - output_loc.to_f64();
                 let self_tile = ws.tile_mut_for(&self.window).unwrap();
                 self_tile.temporary_render_location = None;
                 self_tile.location = self.last_window_location;
@@ -289,7 +290,7 @@ impl From<XdgResizeEdge> for ResizeEdge {
 pub struct ResizeData {
     /// The edges the surface is being resized with.
     pub edges: ResizeEdge,
-    /// The initial window location.
+    /// The initial window location in global coordinate space.
     pub initial_window_location: Point<i32, Logical>,
     /// The initial window size (geometry width and height).
     pub initial_window_size: Size<i32, Logical>,
@@ -313,7 +314,7 @@ pub struct PointerResizeSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
     pub window: Window,
     pub edges: ResizeEdge,
-    pub initial_window_size: Size<i32, Local>,
+    pub initial_window_size: Size<i32, Logical>,
     // The last registered client fact.
     //
     // Used to adapt the layouts on the fly without having to store the current window size, since
@@ -326,7 +327,7 @@ impl PointerResizeSurfaceGrab {
         start_data: PointerGrabStartData<State>,
         window: Window,
         edges: ResizeEdge,
-        initial_window_size: Size<i32, Local>,
+        initial_window_size: Size<i32, Logical>,
     ) -> Self {
         Self {
             start_data,
@@ -356,7 +357,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
 
         let mut delta: Point<i32, Logical> =
             (event.location - self.start_data.location).to_i32_round();
-        let mut new_size = self.initial_window_size.as_logical();
+        let mut new_size = self.initial_window_size;
 
         // Custom behaviour for tiled layouts.
         //

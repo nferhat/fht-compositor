@@ -6,14 +6,13 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{Id, Kind};
 use smithay::desktop::{PopupManager, Window};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
-use smithay::utils::{Physical, Point, Scale, Size};
+use smithay::utils::{Logical, Physical, Point, Scale, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
 
 use super::workspaces::tile::WorkspaceElement;
 use crate::renderer::FhtRenderer;
-use crate::utils::geometry::{Local, PointExt, SizeExt};
 
 struct WindowOffscreenId(RefCell<Option<Id>>);
 
@@ -22,14 +21,14 @@ impl WorkspaceElement for Window {
         self.toplevel().unwrap().send_pending_configure();
     }
 
-    fn set_size(&self, new_size: smithay::utils::Size<i32, Local>) {
+    fn set_size(&self, new_size: Size<i32, Logical>) {
         self.toplevel().unwrap().with_pending_state(|state| {
-            state.size = Some(new_size.as_logical());
+            state.size = Some(new_size);
         });
     }
 
-    fn size(&self) -> Size<i32, Local> {
-        self.geometry().size.as_local()
+    fn size(&self) -> Size<i32, Logical> {
+        self.geometry().size
     }
 
     fn set_fullscreen(&self, fullscreen: bool) {
@@ -81,16 +80,16 @@ impl WorkspaceElement for Window {
             .with_pending_state(|state| state.states.contains(State::Maximized))
     }
 
-    fn set_bounds(&self, bounds: Option<Size<i32, Local>>) {
-        self.toplevel().unwrap().with_pending_state(|state| {
-            state.bounds = bounds.map(Size::as_logical);
-        });
-    }
-
-    fn bounds(&self) -> Option<Size<i32, Local>> {
+    fn set_bounds(&self, bounds: Option<Size<i32, Logical>>) {
         self.toplevel()
             .unwrap()
-            .with_pending_state(|state| state.bounds.map(Size::as_local))
+            .with_pending_state(|state| state.bounds = bounds);
+    }
+
+    fn bounds(&self) -> Option<Size<i32, Logical>> {
+        self.toplevel()
+            .unwrap()
+            .with_pending_state(|state| state.bounds)
     }
 
     fn set_activated(&self, activated: bool) {
@@ -144,10 +143,7 @@ impl WorkspaceElement for Window {
             return vec![];
         };
 
-        location -= self
-            .geometry()
-            .loc
-            .to_physical_precise_round(scale);
+        location -= self.geometry().loc.to_physical_precise_round(scale);
         render_elements_from_surface_tree(
             renderer,
             &surface,

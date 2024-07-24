@@ -28,9 +28,7 @@ use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
 use crate::config::CONFIG;
 use crate::state::{Fht, UnmappedTile};
-use crate::utils::geometry::{
-    Global, PointExt, PointGlobalExt, PointLocalExt, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
-};
+use crate::utils::RectCenterExt;
 use crate::utils::output::OutputExt;
 
 impl Fht {
@@ -45,9 +43,12 @@ impl Fht {
     /// - [`Background`] layer shells.
     pub fn focus_target_under(
         &self,
-        point: Point<f64, Global>,
-    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        mut point: Point<f64, Logical>,
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
         let output = self.focus_state.output.as_ref()?;
+        let output_loc = output.current_location();
+        point -= output_loc.to_f64();
+
         let wset = self.wset_for(output);
         let layer_map = layer_map_for_output(output);
 
@@ -56,22 +57,25 @@ impl Fht {
         let layer_surface_under = |layer: &LayerSurface, loc: Point<i32, Logical>| {
             layer
                 .surface_under(
-                    point.to_local(output).as_logical() - loc.to_f64(),
+                    point - output_loc.to_f64() - loc.to_f64(),
                     WindowSurfaceType::ALL,
                 )
                 .map(|(surface, surface_loc)| {
                     (
                         PointerFocusTarget::from(surface),
-                        (surface_loc + loc).as_local().to_global(output).to_f64(),
+                        (surface_loc + output_loc + loc).to_f64(),
                     )
                 })
         };
 
-        let window_surface_under = |window: &Window, mut loc: Point<i32, Logical>| {
-            loc -= window.geometry().loc;
+        let window_surface_under = |(window, mut loc): (&Window, Point<i32, Logical>)| {
+            loc -= window.geometry().loc; // the passed in location is without the window view
+                                          // offset
             let window_wl_surface = window.wl_surface().unwrap();
+            // NOTE: window location passed here is already global, since its from
+            // `Fht::window_geometry`
             window
-                .surface_under(point.as_logical() - loc.to_f64(), WindowSurfaceType::ALL)
+                .surface_under(point - loc.to_f64(), WindowSurfaceType::ALL)
                 .map(|(surface, surface_loc)| {
                     if surface == *window_wl_surface {
                         // Use the window immediatly when we are the toplevel surface.
@@ -79,20 +83,19 @@ impl Fht {
                         // State::process_mouse_action).
                         (
                             PointerFocusTarget::Window(window.clone()),
-                            loc.to_f64().as_global(), // window loc is already global
+                            loc.to_f64(), // window loc is already global
                         )
                     } else {
                         (
                             PointerFocusTarget::from(surface),
-                            (surface_loc + loc).to_f64().as_global(), /* window loc is already
-                                                                       * global */
+                            (surface_loc + loc).to_f64(), /* window loc is already global */
                         )
                     }
                 })
         };
 
         if let Some(layer_focus) = layer_map
-            .layer_under(Layer::Overlay, point.as_logical())
+            .layer_under(Layer::Overlay, point)
             .and_then(|layer| {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 layer_surface_under(layer, layer_loc)
@@ -101,12 +104,11 @@ impl Fht {
             under = Some(layer_focus);
         } else if let Some(fullscreen_focus) = wset
             .current_fullscreen()
-            .and_then(|(fullscreen, loc)| window_surface_under(fullscreen, loc.as_logical()))
+            .and_then(window_surface_under)
         {
             under = Some(fullscreen_focus)
-        } else if let Some(layer_focus) = layer_map
-            .layer_under(Layer::Top, point.as_logical())
-            .and_then(|layer| {
+        } else if let Some(layer_focus) =
+            layer_map.layer_under(Layer::Top, point).and_then(|layer| {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 layer_surface_under(layer, layer_loc)
             })
@@ -114,12 +116,12 @@ impl Fht {
             under = Some(layer_focus)
         } else if let Some(window_focus) = wset
             .element_under(point)
-            .and_then(|(window, loc)| window_surface_under(window, loc.as_logical()))
+            .and_then(window_surface_under)
         {
             under = Some(window_focus)
         } else if let Some(layer_focus) = layer_map
-            .layer_under(Layer::Bottom, point.as_logical())
-            .or_else(|| layer_map.layer_under(Layer::Background, point.as_logical()))
+            .layer_under(Layer::Bottom, point)
+            .or_else(|| layer_map.layer_under(Layer::Background, point))
             .and_then(|layer| {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 layer_surface_under(layer, layer_loc)
@@ -190,16 +192,16 @@ impl Fht {
             .find_map(|(_, wset)| wset.ws_mut_for(window))
     }
 
-    /// Get a this window's geometry.
-    pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Global>> {
+    /// Get a this window's geometry in global coordinate space.
+    pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
             wset.ws_for(window)
                 .and_then(|ws| ws.element_geometry(window))
         })
     }
 
-    /// Get a this window's geometry.
-    pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Global>> {
+    /// Get a this window's geometry in global coordinate space.
+    pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
             wset.ws_for(window)
                 .and_then(|ws| ws.element_visual_geometry(window))
@@ -337,22 +339,13 @@ impl Fht {
 
         // Pre compute window geometry for insertion.
         let mut tile = WorkspaceTile::new(window.clone(), None);
-        let inner_gaps = CONFIG.general.inner_gaps;
-        let outer_gaps = CONFIG.general.outer_gaps;
-
-        let usable_geo = layer_map_for_output(&wset.output)
-            .non_exclusive_zone()
-            .as_local();
-        let mut tile_area = usable_geo;
-        tile_area.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-        tile_area.loc += (outer_gaps, outer_gaps).into();
-
+        let tile_area = workspace.tile_area();
         let tiles_len = workspace.tiles.len() + 1;
         layout.arrange_tiles(
             workspace.tiles.iter_mut().chain(std::iter::once(&mut tile)),
             tiles_len,
             tile_area,
-            inner_gaps,
+            CONFIG.general.inner_gaps,
             false,
         );
 
@@ -397,6 +390,7 @@ impl Fht {
         } = unmapped_tile;
         let wl_surface = tile.element().wl_surface().unwrap().into_owned();
         let output = last_output.unwrap_or_else(|| self.active_output());
+        let output_loc = output.current_location();
         let wset = self.wset_mut_for(&output);
         let active_idx = wset.get_active_idx();
         let workspace_idx = last_workspace_idx.unwrap_or(active_idx);
@@ -411,7 +405,8 @@ impl Fht {
         tile.start_opening_animation();
         // we dont want to animate the tile now.
         tile.location_animation.take();
-        let tile_geo = tile.geometry().to_global(&output);
+        let mut tile_geo = tile.geometry();
+        tile_geo.loc += output_loc;
 
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
@@ -446,13 +441,11 @@ impl Fht {
         // The target (aka the popup) geometry should be relative to the parent (aka the window's)
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = workspace.output.geometry();
-        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone())).as_global();
+        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
         target.loc -= workspace.element_geometry(window).unwrap().loc;
 
         popup.with_pending_state(|state| {
-            state.geometry = state
-                .positioner
-                .get_unconstrained_geometry(target.as_logical());
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
     }
 
@@ -595,8 +588,8 @@ impl crate::state::State {
                 .borrow_mut();
             *state = ResizeState::Resizing(ResizeData {
                 edges: edges.into(),
-                initial_window_location: window_geo.loc.as_logical(),
-                initial_window_size: window_geo.size.as_logical(),
+                initial_window_location: window_geo.loc,
+                initial_window_size: window_geo.size,
             });
         });
 
@@ -608,8 +601,7 @@ impl crate::state::State {
             state.fht.resize_grab_active = true;
         });
 
-        let grab =
-            PointerResizeSurfaceGrab::new(start_data, window, edges, window_geo.size.as_local());
+        let grab = PointerResizeSurfaceGrab::new(start_data, window, edges, window_geo.size);
 
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }

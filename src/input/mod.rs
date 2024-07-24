@@ -14,7 +14,7 @@ use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
-use smithay::utils::{Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
@@ -26,7 +26,6 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 use crate::config::CONFIG;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::{OutputState, State};
-use crate::utils::geometry::{Global, PointExt, PointGlobalExt, PointLocalExt, RectGlobalExt};
 use crate::utils::output::OutputExt;
 
 impl State {
@@ -52,17 +51,18 @@ impl State {
         let Some(ref output) = self.fht.focus_state.output.clone() else {
             return;
         };
+        let output_loc = output.current_location();
 
-        let pointer_loc = pointer.current_location().as_global();
+        let pointer_loc = pointer.current_location();
         let layer_map = layer_map_for_output(output);
         let wset = self.fht.wset_mut_for(output);
 
-        if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc.as_logical()) {
+        if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc - output_loc.to_f64() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -74,7 +74,7 @@ impl State {
         // } else if let Some(fullscreen) = wset.active().fullscreen.as_ref().map(|f| &f.inner) {
         //     if fullscreen
         //         .surface_under(
-        //             pointer_loc.to_local(output).as_logical(),
+        //             pointer_loc.to_local(output),
         //             WindowSurfaceType::ALL,
         //         )
         //         .is_some()
@@ -83,12 +83,12 @@ impl State {
         //         self.set_focus_target(Some(fullscreen.into()));
         //         return;
         //     }
-        } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc.as_logical()) {
+        } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc - output_loc.to_f64() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -104,16 +104,16 @@ impl State {
         {
             let active = wset.active_mut();
             active.focus_element(&window, true);
-            self.set_focus_target(Some(window.clone().into()));
+            self.set_focus_target(Some(window.into()));
         } else if let Some(layer) = layer_map
-            .layer_under(Layer::Bottom, pointer_loc.as_logical())
-            .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc.as_logical()))
+            .layer_under(Layer::Bottom, pointer_loc)
+            .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc))
         {
             if layer.can_receive_keyboard_focus() {
                 let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
                 if layer
                     .surface_under(
-                        pointer_loc.to_local(output).as_logical() - layer_loc.to_f64(),
+                        pointer_loc - output_loc.to_f64() - layer_loc.to_f64(),
                         WindowSurfaceType::ALL,
                     )
                     .is_some()
@@ -149,15 +149,15 @@ impl State {
     /// Move the pointe to a specific point.
     ///
     /// This will handle pointer constrains and account for them when moving the pointer.
-    pub fn move_pointer(&mut self, point: Point<f64, Global>) {
+    pub fn move_pointer(&mut self, point: Point<f64, Logical>) {
         let pointer = self.fht.pointer.clone();
         let under = self.fht.focus_target_under(point);
 
         pointer.motion(
             self,
-            under.map(|(ft, loc)| (ft, loc.as_logical())),
+            under.map(|(ft, loc)| (ft, loc)),
             &MotionEvent {
-                location: point.as_logical(),
+                location: point,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: {
                     let duration: std::time::Duration = self.fht.clock.now().into();
@@ -177,7 +177,7 @@ impl State {
     /// space.
     ///
     /// In other terms make sure they are clamped to stay in output bounds.
-    pub fn clamp_coords(&self, pos: Point<f64, Global>) -> Point<f64, Global> {
+    pub fn clamp_coords(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
         let (pos_x, pos_y) = pos.into();
         let max_x = self
             .fht
@@ -269,7 +269,7 @@ impl State {
                     }
                 }
 
-                let pointer_location = self.fht.pointer.current_location().as_global();
+                let pointer_location = self.fht.pointer.current_location();
                 let inhibited = self
                     .fht
                     .focus_target_under(pointer_location)
@@ -365,7 +365,7 @@ impl State {
             }
             InputEvent::PointerMotion { event } => {
                 let pointer = self.fht.pointer.clone();
-                let mut pointer_location = pointer.current_location().as_global();
+                let mut pointer_location = pointer.current_location();
                 let under = self.fht.focus_target_under(pointer_location);
                 let serial = SERIAL_COUNTER.next_serial();
 
@@ -373,7 +373,7 @@ impl State {
                 let mut pointer_confined = false;
                 let mut confine_region = None;
 
-                if let Some((wl_surface, surface_loc)) = under
+                if let Some((wl_surface, &surface_loc)) = under
                     .as_ref()
                     .and_then(|(ft, l)| Some((ft.wl_surface()?, l)))
                 {
@@ -383,11 +383,7 @@ impl State {
                                 // Constraint basically useless if not within region/doesn't have a
                                 // defined region
                                 if !constraint.region().map_or(true, |region| {
-                                    region.contains(
-                                        (pointer_location - *surface_loc)
-                                            .as_logical()
-                                            .to_i32_round(),
-                                    )
+                                    region.contains((pointer_location - surface_loc).to_i32_round())
                                 }) {
                                     return;
                                 }
@@ -407,7 +403,7 @@ impl State {
 
                 pointer.relative_motion(
                     self,
-                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
+                    under.clone(),
                     &RelativeMotionEvent {
                         delta: event.delta(),
                         delta_unaccel: event.delta_unaccel(),
@@ -421,7 +417,7 @@ impl State {
                     return;
                 }
 
-                pointer_location += event.delta().as_global();
+                pointer_location += event.delta();
                 pointer_location = self.clamp_coords(pointer_location);
                 let new_under = self.fht.focus_target_under(pointer_location);
 
@@ -443,7 +439,7 @@ impl State {
                             return;
                         }
                         if confine_region.is_some_and(|region| {
-                            region.contains((pointer_location - *loc).as_logical().to_i32_round())
+                            region.contains((pointer_location - *loc).to_i32_round())
                         }) {
                             pointer.frame(self);
                             return;
@@ -453,9 +449,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.map(|(ft, loc)| (ft, loc.as_logical())),
+                    under.map(|(ft, loc)| (ft, loc)),
                     &MotionEvent {
-                        location: pointer_location.as_logical(),
+                        location: pointer_location,
                         serial,
                         time: event.time_msec(),
                     },
@@ -471,9 +467,10 @@ impl State {
                     with_pointer_constraint(&under, &pointer, |constraint| match constraint {
                         Some(constraint) if !constraint.is_active() => {
                             let point = pointer_location.to_i32_round() - surface_location;
-                            if constraint.region().map_or(true, |region| {
-                                region.contains(point.as_logical().to_i32_round())
-                            }) {
+                            if constraint
+                                .region()
+                                .map_or(true, |region| region.contains(point.to_i32_round()))
+                            {
                                 constraint.activate();
                             }
                         }
@@ -482,10 +479,9 @@ impl State {
                 }
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                let output_geo = self.fht.active_output().geometry().as_logical();
-                let pointer_location = (event.position_transformed(output_geo.size)
-                    + output_geo.loc.to_f64())
-                .as_global();
+                let output_geo = self.fht.active_output().geometry();
+                let pointer_location =
+                    event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let pointer = self.fht.pointer.clone();
@@ -493,9 +489,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.map(|(ft, loc)| (ft, loc.as_logical())),
+                    under.map(|(ft, loc)| (ft, loc)),
                     &MotionEvent {
-                        location: pointer_location.as_logical(),
+                        location: pointer_location,
                         serial,
                         time: event.time_msec(),
                     },
@@ -587,14 +583,13 @@ impl State {
                     .outputs()
                     .next()
                     .map(OutputExt::geometry)
-                    .map(|geo| geo.as_logical())
+                    .map(|geo| geo)
                 else {
                     return;
                 };
 
-                let pointer_location = (event.position_transformed(output_geometry.size)
-                    + output_geometry.loc.to_f64())
-                .as_global();
+                let pointer_location =
+                    event.position_transformed(output_geometry.size) + output_geometry.loc.to_f64();
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
@@ -603,9 +598,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
+                    under.clone().map(|(ft, loc)| (ft, loc)),
                     &MotionEvent {
-                        location: pointer_location.as_logical(),
+                        location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),
                         time: 0,
                     },
@@ -632,10 +627,8 @@ impl State {
                     }
 
                     tool.motion(
-                        pointer_location.as_logical(),
-                        under.and_then(|(f, loc)| {
-                            f.wl_surface().map(|s| (s.into_owned(), loc.as_logical()))
-                        }),
+                        pointer_location,
+                        under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
                         &tablet,
                         SERIAL_COUNTER.next_serial(),
                         event.time_msec(),
@@ -646,22 +639,15 @@ impl State {
             InputEvent::TabletToolProximity { event } => {
                 let tablet_seat = self.fht.seat.tablet_seat();
 
-                let Some(output_geo) = self
-                    .fht
-                    .outputs()
-                    .next()
-                    .map(OutputExt::geometry)
-                    .map(|geo| geo.as_logical())
-                else {
+                let Some(output_geo) = self.fht.outputs().next().map(OutputExt::geometry) else {
                     return;
                 };
 
                 let tool = event.tool();
                 tablet_seat.add_tool::<Self>(&self.fht.display_handle, &tool);
 
-                let pointer_location = (event.position_transformed(output_geo.size)
-                    + output_geo.loc.to_f64())
-                .as_global();
+                let pointer_location =
+                    event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
@@ -670,9 +656,9 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone().map(|(ft, loc)| (ft, loc.as_logical())),
+                    under.clone().map(|(ft, loc)| (ft, loc)),
                     &MotionEvent {
-                        location: pointer_location.as_logical(),
+                        location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),
                         time: 0,
                     },
@@ -680,15 +666,13 @@ impl State {
                 pointer.frame(self);
 
                 if let (Some(under), Some(tablet), Some(tool)) = (
-                    under.and_then(|(f, loc)| {
-                        f.wl_surface().map(|s| (s.into_owned(), loc.as_logical()))
-                    }),
+                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
                     tablet,
                     tool,
                 ) {
                     match event.state() {
                         ProximityState::In => tool.proximity_in(
-                            pointer_location.as_logical(),
+                            pointer_location,
                             under,
                             &tablet,
                             SERIAL_COUNTER.next_serial(),

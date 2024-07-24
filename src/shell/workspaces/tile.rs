@@ -16,7 +16,8 @@ use smithay::utils::{
     IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{
-    add_pre_commit_hook, with_states, with_surface_tree_downward, BufferAssignment, HookId, SurfaceAttributes, TraversalAction
+    add_pre_commit_hook, with_states, with_surface_tree_downward, BufferAssignment, HookId,
+    SurfaceAttributes, TraversalAction,
 };
 use smithay::wayland::seat::WaylandFocus;
 
@@ -30,10 +31,7 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::state::State;
 use crate::utils::animation::Animation;
-use crate::utils::geometry::{
-    Local, RectCenterExt, RectExt, RectGlobalExt, RectLocalExt,
-    SizeExt,
-};
+use crate::utils::RectCenterExt;
 
 // I did not finish implementing everything using this trait.
 //
@@ -52,9 +50,9 @@ pub trait WorkspaceElement:
     /// Set the size of this element.
     ///
     /// The element should not send a configure message with this.
-    fn set_size(&self, new_size: Size<i32, Local>);
+    fn set_size(&self, new_size: Size<i32, Logical>);
     /// Get the size of this element.
-    fn size(&self) -> Size<i32, Local>;
+    fn size(&self) -> Size<i32, Logical>;
 
     /// Set whether this element is fullscreened or not.
     ///
@@ -79,9 +77,9 @@ pub trait WorkspaceElement:
     /// Set the bounds of this element.
     ///
     /// The element should not send a configure message with this.
-    fn set_bounds(&self, bounds: Option<Size<i32, Local>>);
+    fn set_bounds(&self, bounds: Option<Size<i32, Logical>>);
     /// Get the bounds of this element.
-    fn bounds(&self) -> Option<Size<i32, Local>>;
+    fn bounds(&self) -> Option<Size<i32, Logical>>;
 
     /// Set whether this element is activated or not.
     ///
@@ -127,24 +125,24 @@ pub trait WorkspaceElement:
     fn get_offscreen_element_id(&self) -> Option<Id>;
 }
 
-/// A single workspace tile.
+/// A single [`Workspace`] tile.
 ///
-/// A workspace tile is responsible for managing an inner [`WorkspaceElement`] by giving a
+/// A [`Workspace`] tile is responsible for managing an inner [`WorkspaceElement`] by giving a
 /// position, border, and other properties. This tile is useful only if you store it inside a
 /// [`Workspace`](super::Workspace)
 pub struct WorkspaceTile<E: WorkspaceElement> {
     /// The inner element.
     pub(crate) element: E,
 
-    /// The location of this element, relative to the workspace holding it.
+    /// The location of this tile, relative to the [`Workspace`] that holds it.
     ///
     /// This location should be the top left corner of the tile's element, in other terms excluding
     /// the client-side decorations
-    pub location: Point<i32, Local>,
+    pub location: Point<i32, Logical>,
 
     /// The currently client fact added to this tile.
     ///
-    /// This float being higher means that this tile of the workspace will take more or less
+    /// This float being higher means that this tile of the [`Workspace`] will take more or less
     /// relative space (width/height, based on the layout) of its stack based on its neighbours
     /// cfacts.
     pub cfact: f32,
@@ -161,12 +159,12 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
 
     /// The temporary render location of this tile.
     /// Used when dragging it using MoveTile mouse action.
-    pub temporary_render_location: Option<Point<i32, Local>>,
+    pub temporary_render_location: Option<Point<i32, Logical>>,
 
     /// Location animation
     ///
     /// This value should be an offset getting closer to zero.
-    pub location_animation: Option<Animation<Point<i32, Local>>>,
+    pub location_animation: Option<Animation<Point<i32, Logical>>>,
 
     /// Open/Close animation.
     pub open_close_animation: Option<OpenCloseAnimation>,
@@ -307,7 +305,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             debug_overlay: CONFIG
                 .renderer
                 .tile_debug_overlay
-                .then(|| EguiElement::new(element_size.as_logical())),
+                .then(|| EguiElement::new(element_size)),
         }
     }
 
@@ -316,12 +314,11 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         &self.element
     }
 
-
-    /// Set this tile's geometry.
+    /// Set this tile's geometry, relative to the [`Workspace`] that holds it.
     ///
     /// `new_geo` is assumed to be the the tile's visual geometry, excluding client side decorations
     /// like shadows.
-    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Local>, animate: bool) {
+    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
         let thickness = self.border_config().thickness as i32;
         if thickness > 0 {
             let thickness = self.border_config().thickness as i32;
@@ -331,10 +328,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
         self.element.set_size(new_geo.size);
         self.element.send_pending_configure();
-        self.rounded_corner_damage
-            .set_size(new_geo.size.as_logical());
+        self.rounded_corner_damage.set_size(new_geo.size);
         if let Some(egui) = self.debug_overlay.as_mut() {
-            egui.set_size(new_geo.size.as_logical());
+            egui.set_size(new_geo.size);
         }
 
         // Location animation
@@ -390,31 +386,31 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     }
 
     /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, excluding
-    /// client side decorations like shadows.
-    pub fn geometry(&self) -> Rectangle<i32, Local> {
-        let mut geo = self.element.geometry().as_local();
+    /// client side decorations like shadows, relative to the [`Workspace`] that holds it
+    pub fn geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.element.geometry();
         geo.loc = self.location;
         geo
     }
 
     /// Get this tile's visual geometry, IE the topleft point of the tile's visual geometry,
-    /// excluding client side decorations like shadows.
-    pub fn visual_geometry(&self) -> Rectangle<i32, Local> {
-        let mut geo = self.element.geometry().as_local();
+    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
+    pub fn visual_geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.element.geometry();
         geo.loc = self.render_location();
         geo
     }
 
-    /// Get this tile's bounding box.
-    pub fn bbox(&self) -> Rectangle<i32, Local> {
-        let mut bbox = self.element.bbox().as_local();
+    /// Get this tile's bounding box, relative to the [`Workspace`] that holds it.
+    pub fn bbox(&self) -> Rectangle<i32, Logical> {
+        let mut bbox = self.element.bbox();
         bbox.loc = self.location;
         bbox
     }
 
     /// Get this tile's render location, IE the topleft point of the tile's visual geometry,
-    /// excluding client side decorations like shadows.
-    pub fn render_location(&self) -> Point<i32, Local> {
+    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
+    pub fn render_location(&self) -> Point<i32, Logical> {
         let mut render_location = self.temporary_render_location.unwrap_or(self.location);
         if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
             render_location += offset;
@@ -589,10 +585,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         // The tile's physical geometry, as in where our render elements will be when drawn
         let physical_geo = Rectangle::from_loc_and_size(
             location,
-            self.element
-                .size()
-                .as_logical()
-                .to_physical_precise_round(scale),
+            self.element.size().to_physical_precise_round(scale),
         );
         // The tile geometry in compositor space, IE what the user sees as being the window.
         let tile_geo = physical_geo.to_f64().to_logical(scale).to_i32_round();
@@ -684,11 +677,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
-        let mut render_geo = self
-            .visual_geometry()
-            .to_global(output)
-            .as_logical()
-            .to_physical_precise_round(scale);
+        let mut render_geo = self.visual_geometry().to_physical_precise_round(scale);
 
         let debug_overlay = self
             .debug_overlay

@@ -11,8 +11,8 @@ use crate::shell::grabs::ResizeEdge;
 use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::geometry::{PointExt, PointGlobalExt, RectCenterExt, SizeExt};
 use crate::utils::output::OutputExt;
+use crate::utils::RectCenterExt;
 
 /// A list of modifiers you can use in a key pattern.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -386,9 +386,7 @@ impl State {
                 };
 
                 if tile.debug_overlay.take().is_none() {
-                    tile.debug_overlay = Some(crate::egui::EguiElement::new(
-                        tile.element.size().as_logical(),
-                    ))
+                    tile.debug_overlay = Some(crate::egui::EguiElement::new(tile.element.size()))
                 }
             }
             _ => {}
@@ -452,7 +450,7 @@ pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 impl State {
     #[profiling::function]
     pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
-        let pointer_loc = self.fht.pointer.current_location().as_global();
+        let pointer_loc = self.fht.pointer.current_location();
 
         match action {
             MouseAction::MoveTile => {
@@ -468,11 +466,11 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    let pointer_loc = self.fht.pointer.current_location().as_global();
+                    let pointer_loc = self.fht.pointer.current_location();
                     let Rectangle { loc, size } =
                         self.fht.window_visual_geometry(&window).unwrap().to_f64();
 
-                    let pointer_loc = (pointer_loc - loc).as_logical();
+                    let pointer_loc = pointer_loc - loc;
                     if !window.is_in_input_region(&pointer_loc) {
                         return;
                     }

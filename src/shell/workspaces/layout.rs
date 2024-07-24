@@ -1,10 +1,9 @@
 use std::cmp::min;
 
 use serde::{Deserialize, Serialize};
-use smithay::utils::Rectangle;
+use smithay::utils::{Logical, Rectangle};
 
 use super::tile::{WorkspaceElement, WorkspaceTile};
-use crate::utils::geometry::Local;
 
 /// All layouts [`Workspace`]s can use.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -53,7 +52,7 @@ impl WorkspaceLayout {
         &'a self,
         tiles: impl Iterator<Item = &'a mut WorkspaceTile<E>>,
         tiles_len: usize,
-        tile_area: Rectangle<i32, Local>,
+        tile_area: Rectangle<i32, Logical>,
         inner_gaps: i32,
         animate: bool,
     ) {

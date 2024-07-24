@@ -8,7 +8,7 @@ use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale};
+use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
 
 pub use self::layout::WorkspaceLayout;
 use self::tile::{WorkspaceElement, WorkspaceTile, WorkspaceTileRenderElement};
@@ -18,9 +18,6 @@ use crate::config::{
 use crate::fht_render_elements;
 use crate::renderer::FhtRenderer;
 use crate::utils::animation::Animation;
-use crate::utils::geometry::{
-    Global, Local, PointGlobalExt, PointLocalExt, RectExt, RectGlobalExt, RectLocalExt, SizeExt,
-};
 use crate::utils::output::OutputExt;
 
 pub struct WorkspaceSet<E: WorkspaceElement> {
@@ -72,7 +69,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Set the active workspace index for this [`WorkspaceSet`], returning the possible focus
+    /// Set the active [`Workspace`] index for this [`WorkspaceSet`], returning the possible focus
     /// candidate that the compositor should focus.
     ///
     /// Animations are opt-in, set `animate` to true if its needed.
@@ -92,7 +89,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces[target_idx].focused().cloned()
     }
 
-    /// Get the active workspace index of this [`WorkspaceSet`]
+    /// Get the active [`Workspace`] index of this [`WorkspaceSet`]
     ///
     /// If there's a switch animation going on, use the target index and not the currently active
     /// one.
@@ -106,7 +103,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
     /// Get a reference to the active workspace.
     ///
-    /// If there's a switch animation going on, use the target workspace and not the currently
+    /// If there's a switch animation going on, use the target [`Workspace`] and not the currently
     /// active one.
     pub fn active(&self) -> &Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
@@ -118,7 +115,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
     /// Get a mutable reference to the active workspace.
     ///
-    /// If there's a switch animation going on, use the target workspace and not the currently
+    /// If there's a switch animation going on, use the target [`Workspace`] and not the currently
     /// active one.
     pub fn active_mut(&mut self) -> &mut Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
@@ -156,12 +153,12 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces_mut().find_map(|ws| ws.find_tile(surface))
     }
 
-    /// Find the workspace containing the window associated with this [`WlSurface`].
+    /// Find the [`Workspace`] containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_surface(surface))
     }
 
-    /// Find the workspace containing the window associated with this [`WlSurface`].
+    /// Find the [`Workspace`] containing the window associated with this [`WlSurface`].
     pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace<E>> {
         self.workspaces_mut().find(|ws| ws.has_surface(surface))
     }
@@ -191,24 +188,25 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces_mut().find(|ws| ws.has_element(element))
     }
 
-    /// Get the current fullscreend element and it's location in global coordinate space.
+    /// Get the current fullscreend element and it's location relative to the [`Workspace`]
     ///
     /// This function also accounts for workspace switch animations.
     #[profiling::function]
-    pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Global>)> {
-        let active = self.active();
-        let location = active.output.geometry().loc;
-        active
-            .fullscreen
-            .as_ref()
-            .map(|fs| (fs.inner.element(), location))
+    pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Logical>)> {
+        self.active().fullscreen.as_ref().map(|fs| {
+            // Fullscreen is always at (0,0)
+            (fs.inner.element(), (0, 0).into())
+        })
     }
 
-    /// Get the element in under the cursor and it's location in global coordinate space.
+    /// Get the element in under a given point and it's location relative to the [`Workspace`]
+    /// that holds it.
     ///
     /// This function also accounts for workspace switch animations.
+    ///
+    /// It is assumed that `point` is relative to the [`WorkspaceSet`]'s 'output.
     #[profiling::function]
-    pub fn element_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
+    pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
         if self.switch_animation.is_none() {
             // It's just the active one, so no need to do additional calculations.
             return self.active().element_under(point);
@@ -274,7 +272,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             })
     }
 
-    /// Render all the elements in this workspace set, returning them and whether it currently
+    /// Render all the elements in this [`WorkspaceSet`], returning them and whether it currently
     /// holds a fullscreen element.
     #[profiling::function]
     pub fn render_elements<R: FhtRenderer>(
@@ -284,11 +282,8 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     ) -> (bool, Vec<WorkspaceSetRenderElement<R>>) {
         let mut elements = vec![];
         let active = &self.workspaces[self.active_idx.load(Ordering::SeqCst)];
-        let output_geo: Rectangle<i32, Physical> = self
-            .output
-            .geometry()
-            .as_logical()
-            .to_physical_precise_round(scale);
+        let output_geo: Rectangle<i32, Physical> =
+            self.output.geometry().to_physical_precise_round(scale);
 
         // No switch, just give what's active.
         let active_elements = active.render_elements(renderer, scale);
@@ -392,7 +387,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 pub struct WorkspaceSwitchAnimation {
     /// The underlying animation tweener to generate values
     pub animation: Animation,
-    /// Which workspace are we going to focus.
+    /// Which [`Workspace`] are we going to focus.
     pub target_idx: usize,
 }
 
@@ -427,17 +422,17 @@ fht_render_elements! {
 
 /// A single workspace.
 ///
-/// This workspace should not stand on it's own, and it's preferred you use it with a
+/// This [`Workspace`] should not stand on it's own, and it's preferred you use it with a
 /// [`WorkspaceSet`], but nothing stops you from doing whatever you want with it like assigning it
 /// to a single output.
 pub struct Workspace<E: WorkspaceElement> {
     /// The output for this workspace
     pub output: Output,
 
-    /// The tiles this workspace contains.
+    /// The tiles this [`Workspace`] contains.
     ///
-    /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the workspace inner
-    /// logic will PANIC.
+    /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the [`Workspace`]
+    /// inner logic will PANIC.
     pub tiles: Vec<WorkspaceTile<E>>,
 
     /// The focused window index.
@@ -500,16 +495,13 @@ impl<E: WorkspaceElement> Workspace<E> {
             // This is now managed globally with focus targets
             fullscreen.inner.element.set_activated(true);
 
-            let mut bbox = fullscreen.inner.element.bbox().as_global();
-            bbox.loc = fullscreen.inner.location.to_global(&self.output);
+            let mut bbox = fullscreen.inner.element.bbox();
+            bbox.loc = fullscreen.inner.location + output_geometry.loc;
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
                 // output_enter excepts the overlap to be relative to the element, weird choice
-                // bu I comply.
+                // but I comply.
                 overlap.loc -= bbox.loc;
-                fullscreen
-                    .inner
-                    .element
-                    .output_enter(&self.output, overlap.as_logical());
+                fullscreen.inner.element.output_enter(&self.output, overlap);
             }
 
             fullscreen.inner.send_pending_configure();
@@ -532,14 +524,14 @@ impl<E: WorkspaceElement> Workspace<E> {
             // This is now managed globally with focus targets
             tile.element.set_activated(idx == self.focused_tile_idx);
 
-            let mut bbox = tile.element.bbox().as_global();
-            bbox.loc = tile.location.to_global(&self.output);
+            let mut bbox = tile.element.bbox();
+            bbox.loc = tile.location + output_geometry.loc;
+
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
                 // output_enter excepts the overlap to be relative to the element, weird choice
-                // bu I comply.
+                // but I comply.
                 overlap.loc -= bbox.loc;
-                tile.element
-                    .output_enter(&self.output, overlap.as_logical());
+                tile.element.output_enter(&self.output, overlap);
             }
 
             tile.send_pending_configure();
@@ -586,7 +578,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             .or_else(|| self.tiles.iter_mut().find(|tile| *tile == element))
     }
 
-    /// Return whether this workspace contains this element.
+    /// Return whether this [`Workspace`] contains this element.
     pub fn has_element(&self, element: &E) -> bool {
         let mut ret = false;
         ret |= self
@@ -597,7 +589,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         ret
     }
 
-    /// Return whether this workspace has an element  with this [`WlSurface`].
+    /// Return whether this [`Workspace`] has an element  with this [`WlSurface`].
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
         let mut ret = false;
         ret |= self
@@ -641,36 +633,26 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.tiles.get_mut(self.focused_tile_idx)
     }
 
-    /// Get the global geometry of a given element.
-    pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Global>> {
-        if self
-            .fullscreen
-            .as_ref()
-            .is_some_and(|fs| fs.inner == *element)
-        {
-            return Some(self.output.geometry());
+    /// Get the geometry of a given element relative to the [`Workspace`].
+    pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
+        if let Some(fs) = self.fullscreen.as_ref().filter(|fs| fs.inner == *element) {
+            return Some(fs.inner.geometry());
         }
         self.tiles
             .iter()
             .find(|tile| *tile == element)
-            .map(|tile| tile.geometry().to_global(&self.output))
+            .map(WorkspaceTile::geometry)
     }
 
-    /// Get the visual global geometry of a given element.
-    ///
-    /// See [`WorkspaceTile::visual_geometry`]
-    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Global>> {
-        if self
-            .fullscreen
-            .as_ref()
-            .is_some_and(|fs| fs.inner == *element)
-        {
-            return Some(self.output.geometry());
+    /// Get the visual geometry of a given element relative to the [`Workspace`].
+    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
+        if let Some(fs) = self.fullscreen.as_ref().filter(|fs| fs.inner == *element) {
+            return Some(fs.inner.visual_geometry());
         }
         self.tiles
             .iter()
             .find(|tile| *tile == element)
-            .map(|tile| tile.visual_geometry().to_global(&self.output))
+            .map(WorkspaceTile::visual_geometry)
     }
 
     /// Insert a tile in this [`Workspace`]
@@ -703,7 +685,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
 
         // Output overlap + wl_surface scale and transform will be set when using self.refresh
-        element.set_bounds(Some(self.output.geometry().size.as_local()));
+        element.set_bounds(Some(self.output.geometry().size));
         let tile = WorkspaceTile::new(element, border_config);
 
         // NOTE: In the following code we dont call to send_pending_configure since arrange_tiles
@@ -933,13 +915,11 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Get the area used to tile the elements.
+    /// Get the area used to tile the elements, relative to the [`Workspace`]
     ///
     /// This is the area that is used with [`Self::arrange_tiles`]
-    pub fn tile_area(&self) -> Rectangle<i32, Local> {
-        let mut area = layer_map_for_output(&self.output)
-            .non_exclusive_zone()
-            .as_local();
+    pub fn tile_area(&self) -> Rectangle<i32, Logical> {
+        let mut area = layer_map_for_output(&self.output).non_exclusive_zone();
         let outer_gaps = CONFIG.general.outer_gaps;
         area.size -= (2 * outer_gaps, 2 * outer_gaps).into();
         area.loc += (outer_gaps, outer_gaps).into();
@@ -953,7 +933,7 @@ impl<E: WorkspaceElement> Workspace<E> {
     pub fn arrange_tiles(&mut self, animate: bool) {
         if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_mut() {
             // NOTE: Output top left is always (0,0) locally
-            let mut output_geo = self.output.geometry().as_logical().as_local();
+            let mut output_geo = self.output.geometry();
             output_geo.loc = (0, 0).into();
             inner.set_geometry(output_geo, animate);
         }
@@ -1057,19 +1037,19 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Get the element under the pointer in this workspace.
+    /// Get the topmost element under the `point` and its location relative to the [`Workspace`]
+    ///
+    /// It is assumed that `point` is relative to the [`Workspace`]'s 'output.
     #[profiling::function]
-    pub fn element_under(&self, point: Point<f64, Global>) -> Option<(&E, Point<i32, Global>)> {
-        let point = point.to_local(&self.output);
-
+    pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
         if let Some(FullscreenTile { inner: tile, .. }) = self.fullscreen.as_ref() {
             let render_location = tile.render_location();
             if tile.bbox().to_f64().contains(point)
                 && tile
                     .element
-                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+                    .is_in_input_region(&(point - render_location.to_f64()))
             {
-                return Some((tile.element(), render_location.to_global(&self.output)));
+                return Some((tile.element(), render_location));
             }
         }
 
@@ -1078,9 +1058,9 @@ impl<E: WorkspaceElement> Workspace<E> {
             if tile.bbox().to_f64().contains(point)
                 && tile
                     .element
-                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+                    .is_in_input_region(&(point - render_location.to_f64()))
             {
-                return Some((tile.element(), render_location.to_global(&self.output)));
+                return Some((tile.element(), render_location));
             }
         }
 
@@ -1091,23 +1071,23 @@ impl<E: WorkspaceElement> Workspace<E> {
                 let render_location = tile.render_location();
                 if tile
                     .element
-                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+                    .is_in_input_region(&(point - render_location.to_f64()))
                 {
-                    Some((tile.element(), render_location.to_global(&self.output)))
+                    Some((tile.element(), render_location))
                 } else {
                     None
                 }
             })
     }
 
-    /// Get the elements under the pointer in this workspace.
+    /// Get the tiles element under the `point`.
+    ///
+    /// It is assumed that `point` is relative to the [`Workspace`]'s output.
     #[profiling::function]
     pub fn tiles_under(
         &self,
-        point: Point<f64, Global>,
+        point: Point<f64, Logical>,
     ) -> impl Iterator<Item = &WorkspaceTile<E>> {
-        let point = point.to_local(&self.output);
-
         None.into_iter()
             .chain(self.fullscreen.as_ref().map(|fs| &fs.inner))
             .chain(self.tiles.iter().filter(move |tile| {
@@ -1117,7 +1097,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 
                 let render_location = tile.render_location();
                 tile.element
-                    .is_in_input_region(&(point - render_location.to_f64()).as_logical())
+                    .is_in_input_region(&(point - render_location.to_f64()))
             }))
     }
 

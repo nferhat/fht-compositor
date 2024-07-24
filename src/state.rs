@@ -61,10 +61,10 @@ use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::tile::{WorkspaceElement, WorkspaceTile};
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
-use crate::utils::geometry::RectCenterExt;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::PipeWire;
+use crate::utils::RectCenterExt;
 
 pub struct State {
     /// Backend-agnostic state.

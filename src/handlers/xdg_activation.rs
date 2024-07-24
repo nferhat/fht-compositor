@@ -5,8 +5,8 @@ use smithay::wayland::xdg_activation::{self, XdgActivationHandler};
 
 use crate::config::CONFIG;
 use crate::state::State;
-use crate::utils::geometry::RectCenterExt;
 use crate::utils::output::OutputExt;
+use crate::utils::RectCenterExt;
 
 /// NOTE: This is really just an arbitrary value that I copied from Anvil's code
 /// Optimally this should be checked based on the client but eh.

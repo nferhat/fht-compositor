@@ -44,7 +44,6 @@ use crate::shell::cursor::CursorRenderElement;
 use crate::shell::workspaces::WorkspaceSetRenderElement;
 use crate::state::Fht;
 use crate::utils::fps::Fps;
-use crate::utils::geometry::{PointExt, PointGlobalExt, PointLocalExt};
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
@@ -354,19 +353,15 @@ pub fn layer_elements<R: FhtRenderer>(
 ) -> Vec<FhtRenderElement<R>> {
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
     let layer_map = layer_map_for_output(output);
+    let output_loc = output.current_location();
 
     layer_map
         .layers_on(layer)
         .rev()
         .filter_map(|l| layer_map.layer_geometry(l).map(|geo| (geo.loc, l)))
         .flat_map(|(loc, layer)| {
-            let loc = loc.as_local().to_global(output).as_logical();
-            layer.render_elements::<FhtRenderElement<R>>(
-                renderer,
-                loc.to_physical_precise_round(output_scale),
-                output_scale,
-                1.0,
-            )
+            let location = (loc + output_loc).to_physical_precise_round(output_scale);
+            layer.render_elements::<FhtRenderElement<R>>(renderer, location, output_scale, 1.0)
         })
         .collect()
 }

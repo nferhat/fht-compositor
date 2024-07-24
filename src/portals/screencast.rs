@@ -10,14 +10,13 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use smithay::reexports::calloop;
-use smithay::utils::Rectangle;
+use smithay::utils::{Logical, Rectangle};
 use zbus::object_server::SignalContext;
 use zbus::{interface, ObjectServer};
 
 use crate::backend::Backend;
 use crate::state::{Fht, State};
 use crate::utils::dbus::DBUS_CONNECTION;
-use crate::utils::geometry::Global;
 use crate::utils::output::OutputExt;
 use crate::utils::pipewire::PipeWire;
 
@@ -292,7 +291,7 @@ pub enum SessionSource {
     /// A named output.
     Output(String, Option<smithay::output::Output>),
     /// An area in compositor space.
-    Rectangle(Rectangle<i32, Global>, Option<smithay::output::Output>),
+    Rectangle(Rectangle<i32, Logical>, Option<smithay::output::Output>),
 }
 
 impl SessionSource {
@@ -305,7 +304,7 @@ impl SessionSource {
     }
 
     /// Get the rectangle of this source.
-    pub fn rectangle(&self) -> Option<Rectangle<i32, Global>> {
+    pub fn rectangle(&self) -> Option<Rectangle<i32, Logical>> {
         match self {
             Self::Unset => None,
             Self::Output(_, output) => output.as_ref().map(|o| o.geometry()),

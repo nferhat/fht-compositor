@@ -1,14 +1,12 @@
 use smithay::output::Output;
-use smithay::utils::{Rectangle, Transform};
-
-use super::geometry::{Global, RectExt};
+use smithay::utils::{Logical, Rectangle, Transform};
 
 pub trait OutputExt {
-    fn geometry(&self) -> Rectangle<i32, Global>;
+    fn geometry(&self) -> Rectangle<i32, Logical>;
 }
 
 impl OutputExt for Output {
-    fn geometry(&self) -> Rectangle<i32, Global> {
+    fn geometry(&self) -> Rectangle<i32, Logical> {
         Rectangle::from_loc_and_size(self.current_location(), {
             Transform::from(self.current_transform())
                 .transform_size(
@@ -20,6 +18,5 @@ impl OutputExt for Output {
                 .to_logical(self.current_scale().fractional_scale())
                 .to_i32_round()
         })
-        .as_global()
     }
 }
