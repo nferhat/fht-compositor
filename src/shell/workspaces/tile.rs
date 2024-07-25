@@ -21,8 +21,8 @@ use smithay::utils::{
     IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{
-    add_pre_commit_hook, with_states, with_surface_tree_downward, BufferAssignment, HookId,
-    SurfaceAttributes, TraversalAction,
+    add_pre_commit_hook, remove_pre_commit_hook, with_states, with_surface_tree_downward,
+    BufferAssignment, HookId, SurfaceAttributes, TraversalAction,
 };
 use smithay::wayland::seat::WaylandFocus;
 
@@ -174,8 +174,8 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
     /// Open/Close animation.
     pub open_close_animation: Option<OpenCloseAnimation>,
 
-    // We have a hook for open/close animations.
-    pre_commit_hook: HookId,
+    // We have a hook for open/close animations, if the element has a [`WlSurface`]
+    pre_commit_hook: Option<HookId>,
 
     /// The egui debug overlay for this element.
     pub debug_overlay: Option<EguiElement>,
@@ -197,9 +197,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Create a new tile.
     pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
         let element_size = element.size();
-        let pre_commit_hook = add_pre_commit_hook::<State, _>(
-            element.wl_surface().as_ref().unwrap(),
-            |state, _dh, surface| {
+
+        let pre_commit_hook = element.wl_surface().as_ref().map(|surface| {
+            add_pre_commit_hook::<State, _>(surface, |state, _dh, surface| {
                 // TODO: We currently don't start it because the surface's view offset gets
                 // set to zero when the buffer gets unmapped. When I get back from smithay
                 // devs ill actually enable closing animation.
@@ -213,9 +213,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 // If that's the case, the window is likely closing (or minimizing, if the
                 // compositor supports that)
                 //
-                // Since we are going to close, we take a snapshot of the window's elements, like we
-                // do inside `Tile::render_elements` into a GlesTexture and store
-                // that for future use.
+                // Since we are going to close, we take a snapshot of the window's elements,
+                // like we do inside `Tile::render_elements` into a
+                // GlesTexture and store that for future use.
                 let got_unmapped = with_states(surface, |states| {
                     let mut guard = states.cached_state.get::<SurfaceAttributes>();
                     let attrs = guard.pending();
@@ -224,16 +224,17 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
                 if got_unmapped {
                     let texture = state.backend.with_renderer(|renderer| {
-                        // NOTE: We use the border thickness as the location to actually include it
-                        // with the render elements, otherwise it would be
-                        // clipped out of the tile.
+                        // NOTE: We use the border thickness as the location to actually include
+                        // it with the render elements, otherwise it
+                        // would be clipped out of the tile.
                         let scale = output.current_scale().fractional_scale().into();
                         let thickness = tile.border_config().thickness as i32;
                         let border_offset = Point::<i32, Logical>::from((thickness, thickness))
                             .to_physical_precise_round::<_, i32>(scale);
 
-                        // For some reason I can't get the render offset from the element even if
-                        // its before we get unmapped, niri seems to be able todo this? Weird.
+                        // For some reason I can't get the render offset from the element even
+                        // if its before we get unmapped, niri seems
+                        // to be able todo this? Weird.
                         let elements = tile
                             .render_elements_inner(
                                 renderer,
@@ -294,8 +295,8 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                         })
                     }
                 }
-            },
-        );
+            })
+        });
 
         Self {
             element,
@@ -450,7 +451,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        let element_surface = self.element.wl_surface().unwrap();
+        let Some(element_surface) = self.element.wl_surface() else {
+            return false;
+        };
+
         if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*element_surface == surface {
             return true;
         }

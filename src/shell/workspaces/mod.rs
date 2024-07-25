@@ -759,6 +759,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             });
         }
 
+        self.refresh();
         self.arrange_tiles(animate);
     }
 
@@ -784,7 +785,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         let tile = self.tiles.remove(idx);
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
         tile.element.output_leave(&self.output);
-        tile.element.set_bounds(None);
         self.focused_tile_idx = self
             .focused_tile_idx
             .clamp(0, self.tiles.len().saturating_sub(1));
@@ -799,7 +799,6 @@ impl<E: WorkspaceElement> Workspace<E> {
     pub fn take_fullscreen(&mut self) -> Option<FullscreenTile<E>> {
         self.fullscreen.take().map(|mut fs| {
             fs.inner.element.output_leave(&self.output);
-            fs.inner.element.set_bounds(None);
             fs.inner.element.set_fullscreen(false);
             fs.inner.element.set_fullscreen_output(None);
             fs.inner.send_pending_configure();
@@ -838,10 +837,13 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
         let tile = self.remove_tile(element, true).unwrap();
         tile.element.set_fullscreen(true);
+        // redo the configuration that remove_tile() did
+        tile.element.set_bounds(Some(self.output.geometry().size));
         self.fullscreen = Some(FullscreenTile {
             inner: tile,
             last_known_idx: idx,
         });
+        self.refresh();
         self.arrange_tiles(animate);
     }
 
@@ -893,6 +895,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.refresh();
             self.arrange_tiles(animate);
         }
 
@@ -920,6 +923,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.refresh();
             self.arrange_tiles(animate);
         }
 
@@ -971,6 +975,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.refresh();
         }
 
         let tiles_len = self.tiles.len();
@@ -1000,6 +1005,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }) = self.take_fullscreen()
         {
             self.tiles.insert(last_known_idx, inner);
+            self.refresh();
         }
 
         let tiles_len = self.tiles.len();
@@ -1312,6 +1318,7 @@ impl ToString for WorkspaceLayout {
     }
 }
 
+#[cfg(test)]
 mod tests {
     // How stuff is tested here is very similar to Niri's layout tests, with operations that we
     // apply to workspaces, then we check some invariants.
@@ -1325,16 +1332,20 @@ mod tests {
     use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
     use smithay::wayland::seat::WaylandFocus;
 
-    use super::tile::{WorkspaceElement, WorkspaceTile};
+    use super::tile::WorkspaceElement;
     use super::{Workspace, WorkspaceLayout};
     use crate::config::{BorderConfig, CONFIG};
     use crate::utils::output::OutputExt;
 
-    #[derive(Clone)]
     struct TestElement(Rc<RefCell<TestElementInner>>);
     impl std::fmt::Debug for TestElement {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             std::fmt::Debug::fmt(&self.0, f)
+        }
+    }
+    impl Clone for TestElement {
+        fn clone(&self) -> Self {
+            Self(Rc::clone(&self.0))
         }
     }
 
@@ -1342,7 +1353,13 @@ mod tests {
         fn new(bbox: Rectangle<i32, Logical>) -> Self {
             let inner = TestElementInner {
                 bbox,
-                ..Default::default()
+                requested_size: None,
+                bounds: None,
+                outputs: vec![],
+                fullscreen: false,
+                maximized: false,
+                activated: false,
+                alive: true,
             };
 
             Self(Rc::new(RefCell::new(inner)))
@@ -1354,7 +1371,7 @@ mod tests {
         }
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Debug)]
     struct TestElementInner {
         bbox: Rectangle<i32, Logical>,
         requested_size: Option<Size<i32, Logical>>,
@@ -1511,14 +1528,11 @@ mod tests {
         }
     }
 
-    const TILE_LAYOUT: WorkspaceLayout = WorkspaceLayout::Tile {
-        nmaster: 1,
-        master_width_factor: 0.5,
-    };
-    const BOTTOM_STACK_LAYOUT: WorkspaceLayout = WorkspaceLayout::BottomStack {
-        nmaster: 1,
-        master_width_factor: 0.5,
-    };
+    #[allow(unused)]
+    const TILE_LAYOUT: usize = 0;
+    #[allow(unused)]
+    const BOTTOM_STACK_LAYOUT: usize = 1;
+    const FLOATING_LAYOUT: usize = 2;
 
     fn create_workspace() -> Workspace<TestElement> {
         let output = Output::new(
@@ -1542,34 +1556,25 @@ mod tests {
             output,
             tiles: vec![],
             focused_tile_idx: 0,
-            layouts: vec![TILE_LAYOUT, BOTTOM_STACK_LAYOUT],
+            layouts: vec![
+                WorkspaceLayout::Tile {
+                    nmaster: 1,
+                    master_width_factor: 0.5,
+                },
+                WorkspaceLayout::BottomStack {
+                    nmaster: 1,
+                    master_width_factor: 0.5,
+                },
+                WorkspaceLayout::Floating,
+            ],
             active_layout_idx: 0,
             fullscreen: None,
         }
     }
 
-    fn check_elements_bboxes(
-        workspace: &Workspace<TestElement>,
-        bboxes: &[Rectangle<i32, Logical>],
-    ) {
-        assert_eq!(
-            bboxes.len(),
-            workspace.tiles.len(),
-            "Number of bounding boxes to check does not match the tiles in workspace!"
-        );
-
-        for (&bbox, tile) in std::iter::zip(bboxes, workspace.tiles.iter()) {
-            let element_bbox = tile.element.bbox();
-            assert_eq!(bbox, element_bbox)
-        }
-    }
-
-    // TODO: Maybe get rid of the expected parameters, but for now I have no way to return values
+    // TODO: Actually find a way to test layouts without having to hardcore pre computed values
+    #[allow(unused)]
     enum Operation {
-        Refresh,
-        InsertTile {
-            tile: WorkspaceTile<TestElement>,
-        },
         InsertElement {
             element: TestElement,
             border_config: Option<BorderConfig>,
@@ -1577,7 +1582,6 @@ mod tests {
         RemoveTile {
             element: TestElement,
         },
-        TakeFullscreen,
         FullscreenElement {
             element: TestElement,
         },
@@ -1593,6 +1597,9 @@ mod tests {
         SwapWithNextElement,
         SwapWithPreviousElement,
         ArrangeTiles,
+        SetLayout {
+            layout_idx: usize,
+        },
         SelectNextLayout,
         SelectPreviousLayout,
         ChangeMwfact {
@@ -1606,17 +1613,12 @@ mod tests {
     impl Operation {
         fn apply(self, workspace: &mut Workspace<TestElement>) {
             match self {
-                Operation::Refresh => workspace.refresh(),
-                Operation::InsertTile { tile } => workspace.insert_tile(tile, false),
                 Operation::InsertElement {
                     element,
                     border_config,
                 } => workspace.insert_element(element, border_config, false),
                 Operation::RemoveTile { element } => {
                     let _ = workspace.remove_tile(&element, false);
-                }
-                Operation::TakeFullscreen => {
-                    let _ = workspace.fullscreen.take();
                 }
                 Operation::FullscreenElement { element } => {
                     workspace.fullscreen_element(&element, false)
@@ -1638,6 +1640,10 @@ mod tests {
                     let _ = workspace.swap_with_previous_element(false);
                 }
                 Operation::ArrangeTiles => workspace.arrange_tiles(false),
+                Operation::SetLayout { layout_idx } => {
+                    workspace.active_layout_idx = layout_idx;
+                    workspace.arrange_tiles(false);
+                }
                 Operation::SelectNextLayout => workspace.select_next_layout(false),
                 Operation::SelectPreviousLayout => workspace.select_previous_layout(false),
                 Operation::ChangeMwfact { delta } => workspace.change_mwfact(delta, false),
@@ -1646,7 +1652,7 @@ mod tests {
         }
     }
 
-    fn check_operations(operations: Vec<Operation>) {
+    fn check_operations(operations: Vec<Operation>) -> Workspace<TestElement> {
         // NOTE: We have to set the configuration since it never defaults.
         // Optimally we wouldn't want a global constant here, but I digress
         CONFIG.set(Default::default());
@@ -1657,6 +1663,7 @@ mod tests {
         }
 
         workspace.check_invariants();
+        workspace
     }
 
     impl Workspace<TestElement> {
@@ -1664,9 +1671,16 @@ mod tests {
             let output_geo = self.output.geometry();
 
             // State checks.
+            if self.tiles.len() != 0 {
+                // Edge case when we dont have any tiles, we have focused_tile_idx = len = 0
+                assert!(
+                    self.focused_tile_idx < self.tiles.len(),
+                    "Focus tile index should be strictly smaller than tiles.len()"
+                );
+            }
             assert!(
-                self.focused_tile_idx < self.tiles.len(),
-                "Focus tile index should be strictly smaller than tiles.len()"
+                !self.layouts.is_empty(),
+                "A workspace can't exist without layouts!"
             );
             assert!(
                 self.active_layout_idx < self.layouts.len(),
@@ -1703,5 +1717,395 @@ mod tests {
                 );
             }
         }
+    }
+
+    // The following tests are non exhaustive and more are coming sooner or later.
+    // ---
+    // They are meant to simulate how a user might interact with a workspace through a variety of
+    // cases, with tests for invariants and expected results to ensure:
+    // - Expected behaviour for the end user
+    // - Proper usage of wayland protocols (especially xdg_toplevel) for the backend
+
+    #[test]
+    fn insert_element() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let workspace = check_operations(vec![Operation::InsertElement {
+            element: element.clone(),
+            border_config: None,
+        }]);
+
+        let loc = {
+            let value = CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32;
+            (value, value).into()
+        };
+        let size = {
+            let width =
+                800 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
+            let height =
+                600 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
+            (width, height).into()
+        };
+
+        let tile = workspace.tile_for(&element).unwrap();
+        assert_eq!(tile.location, loc);
+        assert_eq!(element.bbox().size, size);
+    }
+
+    #[test]
+    fn insert_element_twice() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+        ]);
+
+        let loc = {
+            let value = CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32;
+            (value, value).into()
+        };
+        let size = {
+            let width =
+                800 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
+            let height =
+                600 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
+            (width, height).into()
+        };
+
+        let tile = workspace.tile_for(&element).unwrap();
+        assert_eq!(workspace.tiles.len(), 1); // we can't insert an element twice
+        assert_eq!(tile.location, loc);
+        assert_eq!(element.bbox().size, size);
+    }
+
+    #[test]
+    fn insert_element_with_border_config() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let border_config = BorderConfig {
+            thickness: 5,
+            ..Default::default()
+        };
+        let workspace = check_operations(vec![Operation::InsertElement {
+            element: element.clone(),
+            border_config: Some(border_config),
+        }]);
+
+        let loc = {
+            let value = CONFIG.general.outer_gaps + border_config.thickness as i32;
+            (value, value).into()
+        };
+        let size = {
+            let width = 800 - 2 * (CONFIG.general.outer_gaps + border_config.thickness as i32);
+            let height = 600 - 2 * (CONFIG.general.outer_gaps + border_config.thickness as i32);
+            (width, height).into()
+        };
+
+        let tile = workspace.tile_for(&element).unwrap();
+        assert_eq!(tile.location, loc);
+        assert_eq!(element.bbox().size, size);
+    }
+
+    #[test]
+    fn insert_element_with_floating_layout() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let workspace = check_operations(vec![
+            Operation::SetLayout {
+                layout_idx: FLOATING_LAYOUT,
+            },
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+        ]);
+
+        let tile = workspace.tile_for(&element).unwrap();
+        assert_eq!(tile.location, (0, 0).into());
+        assert_eq!(element.bbox().size, (200, 200).into());
+    }
+
+    #[test]
+    fn insert_fullscreen_element() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        element.set_fullscreen(true);
+        let workspace = check_operations(vec![Operation::InsertElement {
+            element: element.clone(),
+            border_config: None,
+        }]);
+
+        assert!(workspace.fullscreen.is_some());
+        assert!(element.fullscreen());
+    }
+
+    #[test]
+    fn remove_element() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+            Operation::RemoveTile {
+                element: element.clone(),
+            },
+        ]);
+
+        assert_eq!(workspace.tiles.len(), 0);
+    }
+
+    #[test]
+    fn remove_fullscreen_element() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        element.set_fullscreen(true);
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+            Operation::RemoveTile {
+                element: element.clone(),
+            },
+        ]);
+
+        assert_eq!(workspace.tiles.len(), 0);
+        assert!(workspace.fullscreen.is_none());
+    }
+
+    #[test]
+    fn fullscreen_element() {
+        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: element.clone(),
+                border_config: None,
+            },
+            Operation::FullscreenElement {
+                element: element.clone(),
+            },
+        ]);
+
+        assert!(element.fullscreen());
+        assert!(workspace.fullscreen.is_some());
+    }
+
+    #[test]
+    fn focus_element() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::FocusElement { element: b.clone() },
+        ]);
+
+        assert_eq!(workspace.focused_tile_idx, 1);
+    }
+
+    #[test]
+    fn focus_element_removes_fullscreen() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        c.set_fullscreen(true);
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::FocusElement { element: b.clone() },
+        ]);
+
+        // Focusing should always removed fullscreen element
+        assert_eq!(workspace.focused_tile_idx, 1);
+        assert!(workspace.fullscreen.is_none());
+        assert!(!c.fullscreen());
+    }
+
+    #[test]
+    fn focus_next_element_removes_fullscreen() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        c.set_fullscreen(true);
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::FocusNextElement,
+        ]);
+
+        // Focusing should always removed fullscreen element
+        assert_eq!(workspace.focused_tile_idx, 2);
+        assert!(workspace.fullscreen.is_none());
+        assert!(!c.fullscreen());
+    }
+
+    #[test]
+    fn focus_previous_element_removes_fullscreen() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        c.set_fullscreen(true);
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::FocusPreviousElement,
+        ]);
+
+        // Focusing should always removed fullscreen element
+        assert_eq!(workspace.focused_tile_idx, 0);
+        assert!(workspace.fullscreen.is_none());
+        assert!(!c.fullscreen());
+    }
+
+    #[test]
+    fn swap_elements() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::SwapElements {
+                a: a.clone(),
+                b: b.clone(),
+            },
+            Operation::SwapElements {
+                a: b.clone(),
+                b: c.clone(),
+            },
+        ]);
+
+        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
+        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
+        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
+        assert_eq!(a_idx, 1);
+        assert_eq!(b_idx, 2);
+        assert_eq!(c_idx, 0);
+    }
+
+    #[test]
+    fn swap_with_next_element_removes_fullscreen() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        c.set_fullscreen(true);
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::SwapWithNextElement, // swaps b and c
+        ]);
+
+        // Swapping should always removed fullscreen element
+        assert!(workspace.fullscreen.is_none());
+        assert!(!c.fullscreen());
+        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
+        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
+        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
+        assert_eq!(a_idx, 0);
+        assert_eq!(b_idx, 2);
+        assert_eq!(c_idx, 1);
+    }
+
+    #[test]
+    fn swap_with_previous_element_removes_fullscreen() {
+        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
+        c.set_fullscreen(true);
+
+        let workspace = check_operations(vec![
+            Operation::InsertElement {
+                element: a.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: b.clone(),
+                border_config: None,
+            },
+            Operation::InsertElement {
+                element: c.clone(),
+                border_config: None,
+            },
+            Operation::SwapWithPreviousElement, // swaps c and b
+        ]);
+
+        // Swapping should always removed fullscreen element
+        assert!(workspace.fullscreen.is_none());
+        assert!(!c.fullscreen());
+        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
+        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
+        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
+        assert_eq!(a_idx, 1);
+        assert_eq!(b_idx, 0);
+        assert_eq!(c_idx, 2);
     }
 }
