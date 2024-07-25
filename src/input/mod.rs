@@ -73,10 +73,7 @@ impl State {
             }
         } else if let Some((fullscreen, _)) = wset.current_fullscreen() {
             if fullscreen
-                .surface_under(
-                    pointer_loc - output_loc.to_f64(),
-                    WindowSurfaceType::ALL,
-                )
+                .surface_under(pointer_loc - output_loc.to_f64(), WindowSurfaceType::ALL)
                 .is_some()
             {
                 let fullscreen = fullscreen.clone();
