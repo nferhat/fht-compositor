@@ -1078,8 +1078,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             return;
         }
 
-        let tiled_len = tiled.len();
-        layout.arrange_tiles(tiled.into_iter(), tiled_len, tile_area, inner_gaps, animate);
+        layout.arrange_tiles(tiled.into_iter(), tile_area, inner_gaps, animate);
     }
 
     /// Get the active layout that arranges the tiles

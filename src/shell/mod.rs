@@ -337,10 +337,8 @@ impl Fht {
         // Pre compute window geometry for insertion.
         let mut tile = WorkspaceTile::new(window.clone(), None);
         let tile_area = workspace.tile_area();
-        let tiles_len = workspace.tiles.len() + 1;
         layout.arrange_tiles(
             workspace.tiles.iter_mut().chain(std::iter::once(&mut tile)),
-            tiles_len,
             tile_area,
             CONFIG.general.inner_gaps,
             false,

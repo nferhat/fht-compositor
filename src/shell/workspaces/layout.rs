@@ -20,6 +20,7 @@
 //! with some tweaking and changes to be more idiomatic.
 
 use std::cmp::min;
+use std::ops::Mul;
 
 use serde::{Deserialize, Serialize};
 use smithay::utils::{Logical, Rectangle};
@@ -72,23 +73,25 @@ impl WorkspaceLayout {
     pub fn arrange_tiles<'a, E: WorkspaceElement + 'a>(
         &'a self,
         tiles: impl Iterator<Item = &'a mut WorkspaceTile<E>>,
-        tiles_len: usize,
         tile_area: Rectangle<i32, Logical>,
         inner_gaps: i32,
         animate: bool,
     ) {
         let mut tiles = tiles.collect::<Vec<_>>();
+        let tiles_len = tiles.len();
         match *self {
             WorkspaceLayout::Tile {
                 nmaster,
                 master_width_factor: mwfact,
             } => {
-                let master_len = min(tiles_len, nmaster);
+                let nmaster = min(nmaster, tiles_len);
                 let mut master_geo @ mut stack_geo = tile_area;
 
-                master_geo.size.h -= inner_gaps * master_len.saturating_sub(1) as i32;
-                stack_geo.size.h -=
-                    inner_gaps * tiles_len.saturating_sub(nmaster).saturating_sub(1) as i32;
+                master_geo.size.h -= (nmaster as i32).saturating_sub(1).mul(inner_gaps);
+                stack_geo.size.h -= (tiles_len as i32)
+                    .saturating_sub(nmaster as i32)
+                    .saturating_sub(1)
+                    .mul(inner_gaps);
 
                 if tiles_len > nmaster {
                     stack_geo.size.w =
@@ -97,37 +100,34 @@ impl WorkspaceLayout {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 };
 
-                let (mfact, sfact, mrest, srest) = get_facts(
-                    tiles.as_slice(),
-                    nmaster,
-                    master_geo.size.h,
-                    stack_geo.size.h,
-                );
+                let master_heights = {
+                    let tiles = tiles.get(0..nmaster).unwrap_or_default();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    get_dimensions(&cfacts, master_geo.size.h)
+                };
+
+                let stack_heights = {
+                    let tiles = tiles.get(nmaster..).unwrap_or_default();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    get_dimensions(&cfacts, stack_geo.size.h)
+                };
 
                 for (idx, tile) in tiles.iter_mut().enumerate() {
                     if idx < nmaster {
-                        let master_height = ((master_geo.size.h as f32) * (tile.cfact / mfact))
-                            .round() as i32
-                            + ((idx < mrest as usize) as i32);
-
+                        let master_height = master_heights[idx];
                         let geo = Rectangle::from_loc_and_size(
                             master_geo.loc,
                             (master_geo.size.w, master_height),
                         );
                         tile.set_geometry(geo, animate);
-
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
-                        let stack_height = ((stack_geo.size.h as f32) * (tile.cfact / sfact))
-                            .round() as i32
-                            + (((idx - nmaster) < srest as usize) as i32);
-
+                        let stack_height = stack_heights[idx - nmaster];
                         let new_geo = Rectangle::from_loc_and_size(
                             stack_geo.loc,
                             (stack_geo.size.w, stack_height),
                         );
                         tile.set_geometry(new_geo, animate);
-
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
                 }
@@ -136,12 +136,14 @@ impl WorkspaceLayout {
                 nmaster,
                 master_width_factor: mwfact,
             } => {
-                let master_len = min(tiles_len, nmaster);
+                let nmaster = min(nmaster, tiles_len);
                 let mut master_geo @ mut stack_geo = tile_area;
 
-                master_geo.size.w -= inner_gaps * (master_len.saturating_sub(1)) as i32;
-                stack_geo.size.w -=
-                    inner_gaps * tiles_len.saturating_sub(nmaster).saturating_sub(1) as i32;
+                master_geo.size.w -= (nmaster as i32).saturating_sub(1).mul(inner_gaps);
+                stack_geo.size.w -= (tiles_len as i32)
+                    .saturating_sub(nmaster as i32)
+                    .saturating_sub(1)
+                    .mul(inner_gaps);
 
                 if tiles_len > nmaster {
                     stack_geo.size.h =
@@ -150,42 +152,38 @@ impl WorkspaceLayout {
                     stack_geo.loc.y = master_geo.loc.y + master_geo.size.h + inner_gaps;
                 };
 
-                let (mfact, sfact, mrest, srest) = get_facts(
-                    tiles.as_slice(),
-                    nmaster,
-                    master_geo.size.h,
-                    stack_geo.size.h,
-                );
+                let master_widths = {
+                    let tiles = tiles.get(0..nmaster).unwrap_or_default();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    get_dimensions(&cfacts, master_geo.size.w)
+                };
+
+                let stack_widths = {
+                    let tiles = tiles.get(nmaster..).unwrap_or_default();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    get_dimensions(&cfacts, stack_geo.size.w)
+                };
 
                 for (idx, tile) in tiles.iter_mut().enumerate() {
                     if idx < nmaster {
-                        let master_width = ((master_geo.size.w as f32) * (tile.cfact / mfact))
-                            .round() as i32
-                            + ((idx < mrest as usize) as i32);
-
+                        let master_width = master_widths[idx];
                         let geo = Rectangle::from_loc_and_size(
                             master_geo.loc,
                             (master_width, master_geo.size.h),
                         );
                         tile.set_geometry(geo, animate);
-
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
-                        let stack_width = ((stack_geo.size.w as f32) * (tile.cfact / sfact)).round()
-                            as i32
-                            + (((idx - nmaster) < srest as usize) as i32);
-
+                        let stack_width = stack_widths[idx - nmaster];
                         let geo = Rectangle::from_loc_and_size(
                             stack_geo.loc,
                             (stack_width, stack_geo.size.h),
                         );
                         tile.set_geometry(geo, animate);
-
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
                 }
             }
-            #[allow(unused)]
             WorkspaceLayout::CenteredMaster {
                 nmaster,
                 master_width_factor,
@@ -223,71 +221,69 @@ impl WorkspaceLayout {
                     right_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                // Since we use three cols we cant calculate facts as usual
-                let mut mfact @ mut lfact @ mut rfact = 0f32;
-                for (idx, tile) in tiles.iter().enumerate() {
-                    if idx < nmaster {
-                        mfact += tile.cfact;
-                    } else if (idx.saturating_sub(nmaster) % 2) != 0 {
-                        lfact += tile.cfact;
-                    } else {
-                        rfact += tile.cfact;
-                    }
+                let (master_tiles, left_right_tiles) = tiles
+                    .into_iter()
+                    .enumerate()
+                    .partition::<Vec<_>, _>(|(idx, _)| *idx < nmaster);
+                let (left_tiles, right_tiles) = left_right_tiles
+                    .into_iter()
+                    .partition::<Vec<_>, _>(|(idx, _)| (idx.saturating_sub(nmaster) % 2) != 0);
+
+                let left_heights = {
+                    let cfacts = left_tiles
+                        .iter()
+                        .map(|(_, tile)| tile.cfact)
+                        .collect::<Vec<_>>();
+                    get_dimensions(&cfacts, left_geo.size.h)
+                };
+                for (tile, height) in left_tiles
+                    .into_iter()
+                    .map(|(_, tile)| tile)
+                    .zip(left_heights)
+                {
+                    let geo = Rectangle::from_loc_and_size(
+                        left_geo.loc, (left_geo.size.w, height),
+                    );
+                    tile.set_geometry(geo, animate);
+                    left_geo.loc.y += height + inner_gaps;
                 }
 
-                let mut mtotal @ mut ltotal @ mut rtotal = 0;
-                for (idx, tile) in tiles.iter().enumerate() {
-                    if idx < nmaster {
-                        mtotal += (master_geo.size.h as f32 * (tile.cfact / mfact)).round() as i32;
-                    } else if (idx.saturating_sub(nmaster) % 2) != 0 {
-                        ltotal += (left_geo.size.h as f32 * (tile.cfact / lfact)).round() as i32;
-                    } else {
-                        rtotal += (right_geo.size.h as f32 * (tile.cfact / rfact)).round() as i32;
-                    }
+                let master_heights = {
+                    let cfacts = master_tiles
+                        .iter()
+                        .map(|(_, tile)| tile.cfact)
+                        .collect::<Vec<_>>();
+                    get_dimensions(&cfacts, master_geo.size.h)
+                };
+                for (tile, height) in master_tiles
+                    .into_iter()
+                    .map(|(_, tile)| tile)
+                    .zip(master_heights)
+                {
+                    let geo = Rectangle::from_loc_and_size(
+                        master_geo.loc, (master_geo.size.w, height),
+                    );
+                    tile.set_geometry(geo, animate);
+                    master_geo.loc.y += height + inner_gaps;
                 }
 
-                let mrest = master_geo.size.h - mtotal;
-                let lrest = left_geo.size.h - ltotal;
-                let rrest = right_geo.size.h - rtotal;
-
-                for (idx, tile) in tiles.iter_mut().enumerate() {
-                    if idx < nmaster {
-                        let master_height = ((master_geo.size.h as f32) * (tile.cfact / mfact))
-                            .round() as i32
-                            + ((idx < mrest as usize) as i32);
-
-                        let geo = Rectangle::from_loc_and_size(
-                            master_geo.loc,
-                            (master_geo.size.w, master_height),
-                        );
-                        tile.set_geometry(geo, animate);
-
-                        master_geo.loc.y += master_height + inner_gaps;
-                    } else if ((idx - nmaster) % 2 != 0) {
-                        let left_height = ((left_geo.size.h as f32) * (tile.cfact / lfact)).round()
-                            as i32
-                            + (((idx.saturating_sub(2 * nmaster) as i32) < 2 * lrest) as i32);
-
-                        let geo = Rectangle::from_loc_and_size(
-                            left_geo.loc,
-                            (left_geo.size.w, left_height),
-                        );
-                        tile.set_geometry(geo, animate);
-
-                        left_geo.loc.y += left_height + inner_gaps;
-                    } else {
-                        let right_height = ((right_geo.size.h as f32) * (tile.cfact / rfact))
-                            .round() as i32
-                            + (((idx.saturating_sub(2 * nmaster) as i32) < 2 * rrest) as i32);
-
-                        let geo = Rectangle::from_loc_and_size(
-                            right_geo.loc,
-                            (right_geo.size.w, right_height),
-                        );
-                        tile.set_geometry(geo, animate);
-
-                        right_geo.loc.y += right_height + inner_gaps;
-                    }
+                let right_heights = {
+                    let cfacts = right_tiles
+                        .iter()
+                        .map(|(_, tile)| tile.cfact)
+                        .collect::<Vec<_>>();
+                    get_dimensions(&cfacts, right_geo.size.h)
+                };
+                for (tile, height) in right_tiles
+                    .into_iter()
+                    .map(|(_, tile)| tile)
+                    .zip(right_heights)
+                {
+                    let geo = Rectangle::from_loc_and_size(
+                        right_geo.loc, (right_geo.size.w, height),
+                    );
+                    tile.set_geometry(geo, animate);
+                    right_geo.loc.y += height + inner_gaps;
                 }
             }
             WorkspaceLayout::Floating => {}
@@ -295,30 +291,29 @@ impl WorkspaceLayout {
     }
 }
 
-fn get_facts<'a, E: WorkspaceElement + 'a>(
-    tiles: &'a [&'a mut WorkspaceTile<E>],
-    nmaster: usize,
-    msize: i32,
-    ssize: i32,
-) -> (f32, f32, i32, i32) {
-    let mut mfacts @ mut sfacts = 0f32;
-    let mut mtotal @ mut stotal = 0i32;
-
-    for (idx, tile) in tiles.iter().enumerate() {
-        if idx < nmaster {
-            mfacts += tile.cfact
-        } else {
-            sfacts += tile.cfact
-        }
-    }
-
-    for (idx, tile) in tiles.iter().enumerate() {
-        if idx < nmaster {
-            mtotal += (msize as f32 * (tile.cfact / mfacts)).round() as i32;
-        } else {
-            stotal += (ssize as f32 * (tile.cfact / sfacts)).round() as i32;
-        }
-    }
-
-    (mfacts, sfacts, msize - mtotal, ssize - stotal)
+// Get the dimensions of each element partitionned on a `length `based on its `cfact``, where each
+// cfact is a single element.
+//
+// Returns the calculated lengths for each `cfact` in `cfacts.
+fn get_dimensions(cfacts: &[f32], length: i32) -> Vec<i32> {
+    let total_facts: f32 = cfacts.iter().sum();
+    let lengths = cfacts
+        .iter()
+        .map(|&cfact| (length as f32 * (cfact / total_facts)).floor() as i32)
+        .collect::<Vec<_>>();
+    let mut rest = lengths.iter().sum::<i32>() - length;
+    lengths
+        .into_iter()
+        .map(|len| {
+            if rest < 0 {
+                rest += 1;
+                len + 1
+            } else if rest > 0 {
+                rest -= 1;
+                len - 1
+            } else {
+                len
+            }
+        })
+        .collect()
 }
