@@ -98,6 +98,7 @@ glam = "0.28.0"
 egui = "0.23"
 egui_glow = "0.23"
 egui_extras = "0.23"
+rustc-hash = "2.0.0"
 
 [features]
 default = ["egl", "x11_backend", "udev_backend", "all-portals"]

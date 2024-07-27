@@ -7,10 +7,13 @@ use std::time::Duration;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::utils::RescaleRenderElement;
+use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
+use smithay::backend::renderer::element::utils::{
+    Relocate, RelocateRenderElement, RescaleRenderElement,
+};
 use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::GlesTexture;
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
@@ -20,10 +23,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{
     IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
 };
-use smithay::wayland::compositor::{
-    add_pre_commit_hook, remove_pre_commit_hook, with_states, with_surface_tree_downward,
-    BufferAssignment, HookId, SurfaceAttributes, TraversalAction,
-};
+use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::config::{BorderConfig, CONFIG};
@@ -34,7 +34,6 @@ use crate::renderer::rounded_element::RoundedCornerElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineElement, RoundedOutlineSettings};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
-use crate::state::State;
 use crate::utils::animation::Animation;
 use crate::utils::RectCenterExt;
 
@@ -173,9 +172,14 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
 
     /// Open/Close animation.
     pub open_close_animation: Option<OpenCloseAnimation>,
-
-    // We have a hook for open/close animations, if the element has a [`WlSurface`]
-    pre_commit_hook: Option<HookId>,
+    /// A snapshot of the last frame before the tile closes.
+    ///
+    /// Due to a limitation in wayland, we need to prepare the close render elements in advance
+    /// before we start the close animation, since the window will have the buffers unmapped
+    /// or destroyed by then.
+    ///
+    /// It is up to the parent compositor to decide how to handle this.
+    close_animation_snapshot: Option<Vec<WorkspaceTileRenderElement<GlowRenderer>>>,
 
     /// The egui debug overlay for this element.
     pub debug_overlay: Option<EguiElement>,
@@ -198,106 +202,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
         let element_size = element.size();
 
-        let pre_commit_hook = element.wl_surface().as_ref().map(|surface| {
-            add_pre_commit_hook::<State, _>(surface, |state, _dh, surface| {
-                // TODO: We currently don't start it because the surface's view offset gets
-                // set to zero when the buffer gets unmapped. When I get back from smithay
-                // devs ill actually enable closing animation.
-                return;
-
-                let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
-                    return;
-                };
-
-                // Before commiting, we check if the window's buffers are getting unmapped.
-                // If that's the case, the window is likely closing (or minimizing, if the
-                // compositor supports that)
-                //
-                // Since we are going to close, we take a snapshot of the window's elements,
-                // like we do inside `Tile::render_elements` into a
-                // GlesTexture and store that for future use.
-                let got_unmapped = with_states(surface, |states| {
-                    let mut guard = states.cached_state.get::<SurfaceAttributes>();
-                    let attrs = guard.pending();
-                    matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
-                });
-
-                if got_unmapped {
-                    let texture = state.backend.with_renderer(|renderer| {
-                        // NOTE: We use the border thickness as the location to actually include
-                        // it with the render elements, otherwise it
-                        // would be clipped out of the tile.
-                        let scale = output.current_scale().fractional_scale().into();
-                        let thickness = tile.border_config().thickness as i32;
-                        let border_offset = Point::<i32, Logical>::from((thickness, thickness))
-                            .to_physical_precise_round::<_, i32>(scale);
-
-                        // For some reason I can't get the render offset from the element even
-                        // if its before we get unmapped, niri seems
-                        // to be able todo this? Weird.
-                        let elements = tile
-                            .render_elements_inner(
-                                renderer,
-                                border_offset,
-                                scale,
-                                1.0,
-                                true, // TODO: Maybe maybe not, this is just a detail
-                            )
-                            .collect::<Vec<_>>();
-                        let rec = elements
-                            .iter()
-                            .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
-
-                        render_to_texture(
-                            renderer,
-                            rec.size,
-                            scale,
-                            Transform::Normal,
-                            Fourcc::Abgr8888,
-                            elements.into_iter(),
-                        )
-                        .map(|(tex, _)| (tex, rec))
-                        .map_err(|err| {
-                            warn!(?err, "Failed to render to texture for close animation")
-                        })
-                        .ok()
-                    });
-
-                    if let Some((texture, rectangle)) = texture {
-                        let alpha_animation_duration = CONFIG.animation.window_open_close.duration;
-                        let scale_animation_duration = (alpha_animation_duration as f64
-                            * WORKSPACE_TILE_OPENING_ALPHA_THRESHOLD)
-                            .round() as u64;
-
-                        let Some(scale_animation) = Animation::new(
-                            1.0,
-                            0.0,
-                            CONFIG.animation.window_open_close.curve,
-                            Duration::from_millis(scale_animation_duration),
-                        ) else {
-                            return;
-                        };
-
-                        let Some(alpha_animation) = Animation::new(
-                            1.0,
-                            0.0,
-                            CONFIG.animation.window_open_close.curve,
-                            Duration::from_millis(alpha_animation_duration),
-                        ) else {
-                            return;
-                        };
-
-                        tile.open_close_animation = Some(OpenCloseAnimation::Closing {
-                            texture,
-                            rectangle,
-                            alpha_animation,
-                            scale_animation,
-                        })
-                    }
-                }
-            })
-        });
-
         Self {
             element,
             location: Point::default(),
@@ -307,7 +211,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             temporary_render_location: None,
             location_animation: None,
             open_close_animation: None,
-            pre_commit_hook,
+            close_animation_snapshot: None,
             debug_overlay: CONFIG
                 .renderer
                 .tile_debug_overlay
@@ -362,33 +266,101 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Start this tile's opening animation.
     pub fn start_opening_animation(&mut self) {
-        let scale_animation_duration = CONFIG.animation.window_open_close.duration;
-        let alpha_animation_duration = (scale_animation_duration as f64
-            * WORKSPACE_TILE_OPENING_ALPHA_THRESHOLD)
-            .round() as u64;
-
-        let Some(scale_animation) = Animation::new(
+        let Some(progress) = Animation::new(
             0.0,
             1.0,
             CONFIG.animation.window_open_close.curve,
-            Duration::from_millis(scale_animation_duration),
+            Duration::from_millis(CONFIG.animation.window_open_close.duration),
         ) else {
             return;
         };
 
-        let Some(alpha_animation) = Animation::new(
-            0.0,
+        self.open_close_animation = Some(OpenCloseAnimation::Opening { progress })
+    }
+
+    /// Prepare a close animation render elements.
+    pub fn prepare_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
+        if self.close_animation_snapshot.is_some() {
+            return;
+        }
+
+        // NOTE: We use the border thickness as the location to actually include
+        // it with the render elements, otherwise it
+        // would be clipped out of the tile.
+        let thickness = self.border_config().thickness as i32;
+        let border_offset = Point::<i32, Logical>::from((thickness, thickness))
+            .to_physical_precise_round::<_, i32>(scale);
+        let elements = self
+            .render_elements_inner(
+                renderer,
+                border_offset,
+                scale,
+                1.0,
+                true, // TODO: Maybe maybe not, this is just a detail
+            )
+            .collect::<Vec<_>>();
+        self.close_animation_snapshot = Some(elements);
+    }
+
+    /// Prepare a close animation render elements.
+    pub fn clear_close_snapshot(&mut self) {
+        let _ = self.close_animation_snapshot.take();
+    }
+
+    /// Start the closing animation.
+    ///
+    /// Having a `renderer` passed is mandatory for us to store the last window frame.
+    pub fn start_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
+        let Some(elements) = self.close_animation_snapshot.take() else {
+            return;
+        };
+        let thickness = self.border_config().thickness as i32;
+        let tile_size = self.element.size() + (thickness * 2, thickness * 2).into();
+
+        let Some(progress) = Animation::new(
             1.0,
+            0.0,
             CONFIG.animation.window_open_close.curve,
-            Duration::from_millis(alpha_animation_duration),
+            Duration::from_millis(CONFIG.animation.window_open_close.duration),
         ) else {
             return;
         };
 
-        self.open_close_animation = Some(OpenCloseAnimation::Opening {
-            alpha_animation,
-            scale_animation,
-        })
+        let geo = elements
+            .iter()
+            .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
+        let elements = elements.into_iter().rev().map(|e| {
+            RelocateRenderElement::from_element(e, (-geo.loc.x, -geo.loc.y), Relocate::Relative)
+        });
+
+        let Ok(texture) = render_to_texture(
+            renderer,
+            geo.size,
+            scale,
+            Transform::Normal,
+            Fourcc::Abgr8888,
+            elements.into_iter(),
+        )
+        .map(|(tex, _)| tex)
+        .map_err(|err| warn!(?err, "Failed to render to texture for close animation")) else {
+            return;
+        };
+
+        let texture = TextureBuffer::from_texture(
+            renderer,
+            texture,
+            scale.x.max(scale.y) as i32,
+            Transform::Normal,
+            None,
+        );
+        let offset = geo.loc.to_f64().to_logical(scale).to_i32_round();
+
+        self.open_close_animation = Some(OpenCloseAnimation::Closing {
+            texture,
+            offset,
+            tile_size,
+            progress,
+        });
     }
 
     /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, excluding
@@ -727,11 +699,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         let border_offset = Point::<i32, Logical>::from((thickness, thickness))
             .to_physical_precise_round::<_, i32>(scale);
 
-        if let Some(OpenCloseAnimation::Opening {
-            alpha_animation,
-            scale_animation,
-        }) = self.open_close_animation.as_ref()
-        {
+        if let Some(OpenCloseAnimation::Opening { progress }) = self.open_close_animation.as_ref() {
+            let progress = progress.value();
+
             let glow_renderer = renderer.glow_renderer_mut();
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
@@ -759,9 +729,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 })
                 .ok()
                 .map(|(texture, _sync_point)| {
-                    let animation_alpha = alpha_animation.value();
-                    let animation_scale = scale_animation.value();
-
                     let glow_renderer = renderer.glow_renderer_mut();
                     render_geo.loc -= border_offset;
                     render_geo.size += border_offset.to_size().upscale(2);
@@ -772,9 +739,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                         glow_renderer.id(),
                         render_geo.loc.to_f64(),
                         texture,
-                        1,
+                        scale.x.max(scale.y) as i32,
                         Transform::Normal,
-                        Some(animation_alpha),
+                        Some(progress.clamp(0., 1.) as f32),
                         None,
                         None,
                         None,
@@ -783,14 +750,13 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                     .into();
                     self.element.set_offscreen_element_id(Some(element_id));
 
-                    let rescale = RescaleRenderElement::from_element(
-                        texture,
-                        render_geo.center(),
-                        animation_scale,
-                    );
+                    let origin = render_geo.center();
+                    let rescale = (progress * (1.0 - OpenCloseAnimation::OPEN_SCALE_THRESHOLD))
+                        + OpenCloseAnimation::OPEN_SCALE_THRESHOLD;
+                    let rescale = RescaleRenderElement::from_element(texture, origin, rescale);
 
                     WorkspaceTileRenderElement::<R>::OpenClose(
-                        WorkspaceTileOpenCloseElement::Texture(rescale),
+                        WorkspaceTileOpenCloseElement::OpenTexture(rescale),
                     )
                 })
                 .into_iter(),
@@ -799,40 +765,37 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
         if let Some(OpenCloseAnimation::Closing {
             texture,
-            rectangle,
-            alpha_animation,
-            scale_animation,
+            offset,
+            tile_size,
+            progress,
         }) = self.open_close_animation.as_ref()
         {
             let texture = texture.clone();
-            let animation_alpha = alpha_animation.value();
-            let animation_scale = scale_animation.value();
+            let progress = progress.value();
 
-            let glow_renderer = renderer.glow_renderer_mut();
-            render_geo.size = rectangle.size;
-
-            let element_id = Id::new();
-            let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
-                element_id.clone(),
-                glow_renderer.id(),
-                render_geo.loc.to_f64(),
-                texture,
-                1,
-                Transform::Normal,
-                Some(animation_alpha),
-                None,
+            let texture: FhtTextureElement = TextureRenderElement::from_texture_buffer(
+                Point::from((0., 0.)),
+                &texture,
+                Some(progress.clamp(0., 1.) as f32),
                 None,
                 None,
                 Kind::Unspecified,
             )
             .into();
-            self.element.set_offscreen_element_id(Some(element_id));
 
-            let rescale =
-                RescaleRenderElement::from_element(texture, render_geo.center(), animation_scale);
+            let offset = *offset;
+            let center = (*tile_size).to_point().downscale(2);
+            let origin = (center + offset).to_physical_precise_round(scale);
+            let rescale = progress * (1.0 - OpenCloseAnimation::CLOSE_SCALE_THRESHOLD)
+                + OpenCloseAnimation::CLOSE_SCALE_THRESHOLD;
+            let rescale = RescaleRenderElement::from_element(texture, origin, rescale);
+
+            let location = render_geo.loc + offset.to_physical_precise_round(scale);
+            let relocate =
+                RelocateRenderElement::from_element(rescale, location, Relocate::Relative);
 
             let element = WorkspaceTileRenderElement::<R>::OpenClose(
-                WorkspaceTileOpenCloseElement::Texture(rescale),
+                WorkspaceTileOpenCloseElement::CloseTexture(relocate),
             );
 
             closing_elements = Some(Some(element).into_iter())
@@ -855,9 +818,9 @@ impl<E: WorkspaceElement> IsAlive for WorkspaceTile<E> {
     fn alive(&self) -> bool {
         if matches!(
             &self.open_close_animation,
-            Some(OpenCloseAnimation::Closing { .. })
+            Some(anim) if !anim.is_finished()
         ) {
-            // We do not want to clear our the window if we are closing.
+            // We do not want to clear our the window if we opening/closing
             return true;
         }
         self.element.alive()
@@ -877,81 +840,71 @@ crate::fht_render_elements! {
 
 crate::fht_render_elements! {
     WorkspaceTileOpenCloseElement => {
-        Texture = RescaleRenderElement<FhtTextureElement>,
+        OpenTexture = RescaleRenderElement<FhtTextureElement>,
+        // NOTE: After smashing my head very very long on the wall, I found this trick done by niri:
+        //
+        // to actual position the texture correctly. You first need to render the actual texture at
+        // (0,0), then rescale it, then use the relocate render element to actually position it.
+        CloseTexture = RelocateRenderElement<RescaleRenderElement<FhtTextureElement>>,
     }
 }
 
-const WORKSPACE_TILE_OPENING_ALPHA_THRESHOLD: f64 = 0.8;
-// For the open-close animation to feel "good", we first fade in the window quickly before the
-// scale animation ends, so that when the scale animation progress.
-// WORKSPACE_TILE_OPENING_ALPHA_THRESHOLD, the tile's alpha is already at 100%
 pub enum OpenCloseAnimation {
     Opening {
-        alpha_animation: Animation<f32>,
-        scale_animation: Animation,
+        progress: Animation,
     },
     Closing {
         // For closing animation, we need to keep a last render of the window before closing, so
         // that we can render it even after it dies.
-        texture: GlesTexture,
-        // We also need to keep track of the size of all the render elements combined.
-        rectangle: Rectangle<i32, Physical>,
-        alpha_animation: Animation<f32>,
-        scale_animation: Animation,
+        texture: TextureBuffer<GlesTexture>,
+        offset: Point<i32, Logical>,
+        tile_size: Size<i32, Logical>,
+        progress: Animation,
     },
 }
 
 impl OpenCloseAnimation {
+    // We dont display the window directly, we instead have thresholds of scale where we start
+    // animating the window in using the alpha, then we scale it up.
+    const OPEN_SCALE_THRESHOLD: f64 = 0.5;
+    const CLOSE_SCALE_THRESHOLD: f64 = 0.8;
+
     fn set_current_time(&mut self, new_current_time: Time<Monotonic>) {
         match self {
-            Self::Opening {
-                alpha_animation,
-                scale_animation,
-            }
-            | Self::Closing {
-                alpha_animation,
-                scale_animation,
-                ..
-            } => {
-                alpha_animation.set_current_time(new_current_time);
-                scale_animation.set_current_time(new_current_time);
+            Self::Opening { progress } | Self::Closing { progress, .. } => {
+                progress.set_current_time(new_current_time);
             }
         }
     }
 
     fn is_finished(&self) -> bool {
         match self {
-            Self::Opening {
-                scale_animation, ..
+            Self::Opening { progress } => progress.is_finished(),
+            Self::Closing { progress, .. } => {
+                // If we are 0, then byebye.
+                let value = progress.value();
+                let value = (value * (1.0 - Self::CLOSE_SCALE_THRESHOLD)).max(0.0);
+                value <= 1.0e-3 // since it never reaches 0 really.
             }
-            | Self::Closing {
-                scale_animation, ..
-            } => {
-                // The scale animation is always going to be longer here
-                scale_animation.is_finished()
+        }
+    }
+
+    fn scale(&self) -> f64 {
+        match self {
+            Self::Opening { progress } => {
+                let value = progress.value();
+                value * (1.0 - Self::OPEN_SCALE_THRESHOLD) + Self::OPEN_SCALE_THRESHOLD
+            }
+            Self::Closing { progress, .. } => {
+                let value = progress.value();
+                value * (1.0 - Self::CLOSE_SCALE_THRESHOLD) + Self::CLOSE_SCALE_THRESHOLD
             }
         }
     }
 
     fn alpha(&self) -> f32 {
         match self {
-            Self::Opening {
-                alpha_animation, ..
-            }
-            | Self::Closing {
-                alpha_animation, ..
-            } => alpha_animation.value(),
-        }
-    }
-
-    fn scale(&self) -> f64 {
-        match self {
-            Self::Opening {
-                scale_animation, ..
-            }
-            | Self::Closing {
-                scale_animation, ..
-            } => scale_animation.value(),
+            Self::Opening { progress } | Self::Closing { progress, .. } => progress.value() as f32,
         }
     }
 }

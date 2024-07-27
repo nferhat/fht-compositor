@@ -1068,6 +1068,13 @@ impl<E: WorkspaceElement> Workspace<E> {
         let (maximized, tiled) = self
             .tiles
             .iter_mut()
+            .filter(|tile| {
+                // Do not include tiles that are closing.
+                !matches!(
+                    tile.open_close_animation,
+                    Some(tile::OpenCloseAnimation::Closing { .. })
+                )
+            })
             .partition::<Vec<_>, _>(|tile| tile.element.maximized());
 
         for tile in maximized {

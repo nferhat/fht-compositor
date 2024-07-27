@@ -47,13 +47,6 @@ impl Animatable for f64 {
     }
 }
 
-impl Animatable for f32 {
-    fn y(&self, x: f64) -> Self {
-        // WARN: Maybe casting this isnt really good?
-        ((*self as f64).saturating_mul(x)) as f32
-    }
-}
-
 /// An animatable variable.
 ///
 /// See [`Animatable`]

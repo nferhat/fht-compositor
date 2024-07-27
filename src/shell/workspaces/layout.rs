@@ -241,9 +241,7 @@ impl WorkspaceLayout {
                     .map(|(_, tile)| tile)
                     .zip(left_heights)
                 {
-                    let geo = Rectangle::from_loc_and_size(
-                        left_geo.loc, (left_geo.size.w, height),
-                    );
+                    let geo = Rectangle::from_loc_and_size(left_geo.loc, (left_geo.size.w, height));
                     tile.set_geometry(geo, animate);
                     left_geo.loc.y += height + inner_gaps;
                 }
@@ -260,9 +258,8 @@ impl WorkspaceLayout {
                     .map(|(_, tile)| tile)
                     .zip(master_heights)
                 {
-                    let geo = Rectangle::from_loc_and_size(
-                        master_geo.loc, (master_geo.size.w, height),
-                    );
+                    let geo =
+                        Rectangle::from_loc_and_size(master_geo.loc, (master_geo.size.w, height));
                     tile.set_geometry(geo, animate);
                     master_geo.loc.y += height + inner_gaps;
                 }
@@ -279,9 +276,8 @@ impl WorkspaceLayout {
                     .map(|(_, tile)| tile)
                     .zip(right_heights)
                 {
-                    let geo = Rectangle::from_loc_and_size(
-                        right_geo.loc, (right_geo.size.w, height),
-                    );
+                    let geo =
+                        Rectangle::from_loc_and_size(right_geo.loc, (right_geo.size.w, height));
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
                 }

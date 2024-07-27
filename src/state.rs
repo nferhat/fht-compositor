@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use indexmap::IndexMap;
+use rustc_hash::FxHashMap;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
@@ -275,6 +276,14 @@ pub struct Fht {
     pub focus_state: FocusState,
     /// xdg_popup manager
     pub popups: PopupManager,
+    /// A cache of the root of each surface.
+    ///
+    /// When a surface dies, `get_parent` always returns `None`, we need still need a way to get
+    /// the root surface of a surface that got destroyed in `CompositorHandler::destroyed`, so we
+    /// use this hack for now.
+    ///
+    /// This is currently implemented only for closing animations.
+    pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
 
     /// The last configuration error.
     pub last_config_error: Option<anyhow::Error>,
@@ -400,6 +409,7 @@ impl Fht {
             unmapped_tiles: vec![],
             popups: PopupManager::default(),
             resize_grab_active: false,
+            root_surfaces: FxHashMap::default(),
 
             last_config_error: None,
 

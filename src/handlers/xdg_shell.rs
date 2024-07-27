@@ -14,7 +14,10 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{
+    add_pre_commit_hook, with_states, BufferAssignment, HookId, SurfaceAttributes,
+};
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
     Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
@@ -23,7 +26,9 @@ use smithay::wayland::shell::xdg::{
 use crate::shell::grabs::ResizeState;
 use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::KeyboardFocusTarget;
-use crate::state::State;
+use crate::state::{OutputState, State};
+
+pub struct WindowPreCommitHook(RefCell<Option<HookId>>);
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -32,7 +37,40 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         let window = Window::new_wayland_window(toplevel);
+        add_window_pre_commit_hook(&window);
         self.fht.pending_windows.push(window.into());
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        if let Some(idx) = self.fht.unmapped_tiles.iter().position(|tile| {
+            tile.inner
+                .element
+                .wl_surface()
+                .is_some_and(|s| &*s == surface.wl_surface())
+        }) {
+            let _unmapped_tile = self.fht.unmapped_tiles.remove(idx);
+            return;
+        }
+
+        let Some((tile, output)) = self.fht.find_tile_and_output(surface.wl_surface()) else {
+            warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles!");
+            return;
+        };
+        OutputState::get(&output).render_state.queue();
+
+        let scale = output.current_scale().fractional_scale().into();
+        self.backend.with_renderer(|renderer| {
+            tile.prepare_close_animation(renderer, scale);
+        });
+        self.backend.with_renderer(|renderer| {
+            tile.start_close_animation(renderer, scale);
+        });
+
+        let (_, ws) = self
+            .fht
+            .find_window_and_workspace_mut(&surface.wl_surface())
+            .unwrap();
+        ws.arrange_tiles(true);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -251,6 +289,51 @@ impl XdgShellHandler for State {
         self.fht.unconstrain_popup(&surface);
         surface.send_repositioned(token);
     }
+}
+
+fn add_window_pre_commit_hook(window: &Window) {
+    // The workspace tile api is not responsible for actually starting the close animations, we are
+    // the ones that should do this.
+    let wl_surface = window.wl_surface().unwrap();
+    let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
+        let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
+            warn!("Window pre-commit hook should be removed when unmapped!");
+            return;
+        };
+
+        // Before commiting, we check if the window's buffers are getting unmapped.
+        // If that's the case, the window is likely closing (or minimizing, if the
+        // compositor supports that)
+        //
+        // Since we are going to close, we take a snapshot of the window's elements,
+        // like we do inside `Tile::render_elements` into a
+        // GlesTexture and store that for future use.
+        let got_unmapped = with_states(surface, |states| {
+            let mut guard = states.cached_state.get::<SurfaceAttributes>();
+            let attrs = guard.pending();
+            matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
+        });
+
+        if got_unmapped {
+            state.backend.with_renderer(|renderer| {
+                let scale = output.current_scale().fractional_scale().into();
+                tile.prepare_close_animation(renderer, scale);
+            });
+        } else {
+            tile.clear_close_snapshot();
+        }
+    });
+
+    window
+        .user_data()
+        .insert_if_missing(|| WindowPreCommitHook(RefCell::new(None)));
+    let mut guard = window
+        .user_data()
+        .get::<WindowPreCommitHook>()
+        .unwrap()
+        .0
+        .borrow_mut();
+    *guard = Some(hook_id)
 }
 
 delegate_xdg_shell!(State);
