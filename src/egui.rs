@@ -189,6 +189,7 @@ impl EguiElement {
             dropped_files: Vec::with_capacity(0),
             focused: true,
             max_texture_side: Some(max_texture_size),
+            pixels_per_point: Some(scale as f32),
             ..Default::default()
         };
         let egui::FullOutput {
