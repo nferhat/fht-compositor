@@ -224,14 +224,70 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         &self.element
     }
 
-    /// Set this tile's geometry, relative to the [`Workspace`] that holds it.
+    /// Send a pending configure message to the element.
+    pub fn send_pending_configure(&mut self) {
+        self.element.send_pending_configure();
+    }
+
+    /// Return the border settings to use when rendering this tile.
+    pub fn border_config(&self) -> BorderConfig {
+        self.border_config.unwrap_or(CONFIG.decoration.border)
+    }
+
+    /// Return actual border thickness used by the tile, None if there's no border is being drawn.
+    pub fn border_thickness(&self) -> Option<i32> {
+        if self.element.fullscreen() {
+            return None;
+        }
+
+        Some(self.border_config().thickness as i32)
+    }
+
+    /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
+    pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
+        let Some(element_surface) = self.element.wl_surface() else {
+            return false;
+        };
+
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*element_surface == surface {
+            return true;
+        }
+
+        if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
+            use std::sync::atomic::{AtomicBool, Ordering}; // thank you.
+
+            let found_surface: AtomicBool = false.into();
+            with_surface_tree_downward(
+                &element_surface,
+                surface,
+                |_, _, e| TraversalAction::DoChildren(e),
+                |s, _, search| {
+                    found_surface.fetch_or(s == *search, Ordering::SeqCst);
+                },
+                |_, _, _| !found_surface.load(Ordering::SeqCst),
+            );
+            if found_surface.load(Ordering::SeqCst) {
+                return true;
+            }
+        }
+
+        if surface_type.contains(WindowSurfaceType::POPUP) {
+            return PopupManager::popups_for_surface(&element_surface)
+                .any(|(popup, _)| popup.wl_surface() == surface);
+        }
+
+        false
+    }
+}
+
+// Geometry related functions
+impl<E: WorkspaceElement> WorkspaceTile<E> {
+    /// Set the the tile's geometry, relative to the [`Workspace`] that holds it.
     ///
     /// `new_geo` is assumed to be the the tile's visual geometry, excluding client side decorations
     /// like shadows.
-    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
-        let thickness = self.border_config().thickness as i32;
-        if thickness > 0 {
-            let thickness = self.border_config().thickness as i32;
+    pub fn set_tile_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
+        if let Some(thickness) = self.border_thickness() {
             new_geo.loc += (thickness, thickness).into();
             new_geo.size -= (2 * thickness, 2 * thickness).into();
         }
@@ -259,9 +315,50 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
     }
 
-    /// Send a pending configure message to the element.
-    pub fn send_pending_configure(&mut self) {
-        self.element.send_pending_configure();
+    /// Get the element's geometry, excluding client side decorations like shadows, relative to
+    /// the [`Workspace`] that holds it.
+    pub fn element_geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.element.geometry();
+        geo.loc = self.location;
+        geo
+    }
+
+    /// Get the element's visual geometry, excluding client side decorations like shadows, relative
+    /// to the [`Workspace`] that holds it.
+    pub fn element_visual_geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.element.geometry();
+        geo.loc = self.render_location();
+        geo
+    }
+
+    /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, including
+    /// the border, and excluding the client side decorations like shadows, relative to the
+    pub fn tile_geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.element.geometry();
+        geo.loc = self.location;
+        if let Some(thickness) = self.border_thickness() {
+            geo.loc -= (thickness, thickness).into();
+            geo.size += (2 * thickness, 2 * thickness).into();
+        }
+        geo
+    }
+
+    /// Get this tile's bounding box, relative to the [`Workspace`] that holds it.
+    pub fn bbox(&self) -> Rectangle<i32, Logical> {
+        let mut bbox = self.element.bbox();
+        bbox.loc = self.location;
+        bbox
+    }
+
+    /// Get this tile's render location, IE the topleft point of the tile's visual geometry,
+    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
+    pub fn render_location(&self) -> Point<i32, Logical> {
+        let mut render_location = self.temporary_render_location.unwrap_or(self.location);
+        if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
+            render_location += offset;
+        }
+
+        render_location
     }
 
     /// Start this tile's opening animation.
@@ -277,7 +374,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
         self.open_close_animation = Some(OpenCloseAnimation::Opening { progress })
     }
+}
 
+// Animation-related code
+impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Prepare a close animation render elements.
     pub fn prepare_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
         if self.close_animation_snapshot.is_some() {
@@ -363,45 +463,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         });
     }
 
-    /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, excluding
-    /// client side decorations like shadows, relative to the [`Workspace`] that holds it
-    pub fn geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = self.element.geometry();
-        geo.loc = self.location;
-        geo
-    }
-
-    /// Get this tile's visual geometry, IE the topleft point of the tile's visual geometry,
-    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
-    pub fn visual_geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = self.element.geometry();
-        geo.loc = self.render_location();
-        geo
-    }
-
-    /// Get this tile's bounding box, relative to the [`Workspace`] that holds it.
-    pub fn bbox(&self) -> Rectangle<i32, Logical> {
-        let mut bbox = self.element.bbox();
-        bbox.loc = self.location;
-        bbox
-    }
-
-    /// Get this tile's render location, IE the topleft point of the tile's visual geometry,
-    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
-    pub fn render_location(&self) -> Point<i32, Logical> {
-        let mut render_location = self.temporary_render_location.unwrap_or(self.location);
-        if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
-            render_location += offset;
-        }
-
-        render_location
-    }
-
-    /// Return the border settings to use when rendering this tile.
-    pub fn border_config(&self) -> BorderConfig {
-        self.border_config.unwrap_or(CONFIG.decoration.border)
-    }
-
     /// Advance this tile's animations.
     pub fn advance_animations(&mut self, current_time: Time<Monotonic>) -> bool {
         let mut ret = false;
@@ -420,43 +481,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
         ret
     }
+}
 
-    /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
-    pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        let Some(element_surface) = self.element.wl_surface() else {
-            return false;
-        };
-
-        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*element_surface == surface {
-            return true;
-        }
-
-        if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-            use std::sync::atomic::{AtomicBool, Ordering}; // thank you.
-
-            let found_surface: AtomicBool = false.into();
-            with_surface_tree_downward(
-                &element_surface,
-                surface,
-                |_, _, e| TraversalAction::DoChildren(e),
-                |s, _, search| {
-                    found_surface.fetch_or(s == *search, Ordering::SeqCst);
-                },
-                |_, _, _| !found_surface.load(Ordering::SeqCst),
-            );
-            if found_surface.load(Ordering::SeqCst) {
-                return true;
-            }
-        }
-
-        if surface_type.contains(WindowSurfaceType::POPUP) {
-            return PopupManager::popups_for_surface(&element_surface)
-                .any(|(popup, _)| popup.wl_surface() == surface);
-        }
-
-        false
-    }
-
+impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// Draw an egui overlay for this tile.
     fn egui_overlay(&self, ctx: &egui::Context) {
         egui::Area::new("tile-debug-overlay")
@@ -563,24 +590,25 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
-        // The tile's physical geometry, as in where our render elements will be when drawn
-        let physical_geo = Rectangle::from_loc_and_size(
+        let element_physical_geo = Rectangle::from_loc_and_size(
             location,
             self.element.size().to_physical_precise_round(scale),
         );
-        // The tile geometry in compositor space, IE what the user sees as being the window.
-        let tile_geo = physical_geo.to_f64().to_logical(scale).to_i32_round();
+        let element_geo = element_physical_geo
+            .to_f64()
+            .to_logical(scale)
+            .to_i32_round();
 
         let border_config = self.border_config.unwrap_or(CONFIG.decoration.border);
-        let need_border = !self.element.fullscreen();
+        let need_rounding = !self.element.fullscreen();
         let radius = border_config.radius();
 
         let window_elements = self
             .element
-            .render_surface_elements(renderer, physical_geo.loc, scale, alpha)
+            .render_surface_elements(renderer, element_physical_geo.loc, scale, alpha)
             .into_iter()
             .map(move |e| {
-                if !need_border {
+                if !need_rounding {
                     return WorkspaceTileRenderElement::Element(e);
                 }
 
@@ -591,8 +619,8 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 // parts of their interface (for example OBs does this with the preview window)
                 //
                 // To counter this, we check here if the surface is going to clip.
-                if RoundedCornerElement::will_clip(&e, scale, tile_geo, radius) {
-                    let rounded = RoundedCornerElement::new(e, radius, tile_geo, scale);
+                if RoundedCornerElement::will_clip(&e, scale, element_geo, radius) {
+                    let rounded = RoundedCornerElement::new(e, radius, element_geo, scale);
                     WorkspaceTileRenderElement::RoundedElement(rounded)
                 } else {
                     WorkspaceTileRenderElement::Element(e)
@@ -600,7 +628,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             });
         let popup_elements = self
             .element
-            .render_popup_elements(renderer, physical_geo.loc, scale, alpha)
+            .render_popup_elements(renderer, element_physical_geo.loc, scale, alpha)
             .into_iter()
             .map(WorkspaceTileRenderElement::Element);
 
@@ -610,16 +638,16 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 let damage = self
                     .rounded_corner_damage
                     .clone()
-                    .with_location(tile_geo.loc);
+                    .with_location(element_geo.loc);
                 WorkspaceTileRenderElement::RoundedElementDamage(damage)
             })
             .into_iter();
 
         // Same deal for the border, only if the thickness is non-null
-        let border_element = (border_config.thickness != 0)
-            .then(|| {
-                let mut border_geo = tile_geo;
-                let thickness = border_config.thickness as i32;
+        let border_element = self
+            .border_thickness()
+            .map(|thickness| {
+                let mut border_geo = element_geo;
                 border_geo.loc -= (thickness, thickness).into();
                 border_geo.size += (2 * thickness, 2 * thickness).into();
 
@@ -658,7 +686,9 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
-        let mut render_geo = self.visual_geometry().to_physical_precise_round(scale);
+        let mut render_geo = self
+            .element_visual_geometry()
+            .to_physical_precise_round(scale);
 
         let debug_overlay = self
             .debug_overlay
@@ -682,8 +712,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             })
             .into_iter();
 
-        let mut opening_elements = None;
-        let mut closing_elements = None;
+        let mut open_close_element = None;
         let mut normal_elements = None;
 
         // NOTE: We need to offset the render elements by -(thickness,thickness) and
@@ -695,7 +724,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         //
         // So, to actually include the border inside the texture, we render the window at
         // (thickness, thickness), then the texture render elements get offset back.
-        let thickness = self.border_config().thickness as i32;
+        let thickness = self.border_thickness().unwrap_or(0);
         let border_offset = Point::<i32, Logical>::from((thickness, thickness))
             .to_physical_precise_round::<_, i32>(scale);
 
@@ -712,55 +741,52 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 .iter()
                 .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
 
-            opening_elements = Some(
-                render_to_texture(
-                    glow_renderer,
-                    rec.size,
-                    scale,
-                    Transform::Normal,
-                    Fourcc::Abgr8888,
-                    elements.into_iter(),
-                )
-                .map_err(|err| {
-                    warn!(
-                        ?err,
-                        "Failed to render window elements to texture for open animation!"
-                    )
-                })
-                .ok()
-                .map(|(texture, _sync_point)| {
-                    let glow_renderer = renderer.glow_renderer_mut();
-                    render_geo.loc -= border_offset;
-                    render_geo.size += border_offset.to_size().upscale(2);
-
-                    let element_id = Id::new();
-                    let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
-                        element_id.clone(),
-                        glow_renderer.id(),
-                        render_geo.loc.to_f64(),
-                        texture,
-                        scale.x.max(scale.y) as i32,
-                        Transform::Normal,
-                        Some(progress.clamp(0., 1.) as f32),
-                        None,
-                        None,
-                        None,
-                        Kind::Unspecified,
-                    )
-                    .into();
-                    self.element.set_offscreen_element_id(Some(element_id));
-
-                    let origin = render_geo.center();
-                    let rescale = (progress * (1.0 - OpenCloseAnimation::OPEN_SCALE_THRESHOLD))
-                        + OpenCloseAnimation::OPEN_SCALE_THRESHOLD;
-                    let rescale = RescaleRenderElement::from_element(texture, origin, rescale);
-
-                    WorkspaceTileRenderElement::<R>::OpenClose(
-                        WorkspaceTileOpenCloseElement::OpenTexture(rescale),
-                    )
-                })
-                .into_iter(),
+            open_close_element = render_to_texture(
+                glow_renderer,
+                rec.size,
+                scale,
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                elements.into_iter(),
             )
+            .map_err(|err| {
+                warn!(
+                    ?err,
+                    "Failed to render window elements to texture for open animation!"
+                )
+            })
+            .ok()
+            .map(|(texture, _sync_point)| {
+                let glow_renderer = renderer.glow_renderer_mut();
+                render_geo.loc -= border_offset;
+                render_geo.size += border_offset.to_size().upscale(2);
+
+                let element_id = Id::new();
+                let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
+                    element_id.clone(),
+                    glow_renderer.id(),
+                    render_geo.loc.to_f64(),
+                    texture,
+                    scale.x.max(scale.y) as i32,
+                    Transform::Normal,
+                    Some(progress.clamp(0., 1.) as f32),
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                )
+                .into();
+                self.element.set_offscreen_element_id(Some(element_id));
+
+                let origin = render_geo.center();
+                let rescale = (progress * (1.0 - OpenCloseAnimation::OPEN_SCALE_THRESHOLD))
+                    + OpenCloseAnimation::OPEN_SCALE_THRESHOLD;
+                let rescale = RescaleRenderElement::from_element(texture, origin, rescale);
+
+                WorkspaceTileRenderElement::<R>::OpenClose(
+                    WorkspaceTileOpenCloseElement::OpenTexture(rescale),
+                )
+            });
         };
 
         if let Some(OpenCloseAnimation::Closing {
@@ -798,18 +824,17 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 WorkspaceTileOpenCloseElement::CloseTexture(relocate),
             );
 
-            closing_elements = Some(Some(element).into_iter())
+            open_close_element = Some(element)
         };
 
-        if opening_elements.is_none() && closing_elements.is_none() {
+        if open_close_element.is_none() {
             self.element.set_offscreen_element_id(None);
             normal_elements =
                 Some(self.render_elements_inner(renderer, render_geo.loc, scale, alpha, focused))
         }
 
         debug_overlay
-            .chain(opening_elements.into_iter().flatten())
-            .chain(closing_elements.into_iter().flatten())
+            .chain(open_close_element.into_iter())
             .chain(normal_elements.into_iter().flatten())
     }
 }

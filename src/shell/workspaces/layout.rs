@@ -119,7 +119,7 @@ impl WorkspaceLayout {
                             master_geo.loc,
                             (master_geo.size.w, master_height),
                         );
-                        tile.set_geometry(geo, animate);
+                        tile.set_tile_geometry(geo, animate);
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
                         let stack_height = stack_heights[idx - nmaster];
@@ -127,7 +127,7 @@ impl WorkspaceLayout {
                             stack_geo.loc,
                             (stack_geo.size.w, stack_height),
                         );
-                        tile.set_geometry(new_geo, animate);
+                        tile.set_tile_geometry(new_geo, animate);
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
                 }
@@ -171,7 +171,7 @@ impl WorkspaceLayout {
                             master_geo.loc,
                             (master_width, master_geo.size.h),
                         );
-                        tile.set_geometry(geo, animate);
+                        tile.set_tile_geometry(geo, animate);
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
                         let stack_width = stack_widths[idx - nmaster];
@@ -179,7 +179,7 @@ impl WorkspaceLayout {
                             stack_geo.loc,
                             (stack_width, stack_geo.size.h),
                         );
-                        tile.set_geometry(geo, animate);
+                        tile.set_tile_geometry(geo, animate);
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
                 }
@@ -242,7 +242,7 @@ impl WorkspaceLayout {
                     .zip(left_heights)
                 {
                     let geo = Rectangle::from_loc_and_size(left_geo.loc, (left_geo.size.w, height));
-                    tile.set_geometry(geo, animate);
+                    tile.set_tile_geometry(geo, animate);
                     left_geo.loc.y += height + inner_gaps;
                 }
 
@@ -260,7 +260,7 @@ impl WorkspaceLayout {
                 {
                     let geo =
                         Rectangle::from_loc_and_size(master_geo.loc, (master_geo.size.w, height));
-                    tile.set_geometry(geo, animate);
+                    tile.set_tile_geometry(geo, animate);
                     master_geo.loc.y += height + inner_gaps;
                 }
 
@@ -278,7 +278,7 @@ impl WorkspaceLayout {
                 {
                     let geo =
                         Rectangle::from_loc_and_size(right_geo.loc, (right_geo.size.w, height));
-                    tile.set_geometry(geo, animate);
+                    tile.set_tile_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
                 }
             }

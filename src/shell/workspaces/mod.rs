@@ -1026,12 +1026,13 @@ impl<E: WorkspaceElement> Workspace<E> {
 impl<E: WorkspaceElement> Workspace<E> {
     /// Get the geometry of a given element relative to the [`Workspace`].
     pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        self.tile_for(element).map(WorkspaceTile::geometry)
+        self.tile_for(element).map(WorkspaceTile::element_geometry)
     }
 
     /// Get the visual geometry of a given element relative to the [`Workspace`].
     pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        self.tile_for(element).map(WorkspaceTile::visual_geometry)
+        self.tile_for(element)
+            .map(WorkspaceTile::element_visual_geometry)
     }
 
     /// Get the area used to tile the elements, relative to the [`Workspace`]
@@ -1054,7 +1055,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             // NOTE: Output top left is always (0,0) locally
             let mut output_geo = self.output.geometry();
             output_geo.loc = (0, 0).into();
-            inner.set_geometry(output_geo, animate);
+            inner.set_tile_geometry(output_geo, animate);
         }
 
         if self.tiles.is_empty() {
@@ -1078,7 +1079,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             .partition::<Vec<_>, _>(|tile| tile.element.maximized());
 
         for tile in maximized {
-            tile.set_geometry(tile_area, animate)
+            tile.set_tile_geometry(tile_area, animate)
         }
 
         if tiled.is_empty() {

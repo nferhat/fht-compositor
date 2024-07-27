@@ -400,7 +400,7 @@ impl Fht {
         tile.start_opening_animation();
         // we dont want to animate the tile now.
         tile.location_animation.take();
-        let mut tile_geo = tile.geometry();
+        let mut tile_geo = tile.element_geometry();
         tile_geo.loc += output_loc;
 
         // From using the compositor opening a window when a switch is being done feels more
