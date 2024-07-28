@@ -17,7 +17,6 @@ use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer;
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
-use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{
@@ -681,7 +680,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     pub fn render_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
-        output: &Output,
         scale: Scale<f64>,
         alpha: f32,
         focused: bool,

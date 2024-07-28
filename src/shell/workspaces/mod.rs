@@ -640,7 +640,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             return inner
                 .render_elements(
                     renderer,
-                    &self.output,
                     scale,
                     CONFIG.decoration.focused_window_opacity,
                     true,
@@ -655,7 +654,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         if let Some(tile) = self.focused_tile() {
             render_elements.extend(tile.render_elements(
                 renderer,
-                &self.output,
                 scale,
                 CONFIG.decoration.focused_window_opacity,
                 true,
@@ -667,13 +665,13 @@ impl<E: WorkspaceElement> Workspace<E> {
                 continue;
             }
 
-            render_elements.extend(tile.render_elements(
+            let elements = tile.render_elements(
                 renderer,
-                &self.output,
                 scale,
                 CONFIG.decoration.normal_window_opacity,
                 false,
-            ));
+            );
+            render_elements.extend(elements);
         }
 
         render_elements
