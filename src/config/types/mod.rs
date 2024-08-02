@@ -65,7 +65,7 @@ pub struct CompositorConfig {
 
     /// Window rules.
     #[serde(default)]
-    pub rules: HashMap<Vec<WindowRulePattern>, WindowMapSettings>,
+    pub rules: HashMap<Vec<WindowPattern>, WindowRules>,
 
     /// Configuration for the backend renderer.
     #[serde(default)]

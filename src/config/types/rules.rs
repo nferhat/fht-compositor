@@ -19,8 +19,9 @@ fn deserialize_regex<'de, D: Deserializer<'de>>(
     })
 }
 
+/// A single pattern used to match a possible window.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct WindowRulePattern {
+pub struct WindowPattern {
     /// The workspace index the window is getting spawned on.
     #[serde(default)]
     workspace: Option<usize>,
@@ -46,7 +47,7 @@ pub struct WindowRulePattern {
     app_id: Option<Regex>,
 }
 
-impl std::hash::Hash for WindowRulePattern {
+impl std::hash::Hash for WindowPattern {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         if let Some(workspace) = self.workspace {
             state.write_usize(workspace)
@@ -64,7 +65,7 @@ impl std::hash::Hash for WindowRulePattern {
     }
 }
 
-impl PartialEq for WindowRulePattern {
+impl PartialEq for WindowPattern {
     fn eq(&self, other: &Self) -> bool {
         self.workspace == other.workspace
             && regex_matches(self.title.as_ref(), other.title.as_ref())
@@ -72,13 +73,13 @@ impl PartialEq for WindowRulePattern {
     }
 }
 
-impl Eq for WindowRulePattern {}
+impl Eq for WindowPattern {}
 
 fn regex_matches(regex_1: Option<&Regex>, regex_2: Option<&Regex>) -> bool {
     regex_1.map(Regex::as_str) == regex_2.map(Regex::as_str)
 }
 
-impl WindowRulePattern {
+impl WindowPattern {
     pub fn matches(&self, title: &str, app_id: &str, workspace: usize) -> bool {
         if self.workspace.as_ref().is_some_and(|ws| workspace == *ws) {
             return true;
@@ -106,7 +107,7 @@ impl WindowRulePattern {
 
 /// Initial settings/state for a window when mapping it
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WindowMapSettings {
+pub struct WindowRules {
     /// On which output should we map the window?
     pub output: Option<String>,
 
@@ -124,7 +125,7 @@ pub struct WindowMapSettings {
     pub workspace: Option<usize>,
 }
 
-impl Default for WindowMapSettings {
+impl Default for WindowRules {
     fn default() -> Self {
         Self {
             output: None,
