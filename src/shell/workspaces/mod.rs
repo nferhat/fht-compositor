@@ -1334,7 +1334,7 @@ mod tests {
     use smithay::desktop::space::SpaceElement;
     use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
     use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-    use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
+    use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
     use smithay::wayland::seat::WaylandFocus;
 
     use super::tile::WorkspaceElement;
@@ -1433,11 +1433,12 @@ mod tests {
     }
 
     impl WorkspaceElement for TestElement {
-        fn send_pending_configure(&self) {
+        fn send_pending_configure(&self) -> Option<Serial> {
             let mut guard = self.0.borrow_mut();
             if let Some(requested_size) = guard.requested_size.take() {
                 guard.bbox.size = requested_size;
             }
+            None
         }
 
         fn set_size(&self, new_size: Size<i32, Logical>) {

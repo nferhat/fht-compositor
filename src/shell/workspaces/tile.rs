@@ -9,7 +9,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::utils::{
-    Relocate, RelocateRenderElement, RescaleRenderElement,
+    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
 };
 use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::GlesTexture;
@@ -20,7 +20,7 @@ use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{
-    IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
+    IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Serial, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
@@ -48,7 +48,7 @@ pub trait WorkspaceElement:
     ///
     /// Wayland works by accumulating changes between commits and then when either the XDG toplevel
     /// window or the server/compositor send a configure message, the changes are then applied.
-    fn send_pending_configure(&self);
+    fn send_pending_configure(&self) -> Option<Serial>;
 
     /// Set the size of this element.
     ///
@@ -182,6 +182,25 @@ pub struct WorkspaceTile<E: WorkspaceElement> {
 
     /// The egui debug overlay for this element.
     pub debug_overlay: Option<EguiElement>,
+
+    /// Resize animation.
+    pub resize_animation: Option<ResizeAnimation>,
+    /// The next size of the element, before starting the resize animation.
+    ///
+    /// If this is `None`, this means the resize animation has started *and* ended.
+    next_size: Option<Size<i32, Logical>>,
+    /// The previous location of the tile, before starting the location animation.
+    ///
+    /// For the same of smoothness, if we have both a location and resize animation, we start the
+    /// location animation with the resize one.
+    next_location: Option<Point<i32, Logical>>,
+    /// A list of commits that should trigger a resize animation.
+    ///
+    /// We should no start the resize animation until the element has finally commited its new
+    /// size, so, we wait for it.
+    ///
+    /// It is up to the compositor managing this to actually *trigger* resize animations.
+    animation_commit_serials: Vec<Serial>,
 }
 
 impl<E: WorkspaceElement> PartialEq for WorkspaceTile<E> {
@@ -211,6 +230,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             location_animation: None,
             open_close_animation: None,
             close_animation_snapshot: None,
+            resize_animation: None,
+            next_size: None,
+            next_location: None,
+            animation_commit_serials: vec![],
             debug_overlay: CONFIG
                 .renderer
                 .tile_debug_overlay
@@ -225,7 +248,14 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
     /// Send a pending configure message to the element.
     pub fn send_pending_configure(&mut self) {
-        self.element.send_pending_configure();
+        if self.next_size.is_some() {
+            // A resize animation commit is awaiting
+            if let Some(commit_serial) = self.element.send_pending_configure() {
+                self.animation_commit_serials.push(commit_serial);
+            }
+        } else {
+            let _ = self.element.send_pending_configure();
+        }
     }
 
     /// Return the border settings to use when rendering this tile.
@@ -286,31 +316,54 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     /// `new_geo` is assumed to be the the tile's visual geometry, excluding client side decorations
     /// like shadows.
     pub fn set_tile_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
+        let old_geo = self.element_geometry();
         if let Some(thickness) = self.border_thickness() {
             new_geo.loc += (thickness, thickness).into();
             new_geo.size -= (2 * thickness, 2 * thickness).into();
         }
 
-        self.element.set_size(new_geo.size);
-        self.element.send_pending_configure();
         self.rounded_corner_damage.set_size(new_geo.size);
         if let Some(egui) = self.debug_overlay.as_mut() {
             egui.set_size(new_geo.size);
+        }
+
+        // Size animation
+        //
+        // 1. We set the element size and let it actually take its size, to do so we track the the
+        //    commit of the element.
+        // 2. When the commit of the element actually passes, we instantiate the actual
+        //    `ResizeAnimation` in our tile, scaling/cropping the element accordingly.
+        let mut has_resize_animation = false;
+        self.element.set_size(new_geo.size);
+        if animate {
+            if let Some(commit_serial) = self.element.send_pending_configure() {
+                self.next_size = Some(new_geo.size);
+                self.animation_commit_serials.push(commit_serial);
+                has_resize_animation = true;
+            }
         }
 
         // Location animation
         //
         // We set our actual location, then we offset gradually until we reach our destination.
         // By that point our offset should be equal to 0
-        let old_location = self.location;
-        self.location = new_geo.loc;
-        if animate {
-            self.location_animation = Animation::new(
-                old_location - new_geo.loc,
-                Point::default(),
-                CONFIG.animation.window_geometry.curve,
-                Duration::from_millis(CONFIG.animation.window_geometry.duration),
-            );
+        if !has_resize_animation {
+            self.location = new_geo.loc;
+            if animate {
+                self.location_animation = Animation::new(
+                    old_geo.loc - new_geo.loc,
+                    Point::default(),
+                    CONFIG.animation.window_geometry.curve,
+                    Duration::from_millis(CONFIG.animation.window_geometry.duration),
+                );
+            } else {
+            }
+        } else {
+            if animate {
+                self.next_location = Some(new_geo.loc);
+            } else {
+                self.location = new_geo.loc;
+            }
         }
     }
 
@@ -372,6 +425,57 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         };
 
         self.open_close_animation = Some(OpenCloseAnimation::Opening { progress })
+    }
+
+    /// Start this tile's resize animation.
+    ///
+    /// You should be calling this before the element commits to the next size.
+    pub fn start_resize_animation(&mut self) {
+        let Some(progress) = Animation::new(
+            0.0,
+            1.0,
+            CONFIG.animation.window_geometry.curve,
+            Duration::from_millis(CONFIG.animation.window_geometry.duration),
+        ) else {
+            return;
+        };
+
+        let Some(next_size) = self.next_size.take() else {
+            return;
+        };
+
+        if let Some(next_location) = self.next_location.take() {
+            // If we have both a resize and a location animation, start the latter now.
+            self.location_animation = Animation::new(
+                self.location - next_location,
+                Point::default(),
+                CONFIG.animation.window_geometry.curve,
+                Duration::from_millis(CONFIG.animation.window_geometry.duration),
+            );
+            self.location = next_location;
+        }
+
+        self.resize_animation = Some(ResizeAnimation {
+            progress,
+            next_size,
+            prev_size: self.element.size(),
+        });
+    }
+
+    /// Return whether this commit serial will trigger a resize animation.
+    pub fn commit_will_cause_resize_animation(&mut self, serial: Serial) -> bool {
+        let mut ret = false;
+        self.animation_commit_serials.retain(|anim_serial| {
+            if serial.is_no_older_than(anim_serial) {
+                // our commit serial happened after our animation serial, we can start the
+                // animation.
+                ret = true;
+                false
+            } else {
+                true
+            }
+        });
+        ret
     }
 }
 
@@ -475,6 +579,14 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         let _ = self.open_close_animation.take_if(|anim| anim.is_finished());
         if let Some(open_close_animation) = self.open_close_animation.as_mut() {
             open_close_animation.set_current_time(current_time);
+            ret |= true;
+        }
+
+        let _ = self
+            .resize_animation
+            .take_if(|anim| anim.progress.is_finished());
+        if let Some(resize_animation) = self.resize_animation.as_mut() {
+            resize_animation.progress.set_current_time(current_time);
             ret |= true;
         }
 
@@ -589,56 +701,169 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
-        let element_physical_geo = Rectangle::from_loc_and_size(
-            location,
-            self.element.size().to_physical_precise_round(scale),
+        let mut element_geo = Rectangle::from_loc_and_size(
+            location.to_f64().to_logical(scale).to_i32_round(),
+            self.element.size(),
         );
-        let element_geo = element_physical_geo
-            .to_f64()
-            .to_logical(scale)
-            .to_i32_round();
 
         let border_config = self.border_config.unwrap_or(CONFIG.decoration.border);
         let need_rounding = !self.element.fullscreen();
         let radius = border_config.radius();
 
-        let window_elements = self
-            .element
-            .render_surface_elements(renderer, element_physical_geo.loc, scale, alpha)
-            .into_iter()
-            .map(move |e| {
-                if !need_rounding {
-                    return WorkspaceTileRenderElement::Element(e);
-                }
+        let mut window_elements = None;
+        let mut resize_elements = None;
 
-                // Rounding off windows is a little tricky.
-                //
-                // Not every surface of the window means its "the window", not at all.
-                // Some clients (like OBS-studio) use subsurfaces (not popups) to display different
-                // parts of their interface (for example OBs does this with the preview window)
-                //
-                // To counter this, we check here if the surface is going to clip.
-                if RoundedCornerElement::will_clip(&e, scale, element_geo, radius) {
-                    let rounded = RoundedCornerElement::new(e, radius, element_geo, scale);
-                    WorkspaceTileRenderElement::RoundedElement(rounded)
+        if let Some(resize_animation) = self.resize_animation.as_ref() {
+            let current_size = resize_animation.current_size();
+
+            let renderer = renderer.glow_renderer_mut();
+            let mut buffer_geo = element_geo;
+            buffer_geo.loc = (0, 0).into();
+
+            let ResizeAnimation {
+                prev_size,
+                next_size,
+                ..
+            } = *resize_animation;
+            let can_crop = next_size.w >= prev_size.w && next_size.h >= prev_size.h;
+
+            let elements = if can_crop {
+                // Since we rendering to (0,0) the crop rect for rounded elements shall adapt too.
+                let mut buffer_element_geo = element_geo;
+                buffer_element_geo.loc = Point::default();
+                self
+                    .element
+                    .render_surface_elements(renderer, Point::from((0, 0)), scale, alpha)
+                    .into_iter()
+                    .map(move |e| {
+                        if !need_rounding {
+                            return WorkspaceTileRenderElement::Element(e);
+                        }
+
+                        // Rounding off windows is a little tricky.
+                        //
+                        // Not every surface of the window means its "the window", not at all.
+                        // Some clients (like OBS-studio) use subsurfaces (not popups) to display
+                        // different parts of their interface (for example
+                        // OBs does this with the preview window)
+                        //
+                        // To counter this, we check here if the surface is going to clip.
+                        if RoundedCornerElement::will_clip(&e, scale, buffer_element_geo, radius) {
+                            let rounded = RoundedCornerElement::new(e, radius, buffer_element_geo, scale);
+                            WorkspaceTileRenderElement::RoundedElement(rounded)
+                        } else {
+                            WorkspaceTileRenderElement::Element(e)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                self
+                    .element
+                    .render_surface_elements(renderer, Point::from((0, 0)), scale, alpha)
+                    .into_iter()
+                    .map(WorkspaceTileRenderElement::Element)
+                    .collect::<Vec<_>>()
+            };
+            let rec = elements
+                .iter()
+                .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
+            // NOTE: We have to set this here since we depend on it when generating surface
+            // elements above.
+            element_geo.size = current_size;
+
+            resize_elements = render_to_texture(
+                renderer,
+                rec.size,
+                scale,
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                elements.into_iter(),
+            )
+            .map_err(|err| {
+                warn!(
+                    ?err,
+                    "Failed to render window elements for resize animation"
+                )
+            })
+            .ok()
+            .map(|(texture, _sync_point)| {
+                let element_id = Id::new();
+                let texture = TextureRenderElement::from_static_texture(
+                    element_id.clone(),
+                    renderer.id(),
+                    location.to_f64(),
+                    texture,
+                    scale.x.max(scale.y) as i32,
+                    Transform::Normal,
+                    Some(alpha),
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                )
+                .into();
+                self.element.set_offscreen_element_id(Some(element_id));
+
+                let resize_element = if can_crop {
+                    let crop_rect = Rectangle::from_loc_and_size(
+                        location,
+                        current_size.to_physical_precise_round(scale),
+                    );
+                    let cropped = CropRenderElement::from_element(texture, scale, crop_rect).unwrap();
+                    WorkspaceTileResizeElement::Cropped(cropped)
                 } else {
-                    WorkspaceTileRenderElement::Element(e)
-                }
+                    let scale = current_size.to_f64() / resize_animation.next_size.to_f64();
+                    let rescaled = RescaleRenderElement::from_element(texture, location, scale);
+                    let rounded = RoundedCornerElement::new(rescaled, radius, element_geo, scale);
+                    WorkspaceTileResizeElement::Scaled(rounded)
+                };
+
+                WorkspaceTileRenderElement::Resize(resize_element)
             });
+        } else {
+            self.element.set_offscreen_element_id(None);
+            window_elements = Some(
+                self.element
+                    .render_surface_elements(renderer, location, scale, alpha)
+                    .into_iter()
+                    .map(move |e| {
+                        if !need_rounding {
+                            return WorkspaceTileRenderElement::Element(e);
+                        }
+
+                        // Rounding off windows is a little tricky.
+                        //
+                        // Not every surface of the window means its "the window", not at all.
+                        // Some clients (like OBS-studio) use subsurfaces (not popups) to display
+                        // different parts of their interface (for example
+                        // OBs does this with the preview window)
+                        //
+                        // To counter this, we check here if the surface is going to clip.
+                        if RoundedCornerElement::will_clip(&e, scale, element_geo, radius) {
+                            let rounded = RoundedCornerElement::new(e, radius, element_geo, scale);
+                            WorkspaceTileRenderElement::RoundedElement(rounded)
+                        } else {
+                            WorkspaceTileRenderElement::Element(e)
+                        }
+                    }),
+            );
+        }
+
         let popup_elements = self
             .element
-            .render_popup_elements(renderer, element_physical_geo.loc, scale, alpha)
+            .render_popup_elements(renderer, location, scale, alpha)
             .into_iter()
             .map(WorkspaceTileRenderElement::Element);
 
         // We need to have extra damage in the case we have a radius ontop of our window
         let damage = (radius != 0.0)
             .then(|| {
-                let damage = self
-                    .rounded_corner_damage
-                    .clone()
-                    .with_location(element_geo.loc);
-                WorkspaceTileRenderElement::RoundedElementDamage(damage)
+                let mut damage = self.rounded_corner_damage.clone();
+                if resize_elements.is_some() {
+                    // When we are resizing, damage changes for each frame.
+                    damage.set_size(element_geo.size);
+                }
+                WorkspaceTileRenderElement::RoundedElementDamage(damage.with_location(element_geo.loc))
             })
             .into_iter();
 
@@ -673,7 +898,8 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         popup_elements
             .into_iter()
             .chain(damage)
-            .chain(window_elements)
+            .chain(window_elements.into_iter().flatten())
+            .chain(resize_elements.into_iter())
             .chain(border_element)
     }
 
@@ -858,6 +1084,7 @@ crate::fht_render_elements! {
         Border = FhtPixelShaderElement,
         DebugOverlay = EguiRenderElement,
         OpenClose = WorkspaceTileOpenCloseElement,
+        Resize = WorkspaceTileResizeElement,
     }
 }
 
@@ -929,5 +1156,33 @@ impl OpenCloseAnimation {
         match self {
             Self::Opening { progress } | Self::Closing { progress, .. } => progress.value() as f32,
         }
+    }
+}
+
+crate::fht_render_elements! {
+    WorkspaceTileResizeElement => {
+        // For cropped elements, they are cropped in the texture.
+        Cropped = CropRenderElement<FhtTextureElement>,
+        // For rescaled elements, we need to apply the rounded corners *after* we render the
+        // elements to avoid stretching them.
+        Scaled = RoundedCornerElement<RescaleRenderElement<FhtTextureElement>>,
+    }
+}
+
+pub struct ResizeAnimation {
+    progress: Animation,
+    // NOTE: These are element sizes, not tile sizes.
+    prev_size: Size<i32, Logical>,
+    next_size: Size<i32, Logical>,
+}
+
+impl ResizeAnimation {
+    fn current_size(&self) -> Size<i32, Logical> {
+        let progress = self.progress.value();
+        let w = self.prev_size.w
+            + ((self.next_size.w - self.prev_size.w) as f64 * progress).round() as i32;
+        let h = self.prev_size.h
+            + ((self.next_size.h - self.prev_size.h) as f64 * progress).round() as i32;
+        (w, h).into()
     }
 }

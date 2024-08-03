@@ -308,10 +308,20 @@ fn add_window_pre_commit_hook(window: &Window) {
         // Since we are going to close, we take a snapshot of the window's elements,
         // like we do inside `Tile::render_elements` into a
         // GlesTexture and store that for future use.
-        let got_unmapped = with_states(surface, |states| {
+        let (got_unmapped, configure_serial) = with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
             let attrs = guard.pending();
-            matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
+            let got_unmapped = matches!(attrs.buffer, Some(BufferAssignment::Removed) | None);
+
+            let data = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            let configure_serial = data.configure_serial;
+
+            (got_unmapped, configure_serial)
         });
 
         if got_unmapped {
@@ -320,6 +330,12 @@ fn add_window_pre_commit_hook(window: &Window) {
                 tile.prepare_close_animation(renderer, scale);
             });
         } else {
+            if configure_serial
+                .is_some_and(|serial| tile.commit_will_cause_resize_animation(serial))
+            {
+                tile.start_resize_animation();
+            }
+
             tile.clear_close_snapshot();
         }
     });

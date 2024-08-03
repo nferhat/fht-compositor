@@ -6,7 +6,7 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{Id, Kind};
 use smithay::desktop::{PopupManager, Window};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
-use smithay::utils::{Logical, Physical, Point, Scale, Size};
+use smithay::utils::{Logical, Physical, Point, Scale, Serial, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
@@ -17,8 +17,8 @@ use crate::renderer::FhtRenderer;
 struct WindowOffscreenId(RefCell<Option<Id>>);
 
 impl WorkspaceElement for Window {
-    fn send_pending_configure(&self) {
-        self.toplevel().unwrap().send_pending_configure();
+    fn send_pending_configure(&self) -> Option<Serial> {
+        self.toplevel().unwrap().send_pending_configure()
     }
 
     fn set_size(&self, new_size: Size<i32, Logical>) {

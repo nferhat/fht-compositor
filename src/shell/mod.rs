@@ -341,7 +341,7 @@ impl Fht {
             workspace.tiles.iter_mut().chain(std::iter::once(&mut tile)),
             tile_area,
             CONFIG.general.inner_gaps,
-            false,
+            true,
         );
 
         // Client side-decorations
