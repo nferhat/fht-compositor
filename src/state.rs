@@ -96,15 +96,15 @@ impl State {
                 x => unimplemented!("No such backend implemented!: {x}"),
             }
         } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
-            info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window.");
+            info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window");
             #[cfg(feature = "x11_backend")]
             {
                 crate::backend::x11::X11Data::new(&mut fht).unwrap().into()
             }
             #[cfg(not(feature = "x11_backend"))]
-            panic!("X11 backend not enabled on this build! Enable the 'x11_backend' feature when building!");
+            panic!("X11 backend not enabled on this build! Enable the 'x11_backend' feature when building")
         } else {
-            info!("Running from TTY, initializing Udev backend.");
+            info!("Running from TTY, initializing Udev backend");
             #[cfg(feature = "udev_backend")]
             {
                 crate::backend::udev::UdevData::new(&mut fht)
@@ -112,7 +112,7 @@ impl State {
                     .into()
             }
             #[cfg(not(feature = "udev_backend"))]
-            panic!("Udev backend not enabled on this build! Enable the 'udev_backend' feature when building!");
+            panic!("Udev backend not enabled on this build! Enable the 'udev_backend' feature when building")
         };
 
         Self { fht, backend }
@@ -228,53 +228,26 @@ impl State {
 }
 
 pub struct Fht {
-    /// A handle to our wayland display.
     pub display_handle: DisplayHandle,
-    /// A handle to our event loop.
     pub loop_handle: LoopHandle<'static, State>,
-    /// A signal to our loop to control it.
     pub loop_signal: LoopSignal,
-    /// Whether we should stop every operation.
     pub stop: Arc<AtomicBool>,
 
-    /// wl_seat global.
     pub seat_state: SeatState<State>,
-    /// Our main wl_seat instance.
-    ///
-    /// For now, the scope of this compositor is rather small, it should be a standalone compositor
-    /// for a single head system. Supporting multi-seat/multi-head systems is not a priority.
     pub seat: Seat<State>,
-    /// The exposed seat keyboard.
     pub keyboard: KeyboardHandle<State>,
-    /// The exposed seat pointer.
     pub pointer: PointerHandle<State>,
-    /// A monotonic clock to tie frame events and input events.
     pub clock: Clock<Monotonic>,
-    /// A list of suppressed keys to not pass to the focused client.
     pub suppressed_keys: HashSet<Keysym>,
-    /// A list of devices managed by the compositor.
     pub devices: Vec<input::Device>,
-    /// Whether the interactive resize grab.
-    ///
-    /// This is a hacky way since we can't get the type of grab we current have with the pointer
-    /// api.
     pub resize_grab_active: bool,
 
-    /// The currently drawn drag and drop icon.
     pub dnd_icon: Option<WlSurface>,
-    /// The cursor theme manager.
-    ///
-    /// This handles the cursor theme with its bitmaps and icons (based on the Xcursor standard)
     pub cursor_theme_manager: CursorThemeManager,
-    /// The list of registered outputs, and their associated [`WorkspaceSet`]s
     pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
-    /// Windows that did not receive an initial configure message.
     pub pending_windows: Vec<PendingWindow>,
-    /// Windows that received an initial configure message and is still not mapped.
     pub unmapped_tiles: Vec<UnmappedTile>,
-    /// Focus state of the compositor.
     pub focus_state: FocusState,
-    /// xdg_popup manager
     pub popups: PopupManager,
     /// A cache of the root of each surface.
     ///
@@ -318,7 +291,6 @@ impl Fht {
         loop_signal: LoopSignal,
     ) -> Self {
         let clock = Clock::<Monotonic>::new();
-        info!("Initialized monotonic clock.");
 
         let compositor_state = CompositorState::new_v6::<State>(dh);
         let primary_selection_state = PrimarySelectionState::new::<State>(dh);
@@ -371,7 +343,10 @@ impl Fht {
         let keyboard = match res {
             Ok(k) => k,
             Err(err) => {
-                error!(?err, "Failed to add keyboard! Falling back to defaults");
+                error!(
+                    ?err,
+                    "Failed to add keyboard with user xkb config! Falling back to defaults"
+                );
                 seat.add_keyboard(
                     XkbConfig::default(),
                     keyboard_config.repeat_delay,
@@ -381,10 +356,7 @@ impl Fht {
             }
         };
         let pointer = seat.add_pointer();
-        info!("Initialized wl_seat.");
-
         let cursor_theme_manager = CursorThemeManager::new();
-
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 
         Self {
@@ -449,7 +421,7 @@ impl Fht {
             "Tried to add an output twice!"
         );
 
-        info!(name = output.name(), "Adding new output.");
+        info!(name = output.name(), "Adding new output");
 
         // Current default behaviour:
         //
@@ -457,7 +429,7 @@ impl Fht {
         // Right now this assumption can be false for alot of users, but this is just as a
         // fallback.
         let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
-        trace!(?x, y = 0, "Using fallback output location.");
+        debug!(?x, y = 0, "Using fallback output location");
         output.change_current_state(None, None, None, Some((x, 0).into()));
 
         let workspace_set = WorkspaceSet::new(output.clone());
@@ -479,7 +451,7 @@ impl Fht {
     ///
     /// Trying remove a non-existent output causes an assertion fail.
     pub fn remove_output(&mut self, output: &Output) {
-        info!(name = output.name(), "Removing output.");
+        info!(name = output.name(), "Removing output");
         let removed_wset = self
             .workspaces
             .swap_remove(output)

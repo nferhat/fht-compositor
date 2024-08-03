@@ -16,7 +16,7 @@ pub use screencast::{
 pub fn start(loop_handle: &LoopHandle<'static, State>) -> anyhow::Result<()> {
     #[cfg(feature = "xdg-screencast-portal")]
     {
-        info!("Starting XDG screencast portal!");
+        info!("Starting XDG screencast portal");
         let (to_compositor, from_screencast) = calloop::channel::channel::<ScreenCastRequest>();
         let (to_screencast, from_compositor) =
             async_std::channel::unbounded::<ScreenCastResponse>();

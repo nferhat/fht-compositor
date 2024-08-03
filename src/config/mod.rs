@@ -8,8 +8,7 @@ use smithay::reexports::input::{Device, DeviceCapability, SendEventsMode};
 pub use self::types::{
     AnimationConfig, BorderConfig, ColorConfig, CompositorConfig, CursorConfig, GeneralConfig,
     InputConfig, InsertWindowStrategy, KeyboardConfig, MouseConfig, PerDeviceInputConfig,
-    WindowRules, WindowPattern, WorkspaceSwitchAnimationConfig,
-    WorkspaceSwitchAnimationDirection,
+    WindowPattern, WindowRules, WorkspaceSwitchAnimationConfig, WorkspaceSwitchAnimationDirection,
 };
 use crate::state::{OutputState, State};
 
@@ -41,10 +40,10 @@ pub fn init_config_file_watcher(
                 .ok()
                 .filter(|mt| Some(mt) != last_mtime.as_ref())
             {
-                trace!(?new_mtime, "Config file change detected.");
+                debug!(?new_mtime, "Config file change detected");
                 last_mtime = Some(new_mtime);
                 if let Err(err) = sender.send(()) {
-                    warn!(?err, "Failed to notify config file change!");
+                    warn!(?err, "Failed to notify config file change")
                 };
             }
         }
@@ -91,7 +90,7 @@ impl State {
                 .clone()
                 .set_xkb_config(self, CONFIG.input.keyboard.get_xkb_config())
             {
-                error!(?err, "Failed to update keyboard xkb configuration!");
+                error!(?err, "Failed to update keyboard xkb configuration")
             }
         }
 

@@ -20,7 +20,13 @@ use crate::state::{Fht, OutputState, State};
 fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
     // the renderer
-    with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false)
+    with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or_else(|| {
+        warn!(
+            surface = surface.id().protocol_id(),
+            "Surface has no renderer state even though we use smithay buffer handler"
+        );
+        false
+    })
 }
 
 impl State {

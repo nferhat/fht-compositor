@@ -104,8 +104,7 @@ impl Portal {
         debug!(
             request_handle = request_handle.to_string(),
             session_handle = session_handle.to_string(),
-            ?app_id,
-            "Creating screencast session."
+            "create_session"
         );
 
         // Setup request and session
@@ -150,12 +149,18 @@ impl Portal {
 
     async fn select_sources(
         &self,
-        _request_handle: zvariant::ObjectPath<'_>,
+        request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
         app_id: String,
         options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+        debug!(
+            request_handle = request_handle.to_string(),
+            session_handle = session_handle.to_string(),
+            "select_sources"
+        );
+
         let session_ref = object_server
             .interface::<_, Session>(&session_handle)
             .await
@@ -166,14 +171,20 @@ impl Portal {
             .ok()
             .and_then(CursorMode::from_bits)
             .unwrap_or_else(|| {
-                warn!("Failed to get 'cursor_mode' from options, using EMBEDDED");
+                warn!(
+                    session_handle = session_handle.to_string(),
+                    "Failed to get 'cursor_mode' from options, using EMBEDDED"
+                );
                 CursorMode::EMBEDDED
             });
         let source_type = get_option_value::<u32>(&options, "source_type")
             .ok()
             .and_then(SourceType::from_bits)
             .unwrap_or_else(|| {
-                warn!("Failed to get 'source_type' from options, using MONITOR");
+                warn!(
+                    session_handle = session_handle.to_string(),
+                    "Failed to get 'source_type' from options, using MONITOR"
+                );
                 SourceType::MONITOR
             });
 
@@ -225,13 +236,19 @@ impl Portal {
 
     async fn start(
         &self,
-        _request_handle: zvariant::ObjectPath<'_>,
+        request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
         _app_id: String,
         _parent_window: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+        debug!(
+            request_handle = request_handle.to_string(),
+            session_handle = session_handle.to_string(),
+            "start"
+        );
+
         let session_ref = object_server
             .interface::<_, Session>(&session_handle)
             .await
@@ -244,7 +261,11 @@ impl Portal {
             source_type: session.source_type,
             cursor_mode: session.cursor_mode,
         }) {
-            warn!(?err, "PipeWire failed to start cast!");
+            warn!(
+                ?err,
+                session_handle = session_handle.to_string(),
+                "Pipewire failed to start cast!"
+            );
             session.close(object_server).await;
             return (1, HashMap::new());
         }
@@ -257,7 +278,10 @@ impl Portal {
                 source_type,
             }) => (node_id, location, size, source_type),
             Ok(Response::PipeWireFail) | Err(_) => {
-                error!("Pipewire failed to start cast!");
+                warn!(
+                    session = session_handle.to_string(),
+                    "Pipewire failed to start cast!"
+                );
                 session.close(object_server).await;
                 return (1, HashMap::new());
             }
@@ -378,7 +402,7 @@ impl State {
                 // We don't support screencasting on X11 since eh, you prob dont need it.
                 #[cfg(not(feature = "udev_backend"))]
                 {
-                    warn!("ScreenCast is only supported on udev backend!");
+                    warn!("ScreenCast is only supported on udev backend");
                     return;
                 }
                 #[cfg(feature = "udev_backend")]
@@ -386,14 +410,14 @@ impl State {
                     #[allow(irrefutable_let_patterns)]
                     let Backend::Udev(ref mut data) = &mut self.backend
                     else {
-                        warn!("ScreenCast is only supported on udev backend!");
+                        warn!("ScreenCast is only supported on udev backend");
                         return;
                     };
 
                     let Some(gbm_device) =
                         data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
                     else {
-                        warn!("No available GBM device!");
+                        warn!("No available GBM device");
                         return;
                     };
 
@@ -401,11 +425,10 @@ impl State {
                         SessionSource::Unset => unreachable!(),
                         SessionSource::Output(name, output) => {
                             if output.is_none() {
-                                info!(output_name = name);
                                 if let Some(o) = self.fht.output_named(&name) {
                                     *output = Some(o);
                                 } else {
-                                    warn!("Tried to start a screencast with an invalid output!");
+                                    warn!("Tried to start a screencast with an invalid output");
                                     to_screencast.send_blocking(Response::PipeWireFail).unwrap();
                                     return;
                                 }
@@ -413,7 +436,6 @@ impl State {
                         }
                         SessionSource::Rectangle(rec, output) => {
                             if output.is_none() {
-                                info!("Adding from rec");
                                 if let Some(o) = self
                                     .fht
                                     .outputs()
@@ -422,7 +444,7 @@ impl State {
                                 {
                                     *output = Some(o);
                                 } else {
-                                    warn!("Tried to start a screecast with an invalid region!");
+                                    warn!("Tried to start a screecast with an invalid region");
                                     to_screencast.send_blocking(Response::PipeWireFail).unwrap();
                                     return;
                                 }
@@ -432,17 +454,12 @@ impl State {
 
                     self.fht.pipewire_initialised.call_once(|| {
                         self.fht.pipewire = PipeWire::new(&self.fht.loop_handle)
-                            .map_err(|err| {
-                                warn!(
-                                    ?err,
-                                    "Failed to initialize PipeWire! ScreenCasts will NOT work!"
-                                );
-                            })
+                            .map_err(|err| warn!(?err, "Failed to initialize PipeWire!"))
                             .ok();
                     });
 
                     let Some(pipewire) = self.fht.pipewire.as_mut() else {
-                        warn!("PipeWire is not initialised!");
+                        warn!("PipeWire failed to initialize");
                         to_screencast.send_blocking(Response::PipeWireFail).unwrap();
                         return;
                     };
@@ -460,7 +477,7 @@ impl State {
                             pipewire.casts.push(cast);
                         }
                         Err(err) => {
-                            error!(?err, "Failed to start screen cast!");
+                            error!(?err, "Failed to start screen cast");
                             to_screencast.send_blocking(Response::PipeWireFail).unwrap();
                         }
                     }
@@ -476,6 +493,10 @@ impl State {
 impl Fht {
     #[profiling::function]
     pub fn stop_cast(&mut self, session_handle: zvariant::OwnedObjectPath) {
+        debug!(
+            session_handle = session_handle.to_string(),
+            "Stopping cast"
+        );
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
         };
@@ -485,27 +506,29 @@ impl Fht {
             .iter()
             .position(|c| c.session_handle == session_handle)
         else {
-            warn!("Tried to stop an invalid cast!");
+            warn!("Tried to stop an invalid cast");
             return;
         };
 
         let cast = pipewire.casts.swap_remove(idx);
         if let Err(err) = cast.stream.disconnect() {
-            warn!(?err, "Failed to disconnect PipeWire stream!");
+            warn!(?err, "Failed to disconnect PipeWire stream")
         }
 
         let object_server = DBUS_CONNECTION.object_server();
         let Ok(interface) = object_server.interface::<_, Session>(&session_handle) else {
-            warn!("Cast session doesn't exist!");
+            warn!(
+                session_handle = session_handle.to_string(),
+                "Cast session doesn't exist"
+            );
             return;
         };
         async_std::task::block_on(async {
             interface.get().close(object_server.inner()).await;
             if let Err(err) = interface.get().closed(interface.signal_context()).await {
-                warn!(?err, "Failed to send closed signal to screencast session!");
+                warn!(?err, "Failed to send closed signal to screencast session");
             };
         });
-        debug!(session_handle = session_handle.to_string(), "Stopped cast!");
     }
 }
 

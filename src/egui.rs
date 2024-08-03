@@ -127,7 +127,7 @@ impl EguiElement {
                 let mut frame = renderer
                     .render(size, Transform::Normal)
                     .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output!");
+                        warn!(?err, "Failed to create egui glow painter for output");
                         err
                     })
                     .expect("Failed to create frame");
@@ -139,7 +139,7 @@ impl EguiElement {
                         egui_glow::Painter::new(context.clone(), "", None)
                     })?
                     .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output!");
+                        warn!(?err, "Failed to create egui glow painter for output");
                         GlesError::ShaderCompileError
                     })?;
 
@@ -158,7 +158,7 @@ impl EguiElement {
                 let render_texture: GlesTexture = renderer
                     .create_buffer(Fourcc::Abgr8888, buffer_size)
                     .map_err(|err| {
-                        warn!(?err, "Failed to create egui overlay texture buffer!!");
+                        warn!(?err, "Failed to create egui overlay texture buffer");
                         err
                     })?;
 

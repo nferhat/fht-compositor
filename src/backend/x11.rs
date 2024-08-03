@@ -75,7 +75,7 @@ impl X11Data {
 
         #[cfg(feature = "egl")]
         if renderer.bind_wl_display(&state.display_handle).is_ok() {
-            info!("EGL hardware-acceleration enabled.");
+            info!("EGL hardware-acceleration enabled");
         }
 
         let dmabuf_formats = renderer.dmabuf_formats();
@@ -276,7 +276,7 @@ impl X11Data {
         current_time: Duration,
     ) -> anyhow::Result<bool> {
         let Some(surface) = self.surfaces.values_mut().find(|s| s.output == *output) else {
-            anyhow::bail!("Tried to render a non existing surface!");
+            anyhow::bail!("Tried to render a non existing surface")
         };
 
         surface.fps.start();

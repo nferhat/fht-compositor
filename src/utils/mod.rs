@@ -70,17 +70,17 @@ pub fn spawn(cmd: String) {
             match child.wait() {
                 Ok(status) => {
                     if !status.success() {
-                        warn!(?status, "Child didn't exit sucessfully!");
+                        warn!(?status, "Child didn't exit sucessfully")
                     }
                 }
                 Err(err) => {
-                    warn!(?err, "Failed to wait for child!");
+                    warn!(?err, "Failed to wait for child")
                 }
             }
         });
 
     if let Err(err) = res {
-        warn!(?err, "Failed to create command spawner for command!");
+        warn!(?err, "Failed to create command spawner for command")
     }
 }
 

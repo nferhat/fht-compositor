@@ -43,8 +43,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .compact()
         .with_env_filter(filter)
-        .without_time() // no need to see the time (maybe add a cli option for this?)
-        .with_target(false) // no need to see the module where the log was from
         .init();
 
     info!(
@@ -61,7 +59,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             puffin_http::Server::new(&server_addr).expect("Failed to start profiler!");
         profiling::puffin::set_scopes_on(true);
 
-        info!(?server_addr, "Puffin profiler listening.");
+        info!(?server_addr, "Puffin profiler listening");
         _puffin_server
     };
 
@@ -91,11 +89,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
                     .display_handle
                     .insert_client(client_stream, Arc::new(state.new_client_state()));
                 if let Err(err) = ret {
-                    warn!(?err, "Failed to add wayland client to display!");
+                    warn!(?err, "Failed to add wayland client to display");
                 }
             })
             .expect("Failed to init the Wayland event source!");
-        info!(?socket_name, "Listening on socket.");
+        info!(?socket_name, "Listening on socket");
 
         loop_handle
             .insert_source(
@@ -120,20 +118,20 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     }
     #[cfg(any(feature = "xdg-screencast-portal"))]
     if let Err(err) = portals::start(&loop_handle) {
-        error!(?err, "Failed to start XDG portals!");
+        error!(?err, "Failed to start XDG portals")
     }
 
     // Load the configuration before the state, since the state itself uses the config.
     let mut last_config_error = None;
     match CompositorConfig::load() {
         Ok(config) => {
-            info!("Loaded config.");
+            info!("Loaded config");
             // The config is always initialized to the default values as a failsafe.
             // Update them now
             CONFIG.set(config);
         }
         Err(err) => {
-            error!(?err, "Failed to load config!");
+            error!(?err, "Failed to load config");
             last_config_error = Some(anyhow::anyhow!(err));
             CONFIG.set(CompositorConfig::default())
         }

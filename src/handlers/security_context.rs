@@ -22,7 +22,7 @@ impl SecurityContextHandler for State {
                     .display_handle
                     .insert_client(client_stream, Arc::new(client_state))
                 {
-                    warn!(?err, "Failed to add wayland client to display!");
+                    warn!(?err, "Failed to add wayland client to display")
                 }
             })
             .expect("Failed to init Wayland security context source!");

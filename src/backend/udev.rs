@@ -144,7 +144,7 @@ impl UdevData {
                             .udev()
                             .device_added(device_id, &path, &mut state.fht)
                     {
-                        error!(?err, "Failed to add device!");
+                        error!(?err, "Failed to add device")
                     }
                 }
                 UdevEvent::Changed { device_id } => {
@@ -153,7 +153,7 @@ impl UdevData {
                         .udev()
                         .device_changed(device_id, &mut state.fht)
                     {
-                        error!(?err, "Failed to update device!");
+                        error!(?err, "Failed to update device")
                     }
                 }
                 UdevEvent::Removed { device_id } => {
@@ -162,7 +162,7 @@ impl UdevData {
                         .udev()
                         .device_removed(device_id, &mut state.fht)
                     {
-                        error!(?err, "Failed to remove device!");
+                        error!(?err, "Failed to remove device")
                     }
                 }
             });
@@ -219,7 +219,7 @@ impl UdevData {
             .loop_handle
             .insert_source(notifier, move |event, &mut (), state| match event {
                 SessionEvent::PauseSession => {
-                    info!("Pausing session!");
+                    debug!("Pausing session");
                     libinput_context.suspend();
 
                     for device in state.backend.udev().devices.values_mut() {
@@ -231,10 +231,10 @@ impl UdevData {
                     }
                 }
                 SessionEvent::ActivateSession => {
-                    info!("Resuming session!");
+                    debug!("Resuming session");
 
                     if let Err(err) = libinput_context.resume() {
-                        error!("Failed to resume libinput context: {:?}", err);
+                        error!(?err, "Failed to resume libinput context");
                     }
 
                     for device in &mut state.backend.udev().devices.values_mut() {
@@ -250,7 +250,7 @@ impl UdevData {
                         }
                         for surface in device.surfaces.values_mut() {
                             if let Err(err) = surface.compositor.reset_state() {
-                                warn!("Failed to reset drm surface state: {}", err);
+                                warn!(?err, "Failed to reset drm surface state");
                             }
                         }
                     }
@@ -294,8 +294,11 @@ impl UdevData {
 
                 (primary_gpu, primary_node)
             };
-        info!(?primary_gpu, "Found primary GPU for rendering!");
-        info!(?primary_node);
+        info!(
+            ?primary_gpu,
+            ?primary_node,
+            "Found primary GPU for rendering!"
+        );
 
         let mut data = UdevData {
             primary_gpu,
@@ -348,7 +351,7 @@ impl UdevData {
 
         for (device_id, path) in udev_dispatcher.as_source_ref().device_list() {
             if let Err(err) = data.device_added(device_id, path, state) {
-                error!(?err, "Failed to add device!");
+                error!(?err, "Failed to add device")
             }
         }
 
@@ -378,7 +381,7 @@ impl UdevData {
     // Early import this [`WlSurface`] to the [`GpuManager`]
     pub fn early_import(&mut self, surface: &WlSurface) {
         if let Err(err) = self.gpu_manager.early_import(self.primary_gpu, surface) {
-            warn!(?err, "Failed to early import buffer!");
+            warn!(?err, "Failed to early import buffer")
         }
     }
 
@@ -388,6 +391,7 @@ impl UdevData {
             return Ok(());
         }
 
+        debug!(?device_id, ?path, "Trying to add DRM device");
         // Get the DRM device from device ID, if any.
         let device_node = DrmNode::from_dev_id(device_id)?;
 
@@ -416,7 +420,7 @@ impl UdevData {
                         .on_vblank(device_node, crtc, metadata, &mut state.fht);
                 }
                 DrmEvent::Error(err) => {
-                    error!(?err, "Failed to process DRM events!");
+                    error!(?device_id, ?err, "Failed to process DRM events")
                 }
             })
             .context("Failed to insert DRM event source!")?;
@@ -435,7 +439,7 @@ impl UdevData {
             .context("Failed to add GBM device to GPU manager!")?;
 
         if device_node == self.primary_node {
-            debug!("Adding primary node.");
+            debug!("Adding primary node");
 
             #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
             let mut renderer = self
@@ -445,13 +449,12 @@ impl UdevData {
 
             #[cfg(feature = "egl")]
             {
-                info!(
-                    ?self.primary_gpu,
-                    "Trying to initialize EGL Hardware Acceleration",
-                );
                 match renderer.bind_wl_display(&fht.display_handle) {
-                    Ok(_) => info!("EGL hardware-acceleration enabled"),
-                    Err(err) => info!(?err, "Failed to initialize EGL hardware-acceleration"),
+                    Ok(_) => info!(
+                        ?self.primary_gpu,
+                        "EGL hardware-acceleration enabled"
+                    ),
+                    Err(err) => warn!(?err, "Failed to initialize EGL hardware-acceleration"),
                 }
             }
 
@@ -459,7 +462,7 @@ impl UdevData {
             let dmabuf_formats = renderer.dmabuf_formats();
             let default_feedback = DmabufFeedbackBuilder::new(device_node.dev_id(), dmabuf_formats)
                 .build()
-                .unwrap();
+                .context("Failed to create dmabuf feedback")?;
             let global = fht
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(
@@ -490,7 +493,7 @@ impl UdevData {
                 non_desktop_connectors: Vec::new(),
                 lease_state: DrmLeaseState::new::<State>(&fht.display_handle, &device_node)
                     .map_err(|err| {
-                        warn!(?err, ?device_node, "Failed to initialize DRM lease state!");
+                        warn!(?err, ?device_node, "Failed to initialize DRM lease state")
                     })
                     .ok(),
                 active_leases: Vec::new(),
@@ -530,7 +533,7 @@ impl UdevData {
                         if let Err(err) =
                             self.connector_connected(device_node, connector, crtc, fht)
                         {
-                            error!(?crtc, ?err, "Failed to add connector to device!");
+                            error!(?crtc, ?err, "Failed to add connector to device")
                         };
                     }
                     // No crtc, can't do much for you since I dont even know WHAT you connected.
@@ -540,7 +543,7 @@ impl UdevData {
                         if let Err(err) =
                             self.connector_disconnected(device_node, connector, crtc, fht)
                         {
-                            error!(?crtc, ?err, "Failed to remove connector from device!");
+                            error!(?crtc, ?err, "Failed to remove connector from device")
                         }
                     }
                     // No crtc, can't do much for you since I dont even know WHAT you disconnected.
@@ -597,6 +600,7 @@ impl UdevData {
         crtc: CrtcHandle,
         fht: &mut Fht,
     ) -> anyhow::Result<()> {
+        debug!(?device_node, ?crtc, "Connector connected");
         let Some(device) = self.devices.get_mut(&device_node) else {
             warn!(
                 ?device_node,
@@ -620,13 +624,17 @@ impl UdevData {
             connector.interface().as_str(),
             connector.interface_id()
         );
-        info!(?crtc, ?output_name, "Trying to setup connector.");
+        debug!(?crtc, ?output_name, "Trying to setup connector");
 
         let non_desktop =
             match drm_utils::get_property_val(&device.drm, connector.handle(), "non-desktop") {
                 Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
                 Err(err) => {
-                    warn!(?err, "Assuming connector is meant for desktop.");
+                    warn!(
+                        ?crtc,
+                        ?err,
+                        "Failed to get non-desktop property for connector, defaulting to false."
+                    );
                     false
                 }
             };
@@ -636,7 +644,7 @@ impl UdevData {
             .unwrap_or_else(|| ("Unknown".into(), "Unknown".into()));
 
         if non_desktop {
-            info!(
+            debug!(
                 connector_name = output_name,
                 "Setting up connector for leasing!"
             );
@@ -732,6 +740,7 @@ impl UdevData {
                 .to_lowercase()
                 .contains("nvidia")
         {
+            debug!(?crtc, "Detected nvidia device, disable overlay planes");
             planes.overlay = vec![];
         }
 
@@ -768,12 +777,8 @@ impl UdevData {
             last_primary_swapchain: CommitCounter::default(),
             last_primary_element: CommitCounter::default(),
         };
-
+        OutputState::get(&surface.output).render_state.queue();
         device.surfaces.insert(crtc, surface);
-
-        // if let Err(err) = self.schedule_render(&output, Duration::ZERO, &fht.loop_handle) {
-        //     error!(?err, "Failed to schedule initial render for surface!");
-        // };
 
         Ok(())
     }
@@ -786,6 +791,7 @@ impl UdevData {
         crtc: CrtcHandle,
         fht: &mut Fht,
     ) -> anyhow::Result<()> {
+        debug!(?device_node, ?crtc, "Connector disconnected");
         let Some(device) = self.devices.get_mut(&device_node) else {
             warn!(
                 ?device_node,
@@ -850,12 +856,12 @@ impl UdevData {
                 crtc.map(|crtc| (*device_node, crtc))
             })
         else {
-            anyhow::bail!("No surface matching output!");
+            anyhow::bail!("No surface matching output")
         };
 
         let device = self.devices.get_mut(&device_node).unwrap();
         if !device.drm.is_active() {
-            anyhow::bail!("Device DRM is not active!");
+            anyhow::bail!("Device DRM is not active")
         }
 
         let surface = device.surfaces.get_mut(&crtc).unwrap();
@@ -867,7 +873,7 @@ impl UdevData {
             self.gpu_manager
                 .renderer(&self.primary_gpu, &surface.render_node, format)
         }) else {
-            anyhow::bail!("Failed to get renderer!");
+            anyhow::bail!("Failed to get renderer")
         };
 
         surface.fps.start();
@@ -917,7 +923,7 @@ impl UdevData {
 
         match res {
             Err(err) => {
-                warn!(?err, "Rendering error!");
+                warn!(?err, "Rendering error")
             }
             Ok(res) => {
                 if res.needs_sync() {
@@ -1463,7 +1469,7 @@ fn render_screencopy<'a>(
             });
 
         let Ok(res) = res else {
-            unreachable!("Buffer is guaranteed to SHM and should be managed by wl_shm!");
+            unreachable!("Buffer is guaranteed to SHM and should be managed by wl_shm")
         };
 
         res
@@ -1490,7 +1496,7 @@ fn render_screencopy<'a>(
                 Ok(PostAction::Remove)
             });
             if let Err(err) = res {
-                error!(?err, "Failed to schedule screencopy submission!");
+                error!(?err, "Failed to schedule screencopy submission")
             }
         }
         Ok(_) => screencopy.submit(false),

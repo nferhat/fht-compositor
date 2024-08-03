@@ -53,7 +53,7 @@ impl XdgShellHandler for State {
         }
 
         let Some((tile, output)) = self.fht.find_tile_and_output(surface.wl_surface()) else {
-            warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles!");
+            warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles");
             return;
         };
         OutputState::get(&output).render_state.queue();
@@ -297,7 +297,7 @@ fn add_window_pre_commit_hook(window: &Window) {
     let wl_surface = window.wl_surface().unwrap();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
         let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
-            warn!("Window pre-commit hook should be removed when unmapped!");
+            warn!("Window pre-commit hook should be removed when unmapped");
             return;
         };
 

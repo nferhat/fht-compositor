@@ -70,7 +70,7 @@ impl PipeWire {
         let listener = core
             .add_listener_local()
             .error(|id, seq, res, message| {
-                warn!(?id, ?seq, ?res, ?message, "PipeWire error!");
+                warn!(?id, ?seq, ?res, ?message, "PipeWire error")
             })
             .register();
         std::mem::forget(listener);
@@ -112,10 +112,10 @@ impl PipeWire {
         cursor_mode: CursorMode,
     ) -> anyhow::Result<Cast> {
         let Some(output) = source.output().cloned() else {
-            anyhow::bail!("Session source has no output!");
+            anyhow::bail!("Session source has no output")
         };
         let Some(rec) = source.rectangle() else {
-            anyhow::bail!("Session source has no rectangle!");
+            anyhow::bail!("Session source has no rectangle")
         };
         let mode = output.current_mode().unwrap();
         let transform = output.current_transform();
@@ -150,7 +150,7 @@ impl PipeWire {
                 let is_active = is_active.clone();
                 let stop_cast = stop_cast.clone();
                 move |stream, (), old, new| {
-                    debug!(?old, ?new, "New PipeWire stream state");
+                    debug!(id = stream.node_id(), ?old, ?new, "New state");
 
                     match new {
                         StreamState::Streaming => {
@@ -185,7 +185,7 @@ impl PipeWire {
             .param_changed({
                 move |stream, (), id, pod| {
                     let id = ParamType::from_raw(id);
-                    debug!(?id, "PipeWire stream paramters changed.");
+                    debug!(?id, "Paramters changed");
 
                     if id != ParamType::Format {
                         return;
@@ -207,7 +207,7 @@ impl PipeWire {
 
                     let mut format = VideoInfoRaw::new();
                     format.parse(pod).unwrap();
-                    trace!("pw stream: got format = {format:?}");
+                    trace!(?id, ?format, "Got requested format");
 
                     const BPP: u32 = 4;
                     let stride = format.size().width * BPP;
@@ -258,8 +258,9 @@ impl PipeWire {
             .add_buffer({
                 let dmabufs = dmabufs.clone();
                 let stop_cast = stop_cast.clone();
-                move |_stream, (), buffer| {
-                    debug!("New PipeWire buffer.");
+                move |stream, (), buffer| {
+                    let id = stream.node_id();
+                    debug!(?id, "New buffer");
 
                     unsafe {
                         let spa_buffer = (*buffer).buffer;
@@ -275,7 +276,7 @@ impl PipeWire {
                         ) {
                             Ok(bo) => bo,
                             Err(err) => {
-                                warn!("error creating GBM buffer object: {err:?}");
+                                warn!(?id, ?err, "Failed to create GBM buffer object");
                                 stop_cast();
                                 return;
                             }
@@ -284,7 +285,7 @@ impl PipeWire {
                         let dmabuf = match gbm_buffer.export() {
                             Ok(dmabuf) => dmabuf,
                             Err(err) => {
-                                warn!("error exporting GBM buffer object as dmabuf: {err:?}");
+                                warn!(?id, ?err, "Failed to export GBM buffer");
                                 stop_cast();
                                 return;
                             }
@@ -303,8 +304,8 @@ impl PipeWire {
             })
             .remove_buffer({
                 let dmabufs = dmabufs.clone();
-                move |_stream, (), buffer| {
-                    trace!("pw stream: remove_buffer");
+                move |stream, (), buffer| {
+                    trace!(id = stream.node_id(), "Remove buffer");
 
                     unsafe {
                         let spa_buffer = (*buffer).buffer;

@@ -43,7 +43,7 @@ impl Backend {
         if let Self::X11(data) = self {
             return data;
         }
-        unreachable!("Tried to get x11 backend data on non-x11 backend!");
+        unreachable!("Tried to get x11 backend data on non-x11 backend")
     }
 
     /// Access the underlying udev backend, if any.
@@ -57,7 +57,7 @@ impl Backend {
         if let Self::Udev(data) = self {
             return data;
         }
-        unreachable!("Tried to get udev backend data on non-udev backend!");
+        unreachable!("Tried to get udev backend data on non-udev backend")
     }
 
     /// Request the backend to schedule a next frame for this output.

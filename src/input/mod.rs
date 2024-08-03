@@ -315,7 +315,7 @@ impl State {
                                             - Keysym::XF86_Switch_VT_1.raw()
                                             + 1) as i32,
                                     ) {
-                                        error!(?err, "Failed switching virtual terminal.");
+                                        error!(?err, "Failed switching virtual terminal");
                                     }
                                     suppressed_keys.insert(keysym);
                                     return FilterResult::Intercept(KeyAction::None);
