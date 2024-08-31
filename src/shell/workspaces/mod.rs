@@ -448,6 +448,15 @@ fht_render_elements! {
     }
 }
 
+static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct WorkspaceId(usize);
+impl WorkspaceId {
+    pub fn unique() -> Self {
+        Self(WORKSPACE_IDS.fetch_add(1, Ordering::SeqCst))
+    }
+}
+
 pub struct Workspace<E: WorkspaceElement> {
     pub output: Output,
 
@@ -460,6 +469,7 @@ pub struct Workspace<E: WorkspaceElement> {
     pub fullscreen: Option<FullscreenTile<E>>,
 
     pub active_layout_idx: usize,
+    id: WorkspaceId,
 }
 
 impl<E: WorkspaceElement> Workspace<E> {
@@ -471,7 +481,12 @@ impl<E: WorkspaceElement> Workspace<E> {
             layouts: CONFIG.general.layouts.clone(),
             active_layout_idx: 0,
             fullscreen: None,
+            id: WorkspaceId::unique(),
         }
+    }
+
+    pub fn id(&self) -> WorkspaceId {
+        self.id
     }
 
     pub fn tiles(&self) -> impl Iterator<Item = &WorkspaceTile<E>> {
@@ -1430,6 +1445,7 @@ mod tests {
             ],
             active_layout_idx: 0,
             fullscreen: None,
+            id: super::WorkspaceId::unique()
         }
     }
 
