@@ -48,13 +48,6 @@ pub struct Surface {
 }
 
 impl X11Data {
-    /// Create a new instance of this x11 backend.
-    ///
-    /// With this backend will be create two x11 surfaces to represent two differents outputs:
-    /// X11-0 and X11-1.
-    ///
-    /// The backend will also initialize a default dmabuf feedback, and an allocator using either
-    /// Vulkan or GBM as a fallback.
     pub fn new(state: &mut Fht) -> anyhow::Result<Self> {
         // Create the X11 backend and get the DRM node for direct rendering.
         let backend = X11Backend::new().context("Failed to initialize X11 backend!")?;
@@ -169,10 +162,6 @@ impl X11Data {
         Ok(data)
     }
 
-    /// Create a new X11 surface for this backend.
-    ///
-    /// This will create a new window named `fht-compositor (X11-{surface_number})`, assign a new
-    /// output to this surface, with an allocator for its buffers.
     pub fn new_surface(&mut self, state: &mut Fht) -> anyhow::Result<()> {
         let window_idx = self.surfaces.len();
         let window = WindowBuilder::new()
@@ -267,7 +256,6 @@ impl X11Data {
         Ok(())
     }
 
-    /// Render a given [`Output`], if an associated [`Surface`] is found for it.
     #[profiling::function]
     pub fn render(
         &mut self,
@@ -363,7 +351,6 @@ impl X11Data {
         }
     }
 
-    /// Import a [`Dmabuf`] to this renderer.
     pub fn dmabuf_imported(&mut self, dmabuf: &Dmabuf, notifier: ImportNotifier) {
         if self.renderer.import_dmabuf(dmabuf, None).is_ok() {
             let _ = notifier.successful::<State>();

@@ -7,7 +7,6 @@ use smithay::utils::{Coordinate, Monotonic, Point, Time};
 
 use self::curve::AnimationCurve;
 
-/// A type that can be animated using an [`Animation`]
 pub trait Animatable:
     Sized
     + std::fmt::Debug
@@ -16,10 +15,6 @@ pub trait Animatable:
     + Copy
     + PartialEq
 {
-    /// Return the scaled value by x, where x is contained in [0.0, 1.0]
-    ///
-    /// You are free to change the x value as much as you want, but to avoid wonky cutoffs in your
-    /// animations, make sure that remains 0.0 and 1.0 at the edges of your custom function.
     fn y(&self, x: f64) -> Self;
 }
 
@@ -47,9 +42,6 @@ impl Animatable for f64 {
     }
 }
 
-/// An animatable variable.
-///
-/// See [`Animatable`]
 #[derive(Clone, Copy, Debug)]
 pub struct Animation<T = f64>
 where
@@ -65,9 +57,6 @@ where
 }
 
 impl<T: Animatable> Animation<T> {
-    /// Creates a new animation with given parameters.
-    ///
-    /// This returns None if `start == end`
     pub fn new(start: T, end: T, curve: AnimationCurve, mut duration: Duration) -> Option<Self> {
         if start == end {
             return None;
@@ -101,9 +90,6 @@ impl<T: Animatable> Animation<T> {
         })
     }
 
-    /// Set the current time of the animation.
-    ///
-    /// This will calculate the new value at this time.
     pub fn set_current_time(&mut self, new_current_time: Time<Monotonic>) {
         self.current_time = new_current_time;
         self.current_value = match &mut self.curve {
@@ -133,14 +119,10 @@ impl<T: Animatable> Animation<T> {
         };
     }
 
-    /// Check whether the animation is finished or not.
-    ///
-    /// Basically checks the time.
     pub fn is_finished(&self) -> bool {
         Time::elapsed(&self.started_at, self.current_time) >= self.duration
     }
 
-    /// Get the value at the current time
     pub fn value(&self) -> T {
         self.current_value
     }

@@ -4,14 +4,8 @@ use std::time::Duration;
 use serde::de::Visitor;
 use serde::{Deserialize, Serialize};
 
-/// Delta by which we check durations and values.
 const DELTA: f64 = 0.001;
 
-/// Spring-based animation.
-///
-/// Implementation converted from the following:
-/// - https://github.com/GNOME/libadwaita/blob/main/src/adw-spring-animation.c
-/// - https://github.com/GNOME/libadwaita/blob/main/src/adw-spring-params.c
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Animation {
     initial_velocity: f64,
@@ -137,7 +131,6 @@ impl<'de> Deserialize<'de> for Animation {
 }
 
 impl Animation {
-    /// Get the duration of this spring animation.
     pub fn duration(&self) -> Duration {
         let beta = self.damping / (2.0 * self.mass);
 
@@ -191,7 +184,6 @@ impl Animation {
         Duration::from_secs_f64(x1)
     }
 
-    /// Get the first 0 value of this animation.
     pub fn first_zero(&self) -> Duration {
         // The first frame is not that important and we avoid finding the trivial 0
         // for in-place animations.
@@ -215,8 +207,6 @@ impl Animation {
         Duration::from_secs_f64(x)
     }
 
-    /// Get a Y value ranging inside [0.0, 1.0] using an X value from where x is the time in
-    /// seconds
     pub fn oscillate(&self, t: f64) -> f64 {
         let v0 = self.initial_velocity;
         let x0 = -1.0; // x0 is start - end, but start is always 0.0, soo.

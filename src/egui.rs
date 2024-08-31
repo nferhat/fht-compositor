@@ -19,16 +19,12 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transfor
 
 use crate::renderer::texture_element::FhtTextureElement;
 
-/// A single Egui element.
-///
-/// This element holds a single egui window in which egui's [`Context`] will draw,
 pub struct EguiElement {
     size: Size<i32, Logical>,
     inner: Arc<Mutex<EguiElementInner>>,
 }
 
 impl EguiElement {
-    /// Create a new [`EguiElement`] with a given `size`
     pub fn new(size: Size<i32, Logical>) -> Self {
         let xkb_keymap = xkb::Keymap::new_from_names(
             &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
@@ -55,7 +51,6 @@ impl EguiElement {
         }
     }
 
-    /// Resize the element.
     pub fn set_size(&mut self, new_size: Size<i32, Logical>) {
         self.size = new_size;
         let mut guard = self.inner.lock().unwrap();
@@ -65,10 +60,6 @@ impl EguiElement {
         }
     }
 
-    /// Run the element's context, sending all the queued up events to the context.
-    ///
-    /// - `ui` is your function used to render the context.
-    /// - `time` is the current system monotonic time.
     pub fn run(&self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
         let mut guard = self.inner.lock().unwrap();
         let size = self.size.to_physical(scale);
@@ -95,10 +86,6 @@ impl EguiElement {
         let _ = guard.context.run(input, ui);
     }
 
-    /// Run the element's context, sending all the queued up events to the context.
-    ///
-    /// - `ui` is your function used to render the context.
-    /// - `time` is the current system monotonic time.
     pub fn render(
         &self,
         renderer: &mut GlowRenderer,
@@ -234,29 +221,14 @@ impl EguiElement {
 }
 
 pub struct EguiElementInner {
-    /// The egui context used to run and draw our UI.
     context: egui::Context,
-    /// Glow painter state.
-    /// This may not be always Some, as it gets initialized on the first [`Self::render`] call.
     painter: Option<EguiGlowPainter>,
 
-    /// The last pointer position on this element.
-    /// If this is `None`, this means there's no pointer on the element.
     last_pointer_position: Option<Point<i32, Logical>>,
-    /// Last registered modifiers state for keyboard input events.
     last_modifiers: ModifiersState,
-    /// XKB keyboard keymap layout.
     #[allow(unused)] // we have to keep it as long as xkb_state
     xkb_keymap: xkb::Keymap,
-    /// XKB keyboard state machine.
     xkb_state: xkb::State,
-    /// Queued up events.
-    ///
-    /// We use egui in "reactive" mode in this integration, and by that we mean that we update our
-    /// egui state whenever we redraw/render the overlay UI.
-    ///
-    /// When we update our state, we drain these events to send them to our
-    /// [`Context`](egui::Context)
     events: Vec<egui::Event>,
 }
 
@@ -274,9 +246,6 @@ impl std::fmt::Debug for EguiElementInner {
 }
 
 impl EguiElementInner {
-    /// Send a pointer position event to this context.
-    ///
-    /// This expects the position to be relative to the egui element.
     pub fn input_event_pointer_position(&mut self, position: Point<i32, Logical>) {
         // NOTE: No need to check for wants_pointer_input since it tries to base this off the
         // pointer position, so it must be updated regardless.
@@ -287,10 +256,6 @@ impl EguiElementInner {
         )));
     }
 
-    /// Send a pointer axis/scroll event to this context.
-    ///
-    /// If this returns true, don't send the pointer axis event to the wayland client below the
-    /// pointer.
     pub fn input_event_pointer_axis(&mut self, x_amount: f64, y_amount: f64) -> bool {
         if !self.context.wants_pointer_input() {
             return false;
@@ -304,10 +269,6 @@ impl EguiElementInner {
         true
     }
 
-    /// Send a pointer button event to this context.
-    ///
-    /// If this returns true, don't send the pointer axis event to the wayland client below the
-    /// pointer.
     pub fn input_event_pointer_button(&mut self, button: MouseButton, pressed: bool) -> bool {
         if !self.context.wants_pointer_input() {
             return false;
@@ -337,12 +298,6 @@ impl EguiElementInner {
         true
     }
 
-    /// Send a keyboard key event to this context.
-    ///
-    /// If this returns true, don't send the keyboard event to the wayland client below the
-    /// pointer.
-    ///
-    /// FIXME: This outputs garbage sometimes?
     pub fn input_event_keyboard(
         &mut self,
         key_code: u32,
@@ -377,13 +332,11 @@ impl EguiElementInner {
     }
 }
 
-/// An egui glow painter, based on [`egui_glow`], integrated with the smithay rendering pipewire.
 pub struct EguiGlowPainter {
     painter: egui_glow::Painter,
     // We need a buffer in which the painter will draw and track damage.
     // This should get invalidated on each scale change
     render_buffer: Option<(i32, TextureRenderBuffer<GlesTexture>)>,
-    /// `GL_MAX_TEXTURE_SIZE`
     max_texture_size: usize,
 }
 
@@ -397,7 +350,6 @@ impl std::fmt::Debug for EguiGlowPainter {
     }
 }
 
-/// Convert smithay's [`ModifiersState`] to egui's [`Modifiers`](egui::Modifiers)
 fn convert_modifiers(modifiers: ModifiersState) -> egui::Modifiers {
     egui::Modifiers {
         alt: modifiers.alt,
@@ -408,7 +360,6 @@ fn convert_modifiers(modifiers: ModifiersState) -> egui::Modifiers {
     }
 }
 
-/// Convert a raw [`Keysym`] to egui's [`Key`](egui::Key)
 fn convert_keysym(raw: u32) -> Option<egui::Key> {
     use egui::Key::*;
     use smithay::input::keyboard::keysyms;

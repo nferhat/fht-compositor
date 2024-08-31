@@ -10,7 +10,6 @@ use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
-/// A newtype struct around PixelShaderElement for it to implement RenderElement<UdevRenderer>
 #[derive(Debug)]
 pub struct FhtPixelShaderElement(pub PixelShaderElement);
 

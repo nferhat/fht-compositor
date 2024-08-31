@@ -32,15 +32,6 @@ use crate::utils::RectCenterExt;
 use crate::utils::output::OutputExt;
 
 impl Fht {
-    /// Get the [`FocusTarget`] under the cursor.
-    ///
-    /// It checks the surface under the cursor using the following order:
-    /// - [`Overlay`] layer shells.
-    /// - [`Fullscreen`] windows on the active workspace.
-    /// - [`Top`] layer shells.
-    /// - Normal/Maximized windows on the active workspace.
-    /// - [`Bottom`] layer shells.
-    /// - [`Background`] layer shells.
     pub fn focus_target_under(
         &self,
         mut point: Point<f64, Logical>,
@@ -130,19 +121,16 @@ impl Fht {
         under
     }
 
-    /// Find the window associated with this [`WlSurface`]
     pub fn find_window(&self, surface: &WlSurface) -> Option<&Window> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_element(surface))
     }
 
-    /// Find the tile associated with this [`WlSurface`]
     pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<Window>> {
         self.workspaces_mut()
             .find_map(|(_, wset)| wset.find_tile_mut(surface))
     }
 
-    /// Find the window associated with this [`WlSurface`]
     pub fn find_window_and_workspace(
         &self,
         surface: &WlSurface,
@@ -151,7 +139,6 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_element_and_workspace(surface))
     }
 
-    /// Find the window associated with this [`WlSurface`]
     pub fn find_window_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
@@ -160,14 +147,11 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_element_and_workspace_mut(surface))
     }
 
-    /// Find the window associated with this [`WlSurface`], and the output the window is mapped
-    /// onto
     pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, &Output)> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, &wset.output)))
     }
 
-    /// Find the tile associated with this [`WlSurface`]
     pub fn find_tile_and_output(
         &mut self,
         surface: &WlSurface,
@@ -178,18 +162,15 @@ impl Fht {
         })
     }
 
-    /// Get a reference to the workspace holding this window
     pub fn ws_for(&self, window: &Window) -> Option<&Workspace<Window>> {
         self.workspaces().find_map(|(_, wset)| wset.ws_for(window))
     }
 
-    /// Get a mutable reference to the workspace holding this window
     pub fn ws_mut_for(&mut self, window: &Window) -> Option<&mut Workspace<Window>> {
         self.workspaces_mut()
             .find_map(|(_, wset)| wset.ws_mut_for(window))
     }
 
-    /// Get a this window's geometry in global coordinate space.
     pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
             wset.ws_for(window)
@@ -197,7 +178,6 @@ impl Fht {
         })
     }
 
-    /// Get a this window's geometry in global coordinate space.
     pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
             wset.ws_for(window)
@@ -205,9 +185,6 @@ impl Fht {
         })
     }
 
-    /// Find the first output where this [`WlSurface`] is visible.
-    ///
-    /// This checks everything from layer shells to windows to override redirect windows etc.
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
         self.outputs()
             .find(|o| {
@@ -230,7 +207,6 @@ impl Fht {
             })
     }
 
-    /// Find every window that is curently displayed on this output
     #[profiling::function]
     pub fn visible_windows_for_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
         let wset = self.wset_for(output);
@@ -261,7 +237,6 @@ impl Fht {
             .chain(switching_windows)
     }
 
-    /// Prepapre a pending window to be mapped.
     pub fn prepare_pending_window(&mut self, window: Window) {
         let mut output = self.focus_state.output.clone().unwrap();
         let toplevel = window.toplevel().unwrap();
@@ -371,9 +346,6 @@ impl Fht {
         })
     }
 
-    /// Map a pending window, if it's found.
-    ///
-    /// Returns the output where this tile has been mapped.
     pub fn map_tile(&mut self, unmapped_tile: UnmappedTile) -> Output {
         let loop_handle = self.loop_handle.clone();
 
@@ -421,10 +393,6 @@ impl Fht {
         output
     }
 
-    /// Unconstraint a popup.
-    ///
-    /// Basically changes its geometry and location so that it doesn't overflow outside of the
-    /// parent window's output.
     pub fn unconstrain_popup(&self, popup: &PopupSurface) {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
@@ -444,7 +412,6 @@ impl Fht {
         });
     }
 
-    /// Advance all the active animations for this given output
     pub fn advance_animations(&mut self, output: &Output, current_time: Time<Monotonic>) -> bool {
         let mut animations_running = false;
         let wset = self.wset_mut_for(output);
@@ -471,7 +438,6 @@ impl Fht {
         animations_running
     }
 
-    /// Get an interator over all the windows registered in the compositor.
     pub fn all_windows(&self) -> impl Iterator<Item = &Window> + '_ {
         self.workspaces.values().flat_map(|wset| {
             let workspaces = &wset.workspaces;
@@ -483,7 +449,6 @@ impl Fht {
 }
 
 impl crate::state::State {
-    /// Process a move request for this given window.
     pub fn handle_move_request(&mut self, window: Window, serial: Serial) {
         // NOTE: About internal handling.
         // ---
@@ -528,7 +493,6 @@ impl crate::state::State {
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
-    /// Process a resize request for this given window.
     pub fn handle_resize_request(
         &mut self,
         window: Window,

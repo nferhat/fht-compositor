@@ -9,18 +9,9 @@ use ron::extensions::Extensions;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-/// Shared trait for every configuration of fht-shell.
-///
-/// Name will be used to get the path of the config, as in the following format str:
-/// `$XDG_CONFIG_HOME/.config/fht/{Config::NAME}.ron` as the path for the configuration file to
-/// load.
 pub trait Config: Clone + Default + Serialize + DeserializeOwned {
-    /// The name of this config.
     const NAME: &'static str;
 
-    /// The default config file contents to use.
-    ///
-    /// These will be used to popular a default config file if the file was not found before.
     const DEFAULT_CONTENTS: &'static str = "";
 
     fn get_path() -> PathBuf {
@@ -61,25 +52,18 @@ pub trait Config: Clone + Default + Serialize + DeserializeOwned {
     }
 }
 
-/// A config wrapper to use any config struct statically.
-///
-/// This type will be able to load
 #[derive(Debug)]
 pub struct ConfigWrapper<Inner: Config + Sized> {
     inner: SyncUnsafeCell<Option<Inner>>,
 }
 
 impl<Inner: Config> ConfigWrapper<Inner> {
-    /// Creates a new uninitialized configuration.
-    ///
-    /// SAFETY: Its up to YOU to initialize the config.
     pub const fn new() -> Self {
         Self {
             inner: SyncUnsafeCell::new(None),
         }
     }
 
-    /// Get a reference to the inner unsafe cell.
     pub fn get(&self) -> &Inner {
         let inner_ref = unsafe {
             self.inner
@@ -91,16 +75,6 @@ impl<Inner: Config> ConfigWrapper<Inner> {
         inner_ref.expect("Tried to get configuration before initializing it!")
     }
 
-    /// Set the new configuration.
-    ///
-    /// NOTE: If you want to access the old configuration before updating, you can clone it before
-    /// using this.
-    ///
-    /// # SAFETY
-    ///
-    /// This function uses an [`SyncUnsafeCell`] internally, and this means that there's no
-    /// guarantee for data races, thread safety, etc. It is up to YOU and you ONLY to ensure that
-    /// nothing bad happens while setting the config.
     pub fn set(&self, new: Inner) {
         unsafe { *self.inner.get() = Some(new) };
     }
@@ -119,7 +93,6 @@ impl<Inner: Config> Deref for ConfigWrapper<Inner> {
     }
 }
 
-/// Configuration loading error.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("I/O while loading the config: {0:?}")]

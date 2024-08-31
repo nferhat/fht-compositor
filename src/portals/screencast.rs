@@ -23,9 +23,6 @@ use crate::utils::pipewire::PipeWire;
 pub const PORTAL_VERSION: u32 = 5;
 
 bitflags::bitflags! {
-    /// org.freedesktop.impl.portal.ScreenCast:AvailableSourceTypes
-    ///
-    /// A bitmask of available source types. Currently defined types are:
     #[derive(Clone, Copy, PartialEq)]
     pub struct SourceType: u32 {
         const MONITOR = 1;
@@ -35,22 +32,16 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
-    /// org.freedesktop.impl.portal.ScreenCast:AvailableCursorModes
     #[derive(Clone, Copy, PartialEq)]
     pub struct CursorMode: u32 {
-        /// The cursor is not part of the screen cast stream.
         const HIDDEN = 1;
-        /// The cursor is embedded as part of the stream buffers.
         const EMBEDDED = 2;
-        /// The cursor is not part of the screen cast stream, but sent as PipeWire stream metadata.
         const METADATA = 4;
     }
 }
 
 pub struct Portal {
-    /// Sender to the compositor state for it process the request.
     pub(super) to_compositor: calloop::channel::Sender<Request>,
-    /// Receiver from the compositor to get back the response.
     pub(super) from_compositor: async_std::channel::Receiver<Response>,
 }
 
@@ -308,18 +299,12 @@ impl Portal {
 
 #[derive(Clone, PartialEq)]
 pub enum SessionSource {
-    /// The session source is unset.
-    ///
-    /// This means we didn't call SelectSource for this session yet.
     Unset,
-    /// A named output.
     Output(String, Option<smithay::output::Output>),
-    /// An area in compositor space.
     Rectangle(Rectangle<i32, Logical>, Option<smithay::output::Output>),
 }
 
 impl SessionSource {
-    /// Get the output containing this source.
     pub fn output(&self) -> Option<&smithay::output::Output> {
         match self {
             Self::Unset => None,
@@ -327,7 +312,6 @@ impl SessionSource {
         }
     }
 
-    /// Get the rectangle of this source.
     pub fn rectangle(&self) -> Option<Rectangle<i32, Logical>> {
         match self {
             Self::Unset => None,
@@ -365,9 +349,6 @@ impl Session {
     async fn closed(&self, signal_ctx: &SignalContext<'_>) -> zbus::Result<()>;
 }
 
-/// Not to be confused with [`Request`]
-///
-/// This is the Portal Request that is used by the application requesting the screencast.
 pub struct PRequest {
     handle: zvariant::OwnedObjectPath,
 }
@@ -493,10 +474,7 @@ impl State {
 impl Fht {
     #[profiling::function]
     pub fn stop_cast(&mut self, session_handle: zvariant::OwnedObjectPath) {
-        debug!(
-            session_handle = session_handle.to_string(),
-            "Stopping cast"
-        );
+        debug!(session_handle = session_handle.to_string(), "Stopping cast");
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
         };
@@ -532,7 +510,6 @@ impl Fht {
     }
 }
 
-/// Get the value of an option of type [`T`] from a dbus option dict.
 fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
     options: &'value HashMap<&str, zvariant::Value<'value>>,
     name: &str,

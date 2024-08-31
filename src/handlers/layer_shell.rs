@@ -58,9 +58,6 @@ impl WlrLayerShellHandler for State {
 }
 
 impl State {
-    /// Process a potential commit request for a layer shell
-    ///
-    /// Returns the output holding the layer shell associated with this surface.
     pub fn process_layer_shell_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
         let mut layer_output = None;
         if let Some(output) = state.outputs().find(|o| {

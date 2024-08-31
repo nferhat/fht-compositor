@@ -10,16 +10,12 @@ use super::{AsGlowFrame, AsGlowRenderer};
 const ROUNDED_OUTLINE_SRC: &str = include_str!("./rounded_outline_shader/shader.frag");
 const ROUNDED_QUAD_SRC: &str = include_str!("./rounded_element/shader.frag");
 
-/// The shaders a renderer can store.
 pub struct Shaders {
-    /// Shader used to render a rounded outline with a given radius, color, and size.
     pub rounded_outline: GlesPixelProgram,
-    /// Shader used to clip a given render element to a rounded quad.
     pub rounded_quad: GlesTexProgram,
 }
 
 impl Shaders {
-    /// Initialize all the shaders for a given renderer.
     pub fn init(renderer: &mut GlowRenderer) {
         let renderer: &mut GlesRenderer = renderer.borrow_mut();
 
@@ -59,7 +55,6 @@ impl Shaders {
             .insert_if_missing(|| shaders);
     }
 
-    /// Get the shaders.
     pub fn get<'a>(renderer: &'a impl AsGlowRenderer) -> &'a Self {
         renderer
             .glow_renderer()
@@ -69,7 +64,6 @@ impl Shaders {
             .expect("Shaders are initialized at startup!")
     }
 
-    /// Get the shaders from a frame.
     pub fn get_from_frame<'a>(frame: &'a GlowFrame<'_>) -> &'a Self {
         Borrow::<GlesFrame>::borrow(frame.glow_frame())
             .egl_context()

@@ -36,7 +36,6 @@ use crate::portals::{
 };
 use crate::state::State;
 
-/// A helper PipeWire instance to manage PipeWire streams.
 pub struct PipeWire {
     _context: pipewire::context::Context,
     pub core: pipewire::core::Core,
@@ -69,9 +68,7 @@ impl PipeWire {
             .context("Failed to connect pipewire context!")?;
         let listener = core
             .add_listener_local()
-            .error(|id, seq, res, message| {
-                warn!(?id, ?seq, ?res, ?message, "PipeWire error")
-            })
+            .error(|id, seq, res, message| warn!(?id, ?seq, ?res, ?message, "PipeWire error"))
             .register();
         std::mem::forget(listener);
 

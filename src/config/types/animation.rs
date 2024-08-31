@@ -4,15 +4,12 @@ use crate::utils::animation::curve::AnimationCurve;
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationConfig {
-    /// The animation for workspaces switches
     #[serde(default)]
     pub workspace_switch: WorkspaceSwitchAnimationConfig,
 
-    /// The animation when opening and closing windows
     #[serde(default)]
     pub window_open_close: WindowOpenCloseAnimation,
 
-    /// The animation when windows change their geometry
     #[serde(default)]
     pub window_geometry: WindowGeometryAnimation,
 }
@@ -23,13 +20,10 @@ const fn default_workspace_switch_animation_duration() -> u64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceSwitchAnimationConfig {
-    /// What easing to use for the animation:
     #[serde(default)]
     pub curve: AnimationCurve,
-    /// The duration of the animation, in milliseconds.
     #[serde(default = "default_workspace_switch_animation_duration")]
     pub duration: u64,
-    /// The direction, whether to switch vertically of horizontally.
     #[serde(default)]
     pub direction: WorkspaceSwitchAnimationDirection,
 }
@@ -57,10 +51,8 @@ const fn default_window_animation_duration() -> u64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowOpenCloseAnimation {
-    /// What easing to use for the animation:
     #[serde(default)]
     pub curve: AnimationCurve,
-    /// The duration of the animation, in milliseconds.
     #[serde(default = "default_window_animation_duration")]
     pub duration: u64,
 }
@@ -76,10 +68,8 @@ impl Default for WindowOpenCloseAnimation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowGeometryAnimation {
-    /// What easing to use for the animation:
     #[serde(default)]
     pub curve: AnimationCurve,
-    /// The duration of the animation, in milliseconds.
     #[serde(default = "default_window_animation_duration")]
     pub duration: u64,
 }

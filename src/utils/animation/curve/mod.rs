@@ -6,11 +6,8 @@ pub mod spring;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AnimationCurve {
-    /// Use a preset easing provided by [`keyframe`]
     Simple(Easing),
-    /// Use a spring-based animation.
     Spring(spring::Animation),
-    /// Use a custom cubic animation with two control points:
     Cubic(cubic::Animation),
 }
 
@@ -20,7 +17,6 @@ impl Default for AnimationCurve {
     }
 }
 
-/// Wrapper enum including all the easings [`keyframe`] provides.
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Easing {
     EaseIn,
@@ -42,7 +38,6 @@ pub enum Easing {
 }
 
 impl Easing {
-    /// Get the Y value at a given X coordinate, assuming that x is included in [0.0, 1.0]
     pub fn y(&self, x: f64) -> f64 {
         match self {
             Self::EaseIn => keyframe::functions::EaseIn.y(x),

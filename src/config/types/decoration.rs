@@ -10,31 +10,14 @@ const fn default_window_opacity() -> f32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecorationConfig {
-    /// The configuration for the border around the windows.
     pub border: BorderConfig,
 
-    /// The opacity modifier of focused windows.
-    ///
-    /// Note that this will be multiplied on windows opacities, not override them.
     #[serde(default = "default_window_opacity")]
     pub focused_window_opacity: f32,
 
-    /// The opacity modifier of normal/unfocused windows.
-    ///
-    /// Note that this will be multiplied on windows opacities, not override them.
     #[serde(default = "default_window_opacity")]
     pub normal_window_opacity: f32,
 
-    /// Should we allow clients to draw their own decorations.
-    ///
-    /// Basically allow what is called CSD, or client side decorations.
-    ///
-    /// NOTE: If you set this to no, fht-compositor does NOT draw a set of builtin decorations.
-    ///
-    /// NOTE: When changing this setting, only newly created windows will react to it.
-    ///
-    /// WARN: Gnome apps (in Gnome fashion) don't give a fuck about this setting, since they are
-    /// hardstuck on the idea that CSD is the superior option. Don't send issues about this.
     #[serde(default)]
     pub allow_csd: bool,
 }
@@ -63,17 +46,13 @@ mod border {
 
     #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
     pub struct BorderConfig {
-        /// The border color for the focused window.
         pub focused_color: ColorConfig,
 
-        /// The border color for the non-focused window(s).
         pub normal_color: ColorConfig,
 
-        /// The thickness of the border.
         #[serde(default = "default_thickness")]
         pub thickness: u8,
 
-        /// The radius of the border.
         #[serde(default = "default_radius")]
         pub radius: f32,
     }
@@ -90,14 +69,10 @@ mod border {
     }
 
     impl BorderConfig {
-        /// Get the radius of the border.
-        ///
-        /// We subtract half_thickness to get more accurate radius with varying thicknesses
         pub fn radius(&self) -> f32 {
             self.radius - self.half_thickness()
         }
 
-        /// Get the half_thickness of the border
         pub fn half_thickness(&self) -> f32 {
             self.thickness as f32 / 2.0
         }
@@ -167,9 +142,6 @@ mod color {
     }
 
     impl ColorConfig {
-        /// Get the components of this color.
-        ///
-        /// If the color is a gradient, we use the start color.
         pub fn components(&self) -> [f32; 4] {
             match self {
                 Self::Solid(color) => *color,

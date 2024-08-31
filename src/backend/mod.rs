@@ -32,11 +32,6 @@ impl From<udev::UdevData> for Backend {
 }
 
 impl Backend {
-    /// Access the underlying X11 backend, if any.
-    ///
-    /// # PANICS
-    ///
-    /// This panics if the current backend is not X11.
     #[cfg(feature = "x11_backend")]
     pub fn x11(&mut self) -> &mut x11::X11Data {
         #[allow(irrefutable_let_patterns)]
@@ -46,11 +41,6 @@ impl Backend {
         unreachable!("Tried to get x11 backend data on non-x11 backend")
     }
 
-    /// Access the underlying udev backend, if any.
-    ///
-    /// # PANICS
-    ///
-    /// This panics if the current backend is not udev.
     #[cfg(feature = "udev_backend")]
     pub fn udev(&mut self) -> &mut udev::UdevData {
         #[allow(irrefutable_let_patterns)]
@@ -60,10 +50,6 @@ impl Backend {
         unreachable!("Tried to get udev backend data on non-udev backend")
     }
 
-    /// Request the backend to schedule a next frame for this output.
-    ///
-    /// The backend is free to oblige or discard your request, based on internal state like Vblank
-    /// state, or if a frame has already been scheduled.
     #[profiling::function]
     pub fn render(
         &mut self,
@@ -81,7 +67,6 @@ impl Backend {
         }
     }
 
-    /// Run a closure with the backend's primary renderer
     pub fn with_renderer<T>(&mut self, f: impl FnOnce(&mut GlowRenderer) -> T) -> T {
         match self {
             #[cfg(feature = "x11_backend")]

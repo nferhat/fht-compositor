@@ -360,7 +360,6 @@ impl Screencopy {
         &self.buffer
     }
 
-    /// Get the output-local physical region to be copied.
     pub fn physical_region(&self) -> Rectangle<i32, Physical> {
         self.info.physical_region
     }
@@ -373,12 +372,10 @@ impl Screencopy {
         self.info.overlay_cursor
     }
 
-    /// Get whether or not this screencopy should be done on damage.
     pub fn with_damage(&self) -> bool {
         self.with_damage
     }
 
-    /// Mark damaged regions of the screencopy buffer.
     pub fn damage(&mut self, damage: &[Rectangle<i32, Physical>]) {
         if !self.with_damage {
             return;
@@ -390,7 +387,6 @@ impl Screencopy {
         }
     }
 
-    /// Submit the copied content.
     pub fn submit(mut self, y_invert: bool) {
         // Notify client that buffer is ordinary.
         self.frame.flags(if y_invert {

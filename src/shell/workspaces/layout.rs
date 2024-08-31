@@ -27,49 +27,24 @@ use smithay::utils::{Logical, Rectangle};
 
 use super::tile::{WorkspaceElement, WorkspaceTile};
 
-/// All layouts [`Workspace`]s can use.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WorkspaceLayout {
-    /// The classic Master-Tile layout, also known as Master-Slave layout, or TileLeft.
-    ///
-    /// You have `nmaster` windows on the left side, and the other windows are in the stack, or the
-    /// right side, and they share the height equally.
-    ///
-    /// How the master side and the stack side are proportioned is decided by the
-    /// `master_width_factor` parameter, a float ranging in (0.0..1.0)
     Tile {
         nmaster: usize,
         master_width_factor: f32,
     },
-    /// A twist on the [`Tile`] layout, where the master window(s) are on the top, and the stack is
-    /// on the bottom half of the screen.
-    ///
-    /// Every logic from the [`Tile`] layout applies here, but windows share width space equally,
-    /// rather than height.
     BottomStack {
         nmaster: usize,
         master_width_factor: f32,
     },
-    /// The centered master layout is a layout where the master stack is in the middle and its
-    /// windows are getting partitioned inside of it height-wise.
-    ///
-    /// The stack clients are on the left and right of the master windows, being also repartioned
-    /// height-wise.
     CenteredMaster {
         nmaster: usize,
         master_width_factor: f32,
     },
-    /// Floating layout, basically do nothing to arrange the windows.
     Floating,
 }
 
 impl WorkspaceLayout {
-    /// Arrange workspace tiles in given `tile_area`
-    ///
-    /// - `tiles`: The tiles you want to arrange in `tile_area`
-    /// - `tile_area`: The area you want to arrange the tiles in. You should make it local to the
-    ///   workspace you are using this layout for.
-    /// - `inner_gaps`: Gaps to put between tiles, these are vertical+horizontal.
     pub fn arrange_tiles<'a, E: WorkspaceElement + 'a>(
         &'a self,
         tiles: impl Iterator<Item = &'a mut WorkspaceTile<E>>,

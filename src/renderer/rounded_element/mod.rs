@@ -12,7 +12,6 @@ use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
-/// An element that lets you round off the corners of its child.
 #[derive(Debug)]
 pub struct RoundedCornerElement<E: Element> {
     element: E,
@@ -23,7 +22,6 @@ pub struct RoundedCornerElement<E: Element> {
 }
 
 impl<E: Element> RoundedCornerElement<E> {
-    /// Create a new rounded corner element
     pub fn new(
         element: E,
         corner_radius: f32,
@@ -65,7 +63,6 @@ impl<E: Element> RoundedCornerElement<E> {
         }
     }
 
-    /// Return whether this element will be clipped or not.
     pub fn will_clip(
         elem: &E,
         scale: Scale<f64>,
@@ -95,7 +92,6 @@ impl<E: Element> RoundedCornerElement<E> {
         }
     }
 
-    /// Calculate rounded corners non-opaque regions.
     pub fn rounded_corners_regions(
         corner_radius: f32,
         geo: Rectangle<i32, Logical>,

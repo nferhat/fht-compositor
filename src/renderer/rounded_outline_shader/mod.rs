@@ -9,30 +9,19 @@ use super::AsGlowRenderer;
 use crate::config::ColorConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-/// Settings to control a rounded outline shader element
 pub struct RoundedOutlineSettings {
-    /// The half thickness to use.
-    /// The shader uses this anyway
     pub half_thickness: f32,
-    /// The radius.
     pub radius: f32,
-    /// The color, either a solid one or a gradient.
     pub color: ColorConfig,
 }
 
 pub struct RoundedOutlineElement; // this does nothing expect be there.
 
 impl RoundedOutlineElement {
-    /// Get the gles shader program for a rounded outline.
     pub fn program(renderer: &impl AsGlowRenderer) -> GlesPixelProgram {
         Shaders::get(renderer).rounded_outline.clone()
     }
 
-    /// Create a rounded outline element.
-    ///
-    /// The geometry expects you to have already removed your desired border thickness.
-    ///
-    /// The geo argument should be local to the output where the wl_surface is being drawn.
     pub fn element(
         renderer: &mut impl AsGlowRenderer,
         scale: f64,

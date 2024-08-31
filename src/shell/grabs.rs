@@ -21,15 +21,9 @@ use crate::state::State;
 #[allow(unused)]
 pub struct MoveSurfaceGrab {
     pub start_data: PointerGrabStartData<State>,
-    /// The concerned window.
     pub window: Window,
-    /// The initial global window geometry we started with before dragging the tile.
     pub initial_window_geometry: Rectangle<i32, Logical>,
-    /// The last registered window location, local to the workspace that holds it
     last_window_location: Point<i32, Logical>,
-    /// The last registered pointer location in global space.
-    ///
-    /// Keeping at as f64, Logical marker since workspaces transform them locally automatically.
     last_pointer_location: Point<f64, Logical>,
 }
 
@@ -285,28 +279,19 @@ impl From<XdgResizeEdge> for ResizeEdge {
     }
 }
 
-/// Information about the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ResizeData {
-    /// The edges the surface is being resized with.
     pub edges: ResizeEdge,
-    /// The initial window location in global coordinate space.
     pub initial_window_location: Point<i32, Logical>,
-    /// The initial window size (geometry width and height).
     pub initial_window_size: Size<i32, Logical>,
 }
 
-/// State of the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
 pub enum ResizeState {
-    /// The surface is not being resized.
     #[default]
     NotResizing,
-    /// The surface is currently being resized.
     Resizing(ResizeData),
-    /// The resize has finished, and the surface needs to ack the final configure.
     WaitingForFinalAck(ResizeData, Serial),
-    /// The resize has finished, and the surface needs to commit its final state.
     WaitingForCommit(ResizeData),
 }
 

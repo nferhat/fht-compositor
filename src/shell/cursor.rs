@@ -44,21 +44,13 @@ fn get_fallback_cursor_data(_: impl std::error::Error) -> Rc<CursorImage> {
 pub type CursorImageCache = HashMap<(CursorIcon, i32), Rc<CursorImage>>;
 pub type CursorTextureCache = HashMap<(CursorIcon, i32), Vec<(Image, Box<dyn Any>)>>;
 
-/// A cursor theme manager.
-///
-/// This will manage the active cursor theme expressed by the [`FhtConfig`], and cache the images
-/// to render them later.
 pub struct CursorThemeManager {
-    /// A cache of the different cursor images associated with their cursor icons and scale.
     image_cache: RefCell<CursorImageCache>,
 
-    /// A cache of the different rendered cursor texture associated with their cursor icons.
     texture_cache: RefCell<CursorTextureCache>,
 
-    /// The last known cursor image status, to know what to render.
     pub image_status: Arc<Mutex<CursorImageStatus>>,
 
-    /// The current cursor theme, from which [`CursorImage`]s are generated.
     cursor_theme: CursorTheme,
     // Additional info of the cursor theme, so we don't spam the config
     cursor_theme_name: String,
@@ -66,7 +58,6 @@ pub struct CursorThemeManager {
 }
 
 impl CursorThemeManager {
-    /// Initialize the cursor theme manager.
     pub fn new() -> Self {
         let CursorConfig { name, size } = CONFIG.general.cursor.clone();
         let image_status = CursorImageStatus::default_named();
@@ -87,9 +78,6 @@ impl CursorThemeManager {
         }
     }
 
-    /// Reload the cursor theme manager configuration.
-    ///
-    /// This is only effective if the name or size have changed.
     #[profiling::function]
     pub fn reload(&mut self) {
         let CursorConfig { name, size } = CONFIG.general.cursor.clone();
@@ -113,10 +101,6 @@ impl CursorThemeManager {
         self.cursor_theme_name = name;
     }
 
-    /// Loads the cursor image associated with this [`CursorIcon`].
-    ///
-    /// Returns Ok if the image was already loaded/got successfully loaded, returns Err if loading
-    /// failed.
     #[profiling::function]
     fn load_cursor_image(
         &self,
@@ -174,7 +158,6 @@ impl CursorThemeManager {
         Ok(cursor_image)
     }
 
-    /// Render the cursor based on the current [`CursorImageStatus`] stored here.
     #[profiling::function]
     pub fn render_cursor<R, E>(
         &self,
@@ -272,19 +255,12 @@ impl CursorThemeManager {
 }
 
 pub struct CursorImage {
-    /// All the frames composing this cursor icon.
     frames: Vec<Image>,
 
-    /// The duration on which all the frames loop at once, in milliseconds.
-    ///
-    /// Cache it here to avoid recounting them each time.
     animation_duration: u32,
 }
 
 impl CursorImage {
-    /// Given at a time, which frame to show.
-    ///
-    /// This function warps time, do a frame shown at 5ms will also be shown at 105ms.
     pub fn frame(&self, mut millis: u32) -> (&Image, Point<i32, Physical>) {
         if self.animation_duration == 0 {
             let frame = &self.frames[0];

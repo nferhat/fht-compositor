@@ -16,7 +16,6 @@ use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
 use crate::state::{Fht, OutputState, State};
 
-/// Ensures that the [`WlSurface`] has a render buffer
 fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
     // the renderer
@@ -30,10 +29,6 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
 }
 
 impl State {
-    /// Process a commit request for a possible window toplevel.
-    ///
-    /// If this surface is actually associated with a window, this function will return the output
-    /// associated where this window should be drawn.
     fn process_window_commit(&mut self, surface: &WlSurface) -> Option<Output> {
         if let Some(idx) = self
             .fht
@@ -126,7 +121,6 @@ impl State {
         None
     }
 
-    /// Process a popup surface commit request.
     fn process_popup_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
         let popup = state.popups.find_popup(surface)?;
 

@@ -60,7 +60,6 @@ pub struct OutputElementsResult<R: FhtRenderer> {
 }
 
 impl Fht {
-    /// Generate all the elements for this output.
     pub fn output_elements<R: FhtRenderer>(
         &mut self,
         renderer: &mut R,
@@ -176,7 +175,6 @@ impl Fht {
         elements
     }
 
-    /// Render and submit screencopy buffers using given renderer.
     #[cfg(feature = "xdg-screencast-portal")]
     #[profiling::function]
     pub fn render_screencast<R: FhtRenderer>(
@@ -266,7 +264,6 @@ impl Fht {
     }
 }
 
-/// A meta trait combining all the requirements for our renderer
 pub trait FhtRenderer:
     Renderer<TextureId = Self::FhtTextureId, Error = Self::FhtError>
     + ImportAll
@@ -292,7 +289,6 @@ impl<'a> FhtRenderer for UdevRenderer<'a> {
     type FhtError = UdevRenderError<'a>;
 }
 
-/// Helper trait to get around a borrow checker/trait checker limitations (e0277.
 pub trait AsGlowRenderer: Renderer {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
@@ -345,7 +341,6 @@ impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
     }
 }
 
-/// Generate the layer shell elements for a given layer for a given output layer map.
 pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,

@@ -68,14 +68,11 @@ use crate::utils::pipewire::PipeWire;
 use crate::utils::RectCenterExt;
 
 pub struct State {
-    /// Backend-agnostic state.
     pub fht: Fht,
-    /// Backend-specific state.
     pub backend: Backend,
 }
 
 impl State {
-    /// Creates a new instance of the state.
     pub fn new(
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
@@ -118,8 +115,6 @@ impl State {
         Self { fht, backend }
     }
 
-    /// Dispatch evenements from the wayland unix socket, have to be called on each evenement
-    /// otherwise the events won't reach their target clients.
     #[profiling::function]
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
         self.fht
@@ -177,7 +172,6 @@ impl State {
         Ok(())
     }
 
-    /// Create a new Wayland client state for a client stream bound to the WAYLAND_DISPLAY
     pub fn new_client_state(&self) -> ClientState {
         ClientState {
             compositor: CompositorClientState::default(),
@@ -185,7 +179,6 @@ impl State {
         }
     }
 
-    /// Redraw this output.
     #[profiling::function]
     pub fn redraw(&mut self, output: Output) {
         // Verify our invariant.
@@ -249,25 +242,12 @@ pub struct Fht {
     pub unmapped_tiles: Vec<UnmappedTile>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
-    /// A cache of the root of each surface.
-    ///
-    /// When a surface dies, `get_parent` always returns `None`, we need still need a way to get
-    /// the root surface of a surface that got destroyed in `CompositorHandler::destroyed`, so we
-    /// use this hack for now.
-    ///
-    /// This is currently implemented only for closing animations.
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
 
-    /// The last configuration error.
     pub last_config_error: Option<anyhow::Error>,
 
-    /// PipeWire initialization.
-    ///
-    /// We can't start PipeWire immediatly since pipewire may not be running yet, but when the
-    /// ScreenCast application starts it should be started by then.
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire_initialised: std::sync::Once,
-    /// PipeWire instance, for the XDG desktop screencast portal.
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire: Option<PipeWire>,
 
@@ -284,7 +264,6 @@ pub struct Fht {
 }
 
 impl Fht {
-    /// Create a new instance of the state, initializing all the wayland global objects
     pub fn new(
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
@@ -405,16 +384,10 @@ impl Fht {
 }
 
 impl Fht {
-    /// List all the registered outputs.
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         self.workspaces.keys()
     }
 
-    /// Register an output to the wayland state.
-    ///
-    /// # PANICS
-    ///
-    /// Trying to add the same output twice causes an assertion fail.
     pub fn add_output(&mut self, output: Output) {
         assert!(
             self.workspaces.get(&output).is_none(),
@@ -445,11 +418,6 @@ impl Fht {
         self.focus_state.output = Some(output);
     }
 
-    /// Unregister an output from the wayland state.
-    ///
-    /// # PANICS
-    ///
-    /// Trying remove a non-existent output causes an assertion fail.
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output");
         let removed_wset = self
@@ -493,17 +461,11 @@ impl Fht {
         wset.arrange();
     }
 
-    /// Arrange the output workspaces, layer shells.
-    ///
-    /// You are expected to call this after you applied your changes to the output, like changing
-    /// the current mode, mapping a layer shell, etc.
     pub fn output_resized(&mut self, output: &Output) {
         self.wset_mut_for(output).arrange();
         layer_map_for_output(output).arrange();
     }
 
-    /// Get the active output, generally the one with the cursor on it, fallbacking to the first
-    /// available output.
     pub fn active_output(&self) -> Output {
         self.focus_state
             .output
@@ -511,7 +473,6 @@ impl Fht {
             .unwrap_or_else(|| self.outputs().next().unwrap().clone())
     }
 
-    /// Get the output with this name, if any.
     pub fn output_named(&self, name: &str) -> Option<Output> {
         if name == "active" {
             Some(self.active_output())
@@ -520,32 +481,20 @@ impl Fht {
         }
     }
 
-    /// List all the outputs and a reference to their associated workspace set.
     pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet<Window>)> {
         self.workspaces.iter()
     }
 
-    /// List all the outptuts and a mutable reference to their associated workspace set.
     pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet<Window>)> {
         self.workspaces.iter_mut()
     }
 
-    /// Get a reference to the workspace set associated with this output
-    ///
-    /// ## PANICS
-    ///
-    /// This function panics if you didn't register the output.
     pub fn wset_for(&self, output: &Output) -> &WorkspaceSet<Window> {
         self.workspaces
             .get(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
     }
 
-    /// Get a mutable reference to the workspace set associated with this output
-    ///
-    /// ## PANICS
-    ///
-    /// This function panics if you didn't register the output.
     pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet<Window> {
         self.workspaces
             .get_mut(output)
@@ -554,10 +503,6 @@ impl Fht {
 }
 
 impl Fht {
-    /// Send frame events to [`WlSurface`]s after submitting damage to the backend buffer.
-    ///
-    /// This function handles primary scanout outputs (so that [`WlSurface`]s send frames
-    /// immediatly to a specific render surface, the one in [`RenderElementStates`])
     #[profiling::function]
     pub fn send_frames(&self, output: &Output) {
         let time = self.clock.now();
@@ -711,7 +656,6 @@ impl Fht {
         }
     }
 
-    /// Send a dmabuf feedback to every visible [`WlSurface`] on this output.
     pub fn send_dmabuf_feedbacks(
         &self,
         output: &Output,
@@ -783,7 +727,6 @@ impl Fht {
         }
     }
 
-    /// Take the presentation feedback of every visible [`WlSurface`] on this output.
     #[profiling::function]
     pub fn take_presentation_feedback(
         &self,
@@ -849,9 +792,7 @@ pub struct SurfaceDmabufFeedback {
 
 #[derive(Default, Debug)]
 pub struct ClientState {
-    /// Per-client state of wl_compositor.
     pub compositor: CompositorClientState,
-    /// wl_security_context state.
     pub security_context: Option<SecurityContext>,
 }
 
@@ -871,34 +812,16 @@ pub struct FocusState {
     pub focus_target: Option<KeyboardFocusTarget>,
 }
 
-/// The additional state of an [`Output`]
 #[derive(Debug)]
 pub struct OutputState {
-    /// A state machine to track where in the rendering pipeline
     pub render_state: RenderState,
 
-    /// Are there any animations running on the output.
     pub animations_running: bool,
 
-    /// The last "sequence" the output displayed.
-    ///
-    /// Alot of Wayland clients run their main loop based on the send_frames callback the
-    /// compositor should be sending to them, so we need at best to send a single frame callback
-    /// per redraw call (at least this is what I understood from the wayland book)
-    ///
-    /// If we send more than one, this will make those clients update twice or more on a single
-    /// frame, which is not what the user should be expecting.
-    ///
-    /// In order todo this, we add one each refresh cycle to this output, then, every WlSurface
-    /// will track the last sequence it was redrawn on. If its not equal to this sequence for this
-    /// output, we send a frame callback, otherwise, we skip it.
     pub current_frame_sequence: u32,
 
-    /// The current pending screencopy frame.
     pub pending_screencopy: Option<Screencopy>,
 
-    /// The custom damage tracker for this output.
-    /// This is for screencast.
     pub damage_tracker: OutputDamageTracker,
 }
 
@@ -927,14 +850,12 @@ impl OutputState {
 
 #[derive(Debug, Default)]
 pub enum RenderState {
-    /// The output is not being redrawn.
     #[default]
     Idle,
-    /// The output redraw is queued and is getting done so in the next dispatch cycle.
     Queued,
-    /// The output is waiting for a TTY Vblank event.
-    WaitingForVblank { redraw_needed: bool },
-    /// The output is getting redrawn after the next estimated TTY Vblank event.
+    WaitingForVblank {
+        redraw_needed: bool,
+    },
     WaitingForVblankTimer {
         token: RegistrationToken,
         queued: bool,
@@ -971,10 +892,6 @@ impl RenderState {
     }
 }
 
-/// An pending window.
-///
-/// Some clients set their initial_configure to be true even when they are NOT, so we just store
-/// this property on our own here.
 #[derive(Debug, Clone)]
 pub struct PendingWindow {
     pub inner: Window,
@@ -996,7 +913,6 @@ impl Into<Window> for PendingWindow {
     }
 }
 
-/// An unmapped tile.
 pub struct UnmappedTile {
     pub inner: WorkspaceTile<Window>,
     pub last_output: Option<Output>,

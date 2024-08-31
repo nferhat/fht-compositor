@@ -29,45 +29,33 @@ fn default_layouts() -> Vec<WorkspaceLayout> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompositorConfig {
-    /// A list of programs to autostart
-    ///
-    /// NOTE: These are evaluated using `/bin/sh`
     #[serde(default)]
     pub autostart: Vec<String>,
 
-    /// Whether to show a greeting message.
     #[serde(default)]
     pub greet: bool,
 
-    /// Keybinds, table of key patterns bound to key actions.
     #[serde(default)]
     pub keybinds: IndexMap<KeyPattern, KeyAction>,
 
-    /// Mousebinds, a table of mouse pattern bound to mouse actions.
     #[serde(default)]
     pub mousebinds: IndexMap<MousePattern, MouseAction>,
 
-    /// Input configuration.
     #[serde(default)]
     pub input: InputConfig,
 
-    /// General behaviour configuration.
     #[serde(default)]
     pub general: GeneralConfig,
 
-    /// Decorations configuration.
     #[serde(default)]
     pub decoration: DecorationConfig,
 
-    /// Different animations that fht-compositor provides you with.
     #[serde(default)]
     pub animation: AnimationConfig,
 
-    /// Window rules.
     #[serde(default)]
     pub rules: HashMap<Vec<WindowPattern>, WindowRules>,
 
-    /// Configuration for the backend renderer.
     #[serde(default)]
     pub renderer: RenderConfig,
 }
@@ -96,38 +84,24 @@ impl fht_config::Config for CompositorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
-    /// Should we warp the mouse cursor when focusing windows?
-    ///
-    /// If you use keybinds with the [`FocusNextWindow`] and [`FocusPreviousWindow`] actions,
-    /// enabling this option will warp the mouse to the center of that window.
-    ///
-    /// NOTE: This doesn't work on the x11 backend.
     #[serde(default = "default_true")]
     pub cursor_warps: bool,
 
-    /// Should new windows be focused automatically
     #[serde(default = "default_true")]
     pub focus_new_windows: bool,
 
-    /// How should we insert windows inside workspaces.
     #[serde(default)]
     pub insert_window_strategy: InsertWindowStrategy,
 
-    /// Cursor configuration.
-    ///
-    /// Basically the icon used to indicate *where* the pointer is.
     #[serde(default)]
     pub cursor: CursorConfig,
 
-    /// Workspace layouts to use.
     #[serde(default = "default_layouts")]
     pub layouts: Vec<WorkspaceLayout>,
 
-    /// Useless gap added around the output edge when tiling windows.
     #[serde(default)]
     pub outer_gaps: i32,
 
-    /// Useless gap added between the windows when tiling them.
     #[serde(default)]
     pub inner_gaps: i32,
 }
@@ -152,11 +126,8 @@ impl Default for GeneralConfig {
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, Hash)]
 pub enum InsertWindowStrategy {
     #[default]
-    /// Insert the window at the end of the slave stack
     EndOfSlaveStack,
-    /// Replace the master window with the new window
     ReplaceMaster,
-    /// Insert the window after the currently focused one
     AfterFocused,
 }
 
@@ -176,21 +147,9 @@ fn default_cursor_size() -> u32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CursorConfig {
-    /// The cursor theme name.
-    ///
-    /// This fallbacks to the `XCURSOR_THEME` environment variable if not set.
-    ///
-    /// NOTE: If you change this and reload the configuration, you have to restart every
-    /// application in order for them to acknowledge the change.
     #[serde(default = "default_cursor_theme")]
     pub name: String,
 
-    /// The cursor size.
-    ///
-    /// This fallbacks to the `XCURSOR_SIZE` environment variable if not set.
-    ///
-    /// NOTE: If you change this and reload the configuration, you have to restart every
-    /// application in order for them to acknowledge the change.
     #[serde(default = "default_cursor_size")]
     pub size: u32,
 }
@@ -229,32 +188,24 @@ fn default_render_node() -> Option<std::path::PathBuf> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderConfig {
-    /// Should we avoid using 10-bit color formats.
-    ///
-    /// This is only effective in the udev backend.
     #[cfg(feature = "udev_backend")]
     #[serde(default = "default_disable_10bit")]
     pub disable_10bit: bool,
 
-    /// Should we disable overlay planes for the DRM compositor
     #[cfg(feature = "udev_backend")]
     #[serde(default = "default_disable_overlay_planes")]
     pub disable_overlay_planes: bool,
 
-    /// What DRM node should the compositor use for rendering.
     #[cfg(feature = "udev_backend")]
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
 
-    /// Color to set for damaged areas.
     #[serde(default)]
     pub damage_color: Option<[f32; 4]>,
 
-    /// Whether to show a debug overlay for each output.
     #[serde(default)]
     pub debug_overlay: bool,
 
-    /// Whether to show a debug overlay for all the opened tiles.
     #[serde(default)]
     pub tile_debug_overlay: bool,
 }

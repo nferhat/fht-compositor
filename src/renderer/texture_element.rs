@@ -13,8 +13,6 @@ use super::AsGlowFrame;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
-/// A newtype struct around TextureRenderElement<GlesTexture> for it to implement
-/// RenderElement<UdevRenderer>
 #[derive(Debug)]
 pub struct FhtTextureElement<E = GlesTexture>(pub TextureRenderElement<E>)
 where

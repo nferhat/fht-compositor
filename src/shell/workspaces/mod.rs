@@ -40,26 +40,17 @@ use crate::utils::animation::Animation;
 use crate::utils::output::OutputExt;
 
 pub struct WorkspaceSet<E: WorkspaceElement> {
-    /// The output of this set.
     pub(super) output: Output,
 
-    /// All the workspaces of this set.
     pub workspaces: Vec<Workspace<E>>,
 
-    /// The current switch animation, of any.
     pub switch_animation: Option<WorkspaceSwitchAnimation>,
 
-    /// The active workspace index.
     pub(super) active_idx: AtomicUsize,
 }
 
 #[allow(dead_code)]
 impl<E: WorkspaceElement> WorkspaceSet<E> {
-    /// Create a new [`WorkspaceSet`] for this output.
-    ///
-    /// This function creates  9 workspaces, indexed from 0 to 8, each with independent layout
-    /// window list. It's up to whatever manages this set to ensure focusing happens correctly, and
-    /// that windows are getting mapped to the right set.
     pub fn new(output: Output) -> Self {
         let workspaces = (0..9).map(|_| Workspace::new(output.clone())).collect();
         Self {
@@ -70,14 +61,10 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Refresh internal state of the [`WorkspaceSet`]
-    ///
-    /// Preferably call this before flushing clients.
     pub fn refresh(&mut self) {
         self.workspaces_mut().for_each(Workspace::refresh);
     }
 
-    /// Reload the configuration of the [`WorkspaceSet`]
     pub fn reload_config(&mut self) {
         let layouts = CONFIG.general.layouts.clone();
         for workspace in &mut self.workspaces {
@@ -88,10 +75,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Set the active [`Workspace`] index for this [`WorkspaceSet`], returning the possible focus
-    /// candidate that the compositor should focus.
-    ///
-    /// Animations are opt-in, set `animate` to true if its needed.
     pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<E> {
         let target_idx = target_idx.clamp(0, 9);
         if !animate {
@@ -108,10 +91,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces[target_idx].focused().cloned()
     }
 
-    /// Get the active [`Workspace`] index of this [`WorkspaceSet`]
-    ///
-    /// If there's a switch animation going on, use the target index and not the currently active
-    /// one.
     pub fn get_active_idx(&self) -> usize {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             *target_idx
@@ -120,10 +99,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Get a reference to the active workspace.
-    ///
-    /// If there's a switch animation going on, use the target [`Workspace`] and not the currently
-    /// active one.
     pub fn active(&self) -> &Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &self.workspaces[*target_idx]
@@ -132,10 +107,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Get a mutable reference to the active workspace.
-    ///
-    /// If there's a switch animation going on, use the target [`Workspace`] and not the currently
-    /// active one.
     pub fn active_mut(&mut self) -> &mut Workspace<E> {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &mut self.workspaces[*target_idx]
@@ -144,47 +115,36 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    /// Get an iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
     pub fn workspaces(&self) -> impl Iterator<Item = &Workspace<E>> {
         self.workspaces.iter()
     }
 
-    /// Get a mutable iterator over all the [`Workspace`]s in this [`WorkspaceSet`]
     pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace<E>> {
         self.workspaces.iter_mut()
     }
 
-    /// Arrange the [`Workspace`]s and their windows.
-    ///
-    /// You need to call this when this [`WorkspaceSet`] output changes geometry to ensure that
-    /// the tiled window geometries actually fill the output space.
     pub fn arrange(&mut self) {
         self.workspaces_mut().for_each(|ws| ws.arrange_tiles(true))
     }
 
-    /// Find the window associated with this [`WlSurface`]
     pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
         self.workspaces()
             .find_map(|ws| ws.find_tile(surface).map(WorkspaceTile::element))
     }
 
-    /// Find the window associated with this [`WlSurface`]
     pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
         self.workspaces_mut()
             .find_map(|ws| ws.find_tile_mut(surface))
     }
 
-    /// Find the [`Workspace`] containing the window associated with this [`WlSurface`].
     pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_surface(surface))
     }
 
-    /// Find the [`Workspace`] containing the window associated with this [`WlSurface`].
     pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace<E>> {
         self.workspaces_mut().find(|ws| ws.has_surface(surface))
     }
 
-    /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
     pub fn find_element_and_workspace(&self, surface: &WlSurface) -> Option<(E, &Workspace<E>)> {
         self.workspaces().find_map(|ws| {
             let element = ws.find_tile(surface).map(|w| w.element.clone())?;
@@ -192,7 +152,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         })
     }
 
-    /// Find the window associated with this [`WlSurface`] with the [`Workspace`] containing it.
     pub fn find_element_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
@@ -203,20 +162,14 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         })
     }
 
-    /// Get a reference to the [`Workspace`] holding this window, if any.
     pub fn ws_for(&self, element: &E) -> Option<&Workspace<E>> {
         self.workspaces().find(|ws| ws.has_element(element))
     }
 
-    /// Get a mutable reference to the [`Workspace`] holding this window, if any.
     pub fn ws_mut_for(&mut self, element: &E) -> Option<&mut Workspace<E>> {
         self.workspaces_mut().find(|ws| ws.has_element(element))
     }
 
-    /// Get the current fullscreend element and it's location relative to the [`Workspace`]
-    ///
-    /// This function also accounts for workspace switch animations, and will always prefer the
-    /// active workspace (aka previous) fullscreen before the target's (next) fullscreen.
     #[profiling::function]
     pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Logical>)> {
         let Some(animation) = self.switch_animation.as_ref() else {
@@ -286,12 +239,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             })
     }
 
-    /// Get the element in under a given point and it's location relative to the [`Workspace`]
-    /// that holds it.
-    ///
-    /// This function also accounts for workspace switch animations.
-    ///
-    /// It is assumed that `point` is relative to the [`WorkspaceSet`]'s 'output.
     #[profiling::function]
     pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
         if self.switch_animation.is_none() {
@@ -359,8 +306,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             })
     }
 
-    /// Render all the elements in this [`WorkspaceSet`], returning them and whether it currently
-    /// holds a fullscreen element.
     #[profiling::function]
     pub fn render_elements<R: FhtRenderer>(
         &self,
@@ -470,16 +415,12 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 }
 
-/// An active workspace switching animation
 pub struct WorkspaceSwitchAnimation {
-    /// The underlying animation tweener to generate values
     pub animation: Animation,
-    /// Which [`Workspace`] are we going to focus.
     pub target_idx: usize,
 }
 
 impl WorkspaceSwitchAnimation {
-    /// Create a new [`WorkspaceSwitchAnimation`]
     fn new(target_idx: usize) -> Self {
         // When going to the next workspace, the values describes the offset of the next workspace.
         // When going to the previous workspace, the values describe the offset of the current
@@ -507,36 +448,21 @@ fht_render_elements! {
     }
 }
 
-/// A single workspace.
-///
-/// This [`Workspace`] should not stand on it's own, and it's preferred you use it with a
-/// [`WorkspaceSet`], but nothing stops you from doing whatever you want with it like assigning it
-/// to a single output.
 pub struct Workspace<E: WorkspaceElement> {
-    /// The output for this workspace
     pub output: Output,
 
-    /// The tiles this [`Workspace`] contains.
-    ///
-    /// These must all have valid [`WlSurface`]s (aka: being mapped), otherwise the [`Workspace`]
-    /// inner logic will PANIC.
     pub tiles: Vec<WorkspaceTile<E>>,
 
-    /// The focused window index.
     focused_tile_idx: usize,
 
-    /// The layouts list for this workspace.
     pub layouts: Vec<WorkspaceLayout>,
 
-    /// The currently fullscreened tile.
     pub fullscreen: Option<FullscreenTile<E>>,
 
-    /// The active layout index.
     pub active_layout_idx: usize,
 }
 
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Create a new [`Workspace`] for this output.
     pub fn new(output: Output) -> Self {
         Self {
             output,
@@ -548,16 +474,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    /// Get an iterator over this workspace's tiles.
-    ///
-    /// This does NOT include the fullscreened tile!
     pub fn tiles(&self) -> impl Iterator<Item = &WorkspaceTile<E>> {
         self.tiles.iter()
     }
 
-    /// Refresh internal state of the [`Workspace`]
-    ///
-    /// Preferably call this before flushing clients.
     #[profiling::function]
     pub fn refresh(&mut self) {
         let output_geometry = self.output.geometry();
@@ -626,7 +546,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    /// Render all elements in this [`Workspace`], respecting the window's Z-index.
     #[profiling::function]
     pub fn render_elements<R: FhtRenderer>(
         &self,
@@ -680,9 +599,6 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Inserting and removing elements
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Insert a tile in this [`Workspace`]
-    ///
-    /// See [`Workspace::insert_element`]
     pub fn insert_tile(&mut self, tile: WorkspaceTile<E>, animate: bool) {
         let WorkspaceTile {
             element,
@@ -692,13 +608,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.insert_element(element, border_config, animate);
     }
 
-    /// Insert an element in this [`Workspace`]
-    ///
-    /// This function does additional configuration of the element before creating a tile for it,
-    /// mainly setting the bounds of the window, and notifying it of entering this
-    /// [`Workspace`] output.
-    ///
-    /// This doesn't reinsert the element if it's already inserted.
     pub fn insert_element(
         &mut self,
         element: E,
@@ -761,9 +670,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Removes a tile from this [`Workspace`], returning it if it was found.
-    ///
-    /// This function also undones the configuration that was done in [`Self::insert_window`]
     pub fn remove_tile(&mut self, element: &E, animate: bool) -> Option<WorkspaceTile<E>> {
         if self
             .fullscreen
@@ -791,9 +697,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         Some(tile)
     }
 
-    /// Remove the currently fullscreened tile.
-    ///
-    /// This also configures the element state.
     pub fn take_fullscreen(&mut self) -> Option<FullscreenTile<E>> {
         self.fullscreen.take().map(|mut fs| {
             fs.inner.element.output_leave(&self.output);
@@ -808,8 +711,6 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Element focus
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Return the focused element, giving priority to the fullscreen element first, then the
-    /// possible active non-fullscreen element.
     pub fn focused(&self) -> Option<&E> {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             return Some(&fullscreen.inner.element);
@@ -820,7 +721,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             .map(WorkspaceTile::element)
     }
 
-    /// Fullscreen an element.
     pub fn fullscreen_element(&mut self, element: &E, animate: bool) {
         if let Some(FullscreenTile {
             inner,
@@ -845,8 +745,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
-    /// possible active non-fullscreen element.
     pub fn focused_tile(&self) -> Option<&WorkspaceTile<E>> {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             return Some(&fullscreen.inner);
@@ -854,8 +752,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.tiles.get(self.focused_tile_idx)
     }
 
-    /// Return the focused tile, giving priority to the fullscreen elementj first, then the
-    /// possible active non-fullscreen element.
     pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
         if let Some(fullscreen) = self.fullscreen.as_mut() {
             return Some(&mut fullscreen.inner);
@@ -863,7 +759,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.tiles.get_mut(self.focused_tile_idx)
     }
 
-    /// Focus a given element, if this [`Workspace`] contains it.
     pub fn focus_element(&mut self, window: &E, animate: bool) {
         if let Some(idx) = self.tiles.iter().position(|w| w == window) {
             if let Some(FullscreenTile {
@@ -881,7 +776,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    /// Focus the next available element, cycling back to the first one if needed.
     pub fn focus_next_element(&mut self, animate: bool) -> Option<&E> {
         if self.tiles.is_empty() {
             return None;
@@ -909,7 +803,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         Some(tile.element())
     }
 
-    /// Focus the previous available element, cyclying all the way to the last element if needed.
     pub fn focus_previous_element(&mut self, animate: bool) -> Option<&E> {
         if self.tiles.is_empty() {
             return None;
@@ -938,9 +831,6 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Element swapping
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Swap the two given elements.
-    ///
-    /// This will give the focus to b
     pub fn swap_elements(&mut self, a: &E, b: &E, animate: bool) {
         if let Some(FullscreenTile {
             inner,
@@ -961,7 +851,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Swap the current element with the next element.
     pub fn swap_with_next_element(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
@@ -991,7 +880,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Swap the current element with the previous element.
     pub fn swap_with_previous_element(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
@@ -1022,20 +910,15 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Geometry and layout
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Get the geometry of a given element relative to the [`Workspace`].
     pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
         self.tile_for(element).map(WorkspaceTile::element_geometry)
     }
 
-    /// Get the visual geometry of a given element relative to the [`Workspace`].
     pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
         self.tile_for(element)
             .map(WorkspaceTile::element_visual_geometry)
     }
 
-    /// Get the area used to tile the elements, relative to the [`Workspace`]
-    ///
-    /// This is the area that is used with [`Self::arrange_tiles`]
     pub fn tile_area(&self) -> Rectangle<i32, Logical> {
         let mut area = layer_map_for_output(&self.output).non_exclusive_zone();
         let outer_gaps = CONFIG.general.outer_gaps;
@@ -1044,9 +927,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         area
     }
 
-    /// Refresh the geometries of the tiles contained in this [`Workspace`].
-    ///
-    /// This ensures geometry for maximized and tiled elements.
     #[profiling::function]
     pub fn arrange_tiles(&mut self, animate: bool) {
         if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_mut() {
@@ -1087,13 +967,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         layout.arrange_tiles(tiled.into_iter(), tile_area, inner_gaps, animate);
     }
 
-    /// Get the active layout that arranges the tiles
     pub fn get_active_layout(&self) -> WorkspaceLayout {
         self.layouts[self.active_layout_idx]
     }
 
-    /// Select the next available layout in this [`Workspace`], cycling back to the first one if
-    /// needed.
     pub fn select_next_layout(&mut self, animate: bool) {
         let layouts_len = self.layouts.len();
         let new_active_idx = self.active_layout_idx + 1;
@@ -1107,8 +984,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Select the previous available layout in this [`Workspace`], cycling all the way back to the
-    /// last layout if needed.
     pub fn select_previous_layout(&mut self, animate: bool) {
         let layouts_len = self.layouts.len();
         let new_active_idx = match self.active_layout_idx.checked_sub(1) {
@@ -1120,9 +995,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Change the master_width_factor of the active [`WorkspaceLayout`]
-    ///
-    /// This clamps the value between (0.05..=0.95).
     pub fn change_mwfact(&mut self, delta: f32, animate: bool) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile {
@@ -1144,9 +1016,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    /// Change the nmaster of the active [`WorkspaceLayout`]
-    ///
-    /// This clamps the value between (1.0, +inf).
     pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
         let active_layout = &mut self.layouts[self.active_layout_idx];
         if let WorkspaceLayout::Tile { nmaster, .. }
@@ -1164,7 +1033,6 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Finding elements
 impl<E: WorkspaceElement> Workspace<E> {
-    /// Find the tile with this [`WlSurface`] in its surface tree.
     pub fn find_tile(&self, surface: &WlSurface) -> Option<&WorkspaceTile<E>> {
         self.fullscreen
             .as_ref()
@@ -1177,7 +1045,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
-    /// Find the tile with this [`WlSurface`] in its surface tree.
     pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
         self.fullscreen
             .as_mut()
@@ -1190,7 +1057,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
-    /// Find the tile with this element.
     pub fn tile_for(&self, element: &E) -> Option<&WorkspaceTile<E>> {
         self.fullscreen
             .as_ref()
@@ -1199,7 +1065,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             .or_else(|| self.tiles.iter().find(|tile| *tile == element))
     }
 
-    /// Find the tile with this element.
     pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
         self.fullscreen
             .as_mut()
@@ -1208,7 +1073,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             .or_else(|| self.tiles.iter_mut().find(|tile| *tile == element))
     }
 
-    /// Return whether this [`Workspace`] contains this element.
     pub fn has_element(&self, element: &E) -> bool {
         let mut ret = false;
         ret |= self
@@ -1219,8 +1083,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         ret
     }
 
-    /// Return whether this [`Workspace`] has an element with this [`WlSurface`] in its surface
-    /// tree.
     pub fn has_surface(&self, surface: &WlSurface) -> bool {
         let mut ret = false;
         ret |= self
@@ -1234,9 +1096,6 @@ impl<E: WorkspaceElement> Workspace<E> {
         ret
     }
 
-    /// Get the topmost element under the `point` and its location relative to the [`Workspace`]
-    ///
-    /// It is assumed that `point` is relative to the [`Workspace`]'s 'output.
     #[profiling::function]
     pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
         if let Some(FullscreenTile { inner: tile, .. }) = self.fullscreen.as_ref() {
@@ -1277,9 +1136,6 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
-    /// Get the tiles element under the `point`.
-    ///
-    /// It is assumed that `point` is relative to the [`Workspace`]'s output.
     #[profiling::function]
     pub fn tiles_under(
         &self,

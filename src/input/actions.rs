@@ -14,7 +14,6 @@ use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
 
-/// A list of modifiers you can use in a key pattern.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Modifiers {
     ALT,
@@ -23,7 +22,6 @@ pub enum Modifiers {
     SUPER,
 }
 
-/// Custom adaptation of [`ModifiersState`] to allow for custom (de)serialization
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct FhtModifiersState {
     alt: bool,
@@ -81,88 +79,49 @@ impl<'de> Deserialize<'de> for FhtModifiersState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum KeyAction {
-    /// Quit the compositor
     Quit,
 
-    /// Reload the compositor config.
     ReloadConfig,
 
-    /// Run a given command, detaching its process from the compositor (basically the command won't
-    /// be a child of the fht-compositor process)
     RunCommand(String),
 
-    /// Select the next available layout on the current workspace.
     SelectNextLayout,
 
-    /// Select the previous available layout on the current workspace.
     SelectPreviousLayout,
 
-    /// Change the master width factor on the current workspace.
     ChangeMwfact(f32),
 
-    /// Change the number of master clients on the current workspace.
     ChangeNmaster(i32),
 
-    /// Change the cfact of the focused window.
     ChangeCfact(f32),
 
-    /// Maximize the focused window on the current workspace.
-    ///
-    /// NOTE: You cant' have 2 maximized windows at a time.
     MaximizeFocusedWindow,
 
-    /// Fullscreenthe focused window on the current workspace.
-    ///
-    /// NOTE: You cant' have 2 maximized windows at a time.
     FullscreenFocusedWindow,
 
-    /// Focus the next available window on the current workspace.
     FocusNextWindow,
 
-    /// Focus the previous available window on the current workspace.
     FocusPreviousWindow,
 
-    /// Swap the current and next window placements.
     SwapWithNextWindow,
 
-    /// Swap the current and previous window placements.
     SwapWithPreviousWindow,
 
-    /// Focus the next available output.
     FocusNextOutput,
 
-    /// Focus the previous available output.
     FocusPreviousOutput,
 
-    /// Close the currently focused window
     CloseFocusedWindow,
 
-    /// Focus the workspace at a given index on the focused output.
     FocusWorkspace(usize),
 
-    /// Send the focused window to the workspace at a given index on the focused output.
     SendFocusedWindowToWorkspace(usize),
 
-    /// Toggle the debug overlay on the focused window.
     ToggleDebugOverlayOnFocusedTile,
 
-    /// Do nothing.
-    ///
-    /// This is the same as disabling the key pattern for this action.
     None,
 }
 
-/// A key pattern.
-///
-/// For modifiers see [`Modifiers`]
-///
-/// ## Examples
-///
-/// ```rust,ignore
-/// ([SUPER, SHIFT], "c")
-/// ([SUPER, CTRL], "e")
-/// ([SUPER], "k")
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct KeyPattern(
     pub FhtModifiersState,
@@ -430,20 +389,10 @@ impl Into<MouseButton> for FhtMouseButton {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MouseAction {
-    /// Move the window under the cursor
     MoveTile,
-    /// Resize the window under the cursor.
     ResizeTile,
 }
 
-/// A mouse pattern.
-///
-/// For modifiers see [`Modifiers`]
-///
-/// ```rust,ignore
-/// ([SUPER], LMB)
-/// ([SUPER], RMB)
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct MousePattern(pub FhtModifiersState, pub FhtMouseButton);
 

@@ -108,22 +108,12 @@ pub type UdevRenderError<'a> = MultiError<
 >;
 
 pub struct UdevData {
-    /// The libseat session used to control a TTY.
     pub session: LibSeatSession,
-    /// The DMABUF global of this backend, associated with the [`primary_gpu`]
     dmabuf_global: Option<DmabufGlobal>,
-    /// The primary gpu, aka the primary render node.
     pub primary_gpu: DrmNode,
-    /// The primary device node, aka the DRM node pointing to your gpu.
-    /// It may or may not be the same as the primary_gpu node.
     pub primary_node: DrmNode,
-    /// The GPU manager of this backend, responsible to create renderers per-device and per-target.
     pub gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
-    /// The registered devices of this backend.
-    ///
-    /// For additional information, see [`Device`]
     pub devices: HashMap<DrmNode, Device>,
-    /// Registrations token for the event loop.
     _registration_tokens: Vec<RegistrationToken>,
 }
 
@@ -363,7 +353,6 @@ impl UdevData {
         Ok(data)
     }
 
-    /// Import this dmabuf buffer to the primary renderer.
     pub fn dmabuf_imported(&mut self, dmabuf: Dmabuf, notifier: ImportNotifier) {
         if self
             .gpu_manager
@@ -385,7 +374,6 @@ impl UdevData {
         }
     }
 
-    /// Register a device to the udev backend.
     fn device_added(&mut self, device_id: dev_t, path: &Path, fht: &mut Fht) -> anyhow::Result<()> {
         if !self.session.is_active() {
             return Ok(());
@@ -511,7 +499,6 @@ impl UdevData {
         Ok(())
     }
 
-    /// Update a device if already registered.
     fn device_changed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
         if !self.session.is_active() {
             return Ok(());
@@ -554,7 +541,6 @@ impl UdevData {
         Ok(())
     }
 
-    /// Remove a device from the backend if found.
     fn device_removed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
         if !self.session.is_active() {
             return Ok(());
@@ -590,9 +576,6 @@ impl UdevData {
         Ok(())
     }
 
-    /// Connect a new CRTC connector.
-    ///
-    /// This handles creating the output, GBM compositor, and dmabuf globals for this connector.
     fn connector_connected(
         &mut self,
         device_node: DrmNode,
@@ -783,7 +766,6 @@ impl UdevData {
         Ok(())
     }
 
-    /// Disconnect this connector, if found.
     fn connector_disconnected(
         &mut self,
         device_node: DrmNode,
@@ -838,7 +820,6 @@ impl UdevData {
         Ok(())
     }
 
-    /// Request the backend to schedule a next frame for this output.
     #[profiling::function]
     pub fn render(
         &mut self,
@@ -1066,9 +1047,6 @@ impl UdevData {
         Ok(false)
     }
 
-    /// Handle a DRM VBlank event
-    ///
-    /// This submits the frame to the comnpositor and schedules a next one if necessary.
     #[profiling::function]
     fn on_vblank(
         &mut self,
@@ -1156,57 +1134,26 @@ impl UdevData {
     }
 }
 
-/// A single DRM device.
-///
-/// This device is associated with a DRM and GBM device, and is also assigned a render node.
-///
-/// A device may contain multiple connectors, desktop connectors are registered as [`Surface`]s.
 pub struct Device {
-    /// Surfaces associated with this device.
-    ///
-    /// For more information, see [`Surface`]
     surfaces: HashMap<CrtcHandle, Surface>,
-    /// Non-desktop connectors of this device.
     pub non_desktop_connectors: Vec<(ConnectorHandle, CrtcHandle)>,
-    /// wp_drm_lease_device_v1 global.
     pub lease_state: Option<DrmLeaseState>,
-    /// Active leases managed by [`DrmLeaseState`]
     pub active_leases: Vec<DrmLease>,
-    /// The associated [`GbmDevice`]
     pub gbm: GbmDevice<DrmDeviceFd>,
-    /// The associated [`DrmDevice`]
     pub drm: DrmDevice,
-    /// DRM scanner to check for DRM connectors associated with this device.
     drm_scanner: DrmScanner,
-    /// The render node used for this device. It will be used to render every surface associated
-    /// with it. The [`Surface`]'s render_node will be used as the target for the [`MultiRenderer`]
     render_node: DrmNode,
-    /// Event loop token for DRM event listener.
     drm_registration_token: RegistrationToken,
 }
 
-/// A single DRM surface.
-///
-/// This is the backend structure associated with every [`Output`]
 pub struct Surface {
-    /// This surface render node. It will be used as the target with the [`MultiRenderer`]
     render_node: DrmNode,
-    /// The associated [`Output`]
     output: Output,
-    /// The associated wl_output global
     output_global: GlobalId,
-    /// The FPS tracker of this surface.
-    ///
-    /// This does not serve debugging/profiling purposes only. To tie DRM Vblanks properly, we use
-    /// this todo an approximation of the render time of this surface.
     fps: Fps,
-    /// The underlying compositor of this surface.
     compositor: GbmDrmCompositor,
-    /// The [`SurfaceDmabufFeedback`] associated with this surface render node.
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
-    /// Last primary plane swapchain commit counter, to track damage for zwlr_screencopy_manager_v1
     last_primary_swapchain: CommitCounter,
-    /// Last primary plane element commit counter, to track damage for zwlr_screencopy_manager_v1
     last_primary_element: CommitCounter,
 }
 
@@ -1217,7 +1164,6 @@ pub type GbmDrmCompositor = DrmCompositor<
     DrmDeviceFd,
 >;
 
-/// Get the surface dmabuf feedback with the primary_gpu and render_node.
 fn get_surface_dmabuf_feedback(
     primary_gpu: DrmNode,
     render_node: DrmNode,
@@ -1280,11 +1226,6 @@ fn get_surface_dmabuf_feedback(
     })
 }
 
-/// Render to wlr-screencopy.
-///
-/// This uses framebuffer blitting instead of rendering with a damage tracker, improving
-/// performance. XDG desktop portal is still preferred, but some programs need programmatic copying
-/// of the screen (which this provides)
 #[profiling::function]
 fn render_screencopy<'a>(
     renderer: &mut UdevRenderer<'a>,
@@ -1504,7 +1445,6 @@ fn render_screencopy<'a>(
     }
 }
 
-/// Draw rectangles incidacting damaged areas, if any.
 fn draw_damage<'a>(
     dt: &mut OutputDamageTracker,
     elements: &[FhtRenderElement<UdevRenderer<'a>>],

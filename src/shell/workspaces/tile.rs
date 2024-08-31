@@ -44,62 +44,28 @@ use crate::utils::RectCenterExt;
 pub trait WorkspaceElement:
     Clone + std::fmt::Debug + SpaceElement + WaylandFocus + IsAlive + Sized + PartialEq
 {
-    /// Send a configure message to this element.
-    ///
-    /// Wayland works by accumulating changes between commits and then when either the XDG toplevel
-    /// window or the server/compositor send a configure message, the changes are then applied.
     fn send_pending_configure(&self);
 
-    /// Set the size of this element.
-    ///
-    /// The element should not send a configure message with this.
     fn set_size(&self, new_size: Size<i32, Logical>);
-    /// Get the size of this element.
     fn size(&self) -> Size<i32, Logical>;
 
-    /// Set whether this element is fullscreened or not.
-    ///
-    /// The element should not send a configure message with this.
     fn set_fullscreen(&self, fullscreen: bool);
-    /// Set the fullscreen output for this element.
-    ///
-    /// The element should not send a configure message with this.
     fn set_fullscreen_output(&self, output: Option<wl_output::WlOutput>);
-    /// Get whether the this element is fullscreened or not.
     fn fullscreen(&self) -> bool;
-    /// Get the fullscreen output of this element.
     fn fullscreen_output(&self) -> Option<wl_output::WlOutput>;
 
-    /// Set whether this element is maximized or not.
-    ///
-    /// The element should not send a configure message with this.
     fn set_maximized(&self, maximize: bool);
-    /// Get whether the this element is maximizeed or not.
     fn maximized(&self) -> bool;
 
-    /// Set the bounds of this element.
-    ///
-    /// The element should not send a configure message with this.
     fn set_bounds(&self, bounds: Option<Size<i32, Logical>>);
-    /// Get the bounds of this element.
     fn bounds(&self) -> Option<Size<i32, Logical>>;
 
-    /// Set whether this element is activated or not.
-    ///
-    /// The element should not send a configure message with this.
     fn set_activated(&self, activated: bool);
-    /// Get whether this element is activated or not.
     fn activated(&self) -> bool;
 
-    /// Get the app_id/class of this element.
     fn app_id(&self) -> String;
-    /// Get the title of this element.
     fn title(&self) -> String;
 
-    /// Render the surface elements.
-    ///
-    /// It is up to the trait implementation to actually offset the render elements to match the
-    /// given `location`, if applicable.
     fn render_surface_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
@@ -108,10 +74,6 @@ pub trait WorkspaceElement:
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>>;
 
-    /// Render the popup elements.
-    ///
-    /// It is up to the trait implementation to actually offset the render elements to match the
-    /// given `location`, if applicable.
     fn render_popup_elements<R: FhtRenderer>(
         &self,
         renderer: &mut R,
@@ -120,67 +82,28 @@ pub trait WorkspaceElement:
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>>;
 
-    /// Set the offscreen element id.
-    ///
-    /// Sometimes we need to render inside a [`GlesTexture`] for animation purposes.
     fn set_offscreen_element_id(&self, id: Option<Id>);
-    /// Get the offscreen element id.
     fn get_offscreen_element_id(&self) -> Option<Id>;
 }
 
-/// A single [`Workspace`] tile.
-///
-/// A [`WorkspaceTile`] is responsible for managing an inner [`WorkspaceElement`] by giving a
-/// position, border, and other properties. This tile is useful only if you store it inside a
-/// [`Workspace`](super::Workspace)
 pub struct WorkspaceTile<E: WorkspaceElement> {
-    /// The inner element.
     pub(crate) element: E,
 
-    /// The location of this tile, relative to the [`Workspace`] that holds it.
-    ///
-    /// This location should be the top left corner of the tile's element, in other terms excluding
-    /// the client-side decorations
     pub location: Point<i32, Logical>,
 
-    /// The currently client fact added to this tile.
-    ///
-    /// This float being higher means that this tile of the [`Workspace`] will take more or less
-    /// relative space (width/height, based on the layout) of its stack based on its neighbours
-    /// cfacts.
     pub cfact: f32,
 
-    /// The border configuration for this tile.
-    ///
-    /// This can be user specified using window rules, falling back to the global configuration if
-    /// not set.
     pub border_config: Option<BorderConfig>,
 
-    /// Since we clip our tile damage for rounded corners, we still have to damage these regions.
-    /// This is achieved using this.
     pub rounded_corner_damage: ExtraDamage,
 
-    /// The temporary render location of this tile.
-    /// Used when dragging it using MoveTile mouse action.
     pub temporary_render_location: Option<Point<i32, Logical>>,
 
-    /// Location animation
-    ///
-    /// This value should be an offset getting closer to zero.
     pub location_animation: Option<Animation<Point<i32, Logical>>>,
 
-    /// Open/Close animation.
     pub open_close_animation: Option<OpenCloseAnimation>,
-    /// A snapshot of the last frame before the tile closes.
-    ///
-    /// Due to a limitation in wayland, we need to prepare the close render elements in advance
-    /// before we start the close animation, since the window will have the buffers unmapped
-    /// or destroyed by then.
-    ///
-    /// It is up to the parent compositor to decide how to handle this.
     close_animation_snapshot: Option<Vec<WorkspaceTileRenderElement<GlowRenderer>>>,
 
-    /// The egui debug overlay for this element.
     pub debug_overlay: Option<EguiElement>,
 }
 
@@ -197,7 +120,6 @@ impl<E: WorkspaceElement> PartialEq<E> for WorkspaceTile<E> {
 }
 
 impl<E: WorkspaceElement> WorkspaceTile<E> {
-    /// Create a new tile.
     pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
         let element_size = element.size();
 
@@ -218,22 +140,18 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
     }
 
-    /// Get a reference to this tile's inner element.
     pub fn element(&self) -> &E {
         &self.element
     }
 
-    /// Send a pending configure message to the element.
     pub fn send_pending_configure(&mut self) {
         self.element.send_pending_configure();
     }
 
-    /// Return the border settings to use when rendering this tile.
     pub fn border_config(&self) -> BorderConfig {
         self.border_config.unwrap_or(CONFIG.decoration.border)
     }
 
-    /// Return actual border thickness used by the tile, None if there's no border is being drawn.
     pub fn border_thickness(&self) -> Option<i32> {
         if self.element.fullscreen() {
             return None;
@@ -242,7 +160,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         Some(self.border_config().thickness as i32)
     }
 
-    /// Return whether this tile contains this [`WlSurface`] of [`WindowSurfaceType`]
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
         let Some(element_surface) = self.element.wl_surface() else {
             return false;
@@ -281,10 +198,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
 // Geometry related functions
 impl<E: WorkspaceElement> WorkspaceTile<E> {
-    /// Set the the tile's geometry, relative to the [`Workspace`] that holds it.
-    ///
-    /// `new_geo` is assumed to be the the tile's visual geometry, excluding client side decorations
-    /// like shadows.
     pub fn set_tile_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
         if let Some(thickness) = self.border_thickness() {
             new_geo.loc += (thickness, thickness).into();
@@ -314,24 +227,18 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
     }
 
-    /// Get the element's geometry, excluding client side decorations like shadows, relative to
-    /// the [`Workspace`] that holds it.
     pub fn element_geometry(&self) -> Rectangle<i32, Logical> {
         let mut geo = self.element.geometry();
         geo.loc = self.location;
         geo
     }
 
-    /// Get the element's visual geometry, excluding client side decorations like shadows, relative
-    /// to the [`Workspace`] that holds it.
     pub fn element_visual_geometry(&self) -> Rectangle<i32, Logical> {
         let mut geo = self.element.geometry();
         geo.loc = self.render_location();
         geo
     }
 
-    /// Get this tile's geometry, IE the topleft point of the tile's visual geometry, including
-    /// the border, and excluding the client side decorations like shadows, relative to the
     pub fn tile_geometry(&self) -> Rectangle<i32, Logical> {
         let mut geo = self.element.geometry();
         geo.loc = self.location;
@@ -342,15 +249,12 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         geo
     }
 
-    /// Get this tile's bounding box, relative to the [`Workspace`] that holds it.
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
         let mut bbox = self.element.bbox();
         bbox.loc = self.location;
         bbox
     }
 
-    /// Get this tile's render location, IE the topleft point of the tile's visual geometry,
-    /// excluding client side decorations like shadows, relative to the [`Workspace`] that holds it.
     pub fn render_location(&self) -> Point<i32, Logical> {
         let mut render_location = self.temporary_render_location.unwrap_or(self.location);
         if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
@@ -360,7 +264,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         render_location
     }
 
-    /// Start this tile's opening animation.
     pub fn start_opening_animation(&mut self) {
         let Some(progress) = Animation::new(
             0.0,
@@ -377,7 +280,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
 // Animation-related code
 impl<E: WorkspaceElement> WorkspaceTile<E> {
-    /// Prepare a close animation render elements.
     pub fn prepare_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
         if self.close_animation_snapshot.is_some() {
             return;
@@ -401,14 +303,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         self.close_animation_snapshot = Some(elements);
     }
 
-    /// Prepare a close animation render elements.
     pub fn clear_close_snapshot(&mut self) {
         let _ = self.close_animation_snapshot.take();
     }
 
-    /// Start the closing animation.
-    ///
-    /// Having a `renderer` passed is mandatory for us to store the last window frame.
     pub fn start_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
         let Some(elements) = self.close_animation_snapshot.take() else {
             return;
@@ -462,7 +360,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         });
     }
 
-    /// Advance this tile's animations.
     pub fn advance_animations(&mut self, current_time: Time<Monotonic>) -> bool {
         let mut ret = false;
 
@@ -483,7 +380,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 }
 
 impl<E: WorkspaceElement> WorkspaceTile<E> {
-    /// Draw an egui overlay for this tile.
     fn egui_overlay(&self, ctx: &egui::Context) {
         egui::Area::new("tile-debug-overlay")
             .fixed_pos((0.0, 0.0))
@@ -580,7 +476,6 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             });
     }
 
-    /// Generate the render elements for this tile.
     fn render_elements_inner<R: FhtRenderer>(
         &self,
         renderer: &mut R,

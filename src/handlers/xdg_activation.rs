@@ -8,8 +8,6 @@ use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
 
-/// NOTE: This is really just an arbitrary value that I copied from Anvil's code
-/// Optimally this should be checked based on the client but eh.
 pub const ACTIVATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl XdgActivationHandler for State {

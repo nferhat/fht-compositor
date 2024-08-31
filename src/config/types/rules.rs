@@ -19,16 +19,11 @@ fn deserialize_regex<'de, D: Deserializer<'de>>(
     })
 }
 
-/// A single pattern used to match a possible window.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct WindowPattern {
-    /// The workspace index the window is getting spawned on.
     #[serde(default)]
     workspace: Option<usize>,
 
-    /// The window title regex to match on
-    ///
-    /// NOTE: The compositor checks before for a title since it's more specific than an app id.
     #[serde(
         default,
         serialize_with = "serialize_regex",
@@ -36,9 +31,6 @@ pub struct WindowPattern {
     )]
     title: Option<Regex>,
 
-    /// The app id regex to match on.
-    ///
-    /// This is commonly known as the window CLASS, or WM_CLASS on X.org
     #[serde(
         default,
         serialize_with = "serialize_regex",
@@ -105,23 +97,11 @@ impl WindowPattern {
     }
 }
 
-/// Initial settings/state for a window when mapping it
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowRules {
-    /// On which output should we map the window?
     pub output: Option<String>,
-
-    /// The border settings of this window.
-    ///
-    /// This will override `config.decoration.border` for this window.
     pub border: Option<super::decoration::BorderConfig>,
-
-    /// Whether to allow this window to draw client-side decorations
     pub allow_csd: Option<bool>,
-
-    /// On which specific workspace of the output should we map the window?
-    ///
-    /// NOTE: This is the workspace *index*
     pub workspace: Option<usize>,
 }
 

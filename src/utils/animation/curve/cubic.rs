@@ -2,24 +2,14 @@ use serde::de::Visitor;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 
-/// A single cubic control point.
 pub type ControlPoint = (f64, f64);
 
-/// How much points should we bake inside an animation?
 pub const BAKED_POINTS: usize = 255;
 
-/// Cubic bezier animation using two control points.
-///
-/// Adapted from Hyprland's cubic bezier curves:
-/// - `src/helpers/BezierCurve.cpp`
-/// - https://blog.maximeheckel.com/posts/cubic-bezier-from-math-to-motion/
 #[derive(Debug, Clone, Copy)]
 pub struct Animation {
-    /// Our first control points for this curve.
     p1: ControlPoint,
-    /// Our second control point for this curve.
     p2: ControlPoint,
-    /// Baked animation points, basically precalculated values to speed up.
     baked_points: [ControlPoint; BAKED_POINTS],
     // In reality we don't have two control points but 4, one is (0,0) and the other is (1,1).
     // These are added implicitly to the curve to ensure that we go from these bounds.
@@ -117,7 +107,6 @@ impl Animation {
         }
     }
 
-    /// Get the Y value at a given X coordinate, assuming that x is included in [0.0, 1.0]
     pub fn y(&self, x: f64) -> f64 {
         let mut index = 0;
         let mut below = true;
