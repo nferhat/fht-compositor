@@ -20,12 +20,11 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
-use workspaces::FullscreenTile;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use self::grabs::MoveSurfaceGrab;
 use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
-use self::workspaces::{Workspace, WorkspaceSwitchAnimation};
+use self::workspaces::Workspace;
 use crate::config::CONFIG;
 use crate::state::{Fht, UnmappedTile};
 use crate::utils::RectCenterExt;
@@ -147,9 +146,9 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_element_and_workspace_mut(surface))
     }
 
-    pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, &Output)> {
+    pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, Output)> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, &wset.output)))
+            .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, wset.output())))
     }
 
     pub fn find_tile_and_output(
@@ -157,7 +156,7 @@ impl Fht {
         surface: &WlSurface,
     ) -> Option<(&mut WorkspaceTile<Window>, Output)> {
         self.workspaces_mut().find_map(|(_, wset)| {
-            let output = wset.output.clone();
+            let output = wset.output();
             wset.find_tile_mut(surface).map(|tile| (tile, output))
         })
     }
@@ -205,36 +204,6 @@ impl Fht {
                     None
                 })
             })
-    }
-
-    #[profiling::function]
-    pub fn visible_windows_for_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
-        let wset = self.wset_for(output);
-
-        let switching_windows = wset
-            .switch_animation
-            .as_ref()
-            .map(|anim| {
-                let ws = &wset.workspaces[anim.target_idx];
-
-                ws.fullscreen
-                    .as_ref()
-                    .map(|fs| fs.inner.element())
-                    .into_iter()
-                    .chain(ws.tiles.iter().map(WorkspaceTile::element))
-                    .collect::<Vec<_>>()
-            })
-            .into_iter()
-            .flatten();
-
-        let active = wset.active();
-        active
-            .fullscreen
-            .as_ref()
-            .map(|fs| fs.inner.element())
-            .into_iter()
-            .chain(active.tiles.iter().map(WorkspaceTile::element))
-            .chain(switching_windows)
     }
 
     pub fn prepare_pending_window(&mut self, window: Window) {
@@ -306,7 +275,7 @@ impl Fht {
         }
 
         let wset = self.wset_mut_for(&output);
-        let workspace = &mut wset.workspaces[workspace_idx];
+        let workspace = wset.get_workspace_mut(workspace_idx);
         let layout = workspace.get_active_layout();
 
         // Pre compute window geometry for insertion.
@@ -363,7 +332,7 @@ impl Fht {
         let workspace_idx = last_workspace_idx.unwrap_or(active_idx);
 
         let is_active = workspace_idx == wset.get_active_idx();
-        let workspace = &mut wset.workspaces[workspace_idx];
+        let workspace = wset.get_workspace_mut(workspace_idx);
 
         let window = tile.element.clone();
         workspace.insert_tile(tile, false);
@@ -377,7 +346,7 @@ impl Fht {
 
         // From using the compositor opening a window when a switch is being done feels more
         // natural when the window gets focus, even if focus_new_windows is none.
-        let is_switching = wset.switch_animation.is_some();
+        let is_switching = wset.has_switch_animation();
         let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
 
         if should_focus {
@@ -413,36 +382,13 @@ impl Fht {
     }
 
     pub fn advance_animations(&mut self, output: &Output, current_time: Time<Monotonic>) -> bool {
-        let mut animations_running = false;
         let wset = self.wset_mut_for(output);
-        if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
-            wset.switch_animation.take_if(|a| a.animation.is_finished())
-        {
-            wset.active_idx
-                .store(target_idx, std::sync::atomic::Ordering::SeqCst);
-        }
-        if let Some(animation) = wset.switch_animation.as_mut() {
-            animation.animation.set_current_time(current_time);
-            animations_running = true;
-        }
-        for ws in wset.workspaces_mut() {
-            if let Some(FullscreenTile { inner, .. }) = ws.fullscreen.as_mut() {
-                animations_running |= inner.advance_animations(current_time);
-            }
-
-            for window in &mut ws.tiles {
-                animations_running |= window.advance_animations(current_time);
-            }
-        }
-
-        animations_running
+        wset.advance_animations(current_time)
     }
 
     pub fn all_windows(&self) -> impl Iterator<Item = &Window> + '_ {
         self.workspaces.values().flat_map(|wset| {
-            let workspaces = &wset.workspaces;
-            workspaces
-                .iter()
+            wset.workspaces()
                 .flat_map(|ws| ws.tiles.iter().map(|tile| tile.element()))
         })
     }

@@ -420,7 +420,7 @@ impl Fht {
 
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output");
-        let removed_wset = self
+        let mut removed_wset = self
             .workspaces
             .swap_remove(output)
             .expect("Tried to remove a non-existing output!");
@@ -441,7 +441,7 @@ impl Fht {
         let wset = self.workspaces.first_mut().unwrap().1;
 
         for (mut old_workspace, new_workspace) in
-            std::iter::zip(removed_wset.workspaces, wset.workspaces_mut())
+            std::iter::zip(removed_wset.drain_workspaces(), wset.workspaces_mut())
         {
             // Little optimizaztion, to avoid recalculating window geometries each time
             //
@@ -547,8 +547,8 @@ impl Fht {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
 
-        for tile in self.visible_windows_for_output(output) {
-            tile.send_frame(output, time, throttle, should_send_frames);
+        for window in self.wset_for(output).visible_elements() {
+            window.send_frame(output, time, throttle, should_send_frames);
         }
 
         let map = layer_map_for_output(output);
@@ -603,9 +603,9 @@ impl Fht {
         // Both windows and layer surfaces can only be drawn on a single output at a time, so there
         // no need to update all the windows of the output.
 
-        for tile in self.visible_windows_for_output(output) {
-            let offscreen_id = tile.get_offscreen_element_id();
-            tile.with_surfaces(|surface, surface_data| {
+        for window in self.wset_for(output).visible_elements() {
+            let offscreen_id = window.get_offscreen_element_id();
+            window.with_surfaces(|surface, surface_data| {
                 // We do the work of update_surface_primary_scanout_output, but use our own
                 // offscreen Id if needed.
                 surface_data
@@ -696,8 +696,8 @@ impl Fht {
             );
         }
 
-        for tile in self.visible_windows_for_output(output) {
-            tile.send_dmabuf_feedback(
+        for window in self.wset_for(output).visible_elements() {
+            window.send_dmabuf_feedback(
                 output,
                 |_, _| Some(output.clone()),
                 |surface, _| {
@@ -759,7 +759,7 @@ impl Fht {
             );
         }
 
-        for window in self.visible_windows_for_output(output) {
+        for window in self.wset_for(output).visible_elements() {
             window.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,

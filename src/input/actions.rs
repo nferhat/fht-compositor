@@ -333,7 +333,7 @@ impl State {
                 let tile = active.remove_tile(&window, true).unwrap();
                 let new_focus = active.focused().cloned();
                 let idx = idx.clamp(0, 9);
-                wset.workspaces[idx].insert_tile(tile, true);
+                wset.get_workspace_mut(idx).insert_tile(tile, true);
 
                 if let Some(window) = new_focus {
                     self.set_focus_target(Some(window.into()));

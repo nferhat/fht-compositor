@@ -40,7 +40,6 @@ impl FractionalScaleHandler for State {
                 self.fht
                     .find_window_and_output(&root)
                     .map(|(_, o)| o)
-                    .cloned()
             })
         } else {
             // We are not the root surface, try from surface state.
@@ -49,7 +48,6 @@ impl FractionalScaleHandler for State {
                 self.fht
                     .find_window_and_output(&root)
                     .map(|(_, o)| o)
-                    .cloned()
             })
         }
         .unwrap_or_else(|| {
