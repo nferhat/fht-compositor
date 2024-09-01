@@ -276,17 +276,10 @@ impl Fht {
 
         let wset = self.wset_mut_for(&output);
         let workspace = wset.get_workspace_mut(workspace_idx);
-        let layout = workspace.get_active_layout();
 
         // Pre compute window geometry for insertion.
         let mut tile = WorkspaceTile::new(window.clone(), None);
-        let tile_area = workspace.tile_area();
-        layout.arrange_tiles(
-            workspace.tiles.iter_mut().chain(std::iter::once(&mut tile)),
-            tile_area,
-            CONFIG.general.inner_gaps,
-            false,
-        );
+        workspace.prepare_tile_geometry(&mut tile);
 
         // Client side-decorations
         let allow_csd = map_settings
@@ -372,7 +365,7 @@ impl Fht {
 
         // The target (aka the popup) geometry should be relative to the parent (aka the window's)
         // geometry, based on the xdg_shell protocol requirements.
-        let mut target = workspace.output.geometry();
+        let mut target = workspace.output().geometry();
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
         target.loc -= workspace.element_geometry(&window).unwrap().loc;
 
@@ -389,7 +382,7 @@ impl Fht {
     pub fn all_windows(&self) -> impl Iterator<Item = &Window> + '_ {
         self.workspaces.values().flat_map(|wset| {
             wset.workspaces()
-                .flat_map(|ws| ws.tiles.iter().map(|tile| tile.element()))
+                .flat_map(|ws| ws.tiles().map(|tile| tile.element()))
         })
     }
 }

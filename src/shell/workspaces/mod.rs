@@ -23,8 +23,9 @@ pub mod tile;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use layout::Layout;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
-use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
+use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Time};
@@ -67,12 +68,15 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
     }
 
     pub fn reload_config(&mut self) {
-        let layouts = CONFIG.general.layouts.clone();
         for workspace in &mut self.workspaces {
-            workspace.layouts = layouts.clone();
-            workspace.active_layout_idx = workspace
-                .active_layout_idx
-                .clamp(0, workspace.layouts.len() - 1);
+            workspace.layout = Layout::new(
+                &self.output,
+                CONFIG.general.layouts.clone(),
+                CONFIG.general.nmaster,
+                CONFIG.general.mwfact,
+                CONFIG.general.inner_gaps,
+                CONFIG.general.outer_gaps,
+            );
         }
     }
 
@@ -140,6 +144,10 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces_mut().for_each(|ws| ws.arrange_tiles(true))
     }
 
+    pub fn output_resized(&mut self) {
+        self.workspaces_mut().for_each(|ws| ws.output_resized())
+    }
+
     pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
         self.workspaces()
             .find_map(|ws| ws.find_tile(surface).map(WorkspaceTile::element))
@@ -200,7 +208,6 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             .into_iter()
             .chain(active.tiles.iter().map(WorkspaceTile::element))
             .chain(switching_windows)
-
     }
 
     pub fn ws_for(&self, element: &E) -> Option<&Workspace<E>> {
@@ -221,7 +228,8 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         };
 
         let output_geo = self.output.geometry();
-        let (current_offset, target_offset) = animation.calculate_offsets(self.active_idx, output_geo);
+        let (current_offset, target_offset) =
+            animation.calculate_offsets(self.active_idx, output_geo);
         self.active()
             .fullscreen
             .as_ref()
@@ -242,7 +250,8 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         };
 
         let output_geo = self.output.geometry();
-        let (current_offset, target_offset) = animation.calculate_offsets(self.active_idx, output_geo);
+        let (current_offset, target_offset) =
+            animation.calculate_offsets(self.active_idx, output_geo);
 
         self.active()
             .element_under(point + current_offset.to_f64())
@@ -313,17 +322,15 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
         // Switch finished, avoid blank frame and return target elements immediatly
         if animation.animation.is_finished() {
-            elements =
-                target_elements
-                    .map(WorkspaceSetRenderElement::Normal)
-                    .collect()
-            );
+            elements = target_elements
+                .into_iter()
+                .map(WorkspaceSetRenderElement::Normal)
+                .collect();
             return (target.fullscreen.is_some(), elements);
         }
 
-        // Otherwise to computations
-        let (current_offset, target_offset) = animation.calculate_offsets(self.active_idx, output_geo);
-
+        let (current_offset, target_offset) =
+            animation.calculate_offsets(self.active_idx, output_geo);
         elements.extend(active_elements.into_iter().filter_map(|element| {
             let relocate =
                 RelocateRenderElement::from_element(element, current_offset, Relocate::Relative);
@@ -438,34 +445,52 @@ impl WorkspaceId {
 }
 
 pub struct Workspace<E: WorkspaceElement> {
-    pub output: Output,
-    pub tiles: Vec<WorkspaceTile<E>>,
+    output: Output,
+    tiles: Vec<WorkspaceTile<E>>,
     focused_tile_idx: usize,
-    pub layouts: Vec<WorkspaceLayout>,
-    pub fullscreen: Option<FullscreenTile<E>>,
-    pub active_layout_idx: usize,
+    layout: Layout,
+    fullscreen: Option<FullscreenTile<E>>,
     id: WorkspaceId,
 }
 
 impl<E: WorkspaceElement> Workspace<E> {
     pub fn new(output: Output) -> Self {
+        let layout = Layout::new(
+            &output,
+            CONFIG.general.layouts.clone(),
+            CONFIG.general.nmaster,
+            CONFIG.general.mwfact,
+            CONFIG.general.inner_gaps,
+            CONFIG.general.outer_gaps,
+        );
         Self {
             output,
             tiles: vec![],
             focused_tile_idx: 0,
-            layouts: CONFIG.general.layouts.clone(),
-            active_layout_idx: 0,
+            layout,
             fullscreen: None,
             id: WorkspaceId::unique(),
         }
+    }
+
+    pub fn output(&self) -> Output {
+        self.output.clone()
     }
 
     pub fn id(&self) -> WorkspaceId {
         self.id
     }
 
+    pub fn drain_tiles(&mut self) -> impl Iterator<Item = WorkspaceTile<E>> + '_ {
+        self.tiles.drain(..)
+    }
+
     pub fn tiles(&self) -> impl Iterator<Item = &WorkspaceTile<E>> {
         self.tiles.iter()
+    }
+
+    pub fn tiles_len(&self) -> usize {
+        self.tiles.len()
     }
 
     #[profiling::function]
@@ -900,6 +925,13 @@ impl<E: WorkspaceElement> Workspace<E> {
 
 // Geometry and layout
 impl<E: WorkspaceElement> Workspace<E> {
+    pub fn with_layout<F, T>(&mut self, f: F) -> T
+    where
+        F: FnOnce(&mut Layout) -> T,
+    {
+        f(&mut self.layout)
+    }
+
     pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
         self.tile_for(element).map(WorkspaceTile::element_geometry)
     }
@@ -909,12 +941,18 @@ impl<E: WorkspaceElement> Workspace<E> {
             .map(WorkspaceTile::element_visual_geometry)
     }
 
-    pub fn tile_area(&self) -> Rectangle<i32, Logical> {
-        let mut area = layer_map_for_output(&self.output).non_exclusive_zone();
-        let outer_gaps = CONFIG.general.outer_gaps;
-        area.size -= (2 * outer_gaps, 2 * outer_gaps).into();
-        area.loc += (outer_gaps, outer_gaps).into();
-        area
+    pub fn prepare_tile_geometry(&mut self, tile: &mut WorkspaceTile<E>) {
+        // Code adapted from arrange_tiles
+        // We only care about the non-maximized and non-fullscreen tiles here
+        let tiled = self.tiles.iter_mut().filter(|tile| {
+            !tile.element.maximized()
+                && !matches!(
+                    tile.open_close_animation,
+                    Some(tile::OpenCloseAnimation::Closing { .. })
+                )
+        });
+        self.layout
+            .arrange_tiles(tiled.chain(std::iter::once(tile)), true);
     }
 
     #[profiling::function]
@@ -930,15 +968,10 @@ impl<E: WorkspaceElement> Workspace<E> {
             return;
         }
 
-        let inner_gaps = CONFIG.general.inner_gaps;
-        let tile_area = self.tile_area();
-
-        let layout = self.get_active_layout();
         let (maximized, tiled) = self
             .tiles
             .iter_mut()
             .filter(|tile| {
-                // Do not include tiles that are closing.
                 !matches!(
                     tile.open_close_animation,
                     Some(tile::OpenCloseAnimation::Closing { .. })
@@ -946,78 +979,43 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
             .partition::<Vec<_>, _>(|tile| tile.element.maximized());
 
+        let maximized_geo = self.layout.usable_geo();
         for tile in maximized {
-            tile.set_tile_geometry(tile_area, animate)
+            tile.set_tile_geometry(maximized_geo, animate)
         }
 
         if tiled.is_empty() {
             return;
         }
 
-        layout.arrange_tiles(tiled.into_iter(), tile_area, inner_gaps, animate);
-    }
-
-    pub fn get_active_layout(&self) -> WorkspaceLayout {
-        self.layouts[self.active_layout_idx]
+        self.layout.arrange_tiles(tiled.into_iter(), animate);
     }
 
     pub fn select_next_layout(&mut self, animate: bool) {
-        let layouts_len = self.layouts.len();
-        let new_active_idx = self.active_layout_idx + 1;
-        let new_active_idx = if new_active_idx == layouts_len {
-            0
-        } else {
-            new_active_idx
-        };
-
-        self.active_layout_idx = new_active_idx;
+        self.layout.select_next();
         self.arrange_tiles(animate);
     }
 
     pub fn select_previous_layout(&mut self, animate: bool) {
-        let layouts_len = self.layouts.len();
-        let new_active_idx = match self.active_layout_idx.checked_sub(1) {
-            Some(idx) => idx,
-            None => layouts_len - 1,
-        };
-
-        self.active_layout_idx = new_active_idx;
+        self.layout.select_previous();
         self.arrange_tiles(animate);
     }
 
     pub fn change_mwfact(&mut self, delta: f32, animate: bool) {
-        let active_layout = &mut self.layouts[self.active_layout_idx];
-        if let WorkspaceLayout::Tile {
-            master_width_factor,
-            ..
-        }
-        | WorkspaceLayout::BottomStack {
-            master_width_factor,
-            ..
-        }
-        | WorkspaceLayout::CenteredMaster {
-            master_width_factor,
-            ..
-        } = active_layout
-        {
-            *master_width_factor += delta;
-            *master_width_factor = master_width_factor.clamp(0.05, 0.95);
-        }
+        self.layout.change_mwfact(delta);
         self.arrange_tiles(animate);
     }
 
     pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
-        let active_layout = &mut self.layouts[self.active_layout_idx];
-        if let WorkspaceLayout::Tile { nmaster, .. }
-        | WorkspaceLayout::BottomStack { nmaster, .. }
-        | WorkspaceLayout::CenteredMaster { nmaster, .. } = active_layout
-        {
-            let new_nmaster = nmaster
-                .saturating_add_signed(delta as isize)
-                .clamp(1, usize::MAX);
-            *nmaster = new_nmaster;
-        }
+        self.layout.change_nmaster(delta);
         self.arrange_tiles(animate);
+    }
+
+    pub fn output_resized(&mut self) {
+        self.layout.output_resized(&self.output);
+        self.arrange_tiles(true);
+        // force update output overlaps for all the tiles.
+        self.refresh();
     }
 }
 
@@ -1183,8 +1181,9 @@ mod tests {
     use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
     use smithay::wayland::seat::WaylandFocus;
 
+    use super::layout::Layout;
     use super::tile::WorkspaceElement;
-    use super::{Workspace, WorkspaceLayout};
+    use super::{Workspace, WorkspaceId, WorkspaceLayout};
     use crate::config::{BorderConfig, CONFIG};
     use crate::utils::output::OutputExt;
 
@@ -1379,12 +1378,6 @@ mod tests {
         }
     }
 
-    #[allow(unused)]
-    const TILE_LAYOUT: usize = 0;
-    #[allow(unused)]
-    const BOTTOM_STACK_LAYOUT: usize = 1;
-    const FLOATING_LAYOUT: usize = 2;
-
     fn create_workspace() -> Workspace<TestElement> {
         let output = Output::new(
             String::from("test-output-0"),
@@ -1394,6 +1387,14 @@ mod tests {
                 make: String::from("test-make"),
                 model: String::from("test-model"),
             },
+        );
+        let layout = Layout::new(
+            &output,
+            CONFIG.general.layouts.clone(),
+            CONFIG.general.nmaster,
+            CONFIG.general.mwfact,
+            CONFIG.general.inner_gaps,
+            CONFIG.general.outer_gaps,
         );
         let mode = Mode {
             size: (800, 600).into(),
@@ -1407,20 +1408,9 @@ mod tests {
             output,
             tiles: vec![],
             focused_tile_idx: 0,
-            layouts: vec![
-                WorkspaceLayout::Tile {
-                    nmaster: 1,
-                    master_width_factor: 0.5,
-                },
-                WorkspaceLayout::BottomStack {
-                    nmaster: 1,
-                    master_width_factor: 0.5,
-                },
-                WorkspaceLayout::Floating,
-            ],
-            active_layout_idx: 0,
+            layout,
             fullscreen: None,
-            id: super::WorkspaceId::unique()
+            id: WorkspaceId::unique(),
         }
     }
 
@@ -1450,7 +1440,7 @@ mod tests {
         SwapWithPreviousElement,
         ArrangeTiles,
         SetLayout {
-            layout_idx: usize,
+            layout: WorkspaceLayout,
         },
         SelectNextLayout,
         SelectPreviousLayout,
@@ -1492,8 +1482,8 @@ mod tests {
                     let _ = workspace.swap_with_previous_element(false);
                 }
                 Operation::ArrangeTiles => workspace.arrange_tiles(false),
-                Operation::SetLayout { layout_idx } => {
-                    workspace.active_layout_idx = layout_idx;
+                Operation::SetLayout { layout } => {
+                    workspace.layout.set_layouts(vec![layout]);
                     workspace.arrange_tiles(false);
                 }
                 Operation::SelectNextLayout => workspace.select_next_layout(false),
@@ -1520,6 +1510,7 @@ mod tests {
 
     impl Workspace<TestElement> {
         fn check_invariants(&self) {
+            self.layout.check_invariants();
             let output_geo = self.output.geometry();
 
             // State checks.
@@ -1530,14 +1521,6 @@ mod tests {
                     "Focus tile index should be strictly smaller than tiles.len()"
                 );
             }
-            assert!(
-                !self.layouts.is_empty(),
-                "A workspace can't exist without layouts!"
-            );
-            assert!(
-                self.active_layout_idx < self.layouts.len(),
-                "Active layout index should be strictly smaller than layouts.len()"
-            );
 
             // General checks for mapped tiles that abide to the layout
             for tile in &self.tiles {
@@ -1667,7 +1650,7 @@ mod tests {
         let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
         let workspace = check_operations(vec![
             Operation::SetLayout {
-                layout_idx: FLOATING_LAYOUT,
+                layout: WorkspaceLayout::Floating,
             },
             Operation::InsertElement {
                 element: element.clone(),

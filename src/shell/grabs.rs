@@ -72,7 +72,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         let Some(ws) = data.fht.ws_mut_for(&self.window) else {
             return;
         };
-        let output_loc = ws.output.current_location();
+        let output_loc = ws.output().current_location();
         let new_location = new_location.to_i32_round() - output_loc;
 
         self.last_pointer_location = event.location;
@@ -120,7 +120,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
                 //
                 // So, we set our tile location so that when we swap out the two, the arrange_tiles
                 // function (used in swap_elements) will animate from this location here.
-                let output_loc = ws.output.current_location();
+                let output_loc = ws.output().current_location();
                 let location = self.last_pointer_location - output_loc.to_f64();
                 let self_tile = ws.tile_mut_for(&self.window).unwrap();
                 self_tile.temporary_render_location = None;
@@ -366,7 +366,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
         // this.
 
         let ws = state.fht.ws_mut_for(&self.window).unwrap();
-        let windows_len = ws.tiles.len();
+        let windows_len = ws.tiles_len();
 
         // First of all: no need todo anything if we only have one window.
         if windows_len == 1 {
@@ -374,16 +374,16 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
         }
 
         let window_idx = ws
-            .tiles
-            .iter()
+            .tiles()
             .position(|tile| tile.element() == &self.window)
             .unwrap();
-        let tile_area = ws.tile_area();
-        // Try to update only if it matters.
-        let mut new_mwfact @ mut cfact_delta = Option::<f32>::None;
 
-        match ws.get_active_layout() {
-            WorkspaceLayout::Tile { nmaster, .. } => {
+        let (usable_geo, nmaster, active_layout) =
+            ws.with_layout(|layout| (layout.usable_geo(), layout.nmaster(), layout.active()));
+
+        let mut new_mwfact @ mut cfact_delta = Option::<f32>::None;
+        match active_layout {
+            WorkspaceLayout::Tile => {
                 let is_master = window_idx < nmaster;
                 let is_on_top_side = window_idx == 0 || window_idx == nmaster;
                 let is_on_bottom_side =
@@ -405,10 +405,10 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
                     new_size.w += delta.x;
 
                     new_mwfact = Some(if is_master {
-                        new_size.w as f32 / (tile_area.size.w - CONFIG.general.inner_gaps) as f32
+                        new_size.w as f32 / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32
                     } else {
                         1.0 - (new_size.w as f32
-                            / (tile_area.size.w - CONFIG.general.inner_gaps) as f32)
+                            / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32)
                     });
                 }
 
@@ -434,7 +434,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
                     cfact_delta = Some(new_size.h as f32 / self.initial_window_size.h as f32);
                 }
             }
-            WorkspaceLayout::BottomStack { nmaster, .. } => {
+            WorkspaceLayout::BottomStack => {
                 let is_master = window_idx < nmaster;
                 let is_on_left_side = window_idx == 0 || window_idx == nmaster;
                 let is_on_right_side =
@@ -463,14 +463,14 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
                     new_size.h += delta.y;
 
                     new_mwfact = Some(if is_master {
-                        new_size.h as f32 / (tile_area.size.h - CONFIG.general.inner_gaps) as f32
+                        new_size.h as f32 / (usable_geo.size.h - CONFIG.general.inner_gaps) as f32
                     } else {
                         1.0 - (new_size.h as f32
-                            / (tile_area.size.h - CONFIG.general.inner_gaps) as f32)
+                            / (usable_geo.size.h - CONFIG.general.inner_gaps) as f32)
                     });
                 }
             }
-            WorkspaceLayout::CenteredMaster { nmaster, .. } => {
+            WorkspaceLayout::CenteredMaster => {
                 // For the centered master layout, its a little more complicated.
                 //
                 // The master stack grows to both directions at the same time.
@@ -503,12 +503,12 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
                     new_size.w += delta.x;
 
                     // Centered master can have one or TWO columns, important to note this
-                    if is_master || ws.tiles.len() < 3 {
+                    if is_master || windows_len < 3 {
                         // Though, if we are the master, we dont care whether we are one or two
                         // columns, since we determine the mwfact ourselves
                         new_mwfact = Some(
                             new_size.w as f32
-                                / (tile_area.size.w - CONFIG.general.inner_gaps) as f32,
+                                / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32,
                         );
                     } else {
                         // But, if we are the clients, we have two multiply by two only if we have
@@ -516,7 +516,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
                         // than three windows in the layout.
                         new_mwfact = Some(
                             1.0 - new_size.w as f32
-                                / (tile_area.size.w - CONFIG.general.inner_gaps) as f32
+                                / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32
                                 * 2.0,
                         );
                     }
@@ -540,23 +540,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
 
         let mut arrange = false;
         if let Some(new_mwfact) = new_mwfact {
-            let active_layout = &mut ws.layouts[ws.active_layout_idx];
-            if let WorkspaceLayout::Tile {
-                master_width_factor,
-                ..
-            }
-            | WorkspaceLayout::BottomStack {
-                master_width_factor,
-                ..
-            }
-            | WorkspaceLayout::CenteredMaster {
-                master_width_factor,
-                ..
-            } = active_layout
-            {
-                *master_width_factor = new_mwfact;
-                *master_width_factor = master_width_factor.clamp(0.05, 0.95);
-            }
+            ws.with_layout(|layout| layout.set_mwfact(new_mwfact));
             arrange = true;
         }
         if let Some(delta) = cfact_delta {

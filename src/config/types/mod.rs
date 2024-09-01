@@ -21,10 +21,15 @@ const fn default_true() -> bool {
 }
 
 fn default_layouts() -> Vec<WorkspaceLayout> {
-    vec![WorkspaceLayout::Tile {
-        nmaster: 1,
-        master_width_factor: 0.5,
-    }]
+    vec![WorkspaceLayout::Tile]
+}
+
+const fn default_nmaster() -> usize {
+    1
+}
+
+const fn default_mwfact() -> f32 {
+    0.5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +104,12 @@ pub struct GeneralConfig {
     #[serde(default = "default_layouts")]
     pub layouts: Vec<WorkspaceLayout>,
 
+    #[serde(default = "default_nmaster")]
+    pub nmaster: usize,
+
+    #[serde(default = "default_mwfact")]
+    pub mwfact: f32,
+
     #[serde(default)]
     pub outer_gaps: i32,
 
@@ -113,10 +124,9 @@ impl Default for GeneralConfig {
             focus_new_windows: true,
             insert_window_strategy: InsertWindowStrategy::default(),
             cursor: CursorConfig::default(),
-            layouts: vec![WorkspaceLayout::Tile {
-                nmaster: 1,
-                master_width_factor: 0.5,
-            }],
+            layouts: vec![WorkspaceLayout::Tile],
+            nmaster: 1,
+            mwfact: 0.5,
             outer_gaps: 0,
             inner_gaps: 0,
         }

@@ -447,8 +447,9 @@ impl Fht {
             //
             // Due to how we manage windows, a window can't be in two workspaces at a time, let
             // alone from different outputs
-            new_workspace.tiles.extend(old_workspace.tiles.drain(..));
-            new_workspace.arrange_tiles(true);
+            for tile in old_workspace.drain_tiles() {
+                new_workspace.insert_tile(tile, true)
+            }
         }
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
@@ -462,8 +463,8 @@ impl Fht {
     }
 
     pub fn output_resized(&mut self, output: &Output) {
-        self.wset_mut_for(output).arrange();
         layer_map_for_output(output).arrange();
+        self.wset_mut_for(output).output_resized();
     }
 
     pub fn active_output(&self) -> Output {
