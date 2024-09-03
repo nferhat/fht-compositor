@@ -51,18 +51,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         "Starting fht-compositor."
     );
 
-    #[cfg(feature = "profile-with-puffin")]
-    let _puffin_server = {
-        profiling::register_thread!("Main Thread");
-        let server_addr = format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT);
-        let _puffin_server =
-            puffin_http::Server::new(&server_addr).expect("Failed to start profiler!");
-        profiling::puffin::set_scopes_on(true);
-
-        info!(?server_addr, "Puffin profiler listening");
-        _puffin_server
-    };
-
     #[cfg(feature = "profile-with-tracy")]
     {
         profiling::register_thread!("Main Thread");
