@@ -22,7 +22,6 @@ zvariant = { version = "4.1.2", features = ["option-as-array"] }
 # Basic logging setup
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-color-eyre = "0.6.3"
 # Config file support
 xdg = "2.5.2"
 ron = "0.8.1"
@@ -68,7 +67,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
 xdg.workspace = true
-color-eyre.workspace = true
 ron.workspace = true
 smithay = { workspace = true, features = [
     "desktop",

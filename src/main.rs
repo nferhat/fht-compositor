@@ -34,8 +34,6 @@ mod utils;
 
 fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // Logging.
-    // color_eyre for pretty panics
-    color_eyre::install()?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // Allow fatal errors from every crate, compositor can log anything
         tracing_subscriber::EnvFilter::from_str("error,fht_compositor=info").unwrap()
