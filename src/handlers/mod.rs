@@ -1,3 +1,4 @@
+mod cursor_shape;
 mod buffer;
 mod compositor;
 mod data_control;

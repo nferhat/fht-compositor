@@ -494,8 +494,10 @@ impl crate::state::State {
         self.fht.loop_handle.insert_idle(move |state| {
             // Set the cursor icon.
             let icon = edges.cursor_icon();
-            let mut lock = state.fht.cursor_theme_manager.image_status.lock().unwrap();
-            *lock = CursorImageStatus::Named(icon);
+            state
+                .fht
+                .cursor_theme_manager
+                .set_image_status(CursorImageStatus::Named(icon));
             state.fht.resize_grab_active = true;
         });
 

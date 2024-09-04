@@ -34,6 +34,7 @@ use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
 };
+use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::input_method::InputMethodManagerState;
@@ -282,6 +283,7 @@ impl Fht {
             ShmState::new::<State>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
+        CursorShapeManagerState::new::<State>(&dh);
         TextInputManagerState::new::<State>(&dh);
         InputMethodManagerState::new::<State, _>(&dh, |_| true);
         VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
@@ -538,9 +540,7 @@ impl Fht {
             }
         };
 
-        if let CursorImageStatus::Surface(surface) =
-            &*self.cursor_theme_manager.image_status.lock().unwrap()
-        {
+        if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
 
@@ -563,9 +563,7 @@ impl Fht {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
-        if let CursorImageStatus::Surface(surface) =
-            &*self.cursor_theme_manager.image_status.lock().unwrap()
-        {
+        if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             with_surface_tree_downward(
                 surface,
                 (),
@@ -679,9 +677,7 @@ impl Fht {
             );
         }
 
-        if let CursorImageStatus::Surface(surface) =
-            &*self.cursor_theme_manager.image_status.lock().unwrap()
-        {
+        if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             send_dmabuf_feedback_surface_tree(
                 surface,
                 output,
@@ -736,9 +732,7 @@ impl Fht {
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
 
-        if let CursorImageStatus::Surface(surface) =
-            &*self.cursor_theme_manager.image_status.lock().unwrap()
-        {
+        if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             take_presentation_feedback_surface_tree(
                 surface,
                 &mut output_presentation_feedback,

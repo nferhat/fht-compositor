@@ -15,14 +15,14 @@ impl TabletSeatHandler for State {
     fn tablet_tool_image(
         &mut self,
         _tool: &smithay::backend::input::TabletToolDescriptor,
-        image: smithay::input::pointer::CursorImageStatus,
+        image_status: smithay::input::pointer::CursorImageStatus,
     ) {
         if self.fht.resize_grab_active {
             // The resize grab itself sets a cursor icon.
             return;
         }
 
-        *self.fht.cursor_theme_manager.image_status.lock().unwrap() = image;
+        self.fht.cursor_theme_manager.set_image_status(image_status);
     }
 }
 
@@ -61,7 +61,7 @@ impl SeatHandler for State {
         _seat: &Seat<Self>,
         image: smithay::input::pointer::CursorImageStatus,
     ) {
-        *self.fht.cursor_theme_manager.image_status.lock().unwrap() = image;
+        self.fht.cursor_theme_manager.set_image_status(image);
     }
 }
 

@@ -1,165 +1,143 @@
-use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{Ref, RefCell};
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
+use std::fs::File;
 use std::io::Read;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::LazyLock;
 use std::time::Duration;
 
+use rustc_hash::FxHashMap;
 use smithay::backend::allocator::Fourcc;
+use smithay::backend::renderer::element::memory::{
+    MemoryRenderBuffer, MemoryRenderBufferRenderElement,
+};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::Kind;
-use smithay::input::pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus};
-use smithay::utils::{Physical, Point, Scale, Transform};
-use smithay::wayland::compositor;
-use xcursor::parser::{parse_xcursor, Image};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
+use smithay::utils::{Logical, Physical, Point, Scale, Size, Transform};
+use smithay::wayland::compositor::with_states;
+use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;
 
 use crate::config::{CursorConfig, CONFIG};
-use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::FhtRenderer;
 
-static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../res/cursor.rgba");
-
-fn get_fallback_cursor_data(_: impl std::error::Error) -> Rc<CursorImage> {
-    Rc::new(CursorImage {
-        frames: vec![Image {
-            size: 32,
-            width: 64,
-            height: 64,
-            xhot: 1,
-            yhot: 1,
-            delay: 0,
-            pixels_rgba: Vec::from(FALLBACK_CURSOR_DATA),
-            pixels_argb: vec![],
-        }],
-        animation_duration: 0,
-    })
-}
-
-pub type CursorImageCache = HashMap<(CursorIcon, i32), Rc<CursorImage>>;
-pub type CursorTextureCache = HashMap<(CursorIcon, i32), Vec<(Image, Box<dyn Any>)>>;
-
 pub struct CursorThemeManager {
-    image_cache: RefCell<CursorImageCache>,
-
-    texture_cache: RefCell<CursorTextureCache>,
-
-    pub image_status: Arc<Mutex<CursorImageStatus>>,
-
+    // Image cache is keyed by icon type and cursor scale.
+    // TODO: Fractional scaling when possible? (needs rewrite of MemoryRenderElement)
+    cursor_image_cache: RefCell<FxHashMap<(i32, CursorIcon), Image>>,
+    image_status: CursorImageStatus,
     cursor_theme: CursorTheme,
-    // Additional info of the cursor theme, so we don't spam the config
-    cursor_theme_name: String,
-    cursor_theme_size: u32,
+    config: CursorConfig,
 }
 
 impl CursorThemeManager {
     pub fn new() -> Self {
-        let CursorConfig { name, size } = CONFIG.general.cursor.clone();
-        let image_status = CursorImageStatus::default_named();
-        let cursor_theme = CursorTheme::load(&name);
-
-        std::env::set_var("XCURSOR_THEME", &name);
-        std::env::set_var("XCURSOR_SIZE", size.to_string());
+        let config = CONFIG.general.cursor.clone();
+        let cursor_theme = CursorTheme::load(&config.name);
 
         Self {
-            image_cache: RefCell::new(HashMap::new()),
-            texture_cache: RefCell::new(HashMap::new()),
-
-            image_status: Arc::new(Mutex::new(image_status)),
-
+            cursor_image_cache: RefCell::new(FxHashMap::default()),
+            image_status: CursorImageStatus::default_named(),
             cursor_theme,
-            cursor_theme_name: name,
-            cursor_theme_size: size,
+            config,
         }
     }
 
     #[profiling::function]
     pub fn reload(&mut self) {
-        let CursorConfig { name, size } = CONFIG.general.cursor.clone();
-        if self.cursor_theme_name == name && self.cursor_theme_size == size {
-            return;
+        if self.config != CONFIG.general.cursor {
+            self.config = CONFIG.general.cursor.clone();
+            self.cursor_theme = CursorTheme::load(&self.config.name);
+            self.cursor_image_cache.borrow_mut().clear();
         }
+    }
 
-        std::env::set_var("XCURSOR_THEME", &name);
-        std::env::set_var("XCURSOR_SIZE", size.to_string());
+    pub fn image_status(&self) -> &CursorImageStatus {
+        &self.image_status
+    }
 
-        self.image_cache.borrow_mut().clear();
-        self.texture_cache.borrow_mut().clear();
-        if self.cursor_theme_name == name && self.cursor_theme_size != size {
-            return;
-        }
-
-        let new_cursor_theme = CursorTheme::load(&name);
-        self.cursor_theme = new_cursor_theme;
-
-        self.cursor_theme_size = size;
-        self.cursor_theme_name = name;
+    pub fn set_image_status(&mut self, image_status: CursorImageStatus) {
+        self.image_status = image_status
     }
 
     #[profiling::function]
-    fn load_cursor_image(
-        &self,
+    fn load_cursor_image<'a>(
+        &'a self,
         cursor_icon: CursorIcon,
         cursor_scale: i32,
-    ) -> Result<Rc<CursorImage>, Error> {
-        let mut image_cache = self.image_cache.borrow_mut();
-        if let Some(image) = image_cache.get(&(cursor_icon, cursor_scale)) {
-            return Ok(image.clone());
-        }
-
-        // Load images, using old names as a fallback
-        let mut maybe_icon_path = self
-            .cursor_theme
-            .load_icon(cursor_icon.name())
-            .ok_or(Error::NoCursorIcon);
-        for alt_name in cursor_icon.alt_names() {
-            maybe_icon_path = self
+    ) -> Result<Ref<'a, Image>, Error> {
+        if let Entry::Vacant(entry) = self
+            .cursor_image_cache
+            .borrow_mut()
+            .entry((cursor_scale, cursor_icon))
+        {
+            let icon_path = self
                 .cursor_theme
-                .load_icon(alt_name)
-                .ok_or(Error::NoCursorIcon);
-            if maybe_icon_path.is_ok() {
-                break;
+                .load_icon(cursor_icon.name())
+                .or_else(|| {
+                    for alt_name in cursor_icon.alt_names() {
+                        if let Some(icon) = self.cursor_theme.load_icon(alt_name) {
+                            return Some(icon);
+                        }
+                    }
+                    None
+                })
+                .ok_or_else(|| Error::NoCursorIcon(cursor_icon))?;
+
+            let mut cursor_file = File::open(icon_path)?;
+            let mut cursor_file_data = Vec::new();
+            let _ = cursor_file.read_to_end(&mut cursor_file_data)?;
+
+            let images = parse_xcursor(&cursor_file_data).ok_or(Error::Parse)?;
+            let size = self.config.size as i32 * cursor_scale;
+            // pick the cursor image closest to the user desired size
+            let (width, height) = images
+                .iter()
+                .min_by_key(|image| (size - image.size as i32).abs())
+                .map(|image| (image.width, image.height))
+                .unwrap();
+
+            let mut animation_duration = Duration::ZERO;
+            let mut frames = vec![];
+            for image in images {
+                if image.height != height || image.width != width {
+                    continue;
+                }
+
+                let buffer = MemoryRenderBuffer::from_slice(
+                    &image.pixels_rgba,
+                    Fourcc::Argb8888,
+                    Size::from((width as i32, height as i32)),
+                    cursor_scale,
+                    Transform::Normal,
+                    None,
+                );
+                let hotspot = Point::from((image.xhot as i32, image.yhot as i32));
+                let delay = Duration::from_millis(u64::from(image.delay));
+                animation_duration += delay;
+                frames.push(Frame {
+                    buffer,
+                    hotspot,
+                    delay,
+                });
             }
+
+            entry.insert(Image {
+                frames,
+                animation_duration,
+            });
         }
 
-        // Load data
-        let icon_path = maybe_icon_path?;
-        let mut cursor_file = std::fs::File::open(icon_path).map_err(Error::File)?;
-        let mut cursor_data = Vec::new();
-        cursor_file
-            .read_to_end(&mut cursor_data)
-            .map_err(Error::File)?;
-
-        // Filter by size
-        // Follow the nominal size of the cursor to choose the closest ones
-        //
-        // Doing this here will avoid us checking for nearest images on each render
-        let size = self.cursor_theme_size as i32 * cursor_scale;
-        let mut images = parse_xcursor(&cursor_data).ok_or(Error::Parse)?;
-        let (width, height) = images
-            .iter()
-            .min_by_key(|image| (size - image.size as i32).abs())
-            .map(|image| (image.width, image.height))
-            .unwrap();
-        images.retain(move |image| image.width == width && image.height == height);
-
-        let animation_duration = images.iter().fold(0, |acc, image| acc + image.delay);
-        let cursor_image = Rc::new(CursorImage {
-            frames: images,
-            animation_duration,
-        });
-        image_cache.insert((cursor_icon, cursor_scale), cursor_image.clone());
-
-        Ok(cursor_image)
+        Ok(Ref::map(self.cursor_image_cache.borrow(), |cache| {
+            cache.get(&(cursor_scale, cursor_icon)).unwrap()
+        }))
     }
 
     #[profiling::function]
-    pub fn render_cursor<R, E>(
+    pub fn render<R>(
         &self,
         renderer: &mut R,
         mut location: Point<i32, Physical>,
@@ -167,19 +145,17 @@ impl CursorThemeManager {
         cursor_scale: i32,
         alpha: f32,
         time: Duration,
-    ) -> Vec<E>
+    ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError>
     where
         R: FhtRenderer,
-        E: From<CursorRenderElement<R>>,
     {
-        let image_status = &*self.image_status.lock().unwrap();
-        match *image_status {
-            CursorImageStatus::Hidden => vec![],
+        match self.image_status {
+            CursorImageStatus::Hidden => Ok(vec![]),
             CursorImageStatus::Surface(ref wl_surface) => {
-                let hotspot = compositor::with_states(wl_surface, |states| {
+                let hotspot = with_states(wl_surface, |states| {
                     states
                         .data_map
-                        .get::<Mutex<CursorImageAttributes>>()
+                        .get::<CursorImageSurfaceData>()
                         .unwrap()
                         .lock()
                         .unwrap()
@@ -188,119 +164,110 @@ impl CursorThemeManager {
                 .to_physical_precise_round(scale);
                 location -= hotspot;
 
-                render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
+                Ok(render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
                     renderer,
                     wl_surface,
                     location,
                     scale,
                     alpha,
                     Kind::Cursor,
-                )
-                .into_iter()
-                .map(E::from)
-                .collect()
+                ))
             }
             CursorImageStatus::Named(cursor_icon) => {
-                let cursor_image = self
-                    .load_cursor_image(cursor_icon, cursor_scale)
-                    .unwrap_or_else(get_fallback_cursor_data);
-                let (frame, hotspot) = cursor_image.frame(time.as_millis() as u32);
-                location -= hotspot;
-
-                // Get the cursor texture, and generate them all if not already present
-                let mut texture_cache = self.texture_cache.borrow_mut();
-                let frame_texture_cache = texture_cache
-                    .entry((cursor_icon, cursor_scale))
-                    .or_default();
-
-                let maybe_frame_texture = frame_texture_cache
-                    .iter()
-                    .find(|(f, _)| f == frame)
-                    .and_then(|(_, t)| t.downcast_ref::<TextureBuffer<R::TextureId>>());
-                let frame_texture = match maybe_frame_texture {
-                    Some(t) => t,
-                    None => {
-                        let texture = TextureBuffer::from_memory(
-                            renderer,
-                            &frame.pixels_rgba,
-                            Fourcc::Abgr8888,
-                            (frame.width as i32, frame.height as i32),
-                            false,
-                            cursor_scale as i32,
-                            Transform::Normal,
-                            None,
-                        )
-                        .expect("Failed to import cursor bitmap");
-                        frame_texture_cache.push((frame.clone(), Box::new(texture.clone())));
-                        frame_texture_cache
-                            .last()
-                            .and_then(|(_, i)| i.downcast_ref::<TextureBuffer<R::TextureId>>())
-                            .unwrap()
-                    }
+                let Ok(cursor_image) = self.load_cursor_image(cursor_icon, cursor_scale) else {
+                    return self.render_with_fallback_cursor_data(renderer, location, alpha);
                 };
-
-                vec![E::from(CursorRenderElement::Texture(FhtTextureElement(
-                    TextureRenderElement::from_texture_buffer(
+                let frame = cursor_image.get_frame(time);
+                location -= frame.hotspot.to_physical_precise_round(scale);
+                Ok(vec![CursorRenderElement::Memory(
+                    MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
                         location.to_f64(),
-                        &frame_texture,
-                        None,
+                        &frame.buffer,
+                        Some(alpha),
                         None,
                         None,
                         Kind::Cursor,
-                    ),
-                )))]
+                    )?
+                )])
             }
         }
     }
+
+    fn render_with_fallback_cursor_data<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        alpha: f32,
+    ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError> {
+        static RENDER_BUFFER: LazyLock<MemoryRenderBuffer> = LazyLock::new(|| {
+            MemoryRenderBuffer::from_slice(
+                include_bytes!("../../res/cursor.rgba"),
+                Fourcc::Argb8888,
+                Size::from((64, 64)),
+                1,
+                Transform::Normal,
+                None,
+            )
+        });
+        Ok(vec![CursorRenderElement::Memory(
+            MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                location.to_f64(),
+                &RENDER_BUFFER,
+                Some(alpha),
+                None,
+                None,
+                Kind::Cursor,
+            )?
+        )])
+    }
 }
 
-pub struct CursorImage {
-    frames: Vec<Image>,
-
-    animation_duration: u32,
+struct Image {
+    frames: Vec<Frame>,
+    animation_duration: Duration,
 }
 
-impl CursorImage {
-    pub fn frame(&self, mut millis: u32) -> (&Image, Point<i32, Physical>) {
-        if self.animation_duration == 0 {
-            let frame = &self.frames[0];
-            return (frame, (frame.xhot as i32, frame.yhot as i32).into());
+impl Image {
+    #[profiling::function]
+    fn get_frame(&self, now: Duration) -> &Frame {
+        if self.animation_duration.is_zero() {
+            return &self.frames[0];
         }
 
-        millis %= self.animation_duration;
+        let mut now = now.as_millis() % self.animation_duration.as_millis();
         for frame in &self.frames {
-            if millis < frame.delay {
-                return (frame, (frame.xhot as i32, frame.yhot as i32).into());
+            let delay = frame.delay.as_millis();
+            if now < delay {
+                return frame;
             }
-            millis -= frame.delay;
+            now -= delay;
         }
 
-        unreachable!("Added cursor theme has no images for frame")
+        unreachable!("Cursor theme has no images for frame")
     }
 }
 
-#[derive(Debug)]
+struct Frame {
+    buffer: MemoryRenderBuffer,
+    hotspot: Point<i32, Logical>,
+    delay: Duration,
+}
+
+#[derive(Debug, thiserror::Error)]
 enum Error {
-    NoCursorIcon,
-    File(std::io::Error),
+    #[error("Cursor theme does not have cursor icon: {0}")]
+    NoCursorIcon(CursorIcon),
+    #[error("Failed to open cursor image file: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Failed to parse cursor image file")]
     Parse,
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoCursorIcon => f.write_str("Cursor theme has no default cursor image"),
-            Self::File(inner) => std::fmt::Display::fmt(inner, f),
-            Self::Parse => f.write_str("Failed to parse cursor theme file"),
-        }
-    }
 }
 
 crate::fht_render_elements! {
     CursorRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
-        Texture = FhtTextureElement<R::TextureId>,
+        Memory = MemoryRenderBufferRenderElement<R>,
     }
 }

@@ -700,7 +700,9 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
     fn unset(&mut self, data: &mut State) {
         // Reset the cursor to default.
         // FIXME: Maybe check if we actually changed something?
-        let mut lock = data.fht.cursor_theme_manager.image_status.lock().unwrap();
-        *lock = CursorImageStatus::default_named();
+        data.fht
+            .cursor_theme_manager
+            .set_image_status(CursorImageStatus::default_named());
+        data.fht.resize_grab_active = false;
     }
 }

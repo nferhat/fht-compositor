@@ -121,12 +121,10 @@ impl Fht {
     }
 
     pub fn cursor_elements<R: FhtRenderer>(
-        &self,
+        &mut self,
         renderer: &mut R,
         output: &Output,
     ) -> Vec<FhtRenderElement<R>> {
-        let mut cursor_guard = self.cursor_theme_manager.image_status.lock().unwrap();
-
         if self
             .focus_state
             .output
@@ -138,28 +136,31 @@ impl Fht {
         }
 
         let mut reset = false;
-        if let CursorImageStatus::Surface(ref surface) = *cursor_guard {
+        if let CursorImageStatus::Surface(ref surface) = self.cursor_theme_manager.image_status() {
             reset = !surface.alive();
         }
         if reset {
-            *cursor_guard = CursorImageStatus::default_named();
+            self.cursor_theme_manager
+                .set_image_status(CursorImageStatus::default_named());
         }
-        drop(cursor_guard); // since its used by render_cursor
 
         let output_scale = output.current_scale().fractional_scale().into();
         let cursor_element_pos =
             self.pointer.current_location() - output.current_location().to_f64();
         let cursor_element_pos_scaled = cursor_element_pos.to_physical(output_scale).to_i32_round();
-
         let cursor_scale = output.current_scale().integer_scale();
-        let mut elements = self.cursor_theme_manager.render_cursor(
+
+        let mut elements = vec![];
+        if let Ok(cursor_elements) = self.cursor_theme_manager.render(
             renderer,
             cursor_element_pos_scaled,
             output_scale,
             cursor_scale,
             1.0,
             self.clock.now().into(),
-        );
+        ) {
+            elements.extend(cursor_elements)
+        }
 
         // Draw drag and drop icon.
         if let Some(surface) = self.dnd_icon.as_ref().filter(IsAlive::alive) {
@@ -172,7 +173,7 @@ impl Fht {
             ));
         }
 
-        elements
+        elements.into_iter().map(FhtRenderElement::Cursor).collect()
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
@@ -274,7 +275,7 @@ pub trait FhtRenderer:
     + AsGlowRenderer
 {
     // Thank you rust for not being able  to resolve type bounds.
-    type FhtTextureId: Texture + Clone + 'static;
+    type FhtTextureId: Send + Texture + Clone + 'static;
     type FhtError: std::error::Error + From<GlesError> + 'static;
 }
 
