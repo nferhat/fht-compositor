@@ -164,14 +164,16 @@ impl CursorThemeManager {
                 .to_physical_precise_round(scale);
                 location -= hotspot;
 
-                Ok(render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
-                    renderer,
-                    wl_surface,
-                    location,
-                    scale,
-                    alpha,
-                    Kind::Cursor,
-                ))
+                Ok(
+                    render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
+                        renderer,
+                        wl_surface,
+                        location,
+                        scale,
+                        alpha,
+                        Kind::Cursor,
+                    ),
+                )
             }
             CursorImageStatus::Named(cursor_icon) => {
                 let Ok(cursor_image) = self.load_cursor_image(cursor_icon, cursor_scale) else {
@@ -188,7 +190,7 @@ impl CursorThemeManager {
                         None,
                         None,
                         Kind::Cursor,
-                    )?
+                    )?,
                 )])
             }
         }
@@ -219,7 +221,7 @@ impl CursorThemeManager {
                 None,
                 None,
                 Kind::Cursor,
-            )?
+            )?,
         )])
     }
 }

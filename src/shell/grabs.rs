@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 
-use smithay::desktop::Window;
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
     GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -17,6 +16,7 @@ use super::workspaces::WorkspaceLayout;
 use super::PointerFocusTarget;
 use crate::config::CONFIG;
 use crate::state::State;
+use crate::window::Window;
 
 #[allow(unused)]
 pub struct MoveSurfaceGrab {
@@ -53,48 +53,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         _: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // While the grab handle is active, no client should have focus, otherwise bad stuff WILL
-        // HAPPEN (dont ask me how I know, I should probably read reference source code better)
-        handle.motion(data, None, event);
-
-        // When a user drags a workspace tile, it enters in a "free" state.
-        //
-        // In this state, the actual window can be dragged around, but the tile itself will still
-        // be understood as its last location for the other tiles.
-        //
-        // At the old window location will be drawn a solid rectangle meant to represent a
-        // placeholder for the old window.
-
-        let position_delta = event.location - self.start_data.location;
-        let mut new_location = self.initial_window_geometry.loc.to_f64() + position_delta;
-        new_location = data.clamp_coords(new_location);
-
-        let Some(ws) = data.fht.ws_mut_for(&self.window) else {
-            return;
-        };
-        let output_loc = ws.output().current_location();
-        let new_location = new_location.to_i32_round() - output_loc;
-
-        self.last_pointer_location = event.location;
-        self.last_window_location = new_location;
-
-        let Some(tile) = ws.tile_mut_for(&self.window) else {
-            // Window dead/moved, no need to persist the grab
-            handle.unset_grab(self, data, event.serial, event.time, true);
-            // NOTE: Unsetting the only button to notify that we also aren't clicking. This is
-            // required for user-created grabs.
-            handle.button(
-                data,
-                &ButtonEvent {
-                    state: smithay::backend::input::ButtonState::Released,
-                    button: 0x110, // left mouse button
-                    time: event.time,
-                    serial: event.serial,
-                },
-            );
-            return;
-        };
-        tile.temporary_render_location = Some(new_location);
+        todo!()
     }
 
     fn relative_motion(
@@ -113,35 +72,7 @@ impl PointerGrab<State> for MoveSurfaceGrab {
         handle: &mut PointerInnerHandle<'_, State>,
         event: &ButtonEvent,
     ) {
-        if handle.current_pressed().is_empty() {
-            if let Some(ws) = data.fht.ws_mut_for(&self.window) {
-                // When we drop the tile, instead of animating from its old location to the new
-                // one, we want for it to continue from our dragged position.
-                //
-                // So, we set our tile location so that when we swap out the two, the arrange_tiles
-                // function (used in swap_elements) will animate from this location here.
-                let output_loc = ws.output().current_location();
-                let location = self.last_pointer_location - output_loc.to_f64();
-                let self_tile = ws.tile_mut_for(&self.window).unwrap();
-                self_tile.temporary_render_location = None;
-                self_tile.location = self.last_window_location;
-
-                // Though we only want to update our location when we actuall are goin to swap
-                let other_window = ws
-                    .tiles_under(self.last_pointer_location.to_f64())
-                    .find(|tile| tile.element != self.window)
-                    .map(|tile| tile.element.clone());
-
-                if let Some(ref other_window) = other_window {
-                    ws.swap_elements(&self.window, other_window, true)
-                } else {
-                    // If we didnt find anything to swap with, still animate the window back.
-                    ws.arrange_tiles(true);
-                }
-            }
-
-            handle.unset_grab(self, data, event.serial, event.time, true);
-        }
+        todo!()
     }
 
     fn axis(
@@ -332,228 +263,7 @@ impl PointerGrab<State> for PointerResizeSurfaceGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // While the grab is active, no client has pointer focus
-        handle.motion(state, None, event);
-
-        if !self.window.alive() {
-            handle.unset_grab(self, state, event.serial, event.time, true);
-            return;
-        }
-
-        let mut delta: Point<i32, Logical> =
-            (event.location - self.start_data.location).to_i32_round();
-        let mut new_size = self.initial_window_size;
-
-        // Custom behaviour for tiled layouts.
-        //
-        // Since we have a cfact and mwfact system going on, based on how you resize the window,
-        // the layout will adapt accordingly to reflect the new window size, while also moving and
-        // changing all the other windows with it.
-        //
-        // Based on the layout, the new width/height delta will change and adapt the mwfact and
-        // cfacts of the the workspace layout.
-        //
-        // Depending on how and where our windows are, we should only allow them to grow in a
-        // certain direction. the Read a bit more below about how layouts should react when doing
-        // interactive window resizes.
-        //
-        // Taking into account all these considerations and quirks provide a smooth interactive
-        // resize experience, at the cost of handling a good chunk of edge cases that doesnt.
-        //
-        // The main challenge here is to make windows grow or shrink their column/stack
-        // (master and slave) in the same direction no matter what side we are grabbing them from.
-        // Depending on the layout, we need to invert their the X delta or the Y delta to achieve
-        // this.
-
-        let ws = state.fht.ws_mut_for(&self.window).unwrap();
-        let windows_len = ws.tiles_len();
-
-        // First of all: no need todo anything if we only have one window.
-        if windows_len == 1 {
-            return;
-        }
-
-        let window_idx = ws
-            .tiles()
-            .position(|tile| tile.element() == &self.window)
-            .unwrap();
-
-        let (usable_geo, nmaster, active_layout) =
-            ws.with_layout(|layout| (layout.usable_geo(), layout.nmaster(), layout.active()));
-
-        let mut new_mwfact @ mut cfact_delta = Option::<f32>::None;
-        match active_layout {
-            WorkspaceLayout::Tile => {
-                let is_master = window_idx < nmaster;
-                let is_on_top_side = window_idx == 0 || window_idx == nmaster;
-                let is_on_bottom_side =
-                    window_idx == nmaster.saturating_sub(1) || window_idx == windows_len - 1;
-                let is_in_middle = !is_on_top_side && !is_on_bottom_side;
-
-                if self.edges.intersects(ResizeEdge::LEFT_RIGHT) {
-                    // For this layout, the master stack does not need to be changed.
-                    //
-                    // However, if we are the slave stack, our delta gets automatically negated
-                    // since we calculate the mwfact from it using `1.0 - mwfact` since we take
-                    // what the master client doesn't.
-                    // So to match the growing/shrinking of the slave stack appropriatly, we negate
-                    // it.
-                    if !is_master {
-                        delta.x = -delta.x;
-                    }
-
-                    new_size.w += delta.x;
-
-                    new_mwfact = Some(if is_master {
-                        new_size.w as f32 / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32
-                    } else {
-                        1.0 - (new_size.w as f32
-                            / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32)
-                    });
-                }
-
-                if self.edges.intersects(ResizeEdge::TOP_BOTTOM) {
-                    // The reason of why we need to invert the sign here is because of two factors:
-                    // - How points and geometry are done in smithay
-                    // - How we calculate the delta itself.
-                    //
-                    // Basically, rectangles and geometry are defined using the top-left corner of
-                    // a rectangle, this is important since when we caculate the delta, going up
-                    // means the mouse position will be smaller, resulting in a negative delta the
-                    // more you go up.
-                    //
-                    // But, in both the following cases, the user excepts the mouse to grow the
-                    // window, but if we don't invert the delta, it will actually (due to math)
-                    // make it smaller.
-                    if is_on_bottom_side || (is_in_middle && self.edges.intersects(ResizeEdge::TOP))
-                    {
-                        delta.y = -delta.y;
-                    }
-                    new_size.h += delta.y;
-
-                    cfact_delta = Some(new_size.h as f32 / self.initial_window_size.h as f32);
-                }
-            }
-            WorkspaceLayout::BottomStack => {
-                let is_master = window_idx < nmaster;
-                let is_on_left_side = window_idx == 0 || window_idx == nmaster;
-                let is_on_right_side =
-                    window_idx == nmaster.saturating_sub(1) || window_idx == windows_len - 1;
-                let is_in_middle = !is_on_left_side && !is_on_right_side;
-
-                if self.edges.intersects(ResizeEdge::LEFT_RIGHT) {
-                    // This is the same logic with the TOP_BOTTOM check with the Tile layout.
-                    // Go read it, but instead of being at the bottom this time, we are at the
-                    // right.
-                    if is_on_right_side || (is_in_middle && self.edges.intersects(ResizeEdge::LEFT))
-                    {
-                        delta.x = -delta.x;
-                    }
-                    new_size.w += delta.x;
-
-                    cfact_delta = Some(new_size.w as f32 / self.initial_window_size.w as f32);
-                }
-
-                if self.edges.intersects(ResizeEdge::TOP_BOTTOM) {
-                    // Same reason as LEFT_RIGHT section of the Tile layout, but here the mwfact
-                    // determines the height of the master and slave stack, not the width.
-                    if !is_master {
-                        delta.y = -delta.y;
-                    }
-                    new_size.h += delta.y;
-
-                    new_mwfact = Some(if is_master {
-                        new_size.h as f32 / (usable_geo.size.h - CONFIG.general.inner_gaps) as f32
-                    } else {
-                        1.0 - (new_size.h as f32
-                            / (usable_geo.size.h - CONFIG.general.inner_gaps) as f32)
-                    });
-                }
-            }
-            WorkspaceLayout::CenteredMaster => {
-                // For the centered master layout, its a little more complicated.
-                //
-                // The master stack grows to both directions at the same time.
-                //
-                // For the other two columns: the left column grows to the right, the right columns
-                // grows to the left. You are on the left if the stack_idx (so the index of the
-                // window relative to the beginning of the stack, aka window_idx - nmaster) % 2 ==
-                // 0. You are on the left if != 0
-                //
-                // To know if the window is on the topside or bottom side, its not that convoluted,
-                // its always by how the layout works the two first stack window or the two last
-                // ones, with ofc the master column.
-                let is_master = window_idx < nmaster;
-                let stack_idx = window_idx.saturating_sub(nmaster);
-                let is_right_column = stack_idx % 2 == 0;
-                let is_on_top_side = window_idx == 0 || stack_idx <= 1;
-                let is_on_bottom_side = window_idx == nmaster.saturating_sub(1)
-                    || windows_len.saturating_sub(window_idx + 1) <= 1;
-                let is_in_middle = !is_on_top_side || !is_on_bottom_side;
-
-                if self.edges.intersects(ResizeEdge::LEFT_RIGHT) {
-                    // Both of these are inverted for the same reason as the LEFT_RIGHTcheck with
-                    // the bottom stack layout.
-                    if (is_master && self.edges.intersects(ResizeEdge::LEFT))
-                        || (!is_master && is_right_column)
-                    {
-                        delta.x = -delta.x;
-                    }
-
-                    new_size.w += delta.x;
-
-                    // Centered master can have one or TWO columns, important to note this
-                    if is_master || windows_len < 3 {
-                        // Though, if we are the master, we dont care whether we are one or two
-                        // columns, since we determine the mwfact ourselves
-                        new_mwfact = Some(
-                            new_size.w as f32
-                                / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32,
-                        );
-                    } else {
-                        // But, if we are the clients, we have two multiply by two only if we have
-                        // two columns, This is the case when we have more
-                        // than three windows in the layout.
-                        new_mwfact = Some(
-                            1.0 - new_size.w as f32
-                                / (usable_geo.size.w - CONFIG.general.inner_gaps) as f32
-                                * 2.0,
-                        );
-                    }
-                }
-
-                if self.edges.intersects(ResizeEdge::TOP_BOTTOM) {
-                    // This is the same logic with the TOP_BOTTOM check with the Tile layout.
-                    if is_on_bottom_side && self.edges.intersects(ResizeEdge::BOTTOM) {
-                        delta.y = -delta.y;
-                    }
-                    if is_in_middle && self.edges.intersects(ResizeEdge::BOTTOM) {
-                        delta.y = -delta.y;
-                    }
-
-                    new_size.h += delta.y;
-                    cfact_delta = Some(self.initial_window_size.h as f32 / new_size.h as f32);
-                }
-            }
-            WorkspaceLayout::Floating => {}
-        };
-
-        let mut arrange = false;
-        if let Some(new_mwfact) = new_mwfact {
-            ws.with_layout(|layout| layout.set_mwfact(new_mwfact));
-            arrange = true;
-        }
-        if let Some(delta) = cfact_delta {
-            let tile = ws.tile_mut_for(&self.window).unwrap();
-            let initial_cfact = *self.initial_cfact.get_or_insert(tile.cfact);
-            // NOTE: -1.0 since the delta starts at 1.0, since its new_size/old_size
-            tile.cfact = (initial_cfact + delta - 1.0).clamp(0.5, 10.);
-            arrange = true;
-        }
-
-        if arrange {
-            ws.arrange_tiles(false);
-        }
+        todo!()
     }
 
     fn relative_motion(

@@ -94,11 +94,11 @@ impl State {
             }
         } else if let Some(window) = wset
             .active()
-            .element_under(pointer_loc)
+            .window_under(pointer_loc)
             .map(|(w, _)| w.clone())
         {
             let active = wset.active_mut();
-            active.focus_element(&window, true);
+            active.focus_window(&window, true);
             self.set_focus_target(Some(window.into()));
         } else if let Some(layer) = layer_map
             .layer_under(Layer::Bottom, pointer_loc)
@@ -123,11 +123,11 @@ impl State {
     pub fn set_focus_target(&mut self, ft: Option<KeyboardFocusTarget>) {
         let old_focus = self.fht.focus_state.focus_target.take();
         if let Some(KeyboardFocusTarget::Window(w)) = old_focus.as_ref() {
-            w.set_activated(false);
+            w.request_activated(false);
         };
 
         if let Some(KeyboardFocusTarget::Window(w)) = ft.as_ref() {
-            w.set_activated(true);
+            w.request_activated(true);
         };
 
         self.fht.focus_state.focus_target = ft.clone();

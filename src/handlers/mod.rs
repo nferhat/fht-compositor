@@ -1,6 +1,6 @@
-mod cursor_shape;
 mod buffer;
 mod compositor;
+mod cursor_shape;
 mod data_control;
 mod data_device;
 mod dmabuf;

@@ -1,9 +1,7 @@
-use std::cell::RefCell;
-
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-    PopupUngrabStrategy, Window, WindowSurfaceType,
+    PopupUngrabStrategy, WindowSurfaceType,
 };
 use smithay::input::pointer::Focus;
 use smithay::input::Seat;
@@ -11,24 +9,17 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, WmCapabilities,
 };
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
-use smithay::wayland::compositor::{
-    add_pre_commit_hook, with_states, BufferAssignment, HookId, SurfaceAttributes,
-};
+use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
-    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
-use crate::shell::grabs::ResizeState;
-use crate::shell::workspaces::tile::WorkspaceElement;
 use crate::shell::KeyboardFocusTarget;
-use crate::state::{OutputState, State};
-
-pub struct WindowPreCommitHook(RefCell<Option<HookId>>);
+use crate::state::State;
+use crate::window::Window;
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -36,7 +27,7 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
-        let window = Window::new_wayland_window(toplevel);
+        let window = Window::new(toplevel);
         add_window_pre_commit_hook(&window);
         self.fht.pending_windows.push(window.into());
     }
@@ -44,7 +35,7 @@ impl XdgShellHandler for State {
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(idx) = self.fht.unmapped_tiles.iter().position(|tile| {
             tile.inner
-                .element
+                .window()
                 .wl_surface()
                 .is_some_and(|s| &*s == surface.wl_surface())
         }) {
@@ -52,25 +43,26 @@ impl XdgShellHandler for State {
             return;
         }
 
-        let Some((tile, output)) = self.fht.find_tile_and_output(surface.wl_surface()) else {
-            warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles");
-            return;
-        };
-        OutputState::get(&output).render_state.queue();
-
-        let scale = output.current_scale().fractional_scale().into();
-        self.backend.with_renderer(|renderer| {
-            tile.prepare_close_animation(renderer, scale);
-        });
-        self.backend.with_renderer(|renderer| {
-            tile.start_close_animation(renderer, scale);
-        });
-
-        let (_, ws) = self
-            .fht
-            .find_window_and_workspace_mut(&surface.wl_surface())
-            .unwrap();
-        ws.arrange_tiles(true);
+        // TODO
+        // let Some((tile, output)) = self.fht.find_tile_and_output(surface.wl_surface()) else {
+        //     warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles");
+        //     return;
+        // };
+        // OutputState::get(&output).render_state.queue();
+        //
+        // let scale = output.current_scale().fractional_scale().into();
+        // self.backend.with_renderer(|renderer| {
+        //     tile.prepare_close_animation(renderer, scale);
+        // });
+        // self.backend.with_renderer(|renderer| {
+        //     tile.start_close_animation(renderer, scale);
+        // });
+        //
+        // let (_, ws) = self
+        //     .fht
+        //     .find_window_and_workspace_mut(&surface.wl_surface())
+        //     .unwrap();
+        // ws.arrange_tiles(true);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -80,74 +72,18 @@ impl XdgShellHandler for State {
         }
     }
 
-    fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
-        if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
-            self.handle_move_request(window, serial);
-        }
+    fn move_request(&mut self, _: ToplevelSurface, _: wl_seat::WlSeat, _: Serial) {
+        // TODO: Handle move requests
     }
 
     fn resize_request(
         &mut self,
-        surface: ToplevelSurface,
+        _: ToplevelSurface,
         _seat: wl_seat::WlSeat,
-        serial: Serial,
-        edges: xdg_toplevel::ResizeEdge,
+        _: Serial,
+        _: xdg_toplevel::ResizeEdge,
     ) {
-        if let Some(window) = self.fht.find_window(surface.wl_surface()).cloned() {
-            self.handle_resize_request(window, serial, edges.into())
-        }
-    }
-
-    fn ack_configure(&mut self, surface: WlSurface, configure: Configure) {
-        if let Configure::Toplevel(configure) = configure {
-            if let Some(serial) = with_states(&surface, |states| {
-                if let Some(data) = states.data_map.get::<RefCell<ResizeState>>() {
-                    if let ResizeState::WaitingForFinalAck(_, serial) = *data.borrow() {
-                        return Some(serial);
-                    }
-                }
-
-                None
-            }) {
-                // When the resize grab is released the surface
-                // resize state will be set to WaitingForFinalAck
-                // and the client will receive a configure request
-                // without the resize state to inform the client
-                // resizing has finished. Here we will wait for
-                // the client to acknowledge the end of the
-                // resizing. To check if the surface was resizing
-                // before sending the configure we need to use
-                // the current state as the received acknowledge
-                // will no longer have the resize state set
-                let is_resizing = with_states(&surface, |states| {
-                    states
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .current
-                        .states
-                        .contains(xdg_toplevel::State::Resizing)
-                });
-
-                if configure.serial >= serial && is_resizing {
-                    with_states(&surface, |states| {
-                        let state = &mut *states
-                            .data_map
-                            .get::<RefCell<ResizeState>>()
-                            .unwrap()
-                            .borrow_mut();
-                        *state = match std::mem::take(state) {
-                            ResizeState::WaitingForFinalAck(data, _) => {
-                                ResizeState::WaitingForCommit(data)
-                            }
-                            _ => unreachable!(),
-                        }
-                    });
-                }
-            }
-        }
+        // TODO: Handle resize requests
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
@@ -157,7 +93,6 @@ impl XdgShellHandler for State {
         if let Some(root) = find_popup_root_surface(&popup_kind).ok().and_then(|root| {
             self.fht
                 .find_window(&root)
-                .cloned()
                 .map(KeyboardFocusTarget::Window)
                 .or_else(|| {
                     self.fht
@@ -204,7 +139,7 @@ impl XdgShellHandler for State {
             .fht
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
-            window.set_maximized(true);
+            window.request_maximized(true);
             ws.arrange_tiles(true);
         }
 
@@ -216,7 +151,7 @@ impl XdgShellHandler for State {
             .fht
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
-            window.set_maximized(false);
+            window.request_maximized(false);
             ws.arrange_tiles(true);
         }
 
@@ -249,18 +184,18 @@ impl XdgShellHandler for State {
                 if requested_output != output {
                     output = requested_output;
 
-                    let ws = self.fht.ws_mut_for(&window).unwrap();
+                    let ws = self.fht.workspace_for_window_mut(&window).unwrap();
                     let tile = ws.remove_tile(&window, true).unwrap();
 
                     let new_ws = self.fht.wset_mut_for(&output).active_mut();
                     new_ws.insert_tile(tile, true);
                 }
 
-                let ws = self.fht.ws_mut_for(&window).unwrap();
-                ws.fullscreen_element(&window, true);
-            } else if let Some(window) = self.fht.find_window(wl_surface).cloned() {
-                let ws = self.fht.ws_mut_for(&window).unwrap();
-                ws.fullscreen_element(&window, true);
+                let ws = self.fht.workspace_for_window_mut(&window).unwrap();
+                ws.fullscreen_window(&window, true);
+            } else if let Some(window) = self.fht.find_window(wl_surface) {
+                let ws = self.fht.workspace_for_window_mut(&window).unwrap();
+                ws.fullscreen_window(&window, true);
             }
         }
 
@@ -269,7 +204,7 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.fht.find_window(surface.wl_surface()) {
-            window.set_fullscreen(false);
+            window.request_fullscreen(false);
         }
 
         surface.send_configure();
@@ -296,44 +231,36 @@ fn add_window_pre_commit_hook(window: &Window) {
     // the ones that should do this.
     let wl_surface = window.wl_surface().unwrap();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
-        let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
-            warn!("Window pre-commit hook should be removed when unmapped");
-            return;
-        };
-
-        // Before commiting, we check if the window's buffers are getting unmapped.
-        // If that's the case, the window is likely closing (or minimizing, if the
-        // compositor supports that)
+        // TODO
+        // let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
+        //     warn!("Window pre-commit hook should be removed when unmapped");
+        //     return;
+        // };
         //
-        // Since we are going to close, we take a snapshot of the window's elements,
-        // like we do inside `Tile::render_elements` into a
-        // GlesTexture and store that for future use.
-        let got_unmapped = with_states(surface, |states| {
-            let mut guard = states.cached_state.get::<SurfaceAttributes>();
-            let attrs = guard.pending();
-            matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
-        });
-
-        if got_unmapped {
-            state.backend.with_renderer(|renderer| {
-                let scale = output.current_scale().fractional_scale().into();
-                tile.prepare_close_animation(renderer, scale);
-            });
-        } else {
-            tile.clear_close_snapshot();
-        }
+        // // Before commiting, we check if the window's buffers are getting unmapped.
+        // // If that's the case, the window is likely closing (or minimizing, if the
+        // // compositor supports that)
+        // //
+        // // Since we are going to close, we take a snapshot of the window's elements,
+        // // like we do inside `Tile::render_elements` into a
+        // // GlesTexture and store that for future use.
+        // let got_unmapped = with_states(surface, |states| {
+        //     let mut guard = states.cached_state.get::<SurfaceAttributes>();
+        //     let attrs = guard.pending();
+        //     matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
+        // });
+        //
+        // if got_unmapped {
+        //     state.backend.with_renderer(|renderer| {
+        //         let scale = output.current_scale().fractional_scale().into();
+        //         tile.prepare_close_animation(renderer, scale);
+        //     });
+        // } else {
+        //     tile.clear_close_snapshot();
+        // }
     });
 
-    window
-        .user_data()
-        .insert_if_missing(|| WindowPreCommitHook(RefCell::new(None)));
-    let mut guard = window
-        .user_data()
-        .get::<WindowPreCommitHook>()
-        .unwrap()
-        .0
-        .borrow_mut();
-    *guard = Some(hook_id)
+    window.set_pre_commit_hook_id(hook_id);
 }
 
 delegate_xdg_shell!(State);

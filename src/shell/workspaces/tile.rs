@@ -1,7 +1,4 @@
 //! A single workspace tile.
-//!
-//! This is an abstraction over an element that implements [`WorkspaceElement`]. For more
-//! information, check [the `workspaces` module documentation](crate::shell::workspaces)
 
 use std::time::Duration;
 
@@ -15,9 +12,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer;
-use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
-use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{
     IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
@@ -35,96 +30,33 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::utils::animation::Animation;
 use crate::utils::RectCenterExt;
+use crate::window::Window;
 
-// I did not finish implementing everything using this trait.
-//
-// TODO: Maybe remove some of the trait requirements? I should keep this trait very "abstract" so
-// that I can technically render anything inside.
-#[allow(unused)]
-pub trait WorkspaceElement:
-    Clone + std::fmt::Debug + SpaceElement + WaylandFocus + IsAlive + Sized + PartialEq
-{
-    fn send_pending_configure(&self);
-
-    fn set_size(&self, new_size: Size<i32, Logical>);
-    fn size(&self) -> Size<i32, Logical>;
-
-    fn set_fullscreen(&self, fullscreen: bool);
-    fn set_fullscreen_output(&self, output: Option<wl_output::WlOutput>);
-    fn fullscreen(&self) -> bool;
-    fn fullscreen_output(&self) -> Option<wl_output::WlOutput>;
-
-    fn set_maximized(&self, maximize: bool);
-    fn maximized(&self) -> bool;
-
-    fn set_bounds(&self, bounds: Option<Size<i32, Logical>>);
-    fn bounds(&self) -> Option<Size<i32, Logical>>;
-
-    fn set_activated(&self, activated: bool);
-    fn activated(&self) -> bool;
-
-    fn app_id(&self) -> String;
-    fn title(&self) -> String;
-
-    fn render_surface_elements<R: FhtRenderer>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<WaylandSurfaceRenderElement<R>>;
-
-    fn render_popup_elements<R: FhtRenderer>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<WaylandSurfaceRenderElement<R>>;
-
-    fn set_offscreen_element_id(&self, id: Option<Id>);
-    fn get_offscreen_element_id(&self) -> Option<Id>;
-}
-
-pub struct WorkspaceTile<E: WorkspaceElement> {
-    pub(crate) element: E,
-
-    pub location: Point<i32, Logical>,
-
-    pub cfact: f32,
-
-    pub border_config: Option<BorderConfig>,
-
-    pub rounded_corner_damage: ExtraDamage,
-
-    pub temporary_render_location: Option<Point<i32, Logical>>,
-
-    pub location_animation: Option<Animation<Point<i32, Logical>>>,
-
-    pub open_close_animation: Option<OpenCloseAnimation>,
+pub struct Tile {
+    window: Window,
+    location: Point<i32, Logical>,
+    cfact: f32,
+    border_config: Option<BorderConfig>,
+    rounded_corner_damage: ExtraDamage,
+    temporary_render_location: Option<Point<i32, Logical>>,
+    location_animation: Option<Animation<Point<i32, Logical>>>,
+    open_close_animation: Option<OpenCloseAnimation>,
     close_animation_snapshot: Option<Vec<WorkspaceTileRenderElement<GlowRenderer>>>,
-
-    pub debug_overlay: Option<EguiElement>,
+    debug_overlay: Option<EguiElement>,
 }
 
-impl<E: WorkspaceElement> PartialEq for WorkspaceTile<E> {
+impl PartialEq for Tile {
     fn eq(&self, other: &Self) -> bool {
-        self.element == other.element
+        self.window == other.window
     }
 }
 
-impl<E: WorkspaceElement> PartialEq<E> for WorkspaceTile<E> {
-    fn eq(&self, other: &E) -> bool {
-        self.element == *other
-    }
-}
-
-impl<E: WorkspaceElement> WorkspaceTile<E> {
-    pub fn new(element: E, border_config: Option<BorderConfig>) -> Self {
-        let element_size = element.size();
+impl Tile {
+    pub fn new(window: Window, border_config: Option<BorderConfig>) -> Self {
+        let window_size = window.size();
 
         Self {
-            element,
+            window,
             location: Point::default(),
             cfact: 1.0,
             border_config,
@@ -136,16 +68,28 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             debug_overlay: CONFIG
                 .renderer
                 .tile_debug_overlay
-                .then(|| EguiElement::new(element_size)),
+                .then(|| EguiElement::new(window_size)),
         }
     }
 
-    pub fn element(&self) -> &E {
-        &self.element
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+
+    pub fn cfact(&self) -> f32 {
+        self.cfact
+    }
+
+    pub fn change_cfact(&mut self, delta: f32) {
+        self.cfact += delta;
+    }
+
+    pub fn into_window(self) -> (Window, Option<BorderConfig>) {
+        (self.window, self.border_config)
     }
 
     pub fn send_pending_configure(&mut self) {
-        self.element.send_pending_configure();
+        self.window.send_pending_configure();
     }
 
     pub fn border_config(&self) -> BorderConfig {
@@ -153,7 +97,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     }
 
     pub fn border_thickness(&self) -> Option<i32> {
-        if self.element.fullscreen() {
+        if self.window.fullscreen() {
             return None;
         }
 
@@ -161,11 +105,11 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        let Some(element_surface) = self.element.wl_surface() else {
+        let Some(window_surface) = self.window.wl_surface() else {
             return false;
         };
 
-        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*element_surface == surface {
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && &*window_surface == surface {
             return true;
         }
 
@@ -174,7 +118,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 
             let found_surface: AtomicBool = false.into();
             with_surface_tree_downward(
-                &element_surface,
+                &window_surface,
                 surface,
                 |_, _, e| TraversalAction::DoChildren(e),
                 |s, _, search| {
@@ -188,7 +132,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
 
         if surface_type.contains(WindowSurfaceType::POPUP) {
-            return PopupManager::popups_for_surface(&element_surface)
+            return PopupManager::popups_for_surface(&window_surface)
                 .any(|(popup, _)| popup.wl_surface() == surface);
         }
 
@@ -197,15 +141,14 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 }
 
 // Geometry related functions
-impl<E: WorkspaceElement> WorkspaceTile<E> {
-    pub fn set_tile_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
+impl Tile {
+    pub fn set_geometry(&mut self, mut new_geo: Rectangle<i32, Logical>, animate: bool) {
         if let Some(thickness) = self.border_thickness() {
             new_geo.loc += (thickness, thickness).into();
             new_geo.size -= (2 * thickness, 2 * thickness).into();
         }
 
-        self.element.set_size(new_geo.size);
-        self.element.send_pending_configure();
+        self.window.request_size(new_geo.size);
         self.rounded_corner_damage.set_size(new_geo.size);
         if let Some(egui) = self.debug_overlay.as_mut() {
             egui.set_size(new_geo.size);
@@ -227,20 +170,16 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
     }
 
-    pub fn element_geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = self.element.geometry();
-        geo.loc = self.location;
-        geo
+    pub fn window_geometry(&self) -> Rectangle<i32, Logical> {
+        Rectangle::from_loc_and_size(self.location, self.window.size())
     }
 
-    pub fn element_visual_geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = self.element.geometry();
-        geo.loc = self.render_location();
-        geo
+    pub fn window_visual_geometry(&self) -> Rectangle<i32, Logical> {
+        Rectangle::from_loc_and_size(self.render_location(), self.window.size())
     }
 
-    pub fn tile_geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = self.element.geometry();
+    pub fn geometry(&self) -> Rectangle<i32, Logical> {
+        let mut geo = self.window_geometry();
         geo.loc = self.location;
         if let Some(thickness) = self.border_thickness() {
             geo.loc -= (thickness, thickness).into();
@@ -249,8 +188,12 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         geo
     }
 
-    pub fn bbox(&self) -> Rectangle<i32, Logical> {
-        let mut bbox = self.element.bbox();
+    pub fn location(&self) -> Point<i32, Logical> {
+        self.location
+    }
+
+    pub fn window_bbox(&self) -> Rectangle<i32, Logical> {
+        let mut bbox = self.window.bbox();
         bbox.loc = self.location;
         bbox
     }
@@ -262,6 +205,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         }
 
         render_location
+    }
+
+    pub fn stop_location_animation(&mut self) {
+        let _ = self.location_animation.take();
     }
 
     pub fn start_opening_animation(&mut self) {
@@ -279,7 +226,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
 }
 
 // Animation-related code
-impl<E: WorkspaceElement> WorkspaceTile<E> {
+impl Tile {
     pub fn prepare_close_animation(&mut self, renderer: &mut GlowRenderer, scale: Scale<f64>) {
         if self.close_animation_snapshot.is_some() {
             return;
@@ -303,6 +250,10 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         self.close_animation_snapshot = Some(elements);
     }
 
+    pub fn is_closing(&self) -> bool {
+        matches!(self.open_close_animation, Some(OpenCloseAnimation::Closing { .. }))
+    }
+
     pub fn clear_close_snapshot(&mut self) {
         let _ = self.close_animation_snapshot.take();
     }
@@ -312,7 +263,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             return;
         };
         let thickness = self.border_config().thickness as i32;
-        let tile_size = self.element.size() + (thickness * 2, thickness * 2).into();
+        let tile_size = self.window.size() + (thickness * 2, thickness * 2).into();
 
         let Some(progress) = Animation::new(
             1.0,
@@ -379,7 +330,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     }
 }
 
-impl<E: WorkspaceElement> WorkspaceTile<E> {
+impl Tile {
     fn egui_overlay(&self, ctx: &egui::Context) {
         egui::Area::new("tile-debug-overlay")
             .fixed_pos((0.0, 0.0))
@@ -400,10 +351,11 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                         };
 
                         ui.label("Window info");
-                        ui.indent("Window info", |ui| {
-                            info(ui, "title", self.element.title().as_str());
-                            info(ui, "app-id", self.element.app_id().as_str());
-                        });
+                        // TODO
+                        // ui.indent("Window info", |ui| {
+                        //     info(ui, "title", self.window.title());
+                        //     info(ui, "app-id", self.window.app_id());
+                        // });
 
                         ui.add_space(4.0);
 
@@ -414,7 +366,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                                 format!("({}, {})", location.x, location.y).as_str()
                             });
                             info(ui, "size", {
-                                let size = self.element.size();
+                                let size = self.window.size();
                                 format!("({}, {})", size.w, size.h).as_str()
                             });
                             info(ui, "cfact", self.cfact.to_string().as_str());
@@ -431,17 +383,17 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                             info(
                                 ui,
                                 "fullscreen",
-                                self.element.fullscreen().to_string().as_str(),
+                                self.window.fullscreen().to_string().as_str(),
                             );
                             info(
                                 ui,
                                 "maximized",
-                                self.element.maximized().to_string().as_str(),
+                                self.window.maximized().to_string().as_str(),
                             );
                             info(
                                 ui,
                                 "bounds",
-                                self.element
+                                self.window
                                     .bounds()
                                     .map(|bounds| format!("({}, {})", bounds.w, bounds.h))
                                     .unwrap_or_else(|| String::from("None"))
@@ -486,7 +438,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
         let element_physical_geo = Rectangle::from_loc_and_size(
             location,
-            self.element.size().to_physical_precise_round(scale),
+            self.window.size().to_physical_precise_round(scale),
         );
         let element_geo = element_physical_geo
             .to_f64()
@@ -494,12 +446,12 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
             .to_i32_round();
 
         let border_config = self.border_config.unwrap_or(CONFIG.decoration.border);
-        let need_rounding = !self.element.fullscreen();
+        let need_rounding = !self.window.fullscreen();
         let radius = border_config.radius();
 
         let window_elements = self
-            .element
-            .render_surface_elements(renderer, element_physical_geo.loc, scale, alpha)
+            .window
+            .render_toplevel_elements(renderer, element_physical_geo.loc, scale, alpha)
             .into_iter()
             .map(move |e| {
                 if !need_rounding {
@@ -521,7 +473,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                 }
             });
         let popup_elements = self
-            .element
+            .window
             .render_popup_elements(renderer, element_physical_geo.loc, scale, alpha)
             .into_iter()
             .map(WorkspaceTileRenderElement::Element);
@@ -580,7 +532,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         focused: bool,
     ) -> impl Iterator<Item = WorkspaceTileRenderElement<R>> {
         let mut render_geo = self
-            .element_visual_geometry()
+            .window_visual_geometry()
             .to_physical_precise_round(scale);
 
         let debug_overlay = self
@@ -669,7 +621,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
                     Kind::Unspecified,
                 )
                 .into();
-                self.element.set_offscreen_element_id(Some(element_id));
+                self.window.set_offscreen_element_id(Some(element_id));
 
                 let origin = render_geo.center();
                 let rescale = (progress * (1.0 - OpenCloseAnimation::OPEN_SCALE_THRESHOLD))
@@ -721,7 +673,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
         };
 
         if open_close_element.is_none() {
-            self.element.set_offscreen_element_id(None);
+            self.window.set_offscreen_element_id(None);
             normal_elements =
                 Some(self.render_elements_inner(renderer, render_geo.loc, scale, alpha, focused))
         }
@@ -732,7 +684,7 @@ impl<E: WorkspaceElement> WorkspaceTile<E> {
     }
 }
 
-impl<E: WorkspaceElement> IsAlive for WorkspaceTile<E> {
+impl IsAlive for Tile {
     fn alive(&self) -> bool {
         if matches!(
             &self.open_close_animation,
@@ -741,7 +693,7 @@ impl<E: WorkspaceElement> IsAlive for WorkspaceTile<E> {
             // We do not want to clear our the window if we opening/closing
             return true;
         }
-        self.element.alive()
+        self.window.alive()
     }
 }
 

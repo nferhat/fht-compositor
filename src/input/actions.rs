@@ -1,15 +1,11 @@
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
-use smithay::desktop::space::SpaceElement;
 use smithay::input::keyboard::{Keysym, ModifiersState};
-use smithay::utils::{Rectangle, Serial};
+use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::XdgShellHandler;
 
 use crate::config::CONFIG;
-use crate::shell::grabs::ResizeEdge;
-use crate::shell::workspaces::tile::WorkspaceElement;
-use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
@@ -190,7 +186,7 @@ impl State {
             KeyAction::ChangeCfact(delta) => {
                 let mut arrange = false;
                 if let Some(tile) = active.focused_tile_mut() {
-                    tile.cfact += delta;
+                    tile.change_cfact(delta);
                     arrange = true;
                 }
                 if arrange {
@@ -198,58 +194,57 @@ impl State {
                 }
             }
             KeyAction::MaximizeFocusedWindow => {
-                if let Some(window) = active.focused().cloned() {
+                if let Some(window) = active.focused() {
                     let new_maximized = !window.maximized();
-                    window.set_maximized(new_maximized);
+                    window.request_maximized(new_maximized);
                     active.arrange_tiles(true);
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
-                if let Some(window) = active.focused().cloned() {
+                if let Some(window) = active.focused() {
                     if window.fullscreen() {
-                        window.set_fullscreen(false);
-                        window.set_fullscreen_output(None);
+                        window.request_fullscreen(false);
                     } else {
-                        let toplevel = window.toplevel().unwrap().clone();
+                        let toplevel = window.toplevel().clone();
                         self.fullscreen_request(toplevel, None);
                     }
                 }
             }
             KeyAction::FocusNextWindow => {
-                let new_focus = active.focus_next_element(true).cloned();
+                let new_focus = active.focus_next_window(true);
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = active.element_geometry(&window).unwrap().center();
+                        let center = active.window_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::FocusPreviousWindow => {
-                let new_focus = active.focus_previous_element(true).cloned();
+                let new_focus = active.focus_previous_window(true);
                 if let Some(window) = new_focus {
                     if CONFIG.general.cursor_warps {
-                        let center = active.element_geometry(&window).unwrap().center();
+                        let center = active.window_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::SwapWithNextWindow => {
-                active.swap_with_next_element(true);
-                if let Some(window) = active.focused().cloned() {
+                active.swap_with_next_window(true);
+                if let Some(window) = active.focused() {
                     if CONFIG.general.cursor_warps {
-                        let center = active.element_geometry(&window).unwrap().center();
+                        let center = active.window_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
-                active.swap_with_previous_element(true);
-                if let Some(window) = active.focused().cloned() {
+                active.swap_with_previous_window(true);
+                if let Some(window) = active.focused() {
                     if CONFIG.general.cursor_warps {
-                        let center = active.element_geometry(&window).unwrap().center();
+                        let center = active.window_geometry(&window).unwrap().center();
                         self.move_pointer(center.to_f64())
                     }
                     self.set_focus_target(Some(window.into()));
@@ -316,10 +311,10 @@ impl State {
                 self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::CloseFocusedWindow => {
-                let Some(window) = active.focused().cloned() else {
+                let Some(window) = active.focused() else {
                     return;
                 };
-                window.toplevel().unwrap().send_close();
+                window.toplevel().send_close();
             }
             KeyAction::FocusWorkspace(idx) => {
                 if let Some(window) = wset.set_active_idx(idx, true) {
@@ -327,11 +322,11 @@ impl State {
                 };
             }
             KeyAction::SendFocusedWindowToWorkspace(idx) => {
-                let Some(window) = active.focused().cloned() else {
+                let Some(window) = active.focused() else {
                     return;
                 };
                 let tile = active.remove_tile(&window, true).unwrap();
-                let new_focus = active.focused().cloned();
+                let new_focus = active.focused();
                 let idx = idx.clamp(0, 9);
                 wset.get_workspace_mut(idx).insert_tile(tile, true);
 
@@ -340,13 +335,14 @@ impl State {
                 }
             }
             KeyAction::ToggleDebugOverlayOnFocusedTile => {
-                let Some(tile) = active.focused_tile_mut() else {
-                    return;
-                };
-
-                if tile.debug_overlay.take().is_none() {
-                    tile.debug_overlay = Some(crate::egui::EguiElement::new(tile.element.size()))
-                }
+                // TODO:
+                // let Some(tile) = active.focused_tile_mut() else {
+                //     return;
+                // };
+                //
+                // if tile.debug_overlay.take().is_none() {
+                //     tile.debug_overlay = Some(crate::egui::EguiElement::new(tile.element.size()))
+                // }
             }
             _ => {}
         }
@@ -402,47 +398,49 @@ impl State {
         let pointer_loc = self.fht.pointer.current_location();
 
         match action {
-            MouseAction::MoveTile => {
-                if let Some((PointerFocusTarget::Window(window), _)) =
-                    self.fht.focus_target_under(pointer_loc)
-                {
-                    self.fht
-                        .loop_handle
-                        .insert_idle(move |state| state.handle_move_request(window, serial));
-                }
-            }
-            MouseAction::ResizeTile => {
-                if let Some((PointerFocusTarget::Window(window), _)) =
-                    self.fht.focus_target_under(pointer_loc)
-                {
-                    let pointer_loc = self.fht.pointer.current_location();
-                    let Rectangle { loc, size } =
-                        self.fht.window_visual_geometry(&window).unwrap().to_f64();
-
-                    let pointer_loc = pointer_loc - loc;
-                    if !window.is_in_input_region(&pointer_loc) {
-                        return;
-                    }
-
-                    // We divide the window into 9 sections, so that if you grab for example
-                    // somewhere in the middle of the bottom edge, you can only resize vertically.
-                    let mut edges = ResizeEdge::empty();
-                    if pointer_loc.x < size.w / 3. {
-                        edges |= ResizeEdge::LEFT;
-                    } else if 2. * size.w / 3. < pointer_loc.x {
-                        edges |= ResizeEdge::RIGHT;
-                    }
-                    if pointer_loc.y < size.h / 3. {
-                        edges |= ResizeEdge::TOP;
-                    } else if 2. * size.h / 3. < pointer_loc.y {
-                        edges |= ResizeEdge::BOTTOM;
-                    }
-
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        state.handle_resize_request(window, serial, edges)
-                    });
-                }
-            }
+            _ => (),
+            // TODO:
+            // MouseAction::MoveTile => {
+            //     if let Some((PointerFocusTarget::Window(window), _)) =
+            //         self.fht.focus_target_under(pointer_loc)
+            //     {
+            //         self.fht
+            //             .loop_handle
+            //             .insert_idle(move |state| state.handle_move_request(window, serial));
+            //     }
+            // }
+            // MouseAction::ResizeTile => {
+            //     if let Some((PointerFocusTarget::Window(window), _)) =
+            //         self.fht.focus_target_under(pointer_loc)
+            //     {
+            //         let pointer_loc = self.fht.pointer.current_location();
+            //         let Rectangle { loc, size } =
+            //             self.fht.window_visual_geometry(&window).unwrap().to_f64();
+            //
+            //         let pointer_loc_in_window = pointer_loc - loc;
+            //         if window.surface_under(pointer_loc_in_window, WindowSurfaceType::ALL).is_none() {
+            //             return;
+            //         }
+            //
+            //         // We divide the window into 9 sections, so that if you grab for example
+            //         // somewhere in the middle of the bottom edge, you can only resize vertically.
+            //         let mut edges = ResizeEdge::empty();
+            //         if pointer_loc_in_window.x < size.w / 3. {
+            //             edges |= ResizeEdge::LEFT;
+            //         } else if 2. * size.w / 3. < pointer_loc_in_window.x {
+            //             edges |= ResizeEdge::RIGHT;
+            //         }
+            //         if pointer_loc_in_window.y < size.h / 3. {
+            //             edges |= ResizeEdge::TOP;
+            //         } else if 2. * size.h / 3. < pointer_loc_in_window.y {
+            //             edges |= ResizeEdge::BOTTOM;
+            //         }
+            //
+            //         self.fht.loop_handle.insert_idle(move |state| {
+            //             state.handle_resize_request(window, serial, edges)
+            //         });
+            //     }
+            // }
         }
     }
 }

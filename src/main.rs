@@ -31,6 +31,7 @@ mod renderer;
 mod shell;
 mod state;
 mod utils;
+mod window;
 
 fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // Logging.

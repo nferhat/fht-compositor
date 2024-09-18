@@ -45,7 +45,7 @@ impl State {
             if !pending_window.initial_configure_sent {
                 let pending_window = self.fht.pending_windows.get_mut(idx).unwrap();
                 // Send an empty configuration message so that the client informs us of new state.
-                pending_window.inner.toplevel().unwrap().send_configure();
+                pending_window.inner.toplevel().send_configure();
                 pending_window.initial_configure_sent = true;
 
                 return None;
@@ -65,13 +65,13 @@ impl State {
 
         if let Some(idx) = self.fht.unmapped_tiles.iter().position(|t| {
             t.inner
-                .element()
+                .window()
                 .wl_surface()
                 .is_some_and(|s| &*s == surface)
         }) {
             let unmapped_tile = self.fht.unmapped_tiles.get(idx).unwrap();
-            unmapped_tile.inner.element().refresh();
-            unmapped_tile.inner.element().on_commit();
+            unmapped_tile.inner.window().refresh();
+            unmapped_tile.inner.window().on_commit();
 
             if !has_render_buffer(surface) {
                 // FIXME: Why this doesn't commit by itself?
@@ -93,23 +93,24 @@ impl State {
 
         // Other check: its a mapped window.
         let mut arrange = false;
-        if let Some((tile, output)) = self.fht.find_tile_and_output(surface) {
+        if let Some((window, output)) = self.fht.find_window_and_output(surface) {
             let is_mapped = has_render_buffer(surface);
             #[allow(unused_assignments)]
-            if !is_mapped {
-                // The window's render surface got removed, start out close animation.
-                // The unmap snapshot you have be prepared earlier, either by:
-                //
-                // - XdgShellHandler::toplevel_destroyed
-                // - the pre-commit hook we set up on XdgShellHandler::new_toplevel
-                self.backend.with_renderer(|renderer| {
-                    let scale = output.current_scale().fractional_scale().into();
-                    tile.start_close_animation(renderer, scale);
-                });
-                arrange = true;
-            }
+            // TODO:
+            // if !is_mapped {
+            //     // The window's render surface got removed, start out close animation.
+            //     // The unmap snapshot you have be prepared earlier, either by:
+            //     //
+            //     // - XdgShellHandler::toplevel_destroyed
+            //     // - the pre-commit hook we set up on XdgShellHandler::new_toplevel
+            //     self.backend.with_renderer(|renderer| {
+            //         let scale = output.current_scale().fractional_scale().into();
+            //         tile.start_close_animation(renderer, scale);
+            //     });
+            //     arrange = true;
+            // }
 
-            tile.element.on_commit();
+            window.on_commit();
             return Some(output.clone());
         }
 
@@ -264,12 +265,13 @@ impl CompositorHandler for State {
         //
         // As niri states it, this is not perfect, but still better than nothing.
         if let Some(root) = self.fht.root_surfaces.get(surface).cloned() {
-            if let Some((tile, output)) = self.fht.find_tile_and_output(&root) {
-                self.backend.with_renderer(|renderer| {
-                    let scale = output.current_scale().fractional_scale().into();
-                    tile.prepare_close_animation(renderer, scale);
-                });
-            }
+            // TODO:
+            // if let Some((tile, output)) = self.fht.find_tile_and_output(&root) {
+            //     self.backend.with_renderer(|renderer| {
+            //         let scale = output.current_scale().fractional_scale().into();
+            //         tile.prepare_close_animation(renderer, scale);
+            //     });
+            // }
         }
 
         self.fht

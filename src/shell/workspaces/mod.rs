@@ -31,7 +31,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Time};
 
 pub use self::layout::WorkspaceLayout;
-use self::tile::{WorkspaceElement, WorkspaceTile, WorkspaceTileRenderElement};
+use self::tile::{Tile, WorkspaceTileRenderElement};
 use crate::config::{
     BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
 };
@@ -39,16 +39,17 @@ use crate::fht_render_elements;
 use crate::renderer::FhtRenderer;
 use crate::utils::animation::Animation;
 use crate::utils::output::OutputExt;
+use crate::window::Window;
 
-pub struct WorkspaceSet<E: WorkspaceElement> {
+pub struct WorkspaceSet {
     output: Output,
-    workspaces: Vec<Workspace<E>>,
+    workspaces: Vec<Workspace>,
     switch_animation: Option<WorkspaceSwitchAnimation>,
     active_idx: usize,
 }
 
 #[allow(dead_code)]
-impl<E: WorkspaceElement> WorkspaceSet<E> {
+impl WorkspaceSet {
     pub fn new(output: Output) -> Self {
         let workspaces = (0..9).map(|_| Workspace::new(output.clone())).collect();
         Self {
@@ -80,11 +81,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<E> {
+    pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<Window> {
         let target_idx = target_idx.clamp(0, 9);
         if !animate {
             self.active_idx = target_idx;
-            return self.workspaces[target_idx].focused().cloned();
+            return self.workspaces[target_idx].focused();
         }
 
         let active_idx = self.active_idx;
@@ -93,7 +94,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
 
         self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
-        self.workspaces[target_idx].focused().cloned()
+        self.workspaces[target_idx].focused()
     }
 
     pub fn get_active_idx(&self) -> usize {
@@ -104,19 +105,19 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    pub fn drain_workspaces(&mut self) -> impl Iterator<Item = Workspace<E>> + '_ {
+    pub fn drain_workspaces(&mut self) -> impl Iterator<Item = Workspace> + '_ {
         self.workspaces.drain(..)
     }
 
-    pub fn get_workspace(&self, idx: usize) -> &Workspace<E> {
+    pub fn get_workspace(&self, idx: usize) -> &Workspace {
         &self.workspaces[idx]
     }
 
-    pub fn get_workspace_mut(&mut self, idx: usize) -> &mut Workspace<E> {
+    pub fn get_workspace_mut(&mut self, idx: usize) -> &mut Workspace {
         &mut self.workspaces[idx]
     }
 
-    pub fn active(&self) -> &Workspace<E> {
+    pub fn active(&self) -> &Workspace {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &self.workspaces[*target_idx]
         } else {
@@ -124,7 +125,7 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    pub fn active_mut(&mut self) -> &mut Workspace<E> {
+    pub fn active_mut(&mut self) -> &mut Workspace {
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) = self.switch_animation.as_ref() {
             &mut self.workspaces[*target_idx]
         } else {
@@ -132,11 +133,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         }
     }
 
-    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace<E>> {
+    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
         self.workspaces.iter()
     }
 
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace<E>> {
+    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> {
         self.workspaces.iter_mut()
     }
 
@@ -148,42 +149,43 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.workspaces_mut().for_each(|ws| ws.output_resized())
     }
 
-    pub fn find_element(&self, surface: &WlSurface) -> Option<&E> {
+    pub fn find_window(&self, surface: &WlSurface) -> Option<Window> {
         self.workspaces()
-            .find_map(|ws| ws.find_tile(surface).map(WorkspaceTile::element))
+            .find_map(|ws| ws.find_tile(surface).map(Tile::window))
+            .cloned()
     }
 
-    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut Tile> {
         self.workspaces_mut()
             .find_map(|ws| ws.find_tile_mut(surface))
     }
 
-    pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace<E>> {
+    pub fn find_workspace(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.workspaces().find(|ws| ws.has_surface(surface))
     }
 
-    pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace<E>> {
+    pub fn find_workspace_mut(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
         self.workspaces_mut().find(|ws| ws.has_surface(surface))
     }
 
-    pub fn find_element_and_workspace(&self, surface: &WlSurface) -> Option<(E, &Workspace<E>)> {
+    pub fn find_window_and_workspace(&self, surface: &WlSurface) -> Option<(Window, &Workspace)> {
         self.workspaces().find_map(|ws| {
-            let element = ws.find_tile(surface).map(|w| w.element.clone())?;
-            Some((element, ws))
+            let window = ws.find_tile(surface).map(|w| w.window().clone())?;
+            Some((window, ws))
         })
     }
 
-    pub fn find_element_and_workspace_mut(
+    pub fn find_window_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
-    ) -> Option<(E, &mut Workspace<E>)> {
+    ) -> Option<(Window, &mut Workspace)> {
         self.workspaces_mut().find_map(|ws| {
-            let element = ws.find_tile(surface).map(|w| w.element.clone())?;
-            Some((element, ws))
+            let window = ws.find_tile(surface).map(|w| w.window().clone())?;
+            Some((window, ws))
         })
     }
 
-    pub fn visible_elements(&self) -> impl Iterator<Item = &E> + '_ {
+    pub fn visible_windows(&self) -> impl Iterator<Item = &Window> + '_ {
         let switching_windows = self
             .switch_animation
             .as_ref()
@@ -192,9 +194,9 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
 
                 ws.fullscreen
                     .as_ref()
-                    .map(|fs| fs.inner.element())
+                    .map(|fs| fs.inner.window())
                     .into_iter()
-                    .chain(ws.tiles.iter().map(WorkspaceTile::element))
+                    .chain(ws.tiles.iter().map(Tile::window))
                     .collect::<Vec<_>>()
             })
             .into_iter()
@@ -204,26 +206,26 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         active
             .fullscreen
             .as_ref()
-            .map(|fs| fs.inner.element())
+            .map(|fs| fs.inner.window())
             .into_iter()
-            .chain(active.tiles.iter().map(WorkspaceTile::element))
+            .chain(active.tiles.iter().map(Tile::window))
             .chain(switching_windows)
     }
 
-    pub fn ws_for(&self, element: &E) -> Option<&Workspace<E>> {
-        self.workspaces().find(|ws| ws.has_element(element))
+    pub fn workspace_for_window(&self, window: &Window) -> Option<&Workspace> {
+        self.workspaces().find(|ws| ws.has_window(window))
     }
 
-    pub fn ws_mut_for(&mut self, element: &E) -> Option<&mut Workspace<E>> {
-        self.workspaces_mut().find(|ws| ws.has_element(element))
+    pub fn workspace_mut_for_window(&mut self, window: &Window) -> Option<&mut Workspace> {
+        self.workspaces_mut().find(|ws| ws.has_window(window))
     }
 
     #[profiling::function]
-    pub fn current_fullscreen(&self) -> Option<(&E, Point<i32, Logical>)> {
+    pub fn current_fullscreen(&self) -> Option<(Window, Point<i32, Logical>)> {
         let Some(animation) = self.switch_animation.as_ref() else {
             return self.active().fullscreen.as_ref().map(|fs| {
                 // Fullscreen is always at (0,0)
-                (fs.inner.element(), (0, 0).into())
+                (fs.inner.window().clone(), (0, 0).into())
             });
         };
 
@@ -233,20 +235,20 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
         self.active()
             .fullscreen
             .as_ref()
-            .map(|fs| (fs.inner.element(), current_offset))
+            .map(|fs| (fs.inner.window().clone(), current_offset))
             .or_else(|| {
                 self.workspaces[animation.target_idx]
                     .fullscreen
                     .as_ref()
-                    .map(|fs| (fs.inner.element(), target_offset))
+                    .map(|fs| (fs.inner.window().clone(), target_offset))
             })
     }
 
     #[profiling::function]
-    pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
+    pub fn window_under(&self, point: Point<f64, Logical>) -> Option<(Window, Point<i32, Logical>)> {
         let Some(animation) = self.switch_animation.as_ref() else {
             // It's just the active one, so no need to do additional calculations.
-            return self.active().element_under(point);
+            return self.active().window_under(point);
         };
 
         let output_geo = self.output.geometry();
@@ -254,11 +256,11 @@ impl<E: WorkspaceElement> WorkspaceSet<E> {
             animation.calculate_offsets(self.active_idx, output_geo);
 
         self.active()
-            .element_under(point + current_offset.to_f64())
+            .window_under(point + current_offset.to_f64())
             .map(|(ft, loc)| (ft, loc + current_offset))
             .or_else(|| {
                 self.workspaces[animation.target_idx]
-                    .element_under(point + target_offset.to_f64())
+                    .window_under(point + target_offset.to_f64())
                     .map(|(ft, loc)| (ft, loc + target_offset))
             })
     }
@@ -444,16 +446,16 @@ impl WorkspaceId {
     }
 }
 
-pub struct Workspace<E: WorkspaceElement> {
+pub struct Workspace {
     output: Output,
-    tiles: Vec<WorkspaceTile<E>>,
+    tiles: Vec<Tile>,
     focused_tile_idx: usize,
     layout: Layout,
-    fullscreen: Option<FullscreenTile<E>>,
+    fullscreen: Option<FullscreenTile>,
     id: WorkspaceId,
 }
 
-impl<E: WorkspaceElement> Workspace<E> {
+impl Workspace {
     pub fn new(output: Output) -> Self {
         let layout = Layout::new(
             &output,
@@ -481,11 +483,11 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.id
     }
 
-    pub fn drain_tiles(&mut self) -> impl Iterator<Item = WorkspaceTile<E>> + '_ {
+    pub fn drain_tiles(&mut self) -> impl Iterator<Item = Tile> + '_ {
         self.tiles.drain(..)
     }
 
-    pub fn tiles(&self) -> impl Iterator<Item = &WorkspaceTile<E>> {
+    pub fn tiles(&self) -> impl Iterator<Item = &Tile> {
         self.tiles.iter()
     }
 
@@ -503,7 +505,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         if self
             .fullscreen
             .as_ref()
-            .is_some_and(|fs| !fs.inner.element.fullscreen())
+            .is_some_and(|fs| !fs.inner.window().fullscreen())
         {
             let FullscreenTile {
                 inner,
@@ -515,19 +517,19 @@ impl<E: WorkspaceElement> Workspace<E> {
 
         if let Some(fullscreen) = self.fullscreen.as_mut() {
             // This is now managed globally with focus targets
-            fullscreen.inner.element.set_activated(true);
+            fullscreen.inner.window().request_activated(true);
 
-            let mut bbox = fullscreen.inner.element.bbox();
-            bbox.loc = fullscreen.inner.location + output_geometry.loc;
+            let mut bbox = fullscreen.inner.window().bbox();
+            bbox.loc = fullscreen.inner.location() + output_geometry.loc;
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
-                // output_enter excepts the overlap to be relative to the element, weird choice
+                // output_enter excepts the overlap to be relative to the window, weird choice
                 // but I comply.
                 overlap.loc -= bbox.loc;
-                fullscreen.inner.element.output_enter(&self.output, overlap);
+                fullscreen.inner.window().enter_output(&self.output, overlap);
             }
 
             fullscreen.inner.send_pending_configure();
-            fullscreen.inner.element.refresh();
+            fullscreen.inner.window().refresh();
         }
 
         // Clean dead/zombie tiles
@@ -544,20 +546,20 @@ impl<E: WorkspaceElement> Workspace<E> {
         // Refresh internal state of windows
         for (idx, tile) in self.tiles.iter_mut().enumerate() {
             // This is now managed globally with focus targets
-            tile.element.set_activated(idx == self.focused_tile_idx);
+            tile.window().request_activated(idx == self.focused_tile_idx);
 
-            let mut bbox = tile.element.bbox();
-            bbox.loc = tile.location + output_geometry.loc;
+            let mut bbox = tile.window().bbox();
+            bbox.loc = tile.location() + output_geometry.loc;
 
             if let Some(mut overlap) = output_geometry.intersection(bbox) {
-                // output_enter excepts the overlap to be relative to the element, weird choice
+                // output_enter excepts the overlap to be relative to the window, weird choice
                 // but I comply.
                 overlap.loc -= bbox.loc;
-                tile.element.output_enter(&self.output, overlap);
+                tile.window().enter_output(&self.output, overlap);
             }
 
             tile.send_pending_configure();
-            tile.element.refresh();
+            tile.window().refresh();
         }
     }
 
@@ -613,29 +615,25 @@ impl<E: WorkspaceElement> Workspace<E> {
 }
 
 // Inserting and removing elements
-impl<E: WorkspaceElement> Workspace<E> {
-    pub fn insert_tile(&mut self, tile: WorkspaceTile<E>, animate: bool) {
-        let WorkspaceTile {
-            element,
-            border_config,
-            ..
-        } = tile;
-        self.insert_element(element, border_config, animate);
+impl Workspace {
+    pub fn insert_tile(&mut self, tile: Tile, animate: bool) {
+        let (window, border_config) = tile.into_window();
+        self.insert_window(window, border_config, animate);
     }
 
-    pub fn insert_element(
+    pub fn insert_window(
         &mut self,
-        element: E,
+        window: Window,
         border_config: Option<BorderConfig>,
         animate: bool,
     ) {
-        if self.has_element(&element) {
+        if self.has_window(&window) {
             return;
         }
 
-        // Output overlap + wl_surface scale and transform will be set when using self.refresh
-        element.set_bounds(Some(self.output.geometry().size));
-        let tile = WorkspaceTile::new(element, border_config);
+        window.request_bounds(Some(self.output.geometry().size));
+        window.configure_for_output(&self.output);
+        let tile = Tile::new(window, border_config);
 
         // NOTE: In the following code we dont call to send_pending_configure since arrange_tiles
         // does this for us automatically.
@@ -648,7 +646,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             self.tiles.insert(last_known_idx, inner);
         }
 
-        if !tile.element.fullscreen() {
+        if !tile.window().fullscreen() {
             let new_idx = match CONFIG.general.insert_window_strategy {
                 InsertWindowStrategy::EndOfSlaveStack => {
                     self.tiles.push(tile);
@@ -685,25 +683,24 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    pub fn remove_tile(&mut self, element: &E, animate: bool) -> Option<WorkspaceTile<E>> {
+    pub fn remove_tile(&mut self, window: &Window, animate: bool) -> Option<Tile> {
         if self
             .fullscreen
             .as_ref()
-            .is_some_and(|fs| fs.inner == *element)
+            .is_some_and(|fs| fs.inner.window() == window)
         {
             let FullscreenTile { inner, .. } = self.take_fullscreen().unwrap();
             self.arrange_tiles(animate);
-
             return Some(inner);
         }
 
-        let Some(idx) = self.tiles.iter().position(|t| t.element == *element) else {
+        let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
             return None;
         };
 
         let tile = self.tiles.remove(idx);
         // "Un"-configure the window (for potentially inserting it on another workspace who knows)
-        tile.element.output_leave(&self.output);
+        tile.window().leave_output(&self.output);
         self.focused_tile_idx = self
             .focused_tile_idx
             .clamp(0, self.tiles.len().saturating_sub(1));
@@ -712,11 +709,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         Some(tile)
     }
 
-    pub fn take_fullscreen(&mut self) -> Option<FullscreenTile<E>> {
+    pub fn take_fullscreen(&mut self) -> Option<FullscreenTile> {
         self.fullscreen.take().map(|mut fs| {
-            fs.inner.element.output_leave(&self.output);
-            fs.inner.element.set_fullscreen(false);
-            fs.inner.element.set_fullscreen_output(None);
+            fs.inner.window().leave_output(&self.output);
+            fs.inner.window().request_fullscreen(false);
             fs.inner.send_pending_configure();
 
             fs
@@ -724,19 +720,17 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 }
 
-// Element focus
-impl<E: WorkspaceElement> Workspace<E> {
-    pub fn focused(&self) -> Option<&E> {
+// window focus
+impl Workspace {
+    pub fn focused(&self) -> Option<Window> {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
-            return Some(&fullscreen.inner.element);
+            return Some(fullscreen.inner.window().clone());
         }
 
-        self.tiles
-            .get(self.focused_tile_idx)
-            .map(WorkspaceTile::element)
+        self.tiles.get(self.focused_tile_idx).map(Tile::window).cloned()
     }
 
-    pub fn fullscreen_element(&mut self, element: &E, animate: bool) {
+    pub fn fullscreen_window(&mut self, window: &Window, animate: bool) {
         if let Some(FullscreenTile {
             inner,
             last_known_idx,
@@ -745,13 +739,13 @@ impl<E: WorkspaceElement> Workspace<E> {
             self.tiles.insert(last_known_idx, inner);
         }
 
-        let Some(idx) = self.tiles.iter().position(|t| t == element) else {
+        let Some(idx) = self.tiles.iter().position(|t| t.window() == window) else {
             return;
         };
-        let tile = self.remove_tile(element, true).unwrap();
-        tile.element.set_fullscreen(true);
+        let tile = self.remove_tile(window, true).unwrap();
+        tile.window().request_fullscreen(true);
         // redo the configuration that remove_tile() did
-        tile.element.set_bounds(Some(self.output.geometry().size));
+        tile.window().request_bounds(Some(self.output.geometry().size));
         self.fullscreen = Some(FullscreenTile {
             inner: tile,
             last_known_idx: idx,
@@ -760,22 +754,22 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    pub fn focused_tile(&self) -> Option<&WorkspaceTile<E>> {
+    pub fn focused_tile(&self) -> Option<&Tile> {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             return Some(&fullscreen.inner);
         }
         self.tiles.get(self.focused_tile_idx)
     }
 
-    pub fn focused_tile_mut(&mut self) -> Option<&mut WorkspaceTile<E>> {
+    pub fn focused_tile_mut(&mut self) -> Option<&mut Tile> {
         if let Some(fullscreen) = self.fullscreen.as_mut() {
             return Some(&mut fullscreen.inner);
         }
         self.tiles.get_mut(self.focused_tile_idx)
     }
 
-    pub fn focus_element(&mut self, window: &E, animate: bool) {
-        if let Some(idx) = self.tiles.iter().position(|w| w == window) {
+    pub fn focus_window(&mut self, window: &Window, animate: bool) {
+        if let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) {
             if let Some(FullscreenTile {
                 inner,
                 last_known_idx,
@@ -791,7 +785,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         }
     }
 
-    pub fn focus_next_element(&mut self, animate: bool) -> Option<&E> {
+    pub fn focus_next_window(&mut self, animate: bool) -> Option<Window> {
         if self.tiles.is_empty() {
             return None;
         }
@@ -815,10 +809,10 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
 
         let tile = &self.tiles[self.focused_tile_idx];
-        Some(tile.element())
+        Some(tile.window().clone())
     }
 
-    pub fn focus_previous_element(&mut self, animate: bool) -> Option<&E> {
+    pub fn focus_previous_window(&mut self, animate: bool) -> Option<Window> {
         if self.tiles.is_empty() {
             return None;
         }
@@ -840,13 +834,13 @@ impl<E: WorkspaceElement> Workspace<E> {
         };
 
         let tile = &self.tiles[self.focused_tile_idx];
-        Some(tile.element())
+        Some(tile.window().clone())
     }
 }
 
-// Element swapping
-impl<E: WorkspaceElement> Workspace<E> {
-    pub fn swap_elements(&mut self, a: &E, b: &E, animate: bool) {
+// window swapping
+impl Workspace {
+    pub fn swap_windows(&mut self, a: &Window, b: &Window, animate: bool) {
         if let Some(FullscreenTile {
             inner,
             last_known_idx,
@@ -855,10 +849,10 @@ impl<E: WorkspaceElement> Workspace<E> {
             self.tiles.insert(last_known_idx, inner);
         }
 
-        let Some(a_idx) = self.tiles.iter().position(|tile| tile.element == *a) else {
+        let Some(a_idx) = self.tiles.iter().position(|tile| tile.window() == a) else {
             return;
         };
-        let Some(b_idx) = self.tiles.iter().position(|tile| tile.element == *b) else {
+        let Some(b_idx) = self.tiles.iter().position(|tile| tile.window() == b) else {
             return;
         };
         self.focused_tile_idx = b_idx;
@@ -866,7 +860,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    pub fn swap_with_next_element(&mut self, animate: bool) {
+    pub fn swap_with_next_window(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
         }
@@ -895,7 +889,7 @@ impl<E: WorkspaceElement> Workspace<E> {
         self.arrange_tiles(animate);
     }
 
-    pub fn swap_with_previous_element(&mut self, animate: bool) {
+    pub fn swap_with_previous_window(&mut self, animate: bool) {
         if self.tiles.len() < 2 {
             return;
         }
@@ -924,7 +918,7 @@ impl<E: WorkspaceElement> Workspace<E> {
 }
 
 // Geometry and layout
-impl<E: WorkspaceElement> Workspace<E> {
+impl Workspace {
     pub fn with_layout<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(&mut Layout) -> T,
@@ -932,24 +926,19 @@ impl<E: WorkspaceElement> Workspace<E> {
         f(&mut self.layout)
     }
 
-    pub fn element_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        self.tile_for(element).map(WorkspaceTile::element_geometry)
+    pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        self.tile_for(window).map(Tile::window_geometry)
     }
 
-    pub fn element_visual_geometry(&self, element: &E) -> Option<Rectangle<i32, Logical>> {
-        self.tile_for(element)
-            .map(WorkspaceTile::element_visual_geometry)
+    pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        self.tile_for(window).map(Tile::window_visual_geometry)
     }
 
-    pub fn prepare_tile_geometry(&mut self, tile: &mut WorkspaceTile<E>) {
+    pub fn prepare_window_geometry(&mut self, tile: &mut Tile) {
         // Code adapted from arrange_tiles
         // We only care about the non-maximized and non-fullscreen tiles here
         let tiled = self.tiles.iter_mut().filter(|tile| {
-            !tile.element.maximized()
-                && !matches!(
-                    tile.open_close_animation,
-                    Some(tile::OpenCloseAnimation::Closing { .. })
-                )
+            !tile.window().maximized() && !tile.is_closing()
         });
         self.layout
             .arrange_tiles(tiled.chain(std::iter::once(tile)), true);
@@ -961,7 +950,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             // NOTE: Output top left is always (0,0) locally
             let mut output_geo = self.output.geometry();
             output_geo.loc = (0, 0).into();
-            inner.set_tile_geometry(output_geo, animate);
+            inner.set_geometry(output_geo, animate);
         }
 
         if self.tiles.is_empty() {
@@ -971,17 +960,12 @@ impl<E: WorkspaceElement> Workspace<E> {
         let (maximized, tiled) = self
             .tiles
             .iter_mut()
-            .filter(|tile| {
-                !matches!(
-                    tile.open_close_animation,
-                    Some(tile::OpenCloseAnimation::Closing { .. })
-                )
-            })
-            .partition::<Vec<_>, _>(|tile| tile.element.maximized());
+            .filter(|tile| !tile.is_closing())
+            .partition::<Vec<_>, _>(|tile| tile.window().maximized());
 
         let maximized_geo = self.layout.usable_geo();
         for tile in maximized {
-            tile.set_tile_geometry(maximized_geo, animate)
+            tile.set_geometry(maximized_geo, animate)
         }
 
         if tiled.is_empty() {
@@ -1019,9 +1003,9 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 }
 
-// Finding elements
-impl<E: WorkspaceElement> Workspace<E> {
-    pub fn find_tile(&self, surface: &WlSurface) -> Option<&WorkspaceTile<E>> {
+// Finding windows
+impl Workspace {
+    pub fn find_tile(&self, surface: &WlSurface) -> Option<&Tile> {
         self.fullscreen
             .as_ref()
             .filter(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL))
@@ -1033,7 +1017,7 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
-    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<E>> {
+    pub fn find_tile_mut(&mut self, surface: &WlSurface) -> Option<&mut Tile> {
         self.fullscreen
             .as_mut()
             .filter(|fs| fs.inner.has_surface(surface, WindowSurfaceType::ALL))
@@ -1045,29 +1029,29 @@ impl<E: WorkspaceElement> Workspace<E> {
             })
     }
 
-    pub fn tile_for(&self, element: &E) -> Option<&WorkspaceTile<E>> {
+    pub fn tile_for(&self, window: &Window) -> Option<&Tile> {
         self.fullscreen
             .as_ref()
-            .filter(|fs| fs.inner == *element)
+            .filter(|fs| fs.inner.window() == window)
             .map(|fs| &fs.inner)
-            .or_else(|| self.tiles.iter().find(|tile| *tile == element))
+            .or_else(|| self.tiles.iter().find(|tile| tile.window() == window))
     }
 
-    pub fn tile_mut_for(&mut self, element: &E) -> Option<&mut WorkspaceTile<E>> {
+    pub fn tile_mut_for(&mut self, window: &Window) -> Option<&mut Tile> {
         self.fullscreen
             .as_mut()
-            .filter(|fs| fs.inner == *element)
+            .filter(|fs| fs.inner.window() == window)
             .map(|fs| &mut fs.inner)
-            .or_else(|| self.tiles.iter_mut().find(|tile| *tile == element))
+            .or_else(|| self.tiles.iter_mut().find(|tile| tile.window() == window))
     }
 
-    pub fn has_element(&self, element: &E) -> bool {
+    pub fn has_window(&self, window: &Window) -> bool {
         let mut ret = false;
         ret |= self
             .fullscreen
             .as_ref()
-            .is_some_and(|fs| fs.inner == *element);
-        ret |= self.tiles.iter().any(|tile| tile == element);
+            .is_some_and(|fs| fs.inner.window() == window);
+        ret |= self.tiles.iter().any(|tile| tile.window() == window);
         ret
     }
 
@@ -1085,39 +1069,42 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     #[profiling::function]
-    pub fn element_under(&self, point: Point<f64, Logical>) -> Option<(&E, Point<i32, Logical>)> {
+    pub fn window_under(&self, point: Point<f64, Logical>) -> Option<(Window, Point<i32, Logical>)> {
         if let Some(FullscreenTile { inner: tile, .. }) = self.fullscreen.as_ref() {
             let render_location = tile.render_location();
-            if tile.bbox().to_f64().contains(point)
+            if tile.window_bbox().to_f64().contains(point)
                 && tile
-                    .element
-                    .is_in_input_region(&(point - render_location.to_f64()))
+                    .window()
+                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
             {
-                return Some((tile.element(), render_location));
+                return Some((tile.window().clone(), render_location));
             }
         }
 
         if let Some(tile) = self.focused_tile() {
             let render_location = tile.render_location();
-            if tile.bbox().to_f64().contains(point)
+            if tile.window_bbox().to_f64().contains(point)
                 && tile
-                    .element
-                    .is_in_input_region(&(point - render_location.to_f64()))
+                    .window()
+                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
             {
-                return Some((tile.element(), render_location));
+                return Some((tile.window().clone(), render_location));
             }
         }
 
         self.tiles
             .iter()
-            .filter(|tile| tile.bbox().to_f64().contains(point))
+            .filter(|tile| tile.window_bbox().to_f64().contains(point))
             .find_map(|tile| {
                 let render_location = tile.render_location();
                 if tile
-                    .element
-                    .is_in_input_region(&(point - render_location.to_f64()))
+                    .window()
+                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
                 {
-                    Some((tile.element(), render_location))
+                    Some((tile.window().clone(), render_location))
                 } else {
                     None
                 }
@@ -1125,32 +1112,30 @@ impl<E: WorkspaceElement> Workspace<E> {
     }
 
     #[profiling::function]
-    pub fn tiles_under(
-        &self,
-        point: Point<f64, Logical>,
-    ) -> impl Iterator<Item = &WorkspaceTile<E>> {
+    pub fn tiles_under(&self, point: Point<f64, Logical>) -> impl Iterator<Item = &Tile> {
         self.fullscreen
             .as_ref()
             .map(|fs| &fs.inner)
             .into_iter()
             .chain(self.tiles.iter().filter(move |tile| {
-                if !tile.bbox().to_f64().contains(point) {
+                if !tile.window_bbox().to_f64().contains(point) {
                     return false;
                 }
 
                 let render_location = tile.render_location();
-                tile.element
-                    .is_in_input_region(&(point - render_location.to_f64()))
+                tile.window()
+                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
+                    .is_some()
             }))
     }
 }
 
-pub struct FullscreenTile<E: WorkspaceElement> {
-    pub inner: WorkspaceTile<E>,
+pub struct FullscreenTile {
+    pub inner: Tile,
     pub last_known_idx: usize,
 }
 
-impl<E: WorkspaceElement> PartialEq for FullscreenTile<E> {
+impl PartialEq for FullscreenTile {
     fn eq(&self, other: &Self) -> bool {
         &self.inner == &other.inner
     }
@@ -1164,783 +1149,5 @@ impl ToString for WorkspaceLayout {
             Self::CenteredMaster { .. } => "cmaster".into(),
             Self::Floating => "floating".into(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // How stuff is tested here is very similar to Niri's layout tests, with operations that we
-    // apply to workspaces, then we check some invariants.
-    use std::borrow::Cow;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use smithay::desktop::space::SpaceElement;
-    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-    use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-    use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
-    use smithay::wayland::seat::WaylandFocus;
-
-    use super::layout::Layout;
-    use super::tile::WorkspaceElement;
-    use super::{Workspace, WorkspaceId, WorkspaceLayout};
-    use crate::config::{BorderConfig, CONFIG};
-    use crate::utils::output::OutputExt;
-
-    struct TestElement(Rc<RefCell<TestElementInner>>);
-    impl std::fmt::Debug for TestElement {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            std::fmt::Debug::fmt(&self.0, f)
-        }
-    }
-    impl Clone for TestElement {
-        fn clone(&self) -> Self {
-            Self(Rc::clone(&self.0))
-        }
-    }
-
-    impl TestElement {
-        fn new(bbox: Rectangle<i32, Logical>) -> Self {
-            let inner = TestElementInner {
-                bbox,
-                requested_size: None,
-                bounds: None,
-                outputs: vec![],
-                fullscreen: false,
-                maximized: false,
-                activated: false,
-                alive: true,
-            };
-
-            Self(Rc::new(RefCell::new(inner)))
-        }
-
-        fn output_entered(&self, output: &Output) -> bool {
-            let guard = self.0.borrow();
-            guard.outputs.iter().any(|o| o == output)
-        }
-    }
-
-    #[derive(Debug)]
-    struct TestElementInner {
-        bbox: Rectangle<i32, Logical>,
-        requested_size: Option<Size<i32, Logical>>,
-        bounds: Option<Size<i32, Logical>>,
-        outputs: Vec<Output>,
-        fullscreen: bool,
-        maximized: bool,
-        activated: bool,
-        alive: bool,
-    }
-
-    impl SpaceElement for TestElement {
-        fn bbox(&self) -> Rectangle<i32, Logical> {
-            self.0.borrow().bbox
-        }
-
-        fn is_in_input_region(&self, point: &smithay::utils::Point<f64, Logical>) -> bool {
-            // For this, the location will already be local to the bounding box.
-            // So we change the bbox from global to local
-            let mut bbox = self.0.borrow().bbox.to_f64();
-            bbox.loc = Point::default();
-            bbox.contains(*point)
-        }
-
-        fn set_activate(&self, activated: bool) {
-            self.0.borrow_mut().activated = activated
-        }
-
-        fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
-            self.0.borrow_mut().outputs.push(output.clone())
-        }
-
-        fn output_leave(&self, output: &Output) {
-            self.0.borrow_mut().outputs.retain(|o| o != output)
-        }
-    }
-
-    impl IsAlive for TestElement {
-        fn alive(&self) -> bool {
-            self.0.borrow().alive
-        }
-    }
-
-    impl WaylandFocus for TestElement {
-        fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
-            None
-        }
-    }
-
-    impl PartialEq for TestElement {
-        fn eq(&self, other: &Self) -> bool {
-            Rc::ptr_eq(&self.0, &other.0)
-        }
-    }
-
-    impl WorkspaceElement for TestElement {
-        fn send_pending_configure(&self) {
-            let mut guard = self.0.borrow_mut();
-            if let Some(requested_size) = guard.requested_size.take() {
-                guard.bbox.size = requested_size;
-            }
-        }
-
-        fn set_size(&self, new_size: Size<i32, Logical>) {
-            let mut guard = self.0.borrow_mut();
-            guard.requested_size = Some(new_size);
-        }
-
-        fn size(&self) -> Size<i32, Logical> {
-            self.0.borrow().bbox.size
-        }
-
-        fn set_fullscreen(&self, fullscreen: bool) {
-            self.0.borrow_mut().fullscreen = fullscreen
-        }
-
-        fn set_fullscreen_output(
-            &self,
-            output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
-        ) {
-            let _ = output; // no need really.
-        }
-
-        fn fullscreen(&self) -> bool {
-            self.0.borrow().fullscreen
-        }
-
-        fn fullscreen_output(
-            &self,
-        ) -> Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput> {
-            None
-        }
-
-        fn set_maximized(&self, maximize: bool) {
-            self.0.borrow_mut().maximized = maximize
-        }
-
-        fn maximized(&self) -> bool {
-            self.0.borrow().maximized
-        }
-
-        fn set_bounds(&self, bounds: Option<Size<i32, Logical>>) {
-            self.0.borrow_mut().bounds = bounds;
-        }
-
-        fn bounds(&self) -> Option<Size<i32, Logical>> {
-            self.0.borrow().bounds
-        }
-
-        fn set_activated(&self, activated: bool) {
-            self.0.borrow_mut().activated = activated;
-        }
-
-        fn activated(&self) -> bool {
-            self.0.borrow_mut().activated
-        }
-
-        fn app_id(&self) -> String {
-            String::from("test.window")
-        }
-
-        fn title(&self) -> String {
-            String::from("Test Window")
-        }
-
-        fn render_surface_elements<R: crate::renderer::FhtRenderer>(
-            &self,
-            _renderer: &mut R,
-            _location: Point<i32, smithay::utils::Physical>,
-            _scale: smithay::utils::Scale<f64>,
-            _alpha: f32,
-        ) -> Vec<smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>>
-        {
-            vec![]
-        }
-
-        fn render_popup_elements<R: crate::renderer::FhtRenderer>(
-            &self,
-            _renderer: &mut R,
-            _location: Point<i32, smithay::utils::Physical>,
-            _scale: smithay::utils::Scale<f64>,
-            _alpha: f32,
-        ) -> Vec<smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>>
-        {
-            vec![]
-        }
-
-        fn set_offscreen_element_id(&self, id: Option<smithay::backend::renderer::element::Id>) {
-            let _ = id; // we are not rendering
-        }
-
-        fn get_offscreen_element_id(&self) -> Option<smithay::backend::renderer::element::Id> {
-            None //  we are not rendering
-        }
-    }
-
-    fn create_workspace() -> Workspace<TestElement> {
-        let output = Output::new(
-            String::from("test-output-0"),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: String::from("test-make"),
-                model: String::from("test-model"),
-            },
-        );
-        let layout = Layout::new(
-            &output,
-            CONFIG.general.layouts.clone(),
-            CONFIG.general.nmaster,
-            CONFIG.general.mwfact,
-            CONFIG.general.inner_gaps,
-            CONFIG.general.outer_gaps,
-        );
-        let mode = Mode {
-            size: (800, 600).into(),
-            refresh: 0, // does not matter
-        };
-        output.add_mode(mode);
-        output.set_preferred(mode);
-        output.change_current_state(Some(mode), None, None, None);
-
-        Workspace {
-            output,
-            tiles: vec![],
-            focused_tile_idx: 0,
-            layout,
-            fullscreen: None,
-            id: WorkspaceId::unique(),
-        }
-    }
-
-    // TODO: Actually find a way to test layouts without having to hardcore pre computed values
-    #[allow(unused)]
-    enum Operation {
-        InsertElement {
-            element: TestElement,
-            border_config: Option<BorderConfig>,
-        },
-        RemoveTile {
-            element: TestElement,
-        },
-        FullscreenElement {
-            element: TestElement,
-        },
-        FocusElement {
-            element: TestElement,
-        },
-        FocusNextElement,
-        FocusPreviousElement,
-        SwapElements {
-            a: TestElement,
-            b: TestElement,
-        },
-        SwapWithNextElement,
-        SwapWithPreviousElement,
-        ArrangeTiles,
-        SetLayout {
-            layout: WorkspaceLayout,
-        },
-        SelectNextLayout,
-        SelectPreviousLayout,
-        ChangeMwfact {
-            delta: f32,
-        },
-        ChangeNmaster {
-            delta: i32,
-        },
-    }
-
-    impl Operation {
-        fn apply(self, workspace: &mut Workspace<TestElement>) {
-            match self {
-                Operation::InsertElement {
-                    element,
-                    border_config,
-                } => workspace.insert_element(element, border_config, false),
-                Operation::RemoveTile { element } => {
-                    let _ = workspace.remove_tile(&element, false);
-                }
-                Operation::FullscreenElement { element } => {
-                    workspace.fullscreen_element(&element, false)
-                }
-                Operation::FocusElement { element } => workspace.focus_element(&element, false),
-                Operation::FocusNextElement => {
-                    let _ = workspace.focus_next_element(false);
-                }
-                Operation::FocusPreviousElement => {
-                    let _ = workspace.focus_previous_element(false);
-                }
-                Operation::SwapElements { a, b } => {
-                    let _ = workspace.swap_elements(&a, &b, false);
-                }
-                Operation::SwapWithNextElement => {
-                    let _ = workspace.swap_with_next_element(false);
-                }
-                Operation::SwapWithPreviousElement => {
-                    let _ = workspace.swap_with_previous_element(false);
-                }
-                Operation::ArrangeTiles => workspace.arrange_tiles(false),
-                Operation::SetLayout { layout } => {
-                    workspace.layout.set_layouts(vec![layout]);
-                    workspace.arrange_tiles(false);
-                }
-                Operation::SelectNextLayout => workspace.select_next_layout(false),
-                Operation::SelectPreviousLayout => workspace.select_previous_layout(false),
-                Operation::ChangeMwfact { delta } => workspace.change_mwfact(delta, false),
-                Operation::ChangeNmaster { delta } => workspace.change_nmaster(delta, false),
-            }
-        }
-    }
-
-    fn check_operations(operations: Vec<Operation>) -> Workspace<TestElement> {
-        // NOTE: We have to set the configuration since it never defaults.
-        // Optimally we wouldn't want a global constant here, but I digress
-        CONFIG.set(Default::default());
-
-        let mut workspace = create_workspace();
-        for operation in operations {
-            operation.apply(&mut workspace);
-        }
-
-        workspace.check_invariants();
-        workspace
-    }
-
-    impl Workspace<TestElement> {
-        fn check_invariants(&self) {
-            self.layout.check_invariants();
-            let output_geo = self.output.geometry();
-
-            // State checks.
-            if self.tiles.len() != 0 {
-                // Edge case when we dont have any tiles, we have focused_tile_idx = len = 0
-                assert!(
-                    self.focused_tile_idx < self.tiles.len(),
-                    "Focus tile index should be strictly smaller than tiles.len()"
-                );
-            }
-
-            // General checks for mapped tiles that abide to the layout
-            for tile in &self.tiles {
-                assert!(
-                    tile.element.output_entered(&self.output),
-                    "Tile element should enter the workspace's output!"
-                );
-
-                assert!(
-                    !tile.element.fullscreen(),
-                    "Tile element should not be in fullscreen state!"
-                );
-
-                assert_eq!(
-                    tile.element.bounds(),
-                    Some(output_geo.size),
-                    "Tile element bounds should match the output size!"
-                );
-            }
-
-            if let Some(fullscreen) = self.fullscreen.as_ref() {
-                assert!(
-                    fullscreen.inner.element.output_entered(&self.output),
-                    "Fullscreen tile element should enter the workspace's output!"
-                );
-                assert!(
-                    fullscreen.inner.element.fullscreen(),
-                    "Fullscreened tile element be in fullscreen state!"
-                );
-            }
-        }
-    }
-
-    // The following tests are non exhaustive and more are coming sooner or later.
-    // ---
-    // They are meant to simulate how a user might interact with a workspace through a variety of
-    // cases, with tests for invariants and expected results to ensure:
-    // - Expected behaviour for the end user
-    // - Proper usage of wayland protocols (especially xdg_toplevel) for the backend
-
-    #[test]
-    fn insert_element() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let workspace = check_operations(vec![Operation::InsertElement {
-            element: element.clone(),
-            border_config: None,
-        }]);
-
-        let loc = {
-            let value = CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32;
-            (value, value).into()
-        };
-        let size = {
-            let width =
-                800 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
-            let height =
-                600 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
-            (width, height).into()
-        };
-
-        let tile = workspace.tile_for(&element).unwrap();
-        assert_eq!(tile.location, loc);
-        assert_eq!(element.bbox().size, size);
-    }
-
-    #[test]
-    fn insert_element_twice() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-        ]);
-
-        let loc = {
-            let value = CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32;
-            (value, value).into()
-        };
-        let size = {
-            let width =
-                800 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
-            let height =
-                600 - 2 * (CONFIG.general.outer_gaps + CONFIG.decoration.border.thickness as i32);
-            (width, height).into()
-        };
-
-        let tile = workspace.tile_for(&element).unwrap();
-        assert_eq!(workspace.tiles.len(), 1); // we can't insert an element twice
-        assert_eq!(tile.location, loc);
-        assert_eq!(element.bbox().size, size);
-    }
-
-    #[test]
-    fn insert_element_with_border_config() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let border_config = BorderConfig {
-            thickness: 5,
-            ..Default::default()
-        };
-        let workspace = check_operations(vec![Operation::InsertElement {
-            element: element.clone(),
-            border_config: Some(border_config),
-        }]);
-
-        let loc = {
-            let value = CONFIG.general.outer_gaps + border_config.thickness as i32;
-            (value, value).into()
-        };
-        let size = {
-            let width = 800 - 2 * (CONFIG.general.outer_gaps + border_config.thickness as i32);
-            let height = 600 - 2 * (CONFIG.general.outer_gaps + border_config.thickness as i32);
-            (width, height).into()
-        };
-
-        let tile = workspace.tile_for(&element).unwrap();
-        assert_eq!(tile.location, loc);
-        assert_eq!(element.bbox().size, size);
-    }
-
-    #[test]
-    fn insert_element_with_floating_layout() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let workspace = check_operations(vec![
-            Operation::SetLayout {
-                layout: WorkspaceLayout::Floating,
-            },
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-        ]);
-
-        let tile = workspace.tile_for(&element).unwrap();
-        assert_eq!(tile.location, (0, 0).into());
-        assert_eq!(element.bbox().size, (200, 200).into());
-    }
-
-    #[test]
-    fn insert_fullscreen_element() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        element.set_fullscreen(true);
-        let workspace = check_operations(vec![Operation::InsertElement {
-            element: element.clone(),
-            border_config: None,
-        }]);
-
-        assert!(workspace.fullscreen.is_some());
-        assert!(element.fullscreen());
-    }
-
-    #[test]
-    fn remove_element() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-            Operation::RemoveTile {
-                element: element.clone(),
-            },
-        ]);
-
-        assert_eq!(workspace.tiles.len(), 0);
-    }
-
-    #[test]
-    fn remove_fullscreen_element() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        element.set_fullscreen(true);
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-            Operation::RemoveTile {
-                element: element.clone(),
-            },
-        ]);
-
-        assert_eq!(workspace.tiles.len(), 0);
-        assert!(workspace.fullscreen.is_none());
-    }
-
-    #[test]
-    fn fullscreen_element() {
-        let element = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: element.clone(),
-                border_config: None,
-            },
-            Operation::FullscreenElement {
-                element: element.clone(),
-            },
-        ]);
-
-        assert!(element.fullscreen());
-        assert!(workspace.fullscreen.is_some());
-    }
-
-    #[test]
-    fn focus_element() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::FocusElement { element: b.clone() },
-        ]);
-
-        assert_eq!(workspace.focused_tile_idx, 1);
-    }
-
-    #[test]
-    fn focus_element_removes_fullscreen() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        c.set_fullscreen(true);
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::FocusElement { element: b.clone() },
-        ]);
-
-        // Focusing should always removed fullscreen element
-        assert_eq!(workspace.focused_tile_idx, 1);
-        assert!(workspace.fullscreen.is_none());
-        assert!(!c.fullscreen());
-    }
-
-    #[test]
-    fn focus_next_element_removes_fullscreen() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        c.set_fullscreen(true);
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::FocusNextElement,
-        ]);
-
-        // Focusing should always removed fullscreen element
-        assert_eq!(workspace.focused_tile_idx, 2);
-        assert!(workspace.fullscreen.is_none());
-        assert!(!c.fullscreen());
-    }
-
-    #[test]
-    fn focus_previous_element_removes_fullscreen() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        c.set_fullscreen(true);
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::FocusPreviousElement,
-        ]);
-
-        // Focusing should always removed fullscreen element
-        assert_eq!(workspace.focused_tile_idx, 0);
-        assert!(workspace.fullscreen.is_none());
-        assert!(!c.fullscreen());
-    }
-
-    #[test]
-    fn swap_elements() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::SwapElements {
-                a: a.clone(),
-                b: b.clone(),
-            },
-            Operation::SwapElements {
-                a: b.clone(),
-                b: c.clone(),
-            },
-        ]);
-
-        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
-        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
-        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
-        assert_eq!(a_idx, 1);
-        assert_eq!(b_idx, 2);
-        assert_eq!(c_idx, 0);
-    }
-
-    #[test]
-    fn swap_with_next_element_removes_fullscreen() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        c.set_fullscreen(true);
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::SwapWithNextElement, // swaps b and c
-        ]);
-
-        // Swapping should always removed fullscreen element
-        assert!(workspace.fullscreen.is_none());
-        assert!(!c.fullscreen());
-        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
-        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
-        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
-        assert_eq!(a_idx, 0);
-        assert_eq!(b_idx, 2);
-        assert_eq!(c_idx, 1);
-    }
-
-    #[test]
-    fn swap_with_previous_element_removes_fullscreen() {
-        let a = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let b = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        let c = TestElement::new(Rectangle::from_loc_and_size((0, 0), (200, 200)));
-        c.set_fullscreen(true);
-
-        let workspace = check_operations(vec![
-            Operation::InsertElement {
-                element: a.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: b.clone(),
-                border_config: None,
-            },
-            Operation::InsertElement {
-                element: c.clone(),
-                border_config: None,
-            },
-            Operation::SwapWithPreviousElement, // swaps c and b
-        ]);
-
-        // Swapping should always removed fullscreen element
-        assert!(workspace.fullscreen.is_none());
-        assert!(!c.fullscreen());
-        let a_idx = workspace.tiles.iter().position(|tile| *tile == a).unwrap();
-        let b_idx = workspace.tiles.iter().position(|tile| *tile == b).unwrap();
-        let c_idx = workspace.tiles.iter().position(|tile| *tile == c).unwrap();
-        assert_eq!(a_idx, 1);
-        assert_eq!(b_idx, 0);
-        assert_eq!(c_idx, 2);
     }
 }

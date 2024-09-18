@@ -18,7 +18,7 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
     OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, PopupManager, Window};
+use smithay::desktop::{layer_map_for_output, PopupManager};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -60,13 +60,14 @@ use crate::backend::Backend;
 use crate::config::CONFIG;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::tile::{WorkspaceElement, WorkspaceTile};
+use crate::shell::workspaces::tile::Tile;
 use crate::shell::workspaces::WorkspaceSet;
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::PipeWire;
 use crate::utils::RectCenterExt;
+use crate::window::Window;
 
 pub struct State {
     pub fht: Fht,
@@ -152,7 +153,7 @@ impl State {
                 // We are focusing nothing, default to the active workspace focused window.
                 if let Some(window) = self.fht.focus_state.output.as_ref().and_then(|o| {
                     let active = self.fht.wset_for(o).active();
-                    active.focused().cloned()
+                    active.focused()
                 }) {
                     self.set_focus_target(Some(window.into()));
                 } else {
@@ -238,7 +239,7 @@ pub struct Fht {
 
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
-    pub workspaces: IndexMap<Output, WorkspaceSet<Window>>,
+    pub workspaces: IndexMap<Output, WorkspaceSet>,
     pub pending_windows: Vec<PendingWindow>,
     pub unmapped_tiles: Vec<UnmappedTile>,
     pub focus_state: FocusState,
@@ -484,21 +485,21 @@ impl Fht {
         }
     }
 
-    pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet<Window>)> {
+    pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
         self.workspaces.iter()
     }
 
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet<Window>)> {
+    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet)> {
         self.workspaces.iter_mut()
     }
 
-    pub fn wset_for(&self, output: &Output) -> &WorkspaceSet<Window> {
+    pub fn wset_for(&self, output: &Output) -> &WorkspaceSet {
         self.workspaces
             .get(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
     }
 
-    pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet<Window> {
+    pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet {
         self.workspaces
             .get_mut(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
@@ -548,7 +549,7 @@ impl Fht {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
 
-        for window in self.wset_for(output).visible_elements() {
+        for window in self.wset_for(output).visible_windows() {
             window.send_frame(output, time, throttle, should_send_frames);
         }
 
@@ -602,8 +603,8 @@ impl Fht {
         // Both windows and layer surfaces can only be drawn on a single output at a time, so there
         // no need to update all the windows of the output.
 
-        for window in self.wset_for(output).visible_elements() {
-            let offscreen_id = window.get_offscreen_element_id();
+        for window in self.wset_for(output).visible_windows() {
+            let offscreen_id = window.offscreen_element_id();
             window.with_surfaces(|surface, surface_data| {
                 // We do the work of update_surface_primary_scanout_output, but use our own
                 // offscreen Id if needed.
@@ -693,7 +694,7 @@ impl Fht {
             );
         }
 
-        for window in self.wset_for(output).visible_elements() {
+        for window in self.wset_for(output).visible_windows() {
             window.send_dmabuf_feedback(
                 output,
                 |_, _| Some(output.clone()),
@@ -754,7 +755,7 @@ impl Fht {
             );
         }
 
-        for window in self.wset_for(output).visible_elements() {
+        for window in self.wset_for(output).visible_windows() {
             window.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
@@ -909,7 +910,7 @@ impl Into<Window> for PendingWindow {
 }
 
 pub struct UnmappedTile {
-    pub inner: WorkspaceTile<Window>,
+    pub inner: Tile,
     pub last_output: Option<Output>,
     pub last_workspace_idx: Option<usize>,
 }

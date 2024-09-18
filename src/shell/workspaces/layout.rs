@@ -27,7 +27,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
-use super::tile::{WorkspaceElement, WorkspaceTile};
+use super::tile::Tile;
 use crate::utils::output::OutputExt;
 
 pub struct Layout {
@@ -150,9 +150,9 @@ impl Layout {
             .clamp(1, usize::MAX);
     }
 
-    pub fn arrange_tiles<'a, E: WorkspaceElement + 'a>(
+    pub fn arrange_tiles<'a>(
         &'a self,
-        tiles: impl Iterator<Item = &'a mut WorkspaceTile<E>>,
+        tiles: impl Iterator<Item = &'a mut Tile>,
         animate: bool,
     ) {
         let mut tiles = tiles.collect::<Vec<_>>();
@@ -182,13 +182,13 @@ impl Layout {
 
                 let master_heights = {
                     let tiles = tiles.get(0..nmaster).unwrap_or_default();
-                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact()).collect::<Vec<_>>();
                     get_dimensions(&cfacts, master_geo.size.h)
                 };
 
                 let stack_heights = {
                     let tiles = tiles.get(nmaster..).unwrap_or_default();
-                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact()).collect::<Vec<_>>();
                     get_dimensions(&cfacts, stack_geo.size.h)
                 };
 
@@ -199,7 +199,7 @@ impl Layout {
                             master_geo.loc,
                             (master_geo.size.w, master_height),
                         );
-                        tile.set_tile_geometry(geo, animate);
+                        tile.set_geometry(geo, animate);
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
                         let stack_height = stack_heights[idx - nmaster];
@@ -207,7 +207,7 @@ impl Layout {
                             stack_geo.loc,
                             (stack_geo.size.w, stack_height),
                         );
-                        tile.set_tile_geometry(new_geo, animate);
+                        tile.set_geometry(new_geo, animate);
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
                 }
@@ -231,13 +231,13 @@ impl Layout {
 
                 let master_widths = {
                     let tiles = tiles.get(0..nmaster).unwrap_or_default();
-                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact()).collect::<Vec<_>>();
                     get_dimensions(&cfacts, master_geo.size.w)
                 };
 
                 let stack_widths = {
                     let tiles = tiles.get(nmaster..).unwrap_or_default();
-                    let cfacts = tiles.iter().map(|tile| tile.cfact).collect::<Vec<_>>();
+                    let cfacts = tiles.iter().map(|tile| tile.cfact()).collect::<Vec<_>>();
                     get_dimensions(&cfacts, stack_geo.size.w)
                 };
 
@@ -248,7 +248,7 @@ impl Layout {
                             master_geo.loc,
                             (master_width, master_geo.size.h),
                         );
-                        tile.set_tile_geometry(geo, animate);
+                        tile.set_geometry(geo, animate);
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
                         let stack_width = stack_widths[idx - nmaster];
@@ -256,7 +256,7 @@ impl Layout {
                             stack_geo.loc,
                             (stack_width, stack_geo.size.h),
                         );
-                        tile.set_tile_geometry(geo, animate);
+                        tile.set_geometry(geo, animate);
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
                 }
@@ -306,7 +306,7 @@ impl Layout {
                 let left_heights = {
                     let cfacts = left_tiles
                         .iter()
-                        .map(|(_, tile)| tile.cfact)
+                        .map(|(_, tile)| tile.cfact())
                         .collect::<Vec<_>>();
                     get_dimensions(&cfacts, left_geo.size.h)
                 };
@@ -316,14 +316,14 @@ impl Layout {
                     .zip(left_heights)
                 {
                     let geo = Rectangle::from_loc_and_size(left_geo.loc, (left_geo.size.w, height));
-                    tile.set_tile_geometry(geo, animate);
+                    tile.set_geometry(geo, animate);
                     left_geo.loc.y += height + inner_gaps;
                 }
 
                 let master_heights = {
                     let cfacts = master_tiles
                         .iter()
-                        .map(|(_, tile)| tile.cfact)
+                        .map(|(_, tile)| tile.cfact())
                         .collect::<Vec<_>>();
                     get_dimensions(&cfacts, master_geo.size.h)
                 };
@@ -334,14 +334,14 @@ impl Layout {
                 {
                     let geo =
                         Rectangle::from_loc_and_size(master_geo.loc, (master_geo.size.w, height));
-                    tile.set_tile_geometry(geo, animate);
+                    tile.set_geometry(geo, animate);
                     master_geo.loc.y += height + inner_gaps;
                 }
 
                 let right_heights = {
                     let cfacts = right_tiles
                         .iter()
-                        .map(|(_, tile)| tile.cfact)
+                        .map(|(_, tile)| tile.cfact())
                         .collect::<Vec<_>>();
                     get_dimensions(&cfacts, right_geo.size.h)
                 };
@@ -352,32 +352,12 @@ impl Layout {
                 {
                     let geo =
                         Rectangle::from_loc_and_size(right_geo.loc, (right_geo.size.w, height));
-                    tile.set_tile_geometry(geo, animate);
+                    tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
                 }
             }
             WorkspaceLayout::Floating => {}
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn check_invariants(&self) {
-        assert!(self.nmaster > 0, "nmaster should never be zero");
-
-        assert!(
-            self.mwfact >= 0.01 && self.mwfact <= 0.99,
-            "mwfact should be clamped between [0.01, 0.99]"
-        );
-
-        assert!(
-            self.layouts.len() != 0,
-            "A workspace can't exist without layouts!",
-        );
-
-        assert!(
-            self.active_idx < self.layouts.len(),
-            "Active layout index should be strictly smaller than layouts.len()"
-        );
     }
 }
 

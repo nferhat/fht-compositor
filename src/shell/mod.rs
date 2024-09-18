@@ -1,16 +1,10 @@
 pub mod cursor;
 pub mod focus_target;
-pub mod grabs;
-pub mod window;
 pub mod workspaces;
 
-use std::cell::RefCell;
-
-use grabs::{PointerResizeSurfaceGrab, ResizeData, ResizeState};
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface, PopupKind, Window, WindowSurfaceType
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType
 };
-use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Monotonic, Point, Rectangle, Serial, Time};
@@ -22,13 +16,13 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::Sta
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use self::grabs::MoveSurfaceGrab;
-use self::workspaces::tile::{WorkspaceElement, WorkspaceTile};
+use self::workspaces::tile::Tile;
 use self::workspaces::Workspace;
 use crate::config::CONFIG;
 use crate::state::{Fht, UnmappedTile};
 use crate::utils::RectCenterExt;
 use crate::utils::output::OutputExt;
+use crate::window::Window;
 
 impl Fht {
     pub fn focus_target_under(
@@ -58,8 +52,8 @@ impl Fht {
                 })
         };
 
-        let window_surface_under = |(window, mut loc): (&Window, Point<i32, Logical>)| {
-            loc -= window.geometry().loc; // the passed in location is without the window view
+        let window_surface_under = |(window, mut loc): (Window, Point<i32, Logical>)| {
+            loc -= window.render_offset(); // the passed in location is without the window view
                                           // offset
             let window_wl_surface = window.wl_surface().unwrap();
             // NOTE: window location passed here is already global, since its from
@@ -103,7 +97,7 @@ impl Fht {
             })
         {
             under = Some(layer_focus)
-        } else if let Some(window_focus) = wset.element_under(point).and_then(window_surface_under)
+        } else if let Some(window_focus) = wset.window_under(point).and_then(window_surface_under)
         {
             under = Some(window_focus)
         } else if let Some(layer_focus) = layer_map
@@ -120,67 +114,52 @@ impl Fht {
         under
     }
 
-    pub fn find_window(&self, surface: &WlSurface) -> Option<&Window> {
+    pub fn find_window(&self, surface: &WlSurface) -> Option<Window> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_element(surface))
-    }
-
-    pub fn find_tile(&mut self, surface: &WlSurface) -> Option<&mut WorkspaceTile<Window>> {
-        self.workspaces_mut()
-            .find_map(|(_, wset)| wset.find_tile_mut(surface))
+            .find_map(|(_, wset)| wset.find_window(surface))
     }
 
     pub fn find_window_and_workspace(
         &self,
         surface: &WlSurface,
-    ) -> Option<(Window, &Workspace<Window>)> {
+    ) -> Option<(Window, &Workspace)> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_element_and_workspace(surface))
+            .find_map(|(_, wset)| wset.find_window_and_workspace(surface))
     }
 
     pub fn find_window_and_workspace_mut(
         &mut self,
         surface: &WlSurface,
-    ) -> Option<(Window, &mut Workspace<Window>)> {
+    ) -> Option<(Window, &mut Workspace)> {
         self.workspaces_mut()
-            .find_map(|(_, wset)| wset.find_element_and_workspace_mut(surface))
+            .find_map(|(_, wset)| wset.find_window_and_workspace_mut(surface))
     }
 
-    pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(&Window, Output)> {
+    pub fn find_window_and_output(&self, surface: &WlSurface) -> Option<(Window, Output)> {
         self.workspaces()
-            .find_map(|(_, wset)| wset.find_element(surface).map(|w| (w, wset.output())))
+            .find_map(|(_, wset)| wset.find_window(surface).map(|w| (w, wset.output())))
     }
 
-    pub fn find_tile_and_output(
-        &mut self,
-        surface: &WlSurface,
-    ) -> Option<(&mut WorkspaceTile<Window>, Output)> {
-        self.workspaces_mut().find_map(|(_, wset)| {
-            let output = wset.output();
-            wset.find_tile_mut(surface).map(|tile| (tile, output))
-        })
+    pub fn workspace_for_window(&self, window: &Window) -> Option<&Workspace> {
+        self.workspaces().find_map(|(_, wset)| wset.workspace_for_window(window))
     }
 
-    pub fn ws_for(&self, window: &Window) -> Option<&Workspace<Window>> {
-        self.workspaces().find_map(|(_, wset)| wset.ws_for(window))
-    }
-
-    pub fn ws_mut_for(&mut self, window: &Window) -> Option<&mut Workspace<Window>> {
+    pub fn workspace_for_window_mut(&mut self, window: &Window) -> Option<&mut Workspace> {
         self.workspaces_mut()
-            .find_map(|(_, wset)| wset.ws_mut_for(window))
+            .find_map(|(_, wset)| wset.workspace_mut_for_window(window))
     }
 
     pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
-            wset.ws_for(window)
-                .and_then(|ws| ws.element_geometry(window))
+            wset.workspace_for_window(window)
+                .and_then(|ws| ws.window_geometry(window))
         })
     }
 
     pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.workspaces().find_map(|(_, wset)| {
-            wset.ws_for(window)
-                .and_then(|ws| ws.element_visual_geometry(window))
+            wset.workspace_for_window(window)
+                .and_then(|ws| ws.window_visual_geometry(window))
         })
     }
 
@@ -208,7 +187,7 @@ impl Fht {
 
     pub fn prepare_pending_window(&mut self, window: Window) {
         let mut output = self.focus_state.output.clone().unwrap();
-        let toplevel = window.toplevel().unwrap();
+        let toplevel = window.toplevel();
         let wl_surface = toplevel.wl_surface();
 
         // Get the matching mapping setting, if the user specified one.
@@ -278,8 +257,8 @@ impl Fht {
         let workspace = wset.get_workspace_mut(workspace_idx);
 
         // Pre compute window geometry for insertion.
-        let mut tile = WorkspaceTile::new(window.clone(), None);
-        workspace.prepare_tile_geometry(&mut tile);
+        let mut tile = Tile::new(window.clone(), None);
+        workspace.prepare_window_geometry(&mut tile);
 
         // Client side-decorations
         let allow_csd = map_settings
@@ -299,7 +278,7 @@ impl Fht {
             }
         });
 
-        tile.element.toplevel().unwrap().send_configure();
+        tile.window().toplevel().send_configure();
 
         self.unmapped_tiles.push(UnmappedTile {
             inner: tile,
@@ -317,7 +296,7 @@ impl Fht {
             last_output,
             last_workspace_idx,
         } = unmapped_tile;
-        let wl_surface = tile.element().wl_surface().unwrap().into_owned();
+        let wl_surface = tile.window().wl_surface().unwrap().into_owned();
         let output = last_output.unwrap_or_else(|| self.active_output());
         let output_loc = output.current_location();
         let wset = self.wset_mut_for(&output);
@@ -327,14 +306,14 @@ impl Fht {
         let is_active = workspace_idx == wset.get_active_idx();
         let workspace = wset.get_workspace_mut(workspace_idx);
 
-        let window = tile.element.clone();
+        let window = tile.window().clone();
         workspace.insert_tile(tile, false);
 
         let tile = workspace.find_tile_mut(&wl_surface).unwrap();
         tile.start_opening_animation();
         // we dont want to animate the tile now.
-        tile.location_animation.take();
-        let mut tile_geo = tile.element_geometry();
+        tile.stop_location_animation();
+        let mut tile_geo = tile.window_geometry();
         tile_geo.loc += output_loc;
 
         // From using the compositor opening a window when a switch is being done feels more
@@ -367,7 +346,7 @@ impl Fht {
         // geometry, based on the xdg_shell protocol requirements.
         let mut target = workspace.output().geometry();
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= workspace.element_geometry(&window).unwrap().loc;
+        target.loc -= workspace.window_geometry(&window).unwrap().loc;
 
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
@@ -382,127 +361,7 @@ impl Fht {
     pub fn all_windows(&self) -> impl Iterator<Item = &Window> + '_ {
         self.workspaces.values().flat_map(|wset| {
             wset.workspaces()
-                .flat_map(|ws| ws.tiles().map(|tile| tile.element()))
+                .flat_map(|ws| ws.tiles().map(|tile| tile.window()))
         })
-    }
-}
-
-impl crate::state::State {
-    pub fn handle_move_request(&mut self, window: Window, serial: Serial) {
-        // NOTE: About internal handling.
-        // ---
-        // Even though `XdgShellHandler::move_request` has a seat argument, we only advertise one
-        // single seat to clients (why would we support multi-seat for a standalone compositor?)
-        // So the only pointer we have is the advertised seat pointer.
-        let pointer = self.fht.pointer.clone();
-        if !pointer.has_grab(serial) {
-            return;
-        }
-
-        let mut start_data = pointer.grab_start_data().unwrap();
-        start_data.focus = None;
-
-        let mut window_geo = self.fht.window_geometry(&window).unwrap();
-
-        // Unmaximize/Unfullscreen if it already is.
-        let is_maximized = window.maximized();
-        let is_fullscreen = window.fullscreen();
-        window.set_maximized(false);
-        window.set_fullscreen(false);
-        window.set_fullscreen_output(None);
-
-        if is_maximized || is_fullscreen {
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.send_configure();
-            }
-
-            // let pos = pointer.current_location().as_global();
-            // let mut window_pos = pos - window_geo.to_f64().loc;
-            // window_pos.x = window_pos.x.clamp(0.0, window_geo.size.w.to_f64());
-            //
-            // match window_pos.x / window_geo.size.w.to_f64() {
-            //     x if x < 0.5
-            // }
-            let pos = pointer.current_location();
-            window_geo.loc = (pos.x as i32, pos.y as i32).into();
-        }
-
-        let grab = MoveSurfaceGrab::new(start_data, window, window_geo);
-
-        pointer.set_grab(self, grab, serial, Focus::Clear);
-    }
-
-    pub fn handle_resize_request(
-        &mut self,
-        window: Window,
-        serial: Serial,
-        edges: grabs::ResizeEdge,
-    ) {
-        // NOTE: About internal handling.
-        // ---
-        // Even though `XdgShellHandler::move_request` has a seat argument, we only advertise one
-        // single seat to clients (why would we support multi-seat for a standalone compositor?)
-        // So the only pointer we have is the advertised seat pointer.
-        let pointer = self.fht.pointer.clone();
-        if !pointer.has_grab(serial) {
-            return;
-        }
-        let mut start_data = pointer.grab_start_data().unwrap();
-        start_data.focus = None;
-
-        let Some(wl_surface) = window.wl_surface() else {
-            return;
-        };
-
-        let mut window_geo = self.fht.window_geometry(&window).unwrap();
-
-        // Unmaximize/Unfullscreen if it already is.
-        let is_maximized = window.maximized();
-        let is_fullscreen = window.fullscreen();
-        window.set_maximized(false);
-        window.set_fullscreen(false);
-        window.set_fullscreen_output(None);
-
-        if is_maximized || is_fullscreen {
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.send_configure();
-            }
-
-            // let pos = pointer.current_location().as_global();
-            // let mut window_pos = pos - window_geo.to_f64().loc;
-            // window_pos.x = window_pos.x.clamp(0.0, window_geo.size.w.to_f64());
-            //
-            // match window_pos.x / window_geo.size.w.to_f64() {
-            //     x if x < 0.5
-            // }
-            let pos = pointer.current_location();
-            window_geo.loc = (pos.x as i32, pos.y as i32).into();
-        }
-
-        with_states(&wl_surface, move |states| {
-            let mut state = states
-                .data_map
-                .get_or_insert(|| RefCell::new(ResizeState::default()))
-                .borrow_mut();
-            *state = ResizeState::Resizing(ResizeData {
-                edges: edges.into(),
-                initial_window_location: window_geo.loc,
-                initial_window_size: window_geo.size,
-            });
-        });
-
-        self.fht.loop_handle.insert_idle(move |state| {
-            // Set the cursor icon.
-            let icon = edges.cursor_icon();
-            state
-                .fht
-                .cursor_theme_manager
-                .set_image_status(CursorImageStatus::Named(icon));
-            state.fht.resize_grab_active = true;
-        });
-
-        let grab = PointerResizeSurfaceGrab::new(start_data, window, edges, window_geo.size);
-
-        pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 }
