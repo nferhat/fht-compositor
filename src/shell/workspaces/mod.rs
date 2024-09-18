@@ -476,6 +476,15 @@ pub struct Workspace {
     layout: Layout,
     fullscreen: Option<FullscreenTile>,
     id: WorkspaceId,
+    // When an interactive swap is running, the grabbed window will be grabbed and moved around by
+    // the user. When he releases the mouse button, the window under the mouse cursor and the
+    // grabbed one will swap.
+    interactive_swap: Option<InteractiveSwap>,
+}
+
+struct InteractiveSwap {
+    window: Window, // window associated to the tile
+    initial_window_location: Point<i32, Logical>,
 }
 
 fht_render_elements! {
@@ -503,6 +512,7 @@ impl Workspace {
             layout,
             fullscreen: None,
             id: WorkspaceId::unique(),
+            interactive_swap: None,
         }
     }
 
@@ -573,7 +583,14 @@ impl Workspace {
 
         // Clean dead/zombie tiles
         let old_len = self.tiles.len();
-        self.tiles.retain(|tile| tile.window().alive());
+        self.tiles.retain(|tile| {
+            if !tile.window().alive() {
+                let _ = self.interactive_swap.take_if(|s| s.window == *tile.window());
+                false
+            } else {
+                true
+            }
+        });
         self.closing_tiles
             .retain(|closing_tile| !closing_tile.is_finished());
         let new_len = self.tiles.len();
@@ -629,9 +646,7 @@ impl Workspace {
         render_elements.extend(
             self.closing_tiles
                 .iter()
-                .map(|closing_tile| {
-                    closing_tile.render(renderer, scale, 1.0).into()
-                }),
+                .map(|closing_tile| closing_tile.render(renderer, scale, 1.0).into()),
         );
 
         if self.tiles.is_empty() {
@@ -655,12 +670,14 @@ impl Workspace {
                 continue;
             }
 
-            let elements = tile.render_elements(
-                renderer,
-                scale,
-                CONFIG.decoration.normal_window_opacity,
-                false,
-            ).map(Into::into);
+            let elements = tile
+                .render_elements(
+                    renderer,
+                    scale,
+                    CONFIG.decoration.normal_window_opacity,
+                    false,
+                )
+                .map(Into::into);
             render_elements.extend(elements);
         }
 
@@ -1226,6 +1243,105 @@ impl Workspace {
                     .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
                     .is_some()
             }))
+    }
+}
+
+impl Workspace {
+    pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
+        if self.interactive_swap.is_some() {
+            return false;
+        }
+
+        let Some(tile) = self.tile_for(window) else {
+            return false;
+        };
+        if tile.window().fullscreen() || tile.window().maximized() {
+            // We dont have any other windows to swap with when we are fullscreened/maximized
+            // Just ignore the grab request
+            return false;
+        }
+
+        dbg!(window);
+        self.interactive_swap = Some(InteractiveSwap {
+            window: window.clone(),
+            initial_window_location: tile.location(),
+        });
+
+        true
+    }
+
+    pub fn handle_interactive_swap_motion(
+        &mut self,
+        window: &Window,
+        delta: Point<i32, Logical>,
+    ) -> bool {
+        let Some(swap) = self.interactive_swap.as_mut() else {
+            return false;
+        };
+        if swap.window != *window {
+            return false;
+        }
+
+        // NOTE: We dont check for fullscreen window since they are ignored in
+        // handle_interactive_swap_start. When a window gets eventually fullscreened and the swap
+        // is still active, we drop the swap.
+        let Some(tile) = self.tiles.iter_mut().find(|tile| tile.window() == window) else {
+            return false;
+        };
+
+        dbg!(delta);
+        let new_location = swap.initial_window_location + delta;
+        tile.set_location(new_location, false);
+
+        true
+    }
+
+    pub fn handle_interactive_swap_end(
+        &mut self,
+        window: &Window,
+        pointer_location: Point<f64, Logical>,
+    ) {
+        let Some(swap) = self.interactive_swap.take() else {
+            return;
+        };
+        if swap.window != *window {
+            return;
+        }
+
+        // NOTE: We dont check for fullscreen window since they are ignored in
+        // handle_interactive_swap_start. When a window gets eventually fullscreened and the swap
+        // is still active, we drop the swap.
+        let other_window = self
+            .tiles
+            .iter()
+            .find(|tile| {
+                if tile.window() == &swap.window {
+                    return false;
+                }
+                if !tile.window_bbox().to_f64().contains(pointer_location) {
+                    return false;
+                }
+
+                let render_location = tile.render_location();
+                tile.window()
+                    .surface_under(
+                        pointer_location - render_location.to_f64(),
+                        WindowSurfaceType::ALL,
+                    )
+                    .is_some()
+            })
+            .map(Tile::window)
+            .cloned();
+
+        if let Some(ref other_window) = other_window {
+            // proceed with the window swap as we found another window
+            self.swap_windows(window, other_window, true);
+        } else {
+            // we did not find any other tile to swap the tile with.
+            // still run arrange_tiles in order to give back this tile its correct location based
+            // on the current layout
+            self.arrange_tiles(true);
+        }
     }
 }
 

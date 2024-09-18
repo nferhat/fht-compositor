@@ -165,15 +165,18 @@ impl Tile {
             egui.set_size(new_geo.size);
         }
 
-        // Location animation
-        //
-        // We set our actual location, then we offset gradually until we reach our destination.
-        // By that point our offset should be equal to 0
-        let old_location = self.location;
-        self.location = new_geo.loc;
+        self.set_location(new_geo.loc, animate);
+    }
+
+    pub fn set_location(&mut self, new_location: Point<i32, Logical>, animate: bool) {
+        let mut old_location = self.location;
+        if let Some(previous_animation) = self.location_animation.take() {
+            old_location += previous_animation.value();
+        }
+        self.location = new_location;
         if animate {
             self.location_animation = Animation::new(
-                old_location - new_geo.loc,
+                old_location - new_location,
                 Point::default(),
                 CONFIG.animation.window_geometry.curve,
                 Duration::from_millis(CONFIG.animation.window_geometry.duration),

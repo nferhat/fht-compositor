@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod swap_tile_grab;
 
 pub use actions::*;
 use smithay::backend::input::{

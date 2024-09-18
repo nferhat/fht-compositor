@@ -2,10 +2,13 @@ use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 use smithay::backend::input::MouseButton;
 use smithay::input::keyboard::{Keysym, ModifiersState};
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::XdgShellHandler;
 
+use super::swap_tile_grab::SwapTileGrab;
 use crate::config::CONFIG;
+use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
@@ -400,17 +403,35 @@ impl State {
         let pointer_loc = self.fht.pointer.current_location();
 
         match action {
+            MouseAction::MoveTile => {
+                if let Some((PointerFocusTarget::Window(window), _)) =
+                    self.fht.focus_target_under(pointer_loc)
+                {
+                    self.fht.loop_handle.insert_idle(move |state| {
+                        let pointer = state.fht.pointer.clone();
+                        if !pointer.has_grab(serial) {
+                            return;
+                        }
+                        let Some(start_data) = pointer.grab_start_data() else {
+                            return;
+                        };
+                        if let Some(workspace) = state.fht.workspace_for_window_mut(&window) {
+                            if workspace.start_interactive_swap(&window) {
+                                state.fht.loop_handle.insert_idle(|state| {
+                                    // TODO: Figure out why I have todo this inside a idle
+                                    state.fht.interactive_grab_active = true;
+                                    state.fht.cursor_theme_manager.set_image_status(
+                                        CursorImageStatus::Named(CursorIcon::Grabbing),
+                                    );
+                                });
+                                let grab = SwapTileGrab { window, start_data };
+                                pointer.set_grab(state, grab, serial, Focus::Clear);
+                            }
+                        }
+                    });
+                }
+            }
             _ => (),
-            // TODO:
-            // MouseAction::MoveTile => {
-            //     if let Some((PointerFocusTarget::Window(window), _)) =
-            //         self.fht.focus_target_under(pointer_loc)
-            //     {
-            //         self.fht
-            //             .loop_handle
-            //             .insert_idle(move |state| state.handle_move_request(window, serial));
-            //     }
-            // }
             // MouseAction::ResizeTile => {
             //     if let Some((PointerFocusTarget::Window(window), _)) =
             //         self.fht.focus_target_under(pointer_loc)
