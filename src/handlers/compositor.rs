@@ -188,24 +188,28 @@ impl State {
 
         // Other check: its a mapped window.
         let arrange = false;
-        if let Some((window, output)) = self.fht.find_window_and_output(surface) {
+        if let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(surface) {
+            window.on_commit();
             let is_mapped = has_render_buffer(surface);
             #[allow(unused_assignments)]
-            // TODO:
-            // if !is_mapped {
-            //     // The window's render surface got removed, start out close animation.
-            //     // The unmap snapshot you have be prepared earlier, either by:
-            //     //
-            //     // - XdgShellHandler::toplevel_destroyed
-            //     // - the pre-commit hook we set up on XdgShellHandler::new_toplevel
-            //     self.backend.with_renderer(|renderer| {
-            //         let scale = output.current_scale().fractional_scale().into();
-            //         tile.start_close_animation(renderer, scale);
-            //     });
-            //     arrange = true;
-            // }
-            window.on_commit();
-            return Some(output.clone());
+            if !is_mapped {
+                // workspace.close_window will remove the window from the workspace tiles and
+                // create a ClosingTile to represent the last frame of the closing window.
+                self.backend.with_renderer(|renderer| {
+                    if workspace.prepare_window_close_animation(&window, renderer) {
+                        workspace.close_window(&window, true);
+                    }
+                });
+
+                // When a window gets unmapped, it needs to go through all the initial configure
+                // sequence again to set its render buffers and toplevel surface again.
+                let output = workspace.output();
+                self.fht
+                    .unmapped_windows
+                    .push(UnmappedWindow::Unconfigured(window));
+                return Some(output);
+            }
+            return Some(workspace.output());
         }
 
         if arrange {
@@ -359,13 +363,11 @@ impl CompositorHandler for State {
         //
         // As niri states it, this is not perfect, but still better than nothing.
         if let Some(root) = self.fht.root_surfaces.get(surface).cloned() {
-            // TODO:
-            // if let Some((tile, output)) = self.fht.find_tile_and_output(&root) {
-            //     self.backend.with_renderer(|renderer| {
-            //         let scale = output.current_scale().fractional_scale().into();
-            //         tile.prepare_close_animation(renderer, scale);
-            //     });
-            // }
+            if let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(&root) {
+                self.backend.with_renderer(|renderer| {
+                    workspace.prepare_window_close_animation(&window, renderer);
+                });
+            }
         }
 
         self.fht

@@ -11,14 +11,16 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
 };
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
-use smithay::wayland::compositor::add_pre_commit_hook;
+use smithay::wayland::compositor::{
+    add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
+};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
 use crate::shell::KeyboardFocusTarget;
-use crate::state::{State, UnmappedWindow};
+use crate::state::{OutputState, State, UnmappedWindow};
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -45,26 +47,19 @@ impl XdgShellHandler for State {
             return;
         }
 
-        // TODO
-        // let Some((tile, output)) = self.fht.find_tile_and_output(surface.wl_surface()) else {
-        //     warn!("Destroyed toplevel missing from mapped tiles and unmapped tiles");
-        //     return;
-        // };
-        // OutputState::get(&output).render_state.queue();
-        //
-        // let scale = output.current_scale().fractional_scale().into();
-        // self.backend.with_renderer(|renderer| {
-        //     tile.prepare_close_animation(renderer, scale);
-        // });
-        // self.backend.with_renderer(|renderer| {
-        //     tile.start_close_animation(renderer, scale);
-        // });
-        //
-        // let (_, ws) = self
-        //     .fht
-        //     .find_window_and_workspace_mut(&surface.wl_surface())
-        //     .unwrap();
-        // ws.arrange_tiles(true);
+        let Some((window, workspace)) =
+            self.fht.find_window_and_workspace_mut(surface.wl_surface())
+        else {
+            warn!("Destroyed toplevel missing from mapped windows and unmapped windows");
+            return;
+        };
+        OutputState::get(&workspace.output()).render_state.queue();
+
+        self.backend.with_renderer(|renderer| {
+            if workspace.prepare_window_close_animation(&window, renderer) {
+                workspace.close_window(&window, true);
+            }
+        });
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -233,33 +228,31 @@ fn add_window_pre_commit_hook(window: &Window) {
     // the ones that should do this.
     let wl_surface = window.wl_surface().unwrap();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
-        // TODO
-        // let Some((tile, output)) = state.fht.find_tile_and_output(surface) else {
-        //     warn!("Window pre-commit hook should be removed when unmapped");
-        //     return;
-        // };
+        let Some((window, workspace)) = state.fht.find_window_and_workspace_mut(surface) else {
+            warn!("Window pre-commit hook should be removed when unmapped");
+            return;
+        };
+
+        // Before commiting, we check if the window's buffers are getting unmapped.
+        // If that's the case, the window is likely closing (or minimizing, if the
+        // compositor supports that)
         //
-        // // Before commiting, we check if the window's buffers are getting unmapped.
-        // // If that's the case, the window is likely closing (or minimizing, if the
-        // // compositor supports that)
-        // //
-        // // Since we are going to close, we take a snapshot of the window's elements,
-        // // like we do inside `Tile::render_elements` into a
-        // // GlesTexture and store that for future use.
-        // let got_unmapped = with_states(surface, |states| {
-        //     let mut guard = states.cached_state.get::<SurfaceAttributes>();
-        //     let attrs = guard.pending();
-        //     matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
-        // });
-        //
-        // if got_unmapped {
-        //     state.backend.with_renderer(|renderer| {
-        //         let scale = output.current_scale().fractional_scale().into();
-        //         tile.prepare_close_animation(renderer, scale);
-        //     });
-        // } else {
-        //     tile.clear_close_snapshot();
-        // }
+        // Since we are going to close, we take a snapshot of the window's elements,
+        // like we do inside `Tile::render_elements` into a
+        // GlesTexture and store that for future use.
+        let got_unmapped = with_states(surface, |states| {
+            let mut guard = states.cached_state.get::<SurfaceAttributes>();
+            let attrs = guard.pending();
+            matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
+        });
+
+        if got_unmapped {
+            state.backend.with_renderer(|renderer| {
+                workspace.prepare_window_close_animation(&window, renderer);
+            });
+        } else {
+            workspace.clear_window_close_animation_snapshot(&window);
+        }
     });
 
     window.set_pre_commit_hook_id(hook_id);

@@ -432,13 +432,6 @@ impl Fht {
             return;
         }
 
-        // Current behaviour:
-        //
-        // Move each window from each workspace in this removed output wset and bind it to the
-        // first output available, very simple.
-        //
-        // In other words, if you had a window on ws1, 4, and 8 on this output, they would get
-        // moved to their respective workspace on the first available wset.
         let wset = self.workspaces.first_mut().unwrap().1;
         wset.merge_with(removed_wset);
 

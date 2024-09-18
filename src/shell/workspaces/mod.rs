@@ -17,21 +17,24 @@
 //! of the active output, matching the workspace index between the removed and the active output
 //! workspace set.
 
+mod closing_tile;
 pub mod layout;
 pub mod tile;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use closing_tile::{ClosingTile, ClosingTileRenderElement};
 use layout::Layout;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Time};
 
 pub use self::layout::WorkspaceLayout;
-use self::tile::{Tile, WorkspaceTileRenderElement};
+use self::tile::{Tile, TileRenderElement};
 use crate::config::{
     BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
 };
@@ -299,8 +302,13 @@ impl WorkspaceSet {
                 ret |= inner.advance_animations(current_time);
             }
 
-            for window in &mut ws.tiles {
-                ret |= window.advance_animations(current_time);
+            for tile in &mut ws.tiles {
+                ret |= tile.advance_animations(current_time);
+            }
+
+            for closing_tile in &mut ws.closing_tiles {
+                ret = true;
+                closing_tile.advance_animations(current_time);
             }
         }
 
@@ -444,8 +452,8 @@ impl WorkspaceSwitchAnimation {
 
 fht_render_elements! {
     WorkspaceSetRenderElement<R> => {
-        Normal = WorkspaceTileRenderElement<R>,
-        Switching = RelocateRenderElement<WorkspaceTileRenderElement<R>>,
+        Normal = WorkspaceRenderElement<R>,
+        Switching = RelocateRenderElement<WorkspaceRenderElement<R>>,
     }
 }
 
@@ -461,10 +469,20 @@ impl WorkspaceId {
 pub struct Workspace {
     output: Output,
     tiles: Vec<Tile>,
+    // Closing tiles are rendered at their last position while they scale down and fade away to
+    // fully transparent. This allows us to keep the tiles clean of any dead windows
+    closing_tiles: Vec<ClosingTile>,
     focused_tile_idx: usize,
     layout: Layout,
     fullscreen: Option<FullscreenTile>,
     id: WorkspaceId,
+}
+
+fht_render_elements! {
+    WorkspaceRenderElement<R> => {
+        Tile = TileRenderElement<R>,
+        ClosingTile = ClosingTileRenderElement,
+    }
 }
 
 impl Workspace {
@@ -480,6 +498,7 @@ impl Workspace {
         Self {
             output,
             tiles: vec![],
+            closing_tiles: vec![],
             focused_tile_idx: 0,
             layout,
             fullscreen: None,
@@ -514,8 +533,10 @@ impl Workspace {
     pub fn refresh(&mut self) {
         let output_geometry = self.output.geometry();
 
-        let mut should_refresh_geometries =
-            self.fullscreen.take_if(|fs| !fs.inner.alive()).is_some();
+        let mut should_refresh_geometries = self
+            .fullscreen
+            .take_if(|fs| !fs.inner.window().alive())
+            .is_some();
 
         if self
             .fullscreen
@@ -552,7 +573,9 @@ impl Workspace {
 
         // Clean dead/zombie tiles
         let old_len = self.tiles.len();
-        self.tiles.retain(IsAlive::alive);
+        self.tiles.retain(|tile| tile.window().alive());
+        self.closing_tiles
+            .retain(|closing_tile| !closing_tile.is_finished());
         let new_len = self.tiles.len();
         should_refresh_geometries |= new_len != old_len;
 
@@ -587,7 +610,7 @@ impl Workspace {
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> Vec<WorkspaceTileRenderElement<R>> {
+    ) -> Vec<WorkspaceRenderElement<R>> {
         let mut render_elements = vec![];
 
         // If we have a fullscreen, render it and off we go.
@@ -599,20 +622,32 @@ impl Workspace {
                     CONFIG.decoration.focused_window_opacity,
                     true,
                 )
+                .map(Into::into)
                 .collect();
         }
+
+        render_elements.extend(
+            self.closing_tiles
+                .iter()
+                .map(|closing_tile| {
+                    closing_tile.render(renderer, scale, 1.0).into()
+                }),
+        );
 
         if self.tiles.is_empty() {
             return render_elements;
         }
 
         if let Some(tile) = self.focused_tile() {
-            render_elements.extend(tile.render_elements(
-                renderer,
-                scale,
-                CONFIG.decoration.focused_window_opacity,
-                true,
-            ));
+            render_elements.extend(
+                tile.render_elements(
+                    renderer,
+                    scale,
+                    CONFIG.decoration.focused_window_opacity,
+                    true,
+                )
+                .map(Into::into),
+            );
         }
 
         for (idx, tile) in self.tiles().enumerate() {
@@ -625,7 +660,7 @@ impl Workspace {
                 scale,
                 CONFIG.decoration.normal_window_opacity,
                 false,
-            );
+            ).map(Into::into);
             render_elements.extend(elements);
         }
 
@@ -697,9 +732,28 @@ impl Workspace {
         self.refresh();
         self.arrange_tiles(animate);
         // Stop location animation, the tile should spawn "in-place"
-        self.tile_mut_for(&window)
+        self.tile_mut_for_window(&window)
             .unwrap()
             .stop_location_animation();
+    }
+
+    pub fn prepare_window_close_animation(
+        &mut self,
+        window: &Window,
+        renderer: &mut GlowRenderer,
+    ) -> bool {
+        let scale = self.output.current_scale().fractional_scale();
+        let Some(tile) = self.tile_mut_for_window(window) else {
+            return false;
+        };
+
+        tile.prepare_close_animation(renderer, scale.into())
+    }
+
+    pub fn clear_window_close_animation_snapshot(&mut self, window: &Window) {
+        if let Some(tile) = self.tile_mut_for_window(window) {
+            tile.clear_close_window_animation_snapshot()
+        };
     }
 
     pub fn remove_tile(&mut self, window: &Window, animate: bool) -> Option<Tile> {
@@ -713,7 +767,7 @@ impl Workspace {
             return Some(inner);
         }
 
-        let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
+        let Some(idx) = self.tiles.iter().position(|t| t.window() == window) else {
             return None;
         };
 
@@ -726,6 +780,16 @@ impl Workspace {
 
         self.arrange_tiles(animate);
         Some(tile)
+    }
+
+    pub fn close_window(&mut self, window: &Window, animate: bool) {
+        if let Some(tile) = self.remove_tile(window, animate) {
+            if animate {
+                if let Some(closing_tile) = tile.into_closing_tile() {
+                    self.closing_tiles.push(closing_tile);
+                }
+            }
+        }
     }
 
     pub fn take_fullscreen(&mut self) -> Option<FullscreenTile> {
@@ -970,7 +1034,7 @@ impl Workspace {
         let tiled = self
             .tiles
             .iter_mut()
-            .filter(|tile| !tile.window().maximized() && !tile.is_closing());
+            .filter(|tile| !tile.window().maximized());
         self.layout
             .arrange_tiles(tiled.chain(std::iter::once(&mut tile)), true);
         // The tile will just drop out from here.
@@ -993,7 +1057,6 @@ impl Workspace {
         let (maximized, tiled) = self
             .tiles
             .iter_mut()
-            .filter(|tile| !tile.is_closing())
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
 
         let maximized_geo = self.layout.usable_geo();
@@ -1070,7 +1133,7 @@ impl Workspace {
             .or_else(|| self.tiles.iter().find(|tile| tile.window() == window))
     }
 
-    pub fn tile_mut_for(&mut self, window: &Window) -> Option<&mut Tile> {
+    pub fn tile_mut_for_window(&mut self, window: &Window) -> Option<&mut Tile> {
         self.fullscreen
             .as_mut()
             .filter(|fs| fs.inner.window() == window)
