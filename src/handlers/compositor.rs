@@ -1,9 +1,9 @@
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
-use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{find_popup_root_surface, PopupKind};
 use smithay::output::Output;
 use smithay::reexports::calloop::Interest;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::{
@@ -14,7 +14,9 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
-use crate::state::{Fht, OutputState, State};
+use crate::config::CONFIG;
+use crate::state::{Fht, OutputState, State, UnmappedWindow};
+use crate::utils::RectCenterExt;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
@@ -30,69 +32,162 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
 
 impl State {
     fn process_window_commit(&mut self, surface: &WlSurface) -> Option<Output> {
-        if let Some(idx) = self
-            .fht
-            .pending_windows
-            .iter()
-            .position(|w| w.inner.wl_surface().is_some_and(|s| &*s == surface))
-        {
-            let pending_window = self.fht.pending_windows.get_mut(idx).unwrap();
-            pending_window.inner.refresh();
-            pending_window.inner.on_commit();
-
-            // NOTE: We dont check whether the surface has a render buffer here, since most
-            // toplevels dont attach one if their did not receive their initial configure.
-            if !pending_window.initial_configure_sent {
-                let pending_window = self.fht.pending_windows.get_mut(idx).unwrap();
-                // Send an empty configuration message so that the client informs us of new state.
-                pending_window.inner.toplevel().send_configure();
-                pending_window.initial_configure_sent = true;
-
-                return None;
-            }
-
-            let pending_window = self.fht.pending_windows.remove(idx);
-            self.fht.prepare_pending_window(pending_window.inner);
-
-            // FIXME: Why this doesn't commit by itself?
-            let surface = surface.clone();
-            self.fht
-                .loop_handle
-                .insert_idle(move |state| state.commit(&surface));
-
-            return None;
-        }
-
-        if let Some(idx) = self.fht.unmapped_tiles.iter().position(|t| {
-            t.inner
+        if let Some(idx) = self.fht.unmapped_windows.iter().position(|unmapped| {
+            unmapped
                 .window()
                 .wl_surface()
                 .is_some_and(|s| &*s == surface)
         }) {
-            let unmapped_tile = self.fht.unmapped_tiles.get(idx).unwrap();
-            unmapped_tile.inner.window().refresh();
-            unmapped_tile.inner.window().on_commit();
+            if !self.fht.unmapped_windows[idx].configured() {
+                // We did not send an initial configure for this window yet.
+                // This is the time when we send an size for the window to configure itself (and)
+                //
+                // This is also a good oppotunity to apply any window rules, if the user specified
+                // one that matches this window. Figuring out the window size is up to the
+                // workspace.
+                let UnmappedWindow::Unconfigured(window) = self.fht.unmapped_windows.remove(idx)
+                else {
+                    unreachable!()
+                };
+                window.on_commit();
+                window.refresh();
+
+                let mut output = self.fht.focus_state.output.clone().unwrap();
+                let mut workspace_idx = self.fht.wset_for(&output).get_active_idx();
+
+                // Prefer parent workspace and output when matching
+                if let Some((parent_index, parent_output)) =
+                    window.toplevel().parent().and_then(|parent_surface| {
+                        self.fht.workspaces().find_map(|(output, wset)| {
+                            let idx = wset
+                                .workspaces()
+                                .enumerate()
+                                .position(|(_, ws)| ws.has_surface(&parent_surface))?;
+                            Some((idx, output.clone()))
+                        })
+                    })
+                {
+                    workspace_idx = parent_index;
+                    output = parent_output;
+                }
+
+                let (title, app_id) = (window.title(), window.app_id());
+                let rule = CONFIG
+                    .rules
+                    .iter()
+                    .find(|(patterns, _)| {
+                        patterns.iter().any(|pattern| {
+                            pattern.matches(
+                                title.as_ref().map(String::as_str),
+                                app_id.as_ref().map(String::as_str),
+                                workspace_idx,
+                            )
+                        })
+                    })
+                    .map(|(_, rules)| rules)
+                    .cloned()
+                    .unwrap_or_default();
+
+                if let Some(named_output) = rule
+                    .output
+                    .as_ref()
+                    .and_then(|name| self.fht.output_named(name))
+                {
+                    output = named_output;
+                }
+
+                if let Some(allow_csd) = rule.allow_csd {
+                    window.toplevel().with_pending_state(|state| {
+                        if allow_csd {
+                            state.decoration_mode =
+                                Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+                        } else {
+                            state.decoration_mode =
+                                Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+                        }
+                    });
+                } else {
+                    window.toplevel().with_pending_state(|state| {
+                        if CONFIG.decoration.allow_csd {
+                            state.decoration_mode =
+                                Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+                        } else {
+                            state.decoration_mode =
+                                Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+                        }
+                    });
+                }
+
+                // Now apply our rules
+                let wset = self.fht.wset_mut_for(&output);
+                let workspace_idx = rule.workspace.unwrap_or(wset.get_active_idx());
+                let workspace = wset.get_workspace_mut(workspace_idx);
+                let id = workspace.id();
+
+                // Pre compute window geometry for insertion.
+                workspace.prepare_window_geometry(window.clone(), rule.border.clone());
+                window.send_configure();
+                self.fht.unmapped_windows.push(UnmappedWindow::Configured {
+                    window,
+                    border_config: rule.border,
+                    workspace_id: id,
+                });
+                return Some(output);
+            }
 
             if !has_render_buffer(surface) {
-                // FIXME: Why this doesn't commit by itself?
-                let surface = surface.clone();
-                self.fht
-                    .loop_handle
-                    .insert_idle(move |state| state.commit(&surface));
-
-                // We still cant map.
+                self.fht.unmapped_windows[idx].window().send_configure();
                 return None;
             }
 
-            // Otherwise now mapping is possible.
-            let unmapped_tile = self.fht.unmapped_tiles.remove(idx);
-            let output = self.fht.map_tile(unmapped_tile);
+            let UnmappedWindow::Configured {
+                window,
+                border_config,
+                workspace_id,
+            } = self.fht.unmapped_windows.remove(idx)
+            else {
+                unreachable!("Tried to map an unconfigured window!");
+            };
+
+            let workspace = match self.fht.get_workspace_mut(workspace_id) {
+                Some(ws) => ws,
+                None => {
+                    warn!(
+                        ?workspace_id,
+                        "Unmapped window has an invalid workspace id?"
+                    );
+                    let output = self.fht.active_output();
+                    self.fht.wset_mut_for(&output).active_mut()
+                }
+            };
+
+            let output = workspace.output();
+            workspace.insert_window(window.clone(), border_config, true);
+            let mut geometry = workspace.window_geometry(&window).unwrap();
+            geometry.loc += output.current_location();
+
+            let wset = self.fht.wset_for(&output);
+            let is_active = wset.active().id() == workspace_id;
+            let is_switching = wset.has_switch_animation();
+            // From using the compositor opening a window when a switch is being done feels more
+            // natural when the window gets focus, even if focus_new_windows is none.
+            let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
+
+            if should_focus {
+                let center = geometry.center();
+                self.fht.loop_handle.insert_idle(move |state| {
+                    if CONFIG.general.cursor_warps {
+                        state.move_pointer(center.to_f64());
+                    }
+                    state.set_focus_target(Some(window.clone().into()));
+                });
+            }
 
             return Some(output);
         }
 
         // Other check: its a mapped window.
-        let mut arrange = false;
+        let arrange = false;
         if let Some((window, output)) = self.fht.find_window_and_output(surface) {
             let is_mapped = has_render_buffer(surface);
             #[allow(unused_assignments)]
@@ -109,7 +204,6 @@ impl State {
             //     });
             //     arrange = true;
             // }
-
             window.on_commit();
             return Some(output.clone());
         }

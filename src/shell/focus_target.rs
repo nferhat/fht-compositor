@@ -94,9 +94,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
         match self {
-            Self::Window(w) => {
-                KeyboardTarget::leave(w.toplevel().wl_surface(), seat, data, serial)
-            }
+            Self::Window(w) => KeyboardTarget::leave(w.toplevel().wl_surface(), seat, data, serial),
             Self::LayerSurface(l) => KeyboardTarget::leave(l.wl_surface(), seat, data, serial),
             Self::Popup(p) => KeyboardTarget::leave(p.wl_surface(), seat, data, serial),
         }
@@ -138,13 +136,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
         serial: Serial,
     ) {
         match self {
-            Self::Window(w) => KeyboardTarget::modifiers(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                modifiers,
-                serial,
-            ),
+            Self::Window(w) => {
+                KeyboardTarget::modifiers(w.toplevel().wl_surface(), seat, data, modifiers, serial)
+            }
             Self::LayerSurface(l) => {
                 KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
             }
@@ -221,48 +215,37 @@ impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             Self::WlSurface(w) => PointerTarget::enter(w, seat, data, event),
-            Self::Window(w) => {
-                PointerTarget::enter(w.toplevel().wl_surface(), seat, data, event)
-            }
+            Self::Window(w) => PointerTarget::enter(w.toplevel().wl_surface(), seat, data, event),
         }
     }
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         match self {
             Self::WlSurface(w) => PointerTarget::motion(w, seat, data, event),
-            Self::Window(w) => {
-                PointerTarget::motion(w.toplevel().wl_surface(), seat, data, event)
-            }
+            Self::Window(w) => PointerTarget::motion(w.toplevel().wl_surface(), seat, data, event),
         }
     }
 
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
         match self {
             Self::WlSurface(w) => PointerTarget::relative_motion(w, seat, data, event),
-            Self::Window(w) => PointerTarget::relative_motion(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::relative_motion(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self {
             Self::WlSurface(w) => PointerTarget::button(w, seat, data, event),
-            Self::Window(w) => {
-                PointerTarget::button(w.toplevel().wl_surface(), seat, data, event)
-            }
+            Self::Window(w) => PointerTarget::button(w.toplevel().wl_surface(), seat, data, event),
         }
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
         match self {
             Self::WlSurface(w) => PointerTarget::axis(w, seat, data, frame),
-            Self::Window(w) => {
-                PointerTarget::axis(w.toplevel().wl_surface(), seat, data, frame)
-            }
+            Self::Window(w) => PointerTarget::axis(w.toplevel().wl_surface(), seat, data, frame),
         }
     }
 
@@ -281,12 +264,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_swipe_begin(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_swipe_begin(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_swipe_begin(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -298,12 +278,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_swipe_update(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_swipe_update(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_swipe_update(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -315,12 +292,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_swipe_end(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_swipe_end(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_swipe_end(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -332,12 +306,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_pinch_begin(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_pinch_begin(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_pinch_begin(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -349,12 +320,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_pinch_update(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_pinch_update(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_pinch_update(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -366,12 +334,9 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_pinch_end(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_pinch_end(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_pinch_end(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -383,24 +348,18 @@ impl PointerTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_hold_begin(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_hold_begin(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_hold_begin(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
     fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
         match self {
             Self::WlSurface(w) => PointerTarget::gesture_hold_end(w, seat, data, event),
-            Self::Window(w) => PointerTarget::gesture_hold_end(
-                w.toplevel().wl_surface(),
-                seat,
-                data,
-                event,
-            ),
+            Self::Window(w) => {
+                PointerTarget::gesture_hold_end(w.toplevel().wl_surface(), seat, data, event)
+            }
         }
     }
 
@@ -424,9 +383,7 @@ impl TouchTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => TouchTarget::down(w, seat, data, event, seq),
-            Self::Window(w) => {
-                TouchTarget::down(w.toplevel().wl_surface(), seat, data, event, seq)
-            }
+            Self::Window(w) => TouchTarget::down(w.toplevel().wl_surface(), seat, data, event, seq),
         }
     }
 
@@ -439,9 +396,7 @@ impl TouchTarget<State> for PointerFocusTarget {
     ) {
         match self {
             Self::WlSurface(w) => TouchTarget::up(w, seat, data, event, seq),
-            Self::Window(w) => {
-                TouchTarget::up(w.toplevel().wl_surface(), seat, data, event, seq)
-            }
+            Self::Window(w) => TouchTarget::up(w.toplevel().wl_surface(), seat, data, event, seq),
         }
     }
 
@@ -463,18 +418,14 @@ impl TouchTarget<State> for PointerFocusTarget {
     fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
         match self {
             Self::WlSurface(w) => TouchTarget::frame(w, seat, data, seq),
-            Self::Window(w) => {
-                TouchTarget::frame(w.toplevel().wl_surface(), seat, data, seq)
-            }
+            Self::Window(w) => TouchTarget::frame(w.toplevel().wl_surface(), seat, data, seq),
         }
     }
 
     fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
         match self {
             Self::WlSurface(w) => TouchTarget::cancel(w, seat, data, seq),
-            Self::Window(w) => {
-                TouchTarget::cancel(w.toplevel().wl_surface(), seat, data, seq)
-            }
+            Self::Window(w) => TouchTarget::cancel(w.toplevel().wl_surface(), seat, data, seq),
         }
     }
 

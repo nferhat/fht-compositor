@@ -72,25 +72,29 @@ fn regex_matches(regex_1: Option<&Regex>, regex_2: Option<&Regex>) -> bool {
 }
 
 impl WindowPattern {
-    pub fn matches(&self, title: &str, app_id: &str, workspace: usize) -> bool {
+    pub fn matches(&self, title: Option<&str>, app_id: Option<&str>, workspace: usize) -> bool {
         if self.workspace.as_ref().is_some_and(|ws| workspace == *ws) {
             return true;
         }
 
-        if self
-            .title
-            .as_ref()
-            .is_some_and(|regex| regex.is_match(title))
-        {
-            return true;
+        if let Some(title) = title {
+            if self
+                .title
+                .as_ref()
+                .is_some_and(|regex| regex.is_match(&title))
+            {
+                return true;
+            }
         }
 
-        if self
-            .app_id
-            .as_ref()
-            .is_some_and(|regex| regex.is_match(app_id))
-        {
-            return true;
+        if let Some(app_id) = app_id {
+            if self
+                .app_id
+                .as_ref()
+                .is_some_and(|regex| regex.is_match(&app_id))
+            {
+                return true;
+            }
         }
 
         false

@@ -105,8 +105,17 @@ impl WorkspaceSet {
         }
     }
 
-    pub fn drain_workspaces(&mut self) -> impl Iterator<Item = Workspace> + '_ {
-        self.workspaces.drain(..)
+    pub fn merge_with(&mut self, other: Self) {
+        // Current behaviour:
+        //
+        // Move each window from each workspace in this removed output wset and bind it to the
+        // first output available, very simple.
+        //
+        // In other words, if you had a window on ws1, 4, and 8 on this output, they would get
+        // moved to their respective workspace on the first available wset.
+        for (ws, other_ws) in self.workspaces_mut().zip(other.workspaces) {
+            ws.merge_with(other_ws);
+        }
     }
 
     pub fn get_workspace(&self, idx: usize) -> &Workspace {
@@ -245,7 +254,10 @@ impl WorkspaceSet {
     }
 
     #[profiling::function]
-    pub fn window_under(&self, point: Point<f64, Logical>) -> Option<(Window, Point<i32, Logical>)> {
+    pub fn window_under(
+        &self,
+        point: Point<f64, Logical>,
+    ) -> Option<(Window, Point<i32, Logical>)> {
         let Some(animation) = self.switch_animation.as_ref() else {
             // It's just the active one, so no need to do additional calculations.
             return self.active().window_under(point);
@@ -483,16 +495,19 @@ impl Workspace {
         self.id
     }
 
-    pub fn drain_tiles(&mut self) -> impl Iterator<Item = Tile> + '_ {
-        self.tiles.drain(..)
+    pub fn merge_with(&mut self, mut other: Self) {
+        if let Some(fullscreen) = other.fullscreen.take() {
+            let (window, border_config) = fullscreen.inner.into_window();
+            self.insert_window(window, border_config, true);
+        }
+
+        for (window, border_config) in other.tiles.into_iter().map(Tile::into_window) {
+            self.insert_window(window, border_config, true);
+        }
     }
 
     pub fn tiles(&self) -> impl Iterator<Item = &Tile> {
         self.tiles.iter()
-    }
-
-    pub fn tiles_len(&self) -> usize {
-        self.tiles.len()
     }
 
     #[profiling::function]
@@ -525,7 +540,10 @@ impl Workspace {
                 // output_enter excepts the overlap to be relative to the window, weird choice
                 // but I comply.
                 overlap.loc -= bbox.loc;
-                fullscreen.inner.window().enter_output(&self.output, overlap);
+                fullscreen
+                    .inner
+                    .window()
+                    .enter_output(&self.output, overlap);
             }
 
             fullscreen.inner.send_pending_configure();
@@ -546,7 +564,8 @@ impl Workspace {
         // Refresh internal state of windows
         for (idx, tile) in self.tiles.iter_mut().enumerate() {
             // This is now managed globally with focus targets
-            tile.window().request_activated(idx == self.focused_tile_idx);
+            tile.window()
+                .request_activated(idx == self.focused_tile_idx);
 
             let mut bbox = tile.window().bbox();
             bbox.loc = tile.location() + output_geometry.loc;
@@ -616,11 +635,6 @@ impl Workspace {
 
 // Inserting and removing elements
 impl Workspace {
-    pub fn insert_tile(&mut self, tile: Tile, animate: bool) {
-        let (window, border_config) = tile.into_window();
-        self.insert_window(window, border_config, animate);
-    }
-
     pub fn insert_window(
         &mut self,
         window: Window,
@@ -633,7 +647,8 @@ impl Workspace {
 
         window.request_bounds(Some(self.output.geometry().size));
         window.configure_for_output(&self.output);
-        let tile = Tile::new(window, border_config);
+        let mut tile = Tile::new(window.clone(), border_config);
+        tile.start_opening_animation();
 
         // NOTE: In the following code we dont call to send_pending_configure since arrange_tiles
         // does this for us automatically.
@@ -681,6 +696,10 @@ impl Workspace {
 
         self.refresh();
         self.arrange_tiles(animate);
+        // Stop location animation, the tile should spawn "in-place"
+        self.tile_mut_for(&window)
+            .unwrap()
+            .stop_location_animation();
     }
 
     pub fn remove_tile(&mut self, window: &Window, animate: bool) -> Option<Tile> {
@@ -727,7 +746,10 @@ impl Workspace {
             return Some(fullscreen.inner.window().clone());
         }
 
-        self.tiles.get(self.focused_tile_idx).map(Tile::window).cloned()
+        self.tiles
+            .get(self.focused_tile_idx)
+            .map(Tile::window)
+            .cloned()
     }
 
     pub fn fullscreen_window(&mut self, window: &Window, animate: bool) {
@@ -745,7 +767,8 @@ impl Workspace {
         let tile = self.remove_tile(window, true).unwrap();
         tile.window().request_fullscreen(true);
         // redo the configuration that remove_tile() did
-        tile.window().request_bounds(Some(self.output.geometry().size));
+        tile.window()
+            .request_bounds(Some(self.output.geometry().size));
         self.fullscreen = Some(FullscreenTile {
             inner: tile,
             last_known_idx: idx,
@@ -919,13 +942,6 @@ impl Workspace {
 
 // Geometry and layout
 impl Workspace {
-    pub fn with_layout<F, T>(&mut self, f: F) -> T
-    where
-        F: FnOnce(&mut Layout) -> T,
-    {
-        f(&mut self.layout)
-    }
-
     pub fn window_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         self.tile_for(window).map(Tile::window_geometry)
     }
@@ -934,14 +950,31 @@ impl Workspace {
         self.tile_for(window).map(Tile::window_visual_geometry)
     }
 
-    pub fn prepare_window_geometry(&mut self, tile: &mut Tile) {
+    pub fn prepare_window_geometry(&mut self, window: Window, border_config: Option<BorderConfig>) {
+        let mut tile = Tile::new(window, border_config);
+
+        if tile.window().maximized() {
+            let usable_geo = self.layout.usable_geo();
+            tile.window().request_size(usable_geo.size);
+            return;
+        }
+
+        if tile.window().fullscreen() {
+            let output_size = self.output.geometry().size;
+            tile.window().request_size(output_size);
+            return;
+        }
+
         // Code adapted from arrange_tiles
         // We only care about the non-maximized and non-fullscreen tiles here
-        let tiled = self.tiles.iter_mut().filter(|tile| {
-            !tile.window().maximized() && !tile.is_closing()
-        });
+        let tiled = self
+            .tiles
+            .iter_mut()
+            .filter(|tile| !tile.window().maximized() && !tile.is_closing());
         self.layout
-            .arrange_tiles(tiled.chain(std::iter::once(tile)), true);
+            .arrange_tiles(tiled.chain(std::iter::once(&mut tile)), true);
+        // The tile will just drop out from here.
+        // It didnt matter much anyway, only as an intermediary to compute window size
     }
 
     #[profiling::function]
@@ -1069,7 +1102,10 @@ impl Workspace {
     }
 
     #[profiling::function]
-    pub fn window_under(&self, point: Point<f64, Logical>) -> Option<(Window, Point<i32, Logical>)> {
+    pub fn window_under(
+        &self,
+        point: Point<f64, Logical>,
+    ) -> Option<(Window, Point<i32, Logical>)> {
         if let Some(FullscreenTile { inner: tile, .. }) = self.fullscreen.as_ref() {
             let render_location = tile.render_location();
             if tile.window_bbox().to_f64().contains(point)

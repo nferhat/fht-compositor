@@ -325,10 +325,12 @@ impl State {
                 let Some(window) = active.focused() else {
                     return;
                 };
-                let tile = active.remove_tile(&window, true).unwrap();
+                let (window, border_config) =
+                    active.remove_tile(&window, true).unwrap().into_window();
                 let new_focus = active.focused();
                 let idx = idx.clamp(0, 9);
-                wset.get_workspace_mut(idx).insert_tile(tile, true);
+                wset.get_workspace_mut(idx)
+                    .insert_window(window, border_config, true);
 
                 if let Some(window) = new_focus {
                     self.set_focus_target(Some(window.into()));
@@ -418,13 +420,13 @@ impl State {
             //             self.fht.window_visual_geometry(&window).unwrap().to_f64();
             //
             //         let pointer_loc_in_window = pointer_loc - loc;
-            //         if window.surface_under(pointer_loc_in_window, WindowSurfaceType::ALL).is_none() {
-            //             return;
+            //         if window.surface_under(pointer_loc_in_window,
+            // WindowSurfaceType::ALL).is_none() {             return;
             //         }
             //
             //         // We divide the window into 9 sections, so that if you grab for example
-            //         // somewhere in the middle of the bottom edge, you can only resize vertically.
-            //         let mut edges = ResizeEdge::empty();
+            //         // somewhere in the middle of the bottom edge, you can only resize
+            // vertically.         let mut edges = ResizeEdge::empty();
             //         if pointer_loc_in_window.x < size.w / 3. {
             //             edges |= ResizeEdge::LEFT;
             //         } else if 2. * size.w / 3. < pointer_loc_in_window.x {

@@ -150,11 +150,7 @@ impl Layout {
             .clamp(1, usize::MAX);
     }
 
-    pub fn arrange_tiles<'a>(
-        &'a self,
-        tiles: impl Iterator<Item = &'a mut Tile>,
-        animate: bool,
-    ) {
+    pub fn arrange_tiles<'a>(&'a self, tiles: impl Iterator<Item = &'a mut Tile>, animate: bool) {
         let mut tiles = tiles.collect::<Vec<_>>();
         let tiles_len = tiles.len();
         let nmaster = self.nmaster;

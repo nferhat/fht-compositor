@@ -57,11 +57,11 @@ use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
-use crate::config::CONFIG;
+use crate::config::{BorderConfig, CONFIG};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::tile::Tile;
-use crate::shell::workspaces::WorkspaceSet;
+use crate::shell::workspaces::{WorkspaceId, WorkspaceSet};
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
@@ -240,8 +240,7 @@ pub struct Fht {
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
     pub workspaces: IndexMap<Output, WorkspaceSet>,
-    pub pending_windows: Vec<PendingWindow>,
-    pub unmapped_tiles: Vec<UnmappedTile>,
+    pub unmapped_windows: Vec<UnmappedWindow>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
@@ -359,8 +358,7 @@ impl Fht {
             dnd_icon: None,
             cursor_theme_manager,
             workspaces: IndexMap::new(),
-            pending_windows: vec![],
-            unmapped_tiles: vec![],
+            unmapped_windows: vec![],
             popups: PopupManager::default(),
             resize_grab_active: false,
             root_surfaces: FxHashMap::default(),
@@ -442,18 +440,7 @@ impl Fht {
         // In other words, if you had a window on ws1, 4, and 8 on this output, they would get
         // moved to their respective workspace on the first available wset.
         let wset = self.workspaces.first_mut().unwrap().1;
-
-        for (mut old_workspace, new_workspace) in
-            std::iter::zip(removed_wset.drain_workspaces(), wset.workspaces_mut())
-        {
-            // Little optimizaztion, to avoid recalculating window geometries each time
-            //
-            // Due to how we manage windows, a window can't be in two workspaces at a time, let
-            // alone from different outputs
-            for tile in old_workspace.drain_tiles() {
-                new_workspace.insert_tile(tile, true)
-            }
-        }
+        wset.merge_with(removed_wset);
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
@@ -888,29 +875,27 @@ impl RenderState {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PendingWindow {
-    pub inner: Window,
-    pub initial_configure_sent: bool,
+// We track ourselves window configure state since some clients may set initial_configure_sent to
+// true even if its NOT (example: electron + ozone wayland)
+pub enum UnmappedWindow {
+    Unconfigured(Window),
+    Configured {
+        window: Window,
+        border_config: Option<BorderConfig>,
+        /// The workspace to open the window on
+        workspace_id: WorkspaceId,
+    },
 }
 
-impl Into<PendingWindow> for Window {
-    fn into(self) -> PendingWindow {
-        PendingWindow {
-            inner: self,
-            initial_configure_sent: false,
+impl UnmappedWindow {
+    pub fn window(&self) -> &Window {
+        match self {
+            Self::Unconfigured(window) => window,
+            Self::Configured { window, .. } => window,
         }
     }
-}
 
-impl Into<Window> for PendingWindow {
-    fn into(self) -> Window {
-        self.inner
+    pub fn configured(&self) -> bool {
+        matches!(self, Self::Configured { .. })
     }
-}
-
-pub struct UnmappedTile {
-    pub inner: Tile,
-    pub last_output: Option<Output>,
-    pub last_workspace_idx: Option<usize>,
 }

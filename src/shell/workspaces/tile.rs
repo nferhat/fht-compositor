@@ -251,7 +251,10 @@ impl Tile {
     }
 
     pub fn is_closing(&self) -> bool {
-        matches!(self.open_close_animation, Some(OpenCloseAnimation::Closing { .. }))
+        matches!(
+            self.open_close_animation,
+            Some(OpenCloseAnimation::Closing { .. })
+        )
     }
 
     pub fn clear_close_snapshot(&mut self) {

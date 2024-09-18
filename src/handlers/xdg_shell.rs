@@ -18,7 +18,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::shell::KeyboardFocusTarget;
-use crate::state::State;
+use crate::state::{State, UnmappedWindow};
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -29,17 +29,19 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         let window = Window::new(toplevel);
         add_window_pre_commit_hook(&window);
-        self.fht.pending_windows.push(window.into());
+        self.fht
+            .unmapped_windows
+            .push(UnmappedWindow::Unconfigured(window));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(idx) = self.fht.unmapped_tiles.iter().position(|tile| {
-            tile.inner
+        if let Some(idx) = self.fht.unmapped_windows.iter().position(|unmapped| {
+            unmapped
                 .window()
                 .wl_surface()
                 .is_some_and(|s| &*s == surface.wl_surface())
         }) {
-            let _unmapped_tile = self.fht.unmapped_tiles.remove(idx);
+            let _unmapped_tile = self.fht.unmapped_windows.remove(idx);
             return;
         }
 
@@ -186,9 +188,9 @@ impl XdgShellHandler for State {
 
                     let ws = self.fht.workspace_for_window_mut(&window).unwrap();
                     let tile = ws.remove_tile(&window, true).unwrap();
-
+                    let (window, border_config) = tile.into_window();
                     let new_ws = self.fht.wset_mut_for(&output).active_mut();
-                    new_ws.insert_tile(tile, true);
+                    new_ws.insert_window(window, border_config, true);
                 }
 
                 let ws = self.fht.workspace_for_window_mut(&window).unwrap();

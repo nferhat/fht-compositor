@@ -3,24 +3,20 @@ pub mod focus_target;
 pub mod workspaces;
 
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface,
+    PopupKind, WindowSurfaceType,
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Monotonic, Point, Rectangle, Serial, Time};
-use smithay::wayland::compositor::with_states;
+use smithay::utils::{Logical, Monotonic, Point, Rectangle, Time};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
-use smithay::wayland::shell::xdg::{PopupSurface, XdgToplevelSurfaceData};
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgToplevelState;
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+use smithay::wayland::shell::xdg::PopupSurface;
+use workspaces::WorkspaceId;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use self::workspaces::tile::Tile;
 use self::workspaces::Workspace;
-use crate::config::CONFIG;
-use crate::state::{Fht, UnmappedTile};
-use crate::utils::RectCenterExt;
+use crate::state::Fht;
 use crate::utils::output::OutputExt;
 use crate::window::Window;
 
@@ -54,7 +50,7 @@ impl Fht {
 
         let window_surface_under = |(window, mut loc): (Window, Point<i32, Logical>)| {
             loc -= window.render_offset(); // the passed in location is without the window view
-                                          // offset
+                                           // offset
             let window_wl_surface = window.wl_surface().unwrap();
             // NOTE: window location passed here is already global, since its from
             // `Fht::window_geometry`
@@ -97,8 +93,7 @@ impl Fht {
             })
         {
             under = Some(layer_focus)
-        } else if let Some(window_focus) = wset.window_under(point).and_then(window_surface_under)
-        {
+        } else if let Some(window_focus) = wset.window_under(point).and_then(window_surface_under) {
             under = Some(window_focus)
         } else if let Some(layer_focus) = layer_map
             .layer_under(Layer::Bottom, point)
@@ -119,10 +114,7 @@ impl Fht {
             .find_map(|(_, wset)| wset.find_window(surface))
     }
 
-    pub fn find_window_and_workspace(
-        &self,
-        surface: &WlSurface,
-    ) -> Option<(Window, &Workspace)> {
+    pub fn find_window_and_workspace(&self, surface: &WlSurface) -> Option<(Window, &Workspace)> {
         self.workspaces()
             .find_map(|(_, wset)| wset.find_window_and_workspace(surface))
     }
@@ -141,7 +133,8 @@ impl Fht {
     }
 
     pub fn workspace_for_window(&self, window: &Window) -> Option<&Workspace> {
-        self.workspaces().find_map(|(_, wset)| wset.workspace_for_window(window))
+        self.workspaces()
+            .find_map(|(_, wset)| wset.workspace_for_window(window))
     }
 
     pub fn workspace_for_window_mut(&mut self, window: &Window) -> Option<&mut Workspace> {
@@ -154,6 +147,11 @@ impl Fht {
             wset.workspace_for_window(window)
                 .and_then(|ws| ws.window_geometry(window))
         })
+    }
+
+    pub fn get_workspace_mut(&mut self, id: WorkspaceId) -> Option<&mut Workspace> {
+        self.workspaces_mut()
+            .find_map(|(_, wset)| wset.workspaces_mut().find(|ws| ws.id() == id))
     }
 
     pub fn window_visual_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
@@ -183,155 +181,6 @@ impl Fht {
                     None
                 })
             })
-    }
-
-    pub fn prepare_pending_window(&mut self, window: Window) {
-        let mut output = self.focus_state.output.clone().unwrap();
-        let toplevel = window.toplevel();
-        let wl_surface = toplevel.wl_surface();
-
-        // Get the matching mapping setting, if the user specified one.
-        let workspace_idx = self.wset_for(&output).get_active_idx();
-        let (title, app_id) = with_states(&wl_surface, |states| {
-            let data = states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap();
-            (
-                data.title.clone().unwrap_or_default(),
-                data.app_id.clone().unwrap_or_default(),
-            )
-        });
-
-        let map_settings = CONFIG
-            .rules
-            .iter()
-            .find(|(rules, _)| {
-                rules
-                    .iter()
-                    .any(|r| r.matches(&title, &app_id, workspace_idx))
-            })
-            .map(|(_, settings)| settings.clone())
-            .unwrap_or_default();
-
-        // Apply rules
-        //
-        // First start with the output since every operation (mapping,  fullscreening, etc...) will
-        // be done relative to the output.
-        if let Some(target_output) = map_settings
-            .output
-            .as_ref()
-            .and_then(|name| self.outputs().find(|o| o.name().as_str() == name))
-            .cloned()
-        {
-            output = target_output;
-        }
-
-        let wset = self.wset_mut_for(&output);
-        let mut workspace_idx = match map_settings.workspace {
-            None => wset.get_active_idx(),
-            Some(idx) => idx.clamp(0, 9),
-        };
-
-        // Even if the user set rules, we still always prefer the output and workspace of this
-        // window's toplevel parent.
-        //
-        // You can for example imagine a gtk4 application opening a child window or prompt, for
-        // example. Or, opening a new window from your browser main one.
-        if let Some((parent_index, parent_output)) = toplevel.parent().and_then(|parent_surface| {
-            self.workspaces().find_map(|(output, wset)| {
-                let idx = wset
-                    .workspaces()
-                    .enumerate()
-                    .position(|(_, ws)| ws.has_surface(&parent_surface))?;
-                Some((idx, output.clone()))
-            })
-        }) {
-            workspace_idx = parent_index;
-            output = parent_output;
-        }
-
-        let wset = self.wset_mut_for(&output);
-        let workspace = wset.get_workspace_mut(workspace_idx);
-
-        // Pre compute window geometry for insertion.
-        let mut tile = Tile::new(window.clone(), None);
-        workspace.prepare_window_geometry(&mut tile);
-
-        // Client side-decorations
-        let allow_csd = map_settings
-            .allow_csd
-            .unwrap_or(CONFIG.decoration.allow_csd);
-        toplevel.with_pending_state(|state| {
-            if allow_csd {
-                state.decoration_mode = Some(DecorationMode::ClientSide);
-            } else {
-                state.decoration_mode = Some(DecorationMode::ServerSide);
-                // For some reason clients still draw decorations even when asked not to.
-                // Some dont if you set their state to tiled (wow)
-                state.states.set(XdgToplevelState::TiledTop);
-                state.states.set(XdgToplevelState::TiledLeft);
-                state.states.set(XdgToplevelState::TiledRight);
-                state.states.set(XdgToplevelState::TiledBottom);
-            }
-        });
-
-        tile.window().toplevel().send_configure();
-
-        self.unmapped_tiles.push(UnmappedTile {
-            inner: tile,
-            last_output: Some(output),
-            last_workspace_idx: Some(workspace_idx),
-        })
-    }
-
-    pub fn map_tile(&mut self, unmapped_tile: UnmappedTile) -> Output {
-        let loop_handle = self.loop_handle.clone();
-
-        // Make sure we have valid values before insertion.
-        let UnmappedTile {
-            inner: tile,
-            last_output,
-            last_workspace_idx,
-        } = unmapped_tile;
-        let wl_surface = tile.window().wl_surface().unwrap().into_owned();
-        let output = last_output.unwrap_or_else(|| self.active_output());
-        let output_loc = output.current_location();
-        let wset = self.wset_mut_for(&output);
-        let active_idx = wset.get_active_idx();
-        let workspace_idx = last_workspace_idx.unwrap_or(active_idx);
-
-        let is_active = workspace_idx == wset.get_active_idx();
-        let workspace = wset.get_workspace_mut(workspace_idx);
-
-        let window = tile.window().clone();
-        workspace.insert_tile(tile, false);
-
-        let tile = workspace.find_tile_mut(&wl_surface).unwrap();
-        tile.start_opening_animation();
-        // we dont want to animate the tile now.
-        tile.stop_location_animation();
-        let mut tile_geo = tile.window_geometry();
-        tile_geo.loc += output_loc;
-
-        // From using the compositor opening a window when a switch is being done feels more
-        // natural when the window gets focus, even if focus_new_windows is none.
-        let is_switching = wset.has_switch_animation();
-        let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
-
-        if should_focus {
-            let center = tile_geo.center();
-            loop_handle.insert_idle(move |state| {
-                if CONFIG.general.cursor_warps {
-                    state.move_pointer(center.to_f64());
-                }
-                state.set_focus_target(Some(window.clone().into()));
-            });
-        }
-
-        output
     }
 
     pub fn unconstrain_popup(&self, popup: &PopupSurface) {
