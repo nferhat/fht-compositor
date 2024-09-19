@@ -33,7 +33,6 @@ pub struct Tile {
     location: Point<i32, Logical>,
     cfact: f32,
     rounded_corner_damage: ExtraDamage,
-    temporary_render_location: Option<Point<i32, Logical>>,
     location_animation: Option<LocationAnimation>,
     opening_animation: Option<Animation<f64>>,
     // We prepare the close animation snapshot render elements here before running
@@ -60,7 +59,6 @@ impl Tile {
             location: Point::default(),
             cfact: 1.0,
             rounded_corner_damage: ExtraDamage::default(),
-            temporary_render_location: None,
             location_animation: None,
             opening_animation: None,
             close_animation_snapshot: None,
@@ -212,7 +210,7 @@ impl Tile {
     }
 
     pub fn render_location(&self) -> Point<i32, Logical> {
-        let mut render_location = self.temporary_render_location.unwrap_or(self.location);
+        let mut render_location = self.location;
         if let Some(offset) = self.location_animation.as_ref().map(LocationAnimation::value) {
             render_location += offset;
         }
