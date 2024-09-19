@@ -96,11 +96,10 @@ impl X11Data {
             _dmabuf_default_feedback: dmabuf_default_feedback,
         };
 
-        // We create 2 x11 windows to simulate two different outputs.
         data.new_surface(state)
             .expect("Failed to create x11 surfaces");
-        data.new_surface(state)
-            .expect("Failed to create 2nd x11 surfaces");
+        // data.new_surface(state)
+        //     .expect("Failed to create 2nd x11 surfaces");
 
         state
             .loop_handle

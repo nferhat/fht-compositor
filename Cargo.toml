@@ -1,7 +1,7 @@
 # {{{ Workspace
 
 [workspace]
-members = ["fht-config"]
+members = ["fht-compositor-config"]
 resolver = "2"
 
 [workspace.package]
@@ -23,9 +23,6 @@ zvariant = { version = "4.1.2", features = ["option-as-array"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 # Config file support
-xdg = "2.5.2"
-ron = "0.8.1"
-serde = { version = "1.0.203", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
@@ -62,12 +59,9 @@ readme = "README.md"
 
 [dependencies]
 anyhow.workspace = true
-indexmap = { version = "2.2.6", features = ["serde"] }
+indexmap = { version = "2.2.6" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde.workspace = true
-xdg.workspace = true
-ron.workspace = true
 smithay = { workspace = true, features = [
     "desktop",
     "wayland_frontend",
@@ -75,13 +69,10 @@ smithay = { workspace = true, features = [
     "backend_libinput"
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
-colors-transform = "0.2.11"
-regex = "1.10.5"
 bitflags = "2.6.0"
 thiserror = "1.0.61"
 libc = "0.2.155"
 profiling.workspace = true
-keyframe = { version = "1.1.1", default-features = false }
 zbus = { workspace = true, optional = true }
 zvariant = { workspace = true, optional = true }
 uuid = { version = "1.9.1", features = ["v4"] }
@@ -89,13 +80,17 @@ pipewire = { version = "0.8.0", optional = true }
 async-std = { workspace = true, features = ["unstable"] }
 xcursor = "0.3.5"
 x11rb = { version = "0.12.0", optional = true, default-features = false, features = ["composite"] }
-fht-config.path = "./fht-config"
+fht-compositor-config.path = "./fht-compositor-config"
 glam = "0.28.0"
 # TODO: Update this to 0.27 when smithay updates glow from 0.12 to 0.13
 egui = "0.23"
 egui_glow = "0.23"
 egui_extras = "0.23"
 rustc-hash = "2.0.0"
+fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0" }
+# TODO: We use this instead of std::sync::MappedMutexGuard
+# See tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
+owning_ref = "0.4.1"
 
 [features]
 default = ["egl", "x11_backend", "udev_backend", "all-portals"]

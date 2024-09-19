@@ -6,13 +6,13 @@ use smithay::utils::{Logical, Rectangle};
 use super::pixel_shader_element::FhtPixelShaderElement;
 use super::shaders::Shaders;
 use super::AsGlowRenderer;
-use crate::config::ColorConfig;
+use fht_compositor_config::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RoundedOutlineSettings {
     pub half_thickness: f32,
     pub radius: f32,
-    pub color: ColorConfig,
+    pub color: Color,
 }
 
 pub struct RoundedOutlineElement; // this does nothing expect be there.
@@ -33,8 +33,8 @@ impl RoundedOutlineElement {
         let program = Self::program(renderer);
 
         let (start_color, end_color, angle) = match settings.color {
-            ColorConfig::Solid(color) => (color, color, 0.0),
-            ColorConfig::Gradient { start, end, angle } => (start, end, angle),
+            Color::Solid(color) => (color, color, 0.0),
+            Color::Gradient { start, end, angle } => (start, end, angle),
         };
         let mut element = PixelShaderElement::new(
             program,

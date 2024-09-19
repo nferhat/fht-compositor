@@ -11,14 +11,13 @@ use smithay::backend::renderer::element::{Element as _, Id, Kind};
 use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::utils::{Logical, Monotonic, Point, Rectangle, Scale, Size, Time, Transform};
+use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
+use fht_animation::{Animation, AnimationCurve};
 
 use super::tile::TileRenderElement;
-use crate::config::CONFIG;
 use crate::fht_render_elements;
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
-use crate::utils::animation::Animation;
 
 const CLOSE_SCALE_THRESHOLD: f64 = 0.8;
 
@@ -34,7 +33,7 @@ pub struct ClosingTile {
     // We don't render with a border since we don't really know if the tile was focused or not,
     // plus, its not a really noticable detail
     location: Point<i32, Logical>,
-    progress: Animation,
+    progress: Animation<f64>,
 }
 
 impl ClosingTile {
@@ -42,23 +41,20 @@ impl ClosingTile {
         render_elements: Vec<TileRenderElement<GlowRenderer>>,
         location: Point<i32, Logical>,
         size: Size<i32, Logical>,
-    ) -> Option<Self> {
-        Some(Self {
+        duration: Duration,
+        curve: AnimationCurve,
+    ) -> Self {
+        Self {
             render_elements: RefCell::new(render_elements),
             texture: OnceCell::new(),
             size,
             location,
-            progress: Animation::new(
-                1.0,
-                0.0,
-                CONFIG.animation.window_open_close.curve,
-                Duration::from_millis(CONFIG.animation.window_open_close.duration),
-            )?,
-        })
+            progress: Animation::new(1.0, 0.0, duration).with_curve(curve),
+        }
     }
 
-    pub fn advance_animations(&mut self, time: Time<Monotonic>) {
-        self.progress.set_current_time(time.into());
+    pub fn advance_animations(&mut self, now: Duration) {
+        self.progress.tick(now);
     }
 
     pub fn is_finished(&self) -> bool {

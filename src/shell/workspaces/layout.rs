@@ -22,10 +22,10 @@
 use std::cmp::min;
 use std::ops::Mul;
 
-use serde::{Deserialize, Serialize};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Size};
+use fht_compositor_config::WorkspaceLayout;
 
 use super::tile::Tile;
 use crate::utils::output::OutputExt;
@@ -42,14 +42,6 @@ pub struct Layout {
     // eachother. Up to the user
     inner_gaps: i32,
     outer_gaps: i32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum WorkspaceLayout {
-    Tile,
-    BottomStack,
-    CenteredMaster,
-    Floating,
 }
 
 impl Layout {

@@ -22,25 +22,23 @@ pub mod layout;
 pub mod tile;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use closing_tile::{ClosingTile, ClosingTileRenderElement};
+use fht_animation::{Animation, AnimationCurve};
+use fht_compositor_config::{InsertWindowStrategy, WorkspaceSwitchAnimationDirection};
 use layout::Layout;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Time};
+use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale};
 
-pub use self::layout::WorkspaceLayout;
 use self::tile::{Tile, TileRenderElement};
-use crate::config::{
-    BorderConfig, InsertWindowStrategy, WorkspaceSwitchAnimationDirection, CONFIG,
-};
 use crate::fht_render_elements;
 use crate::renderer::FhtRenderer;
-use crate::utils::animation::Animation;
 use crate::utils::output::OutputExt;
 use crate::window::Window;
 
@@ -49,17 +47,21 @@ pub struct WorkspaceSet {
     workspaces: Vec<Workspace>,
     switch_animation: Option<WorkspaceSwitchAnimation>,
     active_idx: usize,
+    config: Arc<fht_compositor_config::Config>,
 }
 
 #[allow(dead_code)]
 impl WorkspaceSet {
-    pub fn new(output: Output) -> Self {
-        let workspaces = (0..9).map(|_| Workspace::new(output.clone())).collect();
+    pub fn new(output: Output, config: Arc<fht_compositor_config::Config>) -> Self {
+        let workspaces = (0..9)
+            .map(|_| Workspace::new(output.clone(), Arc::clone(&config)))
+            .collect();
         Self {
             output: output.clone(),
             workspaces,
             switch_animation: None,
             active_idx: 0,
+            config,
         }
     }
 
@@ -71,15 +73,17 @@ impl WorkspaceSet {
         self.workspaces_mut().for_each(Workspace::refresh);
     }
 
-    pub fn reload_config(&mut self) {
+    pub fn reload_config(&mut self, config: &Arc<fht_compositor_config::Config>) {
+        self.config = Arc::clone(&config);
         for workspace in &mut self.workspaces {
+            workspace.config = Arc::clone(&config);
             workspace.layout = Layout::new(
                 &self.output,
-                CONFIG.general.layouts.clone(),
-                CONFIG.general.nmaster,
-                CONFIG.general.mwfact,
-                CONFIG.general.inner_gaps,
-                CONFIG.general.outer_gaps,
+                config.general.layouts.clone(),
+                config.general.nmaster,
+                config.general.mwfact,
+                config.general.inner_gaps,
+                config.general.outer_gaps,
             );
         }
     }
@@ -96,7 +100,12 @@ impl WorkspaceSet {
             return None;
         }
 
-        self.switch_animation = Some(WorkspaceSwitchAnimation::new(target_idx));
+        self.switch_animation = Some(WorkspaceSwitchAnimation::new(
+            target_idx,
+            self.config.animations.workspace_switch.duration,
+            self.config.animations.workspace_switch.curve,
+            self.config.animations.workspace_switch.direction,
+        ));
         self.workspaces[target_idx].focused()
     }
 
@@ -284,7 +293,7 @@ impl WorkspaceSet {
         self.switch_animation.is_some()
     }
 
-    pub fn advance_animations(&mut self, current_time: Time<Monotonic>) -> bool {
+    pub fn advance_animations(&mut self, now: Duration) -> bool {
         let mut ret = false;
 
         if let Some(WorkspaceSwitchAnimation { target_idx, .. }) =
@@ -293,22 +302,22 @@ impl WorkspaceSet {
             self.active_idx = target_idx;
         }
         if let Some(animation) = self.switch_animation.as_mut() {
-            animation.animation.set_current_time(current_time);
+            animation.animation.tick(now);
             ret = true;
         }
 
         for ws in self.workspaces_mut() {
             if let Some(FullscreenTile { inner, .. }) = ws.fullscreen.as_mut() {
-                ret |= inner.advance_animations(current_time);
+                ret |= inner.advance_animations(now);
             }
 
             for tile in &mut ws.tiles {
-                ret |= tile.advance_animations(current_time);
+                ret |= tile.advance_animations(now);
             }
 
             for closing_tile in &mut ws.closing_tiles {
                 ret = true;
-                closing_tile.advance_animations(current_time);
+                closing_tile.advance_animations(now);
             }
         }
 
@@ -376,26 +385,27 @@ impl WorkspaceSet {
 }
 
 pub struct WorkspaceSwitchAnimation {
-    pub animation: Animation,
-    pub target_idx: usize,
+    animation: Animation<f64>,
+    direction: WorkspaceSwitchAnimationDirection,
+    target_idx: usize,
 }
 
 impl WorkspaceSwitchAnimation {
-    fn new(target_idx: usize) -> Self {
+    fn new(
+        target_idx: usize,
+        duration: Duration,
+        curve: AnimationCurve,
+        direction: WorkspaceSwitchAnimationDirection,
+    ) -> Self {
         // When going to the next workspace, the values describes the offset of the next workspace.
         // When going to the previous workspace, the values describe the offset of the current
         // workspace
 
-        let animation = Animation::new(
-            0.0,
-            1.0,
-            CONFIG.animation.workspace_switch.curve,
-            Duration::from_millis(CONFIG.animation.workspace_switch.duration),
-        )
-        .expect("Should never fail!");
+        let animation = Animation::new(0.0, 1.0, duration).with_curve(curve);
 
         Self {
             animation,
+            direction,
             target_idx,
         }
     }
@@ -410,7 +420,7 @@ impl WorkspaceSwitchAnimation {
             // Focusing the next offset.
             // For the active, how much should we *remove* from the current position
             // For the target, how much should we add to the current position
-            match CONFIG.animation.workspace_switch.direction {
+            match self.direction {
                 WorkspaceSwitchAnimationDirection::Horizontal => {
                     let offset = (value * area.size.w as f64).round() as i32;
                     (
@@ -430,7 +440,7 @@ impl WorkspaceSwitchAnimation {
             // Focusing a previous workspace
             // For the active, how much should we add to tyhe current position
             // For the target, how much should we remove from the current position.
-            match CONFIG.animation.workspace_switch.direction {
+            match self.direction {
                 WorkspaceSwitchAnimationDirection::Horizontal => {
                     let offset = (value * area.size.w as f64).round() as i32;
                     (
@@ -480,6 +490,7 @@ pub struct Workspace {
     // the user. When he releases the mouse button, the window under the mouse cursor and the
     // grabbed one will swap.
     interactive_swap: Option<InteractiveSwap>,
+    config: Arc<fht_compositor_config::Config>,
 }
 
 struct InteractiveSwap {
@@ -495,14 +506,14 @@ fht_render_elements! {
 }
 
 impl Workspace {
-    pub fn new(output: Output) -> Self {
+    pub fn new(output: Output, config: Arc<fht_compositor_config::Config>) -> Self {
         let layout = Layout::new(
             &output,
-            CONFIG.general.layouts.clone(),
-            CONFIG.general.nmaster,
-            CONFIG.general.mwfact,
-            CONFIG.general.inner_gaps,
-            CONFIG.general.outer_gaps,
+            config.general.layouts.clone(),
+            config.general.nmaster,
+            config.general.mwfact,
+            config.general.inner_gaps,
+            config.general.outer_gaps,
         );
         Self {
             output,
@@ -513,6 +524,7 @@ impl Workspace {
             fullscreen: None,
             id: WorkspaceId::unique(),
             interactive_swap: None,
+            config,
         }
     }
 
@@ -526,12 +538,12 @@ impl Workspace {
 
     pub fn merge_with(&mut self, mut other: Self) {
         if let Some(fullscreen) = other.fullscreen.take() {
-            let (window, border_config) = fullscreen.inner.into_window();
-            self.insert_window(window, border_config, true);
+            let window = fullscreen.inner.into_window();
+            self.insert_window(window, true);
         }
 
-        for (window, border_config) in other.tiles.into_iter().map(Tile::into_window) {
-            self.insert_window(window, border_config, true);
+        for window in other.tiles.into_iter().map(Tile::into_window) {
+            self.insert_window(window, true);
         }
     }
 
@@ -585,7 +597,9 @@ impl Workspace {
         let old_len = self.tiles.len();
         self.tiles.retain(|tile| {
             if !tile.window().alive() {
-                let _ = self.interactive_swap.take_if(|s| s.window == *tile.window());
+                let _ = self
+                    .interactive_swap
+                    .take_if(|s| s.window == *tile.window());
                 false
             } else {
                 true
@@ -633,12 +647,7 @@ impl Workspace {
         // If we have a fullscreen, render it and off we go.
         if let Some(FullscreenTile { inner, .. }) = self.fullscreen.as_ref() {
             return inner
-                .render_elements(
-                    renderer,
-                    scale,
-                    CONFIG.decoration.focused_window_opacity,
-                    true,
-                )
+                .render_elements(renderer, scale, true)
                 .map(Into::into)
                 .collect();
         }
@@ -654,15 +663,7 @@ impl Workspace {
         }
 
         if let Some(tile) = self.focused_tile() {
-            render_elements.extend(
-                tile.render_elements(
-                    renderer,
-                    scale,
-                    CONFIG.decoration.focused_window_opacity,
-                    true,
-                )
-                .map(Into::into),
-            );
+            render_elements.extend(tile.render_elements(renderer, scale, true).map(Into::into));
         }
 
         for (idx, tile) in self.tiles().enumerate() {
@@ -670,14 +671,7 @@ impl Workspace {
                 continue;
             }
 
-            let elements = tile
-                .render_elements(
-                    renderer,
-                    scale,
-                    CONFIG.decoration.normal_window_opacity,
-                    false,
-                )
-                .map(Into::into);
+            let elements = tile.render_elements(renderer, scale, false).map(Into::into);
             render_elements.extend(elements);
         }
 
@@ -687,19 +681,14 @@ impl Workspace {
 
 // Inserting and removing elements
 impl Workspace {
-    pub fn insert_window(
-        &mut self,
-        window: Window,
-        border_config: Option<BorderConfig>,
-        animate: bool,
-    ) {
+    pub fn insert_window(&mut self, window: Window, animate: bool) {
         if self.has_window(&window) {
             return;
         }
 
         window.request_bounds(Some(self.output.geometry().size));
         window.configure_for_output(&self.output);
-        let mut tile = Tile::new(window.clone(), border_config);
+        let mut tile = Tile::new(window.clone(), Arc::clone(&self.config));
         tile.start_opening_animation();
 
         // NOTE: In the following code we dont call to send_pending_configure since arrange_tiles
@@ -714,7 +703,7 @@ impl Workspace {
         }
 
         if !tile.window().fullscreen() {
-            let new_idx = match CONFIG.general.insert_window_strategy {
+            let new_idx = match self.config.general.insert_window_strategy {
                 InsertWindowStrategy::EndOfSlaveStack => {
                     self.tiles.push(tile);
                     self.tiles.len() - 1
@@ -736,7 +725,7 @@ impl Workspace {
                 }
             };
 
-            if CONFIG.general.focus_new_windows {
+            if self.config.general.focus_new_windows {
                 self.focused_tile_idx = new_idx;
             }
         } else {
@@ -1031,8 +1020,8 @@ impl Workspace {
         self.tile_for(window).map(Tile::window_visual_geometry)
     }
 
-    pub fn prepare_window_geometry(&mut self, window: Window, border_config: Option<BorderConfig>) {
-        let mut tile = Tile::new(window, border_config);
+    pub fn prepare_window_geometry(&mut self, window: Window) {
+        let mut tile = Tile::new(window, Arc::clone(&self.config));
 
         if tile.window().maximized() {
             let usable_geo = self.layout.usable_geo();
@@ -1353,16 +1342,5 @@ pub struct FullscreenTile {
 impl PartialEq for FullscreenTile {
     fn eq(&self, other: &Self) -> bool {
         &self.inner == &other.inner
-    }
-}
-
-impl ToString for WorkspaceLayout {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Tile { .. } => "tile".into(),
-            Self::BottomStack { .. } => "bstack".into(),
-            Self::CenteredMaster { .. } => "cmaster".into(),
-            Self::Floating => "floating".into(),
-        }
     }
 }

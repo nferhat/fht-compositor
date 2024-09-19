@@ -3,7 +3,6 @@ use smithay::input::Seat;
 use smithay::reexports::wayland_server::protocol::wl_surface;
 use smithay::wayland::xdg_activation::{self, XdgActivationHandler};
 
-use crate::config::CONFIG;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
@@ -70,7 +69,7 @@ impl XdgActivationHandler for State {
                 .as_ref()
                 .is_some_and(|o| *o != output)
             {
-                if CONFIG.general.cursor_warps {
+                if self.fht.config.general.cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }

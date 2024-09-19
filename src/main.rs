@@ -10,14 +10,11 @@ use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use fht_config::Config;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
 use smithay::wayland::socket::ListeningSocketSource;
 use state::State;
-
-use crate::config::{CompositorConfig, CONFIG};
 
 mod backend;
 mod config;
@@ -100,28 +97,12 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         (dh, socket_name)
     };
 
-    if let Err(err) = config::init_config_file_watcher(&loop_handle) {
-        error!(?err, "Failed to start config file watcher!");
-    }
+    // if let Err(err) = config::init_config_file_watcher(&loop_handle) {
+    //     error!(?err, "Failed to start config file watcher!");
+    // }
     #[cfg(any(feature = "xdg-screencast-portal"))]
     if let Err(err) = portals::start(&loop_handle) {
         error!(?err, "Failed to start XDG portals")
-    }
-
-    // Load the configuration before the state, since the state itself uses the config.
-    let mut last_config_error = None;
-    match CompositorConfig::load() {
-        Ok(config) => {
-            info!("Loaded config");
-            // The config is always initialized to the default values as a failsafe.
-            // Update them now
-            CONFIG.set(config);
-        }
-        Err(err) => {
-            error!(?err, "Failed to load config");
-            last_config_error = Some(anyhow::anyhow!(err));
-            CONFIG.set(CompositorConfig::default())
-        }
     }
 
     let mut state = State::new(
@@ -130,7 +111,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         event_loop.get_signal(),
         socket_name.clone(),
     );
-    state.fht.last_config_error = last_config_error;
 
     std::env::set_var("WAYLAND_DISPLAY", &socket_name);
     std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");
@@ -138,7 +118,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
     std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
 
-    for cmd in &CONFIG.autostart {
+    for cmd in &state.fht.config.autostart {
         utils::spawn(cmd.clone());
     }
 

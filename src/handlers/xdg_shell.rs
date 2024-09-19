@@ -206,9 +206,9 @@ impl XdgShellHandler for State {
 
                     let ws = self.fht.workspace_for_window_mut(&window).unwrap();
                     let tile = ws.remove_tile(&window, true).unwrap();
-                    let (window, border_config) = tile.into_window();
+                    let window= tile.into_window();
                     let new_ws = self.fht.wset_mut_for(&output).active_mut();
-                    new_ws.insert_window(window, border_config, true);
+                    new_ws.insert_window(window, true);
                 }
 
                 let ws = self.fht.workspace_for_window_mut(&window).unwrap();

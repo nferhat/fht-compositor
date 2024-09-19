@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
+use fht_compositor_config::BorderOverrides;
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -57,10 +58,8 @@ use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
-use crate::config::{BorderConfig, CONFIG};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::tile::Tile;
 use crate::shell::workspaces::{WorkspaceId, WorkspaceSet};
 use crate::shell::KeyboardFocusTarget;
 use crate::utils::output::OutputExt;
@@ -189,7 +188,7 @@ impl State {
 
         // Advance animations.
         let current_time = self.fht.clock.now();
-        output_state.animations_running = self.fht.advance_animations(&output, current_time);
+        output_state.animations_running = self.fht.advance_animations(&output, current_time.into());
         drop(output_state);
 
         // Then ask the backend to render.
@@ -246,7 +245,8 @@ pub struct Fht {
     pub popups: PopupManager,
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
 
-    pub last_config_error: Option<anyhow::Error>,
+    pub config: Arc<fht_compositor_config::Config>,
+    pub last_config_error: Option<fht_compositor_config::Error>,
 
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire_initialised: std::sync::Once,
@@ -271,6 +271,17 @@ impl Fht {
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
     ) -> Self {
+        let mut last_config_error = None;
+        // TODO: Get path from a cli argument or something
+        let config = match fht_compositor_config::load(None) {
+            Ok(config) => config,
+            Err(err) => {
+                error!(?err, "Failed to load configuration, using default");
+                last_config_error = Some(err);
+                Default::default()
+            }
+        };
+
         let clock = Clock::<Monotonic>::new();
 
         let compositor_state = CompositorState::new_v6::<State>(dh);
@@ -316,9 +327,9 @@ impl Fht {
         let mut seat = seat_state.new_wl_seat(dh, "seat0");
 
         // Dont let the user crash the compositor with invalid config
-        let keyboard_config = &CONFIG.input.keyboard;
+        let keyboard_config = &config.input.keyboard;
         let res = seat.add_keyboard(
-            keyboard_config.get_xkb_config(),
+            keyboard_config.xkb_config(),
             keyboard_config.repeat_delay,
             keyboard_config.repeat_rate,
         );
@@ -338,7 +349,7 @@ impl Fht {
             }
         };
         let pointer = seat.add_pointer();
-        let cursor_theme_manager = CursorThemeManager::new();
+        let cursor_theme_manager = CursorThemeManager::new(config.cursor.clone());
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 
         Self {
@@ -365,7 +376,8 @@ impl Fht {
             interactive_grab_active: false,
             root_surfaces: FxHashMap::default(),
 
-            last_config_error: None,
+            config: Arc::new(config),
+            last_config_error,
 
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire_initialised: std::sync::Once::new(),
@@ -384,9 +396,7 @@ impl Fht {
             xdg_shell_state,
         }
     }
-}
 
-impl Fht {
     pub fn outputs(&self) -> impl Iterator<Item = &Output> {
         self.workspaces.keys()
     }
@@ -408,11 +418,11 @@ impl Fht {
         debug!(?x, y = 0, "Using fallback output location");
         output.change_current_state(None, None, None, Some((x, 0).into()));
 
-        let workspace_set = WorkspaceSet::new(output.clone());
+        let workspace_set = WorkspaceSet::new(output.clone(), Arc::clone(&self.config));
         self.workspaces.insert(output.clone(), workspace_set);
 
         // Focus output now.
-        if CONFIG.general.cursor_warps {
+        if self.config.general.cursor_warps {
             let center = output.geometry().center();
             self.loop_handle.insert_idle(move |state| {
                 state.move_pointer(center.to_f64());
@@ -423,7 +433,7 @@ impl Fht {
 
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output");
-        let mut removed_wset = self
+        let removed_wset = self
             .workspaces
             .swap_remove(output)
             .expect("Tried to remove a non-existing output!");
@@ -486,9 +496,7 @@ impl Fht {
             .get_mut(output)
             .expect("Tried to get the WorkspaceSet of a non-existing output!")
     }
-}
 
-impl Fht {
     #[profiling::function]
     pub fn send_frames(&self, output: &Output) {
         let time = self.clock.now();
@@ -760,6 +768,10 @@ impl Fht {
 
         output_presentation_feedback
     }
+
+    pub fn add_libinput_device(&mut self, device: input::Device) {
+        self.devices.push(device);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -793,13 +805,9 @@ pub struct FocusState {
 #[derive(Debug)]
 pub struct OutputState {
     pub render_state: RenderState,
-
     pub animations_running: bool,
-
     pub current_frame_sequence: u32,
-
     pub pending_screencopy: Option<Screencopy>,
-
     pub damage_tracker: OutputDamageTracker,
 }
 
@@ -875,9 +883,9 @@ impl RenderState {
 pub enum UnmappedWindow {
     Unconfigured(Window),
     Configured {
+        // A big different between an unconfigured and configured unmapped window is that the
+        // configured window will have a resolved set of window rules.
         window: Window,
-        border_config: Option<BorderConfig>,
-        /// The workspace to open the window on
         workspace_id: WorkspaceId,
     },
 }
@@ -892,5 +900,169 @@ impl UnmappedWindow {
 
     pub fn configured(&self) -> bool {
         matches!(self, Self::Configured { .. })
+    }
+}
+
+// Resolved window rules that get computed from the configuration.
+// They keep around actual values the user specified.
+//
+// Resolving window rules is combined, as in the it will apply all the matching rules from the
+// config only the resolved window rule set.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedWindowRules {
+    // Border overrides gets applied to the border config when we need the window-specific border
+    // config with rules applied (for example when rendering)
+    pub border_overrides: BorderOverrides,
+    pub open_on_output: Option<String>,
+    pub open_on_workspace: Option<usize>,
+    pub opacity: Option<f32>,
+    pub allow_csd: Option<bool>,
+    pub maximized: Option<bool>,
+    pub fullscreen: Option<bool>,
+}
+
+impl ResolvedWindowRules {
+    pub fn resolve(
+        window: &Window,
+        rules: &[fht_compositor_config::WindowRule],
+        current_output: String,
+        current_workspace_idx: usize,
+        is_focused: bool,
+    ) -> Self {
+        let mut resolved_rules = ResolvedWindowRules::default();
+
+        for rule in rules.iter().filter(|rule| {
+            rule_matches(
+                rule,
+                window,
+                &current_output,
+                current_workspace_idx,
+                is_focused,
+            )
+        }) {
+            resolved_rules.border_overrides = resolved_rules
+                .border_overrides
+                .merge_with(rule.border_overrides);
+            if let Some(open_on_output) = &rule.open_on_output {
+                resolved_rules.open_on_output = Some(open_on_output.clone())
+            }
+
+            if let Some(open_on_workspace) = &rule.open_on_workspace {
+                resolved_rules.open_on_workspace = Some(open_on_workspace.clone())
+            }
+
+            if let Some(opacity) = rule.opacity {
+                resolved_rules.opacity = Some(opacity)
+            }
+
+            if let Some(allow_csd) = rule.allow_csd {
+                resolved_rules.allow_csd = Some(allow_csd)
+            }
+
+            if let Some(maximized) = rule.maximized {
+                resolved_rules.maximized = Some(maximized)
+            }
+
+            if let Some(fullscreen) = rule.fullscreen {
+                resolved_rules.fullscreen = Some(fullscreen)
+            }
+        }
+
+        resolved_rules
+    }
+}
+
+fn rule_matches(
+    rule: &fht_compositor_config::WindowRule,
+    window: &Window,
+    current_output: &str,
+    current_workspace_idx: usize,
+    is_focused: bool,
+) -> bool {
+    if rule.match_all {
+        // When the user wants to match all the match criteria onto the window, there's two
+        // considerations to be done
+        // - Only specified criteria should be matched
+        // - If the window does not have a app_id and title, the match_title and match_app_id will
+        //   be skipped (for not being relevant, maybe not matching would be better?)
+        if let Some(window_title) = window.title() {
+            if !rule
+                .match_title
+                .iter()
+                .any(|regex| regex.is_match(&window_title))
+            {
+                return false;
+            }
+        }
+
+        if let Some(window_app_id) = window.app_id() {
+            if !rule
+                .match_app_id
+                .iter()
+                .any(|regex| regex.is_match(&window_app_id))
+            {
+                return false;
+            }
+        }
+
+        if let Some(rule_output) = rule.on_output.as_ref() {
+            if rule_output != current_output {
+                return false;
+            }
+        }
+
+        if let Some(on_workspace) = rule.on_workspace {
+            if on_workspace != current_workspace_idx {
+                return false;
+            }
+        }
+
+        if let Some(rule_is_focused) = rule.is_focused {
+            if rule_is_focused != is_focused {
+                return false;
+            }
+        }
+
+        true
+    } else {
+        if let Some(window_title) = window.title() {
+            if rule
+                .match_title
+                .iter()
+                .any(|regex| regex.is_match(&window_title))
+            {
+                return true;
+            }
+        }
+
+        if let Some(window_app_id) = window.app_id() {
+            if rule
+                .match_app_id
+                .iter()
+                .any(|regex| regex.is_match(&window_app_id))
+            {
+                return true;
+            }
+        }
+
+        if let Some(rule_output) = rule.on_output.as_ref() {
+            if *rule_output == current_output {
+                return true;
+            }
+        }
+
+        if let Some(on_workspace) = rule.on_workspace {
+            if on_workspace == current_workspace_idx {
+                return true;
+            }
+        }
+
+        if let Some(rule_is_focused) = rule.is_focused {
+            if rule_is_focused == is_focused {
+                return true;
+            }
+        }
+
+        false
     }
 }

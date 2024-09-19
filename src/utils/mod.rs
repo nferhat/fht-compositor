@@ -4,7 +4,6 @@ use std::process::Stdio;
 
 use smithay::utils::{Coordinate, Point, Rectangle};
 
-pub mod animation;
 #[cfg(feature = "dbus")]
 pub mod dbus;
 #[cfg(feature = "udev_backend")]

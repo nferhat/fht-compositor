@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use owning_ref::MutexGuardRef;
 use smithay::backend::renderer::element;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
@@ -26,6 +27,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 
 use crate::renderer::FhtRenderer;
+use crate::state::ResolvedWindowRules;
 
 #[derive(Debug, Clone)]
 pub struct Window {
@@ -66,12 +68,18 @@ struct WindowInner {
     data: Mutex<WindowData>,
 }
 
+// NOTE: This type is public just for the sake of getting the rules out of the window
+// It is not meant to be accessed by the rest of the compositor logic, but owning_ref requires that
+// the type is public, soo, can't do much about that :/
 #[derive(Debug)]
-struct WindowData {
+pub struct WindowData {
     bbox: Rectangle<i32, Logical>,
     entered_outputs: HashMap<WeakOutput, Rectangle<i32, Logical>>,
     offscreen_element_id: Option<element::Id>,
     pre_commit_hook_id: Option<HookId>,
+    // Rules need to be re-resolved when window state change
+    rules: ResolvedWindowRules,
+    need_to_resolve_rules: bool,
 }
 
 impl Window {
@@ -85,6 +93,8 @@ impl Window {
                     entered_outputs: HashMap::new(),
                     offscreen_element_id: None,
                     pre_commit_hook_id: None,
+                    rules: ResolvedWindowRules::default(),
+                    need_to_resolve_rules: false,
                 }),
             }),
         }
@@ -100,6 +110,17 @@ impl Window {
 
     pub fn send_configure(&self) -> Serial {
         self.toplevel().send_configure()
+    }
+
+    pub fn set_rules(&self, rules: ResolvedWindowRules) {
+        let mut guard = self.inner.data.lock().unwrap();
+        guard.rules = rules;
+    }
+
+    pub fn rules(&self) -> MutexGuardRef<WindowData, ResolvedWindowRules> {
+        // Mutex madness, and interior mutability, I hate you :star_struck:
+        let guard = self.inner.data.lock().unwrap();
+        MutexGuardRef::new(guard).map(|data| &data.rules)
     }
 
     pub fn request_size(&self, new_size: Size<i32, Logical>) {

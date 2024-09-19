@@ -1,0 +1,210 @@
+# fht-compositor config.
+#
+# This config is not exhaustive, just a starter for you to change.
+# You will be able to find all configuration keys on the wiki. (when it's done)
+
+# Environment variables, if you need to set some before anything else starts
+# (including the autostart section!)
+# env.key = "val"
+
+autostart = [
+  "dex -a", # autostart XDG programs
+  "swaybg -i ~/.config/wallpaper.jpg",
+]
+
+# Should the compositor warp the cursor arbitrarily (for example when focusing window,
+# when an output is added, etc...)
+cursor-warps = true
+# Should the compositor focus new windows, or just insert it without focusing.
+focus-new-windows = true
+# Layout settings.
+#
+# Currently three layouts exist: tile, bottom_stack, and centered_master (all from dwm patches)
+# (and floating which disables all layouting logic)
+#
+# The layout logic is very similar to dwm's, you have one or more master windows (determined
+# by nmaster), a factor that divies the screen space between the master stack and the slave stack,
+# and optionally gaps.
+layouts = ["tile", "floating"]
+# These values are set on a per-workspace basis, and can be changed transiently (before any config
+# reload, which will set them to whatever value is here)
+# See keybinds section
+nmaster = 1
+mwfact = 0.5
+outer-gaps = 20
+inner-gaps = 5
+
+[cursor]
+# Cursor theme. The compositor can also read `XCURSOR_THEME` and `XCURSOR_SIZE` if
+# these values are not set.
+name = "Vimix"
+size = 32
+
+[decorations]
+# Should we allow clients to draw client-side decorations?
+#
+# This is basically the switch for allowing/disawolling windows to draw their own
+# titlebars, shadows, etc.
+#
+# You are recommended to set this to false, though GNOME applications (and also
+# libadwaita applications) don't respect this setting.
+allow-csd = true
+[decorations.border]
+thickness = 2
+radius = 20
+# You can either use solid border color, or use gradients, like the following
+#
+# ```toml
+# normal-color.start = "<start color>"
+# normal-color.end = "<end color>"
+# normal-color.angle = "<angle in degrees>"
+# ```
+#
+# Setting both the solid and gradient fields will cause an error!
+#
+# CSS-like color syntax is supported! so you have access to hsl functions
+normal-color = "#44474f"
+focused-color = "#87c7a1"
+
+# Input configuration
+[input]
+
+[input.keyboard]
+# Keyboard XKB settings, applied globally.
+# See: man xkeyboard-config(7)
+layout = "us" # layout = "fr"
+rules = ""
+repeat-rate = 50
+repeat-delay = 250
+
+# Per device input configuration.
+# The keyboard and mouse field are the same as the root input.keyboard/mouse fields.
+#
+# The devide is identified using the key into the table, by the following order:
+# - The device pretty name (aka the readable name, which you would see in a device manager)
+# - The device dev name
+# - The raw device path `/dev/input/XXXXX`
+
+# See: man libinput
+[input.per-device."AT Translated Set 2 keyboard"]
+disable = true # get rid of the device entierly
+keyboard.layout = "fr" # override layout
+[input.per-device."SynPS/2 Synaptics TouchPad"]
+mouse.tap-to-click = true
+
+[animations]
+# Whether to get rid of ALL animations.
+disable = false
+# Read the wiki to get a list of all the animations you can customize, aswell as
+# possible animation curves you can use.
+
+[keybinds]
+# Example key actions that do not need any argument
+Super-q = "quit"
+Super-Ctrl-r = "reload-config"
+# Example key actions that need an argument passed in
+Super-Return = { action = "run-command", arg = "alacritty" }
+Super-p = { action = "run-command", arg = "wofi --show drun" }
+Super-Shift-s = { action = "run-command", arg = """grim -g "`slurp -o`" - | wl-copy --type image/png""" }
+# Focus management
+Super-j = "focus-next-window"
+Super-k = "focus-previous-window"
+Super-Shift-j = "swap-with-next-window"
+Super-Shift-k = "swap-with-previous-window"
+Super-Ctrl-j = "focus-next-output"
+Super-Ctrl-k = "focus-previous-output"
+# Window management
+Super-m = "maximize-focused-window"
+Super-f = "fullscreen-focused-window"
+Super-Shift-c = "close-focused-window"
+# Transient layout changes.
+# Any changes set using these keybinds will be reset on configuration reload
+Super-Space = "select-next-layout"
+Super-Shift-Space = "select-previous-layout"
+Super-h = { action = "change-mwfact", arg = -0.01 }
+Super-l = { action = "change-mwfact", arg = +0.01 }
+Super-Shift-h = { action = "change-nmaster", arg = -1 }
+Super-Shift-l = { action = "change-nmaster", arg = +1 }
+Super-i = { action = "change-cfact", arg = +0.1 }
+Super-o = { action = "change-cfact", arg = -0.1 }
+# Workspaces
+Super-1 = { action = "focus-workspace", arg = 0 }
+Super-2 = { action = "focus-workspace", arg = 1 }
+Super-3 = { action = "focus-workspace", arg = 2 }
+Super-4 = { action = "focus-workspace", arg = 3 }
+Super-5 = { action = "focus-workspace", arg = 4 }
+Super-6 = { action = "focus-workspace", arg = 5 }
+Super-7 = { action = "focus-workspace", arg = 6 }
+Super-8 = { action = "focus-workspace", arg = 7 }
+Super-9 = { action = "focus-workspace", arg = 8 }
+# Sending windows to workspaces
+Super-Shift-1 = { action = "send-focused-window-to-workspace", arg = 0 }
+Super-Shift-2 = { action = "send-focused-window-to-workspace", arg = 1 }
+Super-Shift-3 = { action = "send-focused-window-to-workspace", arg = 2 }
+Super-Shift-4 = { action = "send-focused-window-to-workspace", arg = 3 }
+Super-Shift-5 = { action = "send-focused-window-to-workspace", arg = 4 }
+Super-Shift-6 = { action = "send-focused-window-to-workspace", arg = 5 }
+Super-Shift-7 = { action = "send-focused-window-to-workspace", arg = 6 }
+Super-Shift-8 = { action = "send-focused-window-to-workspace", arg = 7 }
+Super-Shift-9 = { action = "send-focused-window-to-workspace", arg = 8 }
+
+[mousebinds]
+Super-Left = "move-tile"
+Super-Right = "resize-tile"
+
+# Window rules.
+#
+# These are a giant toml array. These are from my personal configuration, in order
+# to represent a "large" variety of possible rules, and ways to match applications
+#
+# Each match string *is* a regular expression.
+[[rules]]
+# If you need your window rule to match ALL the criteria specified here,
+# uncomment the following line:
+# match-all = true
+match-app-id = [
+  "nvidia-settings",
+  "org.keepassxc.KeePassXC",
+  "nwg-look",
+  "Virt-Manager",
+  "pinentry-qt",
+  "file_progress",
+  "confirm",
+  "dialog",
+  "download",
+  "notification",
+  "error",
+  "splash",
+  "confirmreset",
+  "fht.desktop.ScreenCastSourcePicker",
+  "org.inkscape.Inkscape",
+]
+# centered = true
+# floating = true
+
+[[rules]]
+match-app-id = ["Alacritty"]
+workspace = 2
+
+[[rules]]
+# Web browsers
+match-app-id = ["LibreWolf", "Firefox"]
+workspace = 1                           # workspaces are zero-indexed
+
+[[rules]]
+on-workspace = 5 # if the opened window is on this workspace
+match-app-id = [
+  "Celeste.bin.x86_64",
+  "osu!.exe",
+  "Grapejuice",
+  "Etterna",
+  "Quaver",
+  "Steam",
+  "org.prismlauncher.PrismLauncher",
+  "love",                            # olympus for celeste.
+]
+workspace = 5
+# floating = true
+
+[[rules]]
+opacity = 0.5

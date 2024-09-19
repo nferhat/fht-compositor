@@ -194,16 +194,7 @@ impl Portal {
             return (1, HashMap::new());
         }
         let stderr = std::str::from_utf8(&output.stderr).expect("stderr contained invalid bytes!");
-        let source = if let Some((x, y, w, h)) = stderr
-            .lines()
-            .find(|line| line.contains("[select-area]"))
-            .and_then(|line| {
-                let coords_str = line.split('/').skip(1).next()?;
-                let coords: (i32, i32, i32, i32) = ron::de::from_str(coords_str).ok()?;
-                Some(coords)
-            }) {
-            SessionSource::Rectangle(Rectangle::from_loc_and_size((x, y), (w, h)), None)
-        } else if let Some(output_name) = stderr
+        let source = if let Some(output_name) = stderr
             .lines()
             .find(|line| line.contains("[select-output]"))
             .and_then(|line| line.split('/').skip(1).next())

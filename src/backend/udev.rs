@@ -67,7 +67,6 @@ use smithay::wayland::shm::{self, shm_format_to_fourcc};
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use smithay_drm_extras::edid::EdidInfo;
 
-use crate::config::CONFIG;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::{AsGlowRenderer, FhtRenderElement, OutputElementsResult};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
@@ -178,25 +177,7 @@ impl UdevData {
                         device.led_update(led_state.into());
                     }
 
-                    let device_config = CONFIG
-                        .input
-                        .per_device
-                        .get(device.name())
-                        .or_else(|| CONFIG.input.per_device.get(device.sysname()));
-                    let mouse_config =
-                        device_config.map_or_else(|| &CONFIG.input.mouse, |cfg| &cfg.mouse);
-                    let keyboard_config =
-                        device_config.map_or_else(|| &CONFIG.input.keyboard, |cfg| &cfg.keyboard);
-                    let disabled = device_config.map_or(false, |cfg| cfg.disable);
-
-                    crate::config::apply_libinput_settings(
-                        device,
-                        mouse_config,
-                        keyboard_config,
-                        disabled,
-                    );
-
-                    state.fht.devices.push(device.clone());
+                    state.fht.add_libinput_device(device.clone());
                 } else if let InputEvent::DeviceRemoved { ref device } = event {
                     state.fht.devices.retain(|d| d != device);
                 }
@@ -256,34 +237,33 @@ impl UdevData {
 
         let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
 
-        let (primary_gpu, primary_node) =
-            if let Some(user_path) = &CONFIG.renderer.render_node.as_ref() {
-                let primary_gpu = DrmNode::from_path(user_path)
-                    .expect(&format!(
-                        "Please make sure that {} is a valid DRM node!",
-                        user_path.display()
-                    ))
-                    .node_with_type(NodeType::Render)
-                    .expect("Please make sure that {user_path} is a render node!")
-                    .expect("Please make sure that {user_path} is a render node!");
-                let primary_node = primary_gpu
-                    .node_with_type(NodeType::Primary)
-                    .expect("Unable to get primary node from primary gpu node!")
-                    .expect("Unable to get primary node from primary gpu node!");
+        let (primary_gpu, primary_node) = if let Some(user_path) = &state.config.debug.render_node {
+            let primary_gpu = DrmNode::from_path(user_path)
+                .expect(&format!(
+                    "Please make sure that {} is a valid DRM node!",
+                    user_path.display()
+                ))
+                .node_with_type(NodeType::Render)
+                .expect("Please make sure that {user_path} is a render node!")
+                .expect("Please make sure that {user_path} is a render node!");
+            let primary_node = primary_gpu
+                .node_with_type(NodeType::Primary)
+                .expect("Unable to get primary node from primary gpu node!")
+                .expect("Unable to get primary node from primary gpu node!");
 
-                (primary_gpu, primary_node)
-            } else {
-                let primary_node = udev::primary_gpu(&seat_name)
-                    .unwrap()
-                    .and_then(|path| DrmNode::from_path(path).ok())
-                    .expect("Failed to get primary gpu!");
-                let primary_gpu = primary_node
-                    .node_with_type(NodeType::Render)
-                    .expect("Failed to get primary gpu node from primary node!")
-                    .expect("Failed to get primary gpu node from primary node!");
+            (primary_gpu, primary_node)
+        } else {
+            let primary_node = udev::primary_gpu(&seat_name)
+                .unwrap()
+                .and_then(|path| DrmNode::from_path(path).ok())
+                .expect("Failed to get primary gpu!");
+            let primary_gpu = primary_node
+                .node_with_type(NodeType::Render)
+                .expect("Failed to get primary gpu node from primary node!")
+                .expect("Failed to get primary gpu node from primary node!");
 
-                (primary_gpu, primary_node)
-            };
+            (primary_gpu, primary_node)
+        };
         info!(
             ?primary_gpu,
             ?primary_node,
@@ -311,9 +291,9 @@ impl UdevData {
                 .seat_state
                 .new_wl_seat(&state.display_handle, &seat_name);
 
-            let keyboard_config = &CONFIG.input.keyboard;
+            let keyboard_config = &state.config.input.keyboard;
             let res = new_seat.add_keyboard(
-                keyboard_config.get_xkb_config(),
+                keyboard_config.xkb_config(),
                 keyboard_config.repeat_delay,
                 keyboard_config.repeat_rate,
             );
@@ -693,7 +673,7 @@ impl UdevData {
             GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
         );
 
-        let color_formats = if CONFIG.renderer.disable_10bit {
+        let color_formats = if fht.config.debug.disable_10bit {
             SUPPORTED_FORMATS_8BIT_ONLY
         } else {
             SUPPORTED_FORMATS
@@ -867,8 +847,9 @@ impl UdevData {
             surface.fps.elements();
 
             // To render damage we just use solid color elements,
-            let damage_elements = CONFIG
-                .renderer
+            let damage_elements = fht
+                .config
+                .debug
                 .damage_color
                 .map(|damage_color| {
                     let mut state = OutputState::get(output);

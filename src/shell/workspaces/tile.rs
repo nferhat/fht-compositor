@@ -1,32 +1,30 @@
 //! A single workspace tile.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use fht_animation::{Animation, AnimationCurve};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
-use smithay::backend::renderer::element::utils::{
-    Relocate, RelocateRenderElement, RescaleRenderElement,
-};
+use smithay::backend::renderer::element::texture::TextureRenderElement;
+use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Monotonic, Physical, Point, Rectangle, Scale, Time, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
-use crate::config::{BorderConfig, CONFIG};
-use crate::egui::{EguiElement, EguiRenderElement};
+use crate::egui::EguiRenderElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
 use crate::renderer::rounded_outline_shader::{RoundedOutlineElement, RoundedOutlineSettings};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
-use crate::utils::animation::Animation;
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -34,18 +32,19 @@ pub struct Tile {
     window: Window,
     location: Point<i32, Logical>,
     cfact: f32,
-    border_config: Option<BorderConfig>,
     rounded_corner_damage: ExtraDamage,
     temporary_render_location: Option<Point<i32, Logical>>,
-    location_animation: Option<Animation<Point<i32, Logical>>>,
-    opening_animation: Option<Animation>,
+    location_animation: Option<LocationAnimation>,
+    opening_animation: Option<Animation<f64>>,
     // We prepare the close animation snapshot render elements here before running
     // into_closing_tile in our workspace logic code (and compositor code)
     //
     // Sometimes we want to prepare these in advance since a surface could be destroyed/not alive
     // by the time we actually display the ClosingTile
     close_animation_snapshot: Option<Vec<TileRenderElement<GlowRenderer>>>,
-    debug_overlay: Option<EguiElement>,
+    config: Arc<fht_compositor_config::Config>,
+    // TODO: Introcude this back
+    // debug_overlay: Option<EguiElement>,
 }
 
 impl PartialEq for Tile {
@@ -55,23 +54,22 @@ impl PartialEq for Tile {
 }
 
 impl Tile {
-    pub fn new(window: Window, border_config: Option<BorderConfig>) -> Self {
-        let window_size = window.size();
-
+    pub fn new(window: Window, config: Arc<fht_compositor_config::Config>) -> Self {
         Self {
             window,
             location: Point::default(),
             cfact: 1.0,
-            border_config,
             rounded_corner_damage: ExtraDamage::default(),
             temporary_render_location: None,
             location_animation: None,
             opening_animation: None,
             close_animation_snapshot: None,
-            debug_overlay: CONFIG
-                .renderer
-                .tile_debug_overlay
-                .then(|| EguiElement::new(window_size)),
+            config,
+            // TODO: Introduce this back
+            // debug_overlay: CONFIG
+            //     .renderer
+            //     .tile_debug_overlay
+            //     .then(|| EguiElement::new(window_size)),
         }
     }
 
@@ -87,24 +85,22 @@ impl Tile {
         self.cfact += delta;
     }
 
-    pub fn into_window(self) -> (Window, Option<BorderConfig>) {
-        (self.window, self.border_config)
+    pub fn into_window(self) -> Window {
+        self.window
     }
 
     pub fn into_closing_tile(mut self) -> Option<ClosingTile> {
-        ClosingTile::new(
+        Some(ClosingTile::new(
             self.close_animation_snapshot.take()?,
             self.location,
             self.window.size(),
-        )
+            self.config.animations.window_open_close.duration,
+            self.config.animations.window_open_close.curve,
+        ))
     }
 
     pub fn send_pending_configure(&mut self) {
         self.window.send_pending_configure();
-    }
-
-    pub fn border_config(&self) -> BorderConfig {
-        self.border_config.unwrap_or(CONFIG.decoration.border)
     }
 
     pub fn border_thickness(&self) -> Option<i32> {
@@ -112,7 +108,9 @@ impl Tile {
             return None;
         }
 
-        Some(self.border_config().thickness as i32)
+        // TODO: When implementing fractional layout, use f64
+        let rules = self.window.rules();
+        Some(self.config.decorations.border.with_overrides(&rules.border_overrides).thickness as i32)
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
@@ -161,9 +159,10 @@ impl Tile {
 
         self.window.request_size(new_geo.size);
         self.rounded_corner_damage.set_size(new_geo.size);
-        if let Some(egui) = self.debug_overlay.as_mut() {
-            egui.set_size(new_geo.size);
-        }
+        // TODO
+        // if let Some(egui) = self.debug_overlay.as_mut() {
+        //     egui.set_size(new_geo.size);
+        // }
 
         self.set_location(new_geo.loc, animate);
     }
@@ -175,11 +174,11 @@ impl Tile {
         }
         self.location = new_location;
         if animate {
-            self.location_animation = Animation::new(
-                old_location - new_location,
-                Point::default(),
-                CONFIG.animation.window_geometry.curve,
-                Duration::from_millis(CONFIG.animation.window_geometry.duration),
+            self.location_animation = LocationAnimation::new(
+                old_location,
+                new_location,
+                self.config.animations.window_geometry.duration,
+                self.config.animations.window_geometry.curve,
             );
         }
     }
@@ -214,7 +213,7 @@ impl Tile {
 
     pub fn render_location(&self) -> Point<i32, Logical> {
         let mut render_location = self.temporary_render_location.unwrap_or(self.location);
-        if let Some(offset) = self.location_animation.as_ref().map(Animation::value) {
+        if let Some(offset) = self.location_animation.as_ref().map(LocationAnimation::value) {
             render_location += offset;
         }
 
@@ -226,11 +225,9 @@ impl Tile {
     }
 
     pub fn start_opening_animation(&mut self) {
-        self.opening_animation = Animation::new(
-            0.0,
-            1.0,
-            CONFIG.animation.window_open_close.curve,
-            Duration::from_millis(CONFIG.animation.window_open_close.duration),
+        self.opening_animation = Some(
+            Animation::new(0.0, 1.0, self.config.animations.window_open_close.duration)
+                .with_curve(self.config.animations.window_open_close.curve),
         );
     }
 }
@@ -250,17 +247,11 @@ impl Tile {
         // NOTE: We use the border thickness as the location to actually include
         // it with the render elements, otherwise it
         // would be clipped out of the tile.
-        let thickness = self.border_config().thickness as i32;
+        let thickness = self.border_thickness().unwrap_or(0);
         let border_offset = Point::<i32, Logical>::from((thickness, thickness))
             .to_physical_precise_round::<_, i32>(scale);
         let elements = self
-            .render_elements_inner(
-                renderer,
-                border_offset,
-                scale,
-                1.0,
-                true, // TODO: Maybe maybe not, this is just a detail
-            )
+            .render_elements_inner(renderer, border_offset, scale, false)
             .collect::<Vec<_>>();
         self.close_animation_snapshot = Some(elements);
         true
@@ -270,18 +261,18 @@ impl Tile {
         let _ = self.close_animation_snapshot.take();
     }
 
-    pub fn advance_animations(&mut self, current_time: Time<Monotonic>) -> bool {
+    pub fn advance_animations(&mut self, now: Duration) -> bool {
         let mut ret = false;
 
         let _ = self.location_animation.take_if(|anim| anim.is_finished());
         if let Some(location_animation) = self.location_animation.as_mut() {
-            location_animation.set_current_time(current_time);
+            location_animation.tick(now);
             ret |= true;
         }
 
         let _ = self.opening_animation.take_if(|anim| anim.is_finished());
         if let Some(opening_animation) = self.opening_animation.as_mut() {
-            opening_animation.set_current_time(current_time);
+            opening_animation.tick(now);
             ret |= true;
         }
 
@@ -368,7 +359,6 @@ impl Tile {
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
-        alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         let element_physical_geo = Rectangle::from_loc_and_size(
@@ -380,9 +370,28 @@ impl Tile {
             .to_logical(scale)
             .to_i32_round();
 
-        let border_config = self.border_config.unwrap_or(CONFIG.decoration.border);
+        let rules = self.window.rules();
+        let alpha = if self.window.fullscreen() {
+            1.0
+        } else {
+            rules.opacity.unwrap_or(1.0)
+        };
+        let border_config = self
+            .config
+            .decorations
+            .border
+            .with_overrides(&rules.border_overrides);
+        // Mutex lock still exists until the iterator is collected.
+        //
+        // We use the WindowData associated with the winow (which holds the rules) else where, and
+        // dropping this mutex guard is required to avoid a deadlock
+        drop(rules);
         let need_rounding = !self.window.fullscreen();
-        let radius = border_config.radius();
+        let radius = border_config.radius - border_config.thickness / 2.0;
+        let border_thickness = if self.window.fullscreen() { None } else {
+            // TODO: Get rid of truncating when switching to fractional layout
+            Some(border_config.thickness as i32)
+        };
 
         let window_elements = self
             .window
@@ -425,8 +434,7 @@ impl Tile {
             .into_iter();
 
         // Same deal for the border, only if the thickness is non-null
-        let border_element = self
-            .border_thickness()
+        let border_element = border_thickness
             .map(|thickness| {
                 let mut border_geo = element_geo;
                 border_geo.loc -= (thickness, thickness).into();
@@ -438,8 +446,8 @@ impl Tile {
                     alpha,
                     border_geo,
                     RoundedOutlineSettings {
-                        half_thickness: border_config.half_thickness(),
-                        radius: border_config.radius(),
+                        half_thickness: border_config.thickness / 2.0,
+                        radius,
                         color: if focused {
                             border_config.focused_color
                         } else {
@@ -463,34 +471,34 @@ impl Tile {
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-        alpha: f32,
         focused: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         let mut render_geo = self
             .window_visual_geometry()
             .to_physical_precise_round(scale);
 
-        let debug_overlay = self
-            .debug_overlay
-            .as_ref()
-            .map(|egui| {
-                // TODO: Maybe use smithay's clock? But it just does this under the hood soo.
-                use smithay::reexports::rustix;
-                let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
-                let time = Duration::new(time.tv_sec as u64, time.tv_nsec as u32);
-                let element = egui
-                    .render(
-                        renderer.glow_renderer_mut(),
-                        scale.x as i32,
-                        alpha,
-                        render_geo.loc,
-                        |ctx| self.egui_overlay(ctx),
-                        time,
-                    )
-                    .unwrap();
-                TileRenderElement::DebugOverlay(element)
-            })
-            .into_iter();
+        // TODO
+        // let debug_overlay = self
+        //     .debug_overlay
+        //     .as_ref()
+        //     .map(|egui| {
+        //         // TODO: Maybe use smithay's clock? But it just does this under the hood soo.
+        //         use smithay::reexports::rustix;
+        //         let time = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        //         let time = Duration::new(time.tv_sec as u64, time.tv_nsec as u32);
+        //         let element = egui
+        //             .render(
+        //                 renderer.glow_renderer_mut(),
+        //                 scale.x as i32,
+        //                 alpha,
+        //                 render_geo.loc,
+        //                 |ctx| self.egui_overlay(ctx),
+        //                 time,
+        //             )
+        //             .unwrap();
+        //         TileRenderElement::DebugOverlay(element)
+        //     })
+        //     .into_iter();
 
         let mut opening_element = None;
         let mut normal_elements = None;
@@ -509,13 +517,13 @@ impl Tile {
             .to_physical_precise_round::<_, i32>(scale);
 
         if let Some(animation) = self.opening_animation.as_ref() {
-            let progress = animation.value();
+            let progress = *animation.value();
 
             let glow_renderer = renderer.glow_renderer_mut();
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
             let elements = self
-                .render_elements_inner(glow_renderer, border_offset, scale, alpha, focused)
+                .render_elements_inner(glow_renderer, border_offset, scale, focused)
                 .collect::<Vec<_>>();
             let rec = elements
                 .iter()
@@ -572,11 +580,11 @@ impl Tile {
         if opening_element.is_none() {
             self.window.set_offscreen_element_id(None);
             normal_elements =
-                Some(self.render_elements_inner(renderer, render_geo.loc, scale, alpha, focused))
+                Some(self.render_elements_inner(renderer, render_geo.loc, scale, focused))
         }
 
-        debug_overlay
-            .chain(opening_element.into_iter())
+        opening_element
+            .into_iter()
             .chain(normal_elements.into_iter().flatten())
     }
 }
@@ -595,4 +603,43 @@ crate::fht_render_elements! {
 fn opening_animation_progress_to_scale(progress: f64) -> f64 {
     const OPEN_SCALE_THRESHOLD: f64 = 0.5;
     progress * (1.0 - OPEN_SCALE_THRESHOLD) + OPEN_SCALE_THRESHOLD
+}
+
+struct LocationAnimation {
+    // Location animation holds the delta between the previous and current location. It gets
+    // added to Tile.location until the offsets gets to zero
+    x: Animation<i32>,
+    y: Animation<i32>,
+}
+
+impl LocationAnimation {
+    fn new(
+        prev: Point<i32, Logical>,
+        next: Point<i32, Logical>,
+        duration: Duration,
+        curve: AnimationCurve,
+    ) -> Option<Self> {
+        if prev == next {
+            return None;
+        }
+
+        let delta = prev - next;
+        Some(Self {
+            x: Animation::new(delta.x, 0, duration).with_curve(curve),
+            y: Animation::new(delta.y, 0, duration).with_curve(curve),
+        })
+    }
+
+    fn tick(&mut self, now: Duration) {
+        self.x.tick(now);
+        self.y.tick(now);
+    }
+
+    fn is_finished(&self) -> bool {
+        self.x.is_finished() || self.y.is_finished()
+    }
+
+    fn value(&self) -> Point<i32, Logical> {
+        (*self.x.value(), *self.y.value()).into()
+    }
 }

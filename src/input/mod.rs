@@ -24,7 +24,6 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
-use crate::config::CONFIG;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::{OutputState, State};
 use crate::utils::output::OutputExt;
@@ -324,8 +323,8 @@ impl State {
                         }
 
                         if key_state == KeyState::Pressed && !inhibited {
-                            let key_pattern = KeyPattern(modifiers.into(), keysym);
-                            let action = CONFIG.keybinds.get(&key_pattern).cloned();
+                            let key_pattern = fht_compositor_config::KeyPattern(modifiers.into(), keysym);
+                            let action = state.fht.config.keybinds.get(&key_pattern).cloned().map(Into::into);
                             debug!(?keysym, ?key_pattern, ?action);
 
                             if let Some(action) = action {
@@ -493,8 +492,8 @@ impl State {
 
                     if let Some(button) = event.button() {
                         let mouse_pattern =
-                            MousePattern(self.fht.keyboard.modifier_state().into(), button.into());
-                        if let Some(action) = CONFIG.mousebinds.get(&mouse_pattern).cloned() {
+                            fht_compositor_config::MousePattern(self.fht.keyboard.modifier_state().into(), button.into());
+                        if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
                             self.process_mouse_action(action, serial);
                         }
                     }

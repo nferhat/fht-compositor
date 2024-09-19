@@ -8,7 +8,7 @@ use smithay::desktop::{
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Monotonic, Point, Rectangle, Time};
+use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::PopupSurface;
@@ -202,9 +202,9 @@ impl Fht {
         });
     }
 
-    pub fn advance_animations(&mut self, output: &Output, current_time: Time<Monotonic>) -> bool {
+    pub fn advance_animations(&mut self, output: &Output, now: std::time::Duration) -> bool {
         let wset = self.wset_mut_for(output);
-        wset.advance_animations(current_time)
+        wset.advance_animations(now)
     }
 
     pub fn all_windows(&self) -> impl Iterator<Item = &Window> + '_ {

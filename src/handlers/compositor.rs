@@ -14,8 +14,7 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
-use crate::config::CONFIG;
-use crate::state::{Fht, OutputState, State, UnmappedWindow};
+use crate::state::{Fht, OutputState, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
@@ -71,32 +70,23 @@ impl State {
                     output = parent_output;
                 }
 
-                let (title, app_id) = (window.title(), window.app_id());
-                let rule = CONFIG
-                    .rules
-                    .iter()
-                    .find(|(patterns, _)| {
-                        patterns.iter().any(|pattern| {
-                            pattern.matches(
-                                title.as_ref().map(String::as_str),
-                                app_id.as_ref().map(String::as_str),
-                                workspace_idx,
-                            )
-                        })
-                    })
-                    .map(|(_, rules)| rules)
-                    .cloned()
-                    .unwrap_or_default();
+                let rules = ResolvedWindowRules::resolve(
+                    &window,
+                    &self.fht.config.rules,
+                    output.name(),
+                    workspace_idx,
+                    false, // we are still unmapped
+                );
 
-                if let Some(named_output) = rule
-                    .output
+                if let Some(named_output) = rules
+                    .open_on_output
                     .as_ref()
                     .and_then(|name| self.fht.output_named(name))
                 {
                     output = named_output;
                 }
 
-                if let Some(allow_csd) = rule.allow_csd {
+                if let Some(allow_csd) = rules.allow_csd {
                     window.toplevel().with_pending_state(|state| {
                         if allow_csd {
                             state.decoration_mode =
@@ -108,7 +98,7 @@ impl State {
                     });
                 } else {
                     window.toplevel().with_pending_state(|state| {
-                        if CONFIG.decoration.allow_csd {
+                        if self.fht.config.decorations.allow_csd {
                             state.decoration_mode =
                                 Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
                         } else {
@@ -120,17 +110,17 @@ impl State {
 
                 // Now apply our rules
                 let wset = self.fht.wset_mut_for(&output);
-                let workspace_idx = rule.workspace.unwrap_or(wset.get_active_idx());
+                let workspace_idx = rules.open_on_workspace.unwrap_or(wset.get_active_idx());
                 let workspace = wset.get_workspace_mut(workspace_idx);
-                let id = workspace.id();
+                let workspace_id = workspace.id();
 
                 // Pre compute window geometry for insertion.
-                workspace.prepare_window_geometry(window.clone(), rule.border.clone());
+                workspace.prepare_window_geometry(window.clone());
+                window.set_rules(rules);
                 window.send_configure();
                 self.fht.unmapped_windows.push(UnmappedWindow::Configured {
                     window,
-                    border_config: rule.border,
-                    workspace_id: id,
+                    workspace_id,
                 });
                 return Some(output);
             }
@@ -142,7 +132,6 @@ impl State {
 
             let UnmappedWindow::Configured {
                 window,
-                border_config,
                 workspace_id,
             } = self.fht.unmapped_windows.remove(idx)
             else {
@@ -152,17 +141,14 @@ impl State {
             let workspace = match self.fht.get_workspace_mut(workspace_id) {
                 Some(ws) => ws,
                 None => {
-                    warn!(
-                        ?workspace_id,
-                        "Unmapped window has an invalid workspace id?"
-                    );
+                    warn!(?workspace_id, "Unmapped window has an invalid workspace id");
                     let output = self.fht.active_output();
                     self.fht.wset_mut_for(&output).active_mut()
                 }
             };
 
             let output = workspace.output();
-            workspace.insert_window(window.clone(), border_config, true);
+            workspace.insert_window(window.clone(), true);
             let mut geometry = workspace.window_geometry(&window).unwrap();
             geometry.loc += output.current_location();
 
@@ -171,12 +157,13 @@ impl State {
             let is_switching = wset.has_switch_animation();
             // From using the compositor opening a window when a switch is being done feels more
             // natural when the window gets focus, even if focus_new_windows is none.
-            let should_focus = (CONFIG.general.focus_new_windows || is_switching) && is_active;
+            let should_focus =
+                (self.fht.config.general.focus_new_windows || is_switching) && is_active;
 
             if should_focus {
                 let center = geometry.center();
                 self.fht.loop_handle.insert_idle(move |state| {
-                    if CONFIG.general.cursor_warps {
+                    if state.fht.config.general.cursor_warps {
                         state.move_pointer(center.to_f64());
                     }
                     state.set_focus_target(Some(window.clone().into()));
@@ -187,7 +174,6 @@ impl State {
         }
 
         // Other check: its a mapped window.
-        let arrange = false;
         if let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(surface) {
             window.on_commit();
             let is_mapped = has_render_buffer(surface);
@@ -210,11 +196,6 @@ impl State {
                 return Some(output);
             }
             return Some(workspace.output());
-        }
-
-        if arrange {
-            let (_, ws) = self.fht.find_window_and_workspace_mut(surface).unwrap();
-            ws.arrange_tiles(true);
         }
 
         None

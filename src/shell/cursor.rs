@@ -21,7 +21,7 @@ use smithay::wayland::compositor::with_states;
 use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;
 
-use crate::config::{CursorConfig, CONFIG};
+use fht_compositor_config::Cursor;
 use crate::renderer::FhtRenderer;
 
 pub struct CursorThemeManager {
@@ -30,12 +30,11 @@ pub struct CursorThemeManager {
     cursor_image_cache: RefCell<FxHashMap<(i32, CursorIcon), Image>>,
     image_status: CursorImageStatus,
     cursor_theme: CursorTheme,
-    config: CursorConfig,
+    config: Cursor,
 }
 
 impl CursorThemeManager {
-    pub fn new() -> Self {
-        let config = CONFIG.general.cursor.clone();
+    pub fn new(config: Cursor) -> Self {
         let cursor_theme = CursorTheme::load(&config.name);
 
         Self {
@@ -47,9 +46,9 @@ impl CursorThemeManager {
     }
 
     #[profiling::function]
-    pub fn reload(&mut self) {
-        if self.config != CONFIG.general.cursor {
-            self.config = CONFIG.general.cursor.clone();
+    pub fn reload(&mut self, new_config: Cursor) {
+        if self.config != new_config {
+            self.config = new_config;
             self.cursor_theme = CursorTheme::load(&self.config.name);
             self.cursor_image_cache.borrow_mut().clear();
         }
