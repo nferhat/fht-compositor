@@ -56,6 +56,7 @@ use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use std::thread::JoinHandle;
 
 use crate::backend::Backend;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
@@ -222,14 +223,28 @@ impl State {
     }
 
     pub fn reload_config(&mut self) {
-        let new_config = match fht_compositor_config::load(None) {
-            Ok(config) => config,
+        let (new_config, path) = match fht_compositor_config::load(None) {
+            Ok((config, path)) => (config, Some(path)),
             Err(err) => {
-                error!(?err, "Failed to reload configuration file!");
-                // TODO: Config ui error message type thing
-                return;
+                error!(?err, "Failed to load configuration, using default");
+                self.fht.last_config_error = Some(err);
+                (Default::default(), None)
             }
         };
+
+        let config_watcher = path.and_then(|path| {
+            crate::config::init_watcher(path, &self.fht.loop_handle)
+                .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
+                .ok()
+        });
+        if let Some((registration_token, _join_handle)) =
+            std::mem::replace(&mut self.fht.config_watcher, config_watcher)
+        {
+            self.fht.loop_handle.remove(registration_token);
+            // The associated thread will die alone since it will error out (tx.send will fail since
+            // the channel does not exist anymore) So there's nothing todo with the
+            // join_handle!
+        }
         // let old_config = Arc::clone(&self.fht.config);
         let config = Arc::new(new_config);
 
@@ -302,6 +317,9 @@ pub struct Fht {
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
 
     pub config: Arc<fht_compositor_config::Config>,
+    // We keep the config watcher around in case the configuration file path changes.
+    // This will be useful for configuration file imports (when implemented)
+    pub config_watcher: Option<(RegistrationToken, JoinHandle<()>)>,
     pub last_config_error: Option<fht_compositor_config::Error>,
 
     #[cfg(feature = "xdg-screencast-portal")]
@@ -329,14 +347,20 @@ impl Fht {
     ) -> Self {
         let mut last_config_error = None;
         // TODO: Get path from a cli argument or something
-        let config = match fht_compositor_config::load(None) {
-            Ok(config) => config,
+        let (config, path) = match fht_compositor_config::load(None) {
+            Ok((config, path)) => (config, Some(path)),
             Err(err) => {
                 error!(?err, "Failed to load configuration, using default");
                 last_config_error = Some(err);
-                Default::default()
+                (Default::default(), None)
             }
         };
+
+        let config_watcher = path.and_then(|path| {
+            crate::config::init_watcher(path, &loop_handle)
+                .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
+                .ok()
+        });
 
         let clock = Clock::<Monotonic>::new();
 
@@ -433,6 +457,7 @@ impl Fht {
             root_surfaces: FxHashMap::default(),
 
             config: Arc::new(config),
+            config_watcher,
             last_config_error,
 
             #[cfg(feature = "xdg-screencast-portal")]

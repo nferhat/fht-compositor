@@ -950,7 +950,7 @@ fn fallback_path() -> path::PathBuf {
     path
 }
 
-pub fn load(path: Option<path::PathBuf>) -> Result<Config, Error> {
+pub fn load(path: Option<path::PathBuf>) -> Result<(Config, path::PathBuf), Error> {
     let path = path.or_else(|| {
         get_xdg_path().inspect_err(|err| {
             warn!(?err, "Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml")
@@ -973,7 +973,7 @@ pub fn load(path: Option<path::PathBuf>) -> Result<Config, Error> {
     let _ = file.read_to_string(&mut buf)?;
 
     let config: Config = toml::de::from_str(buf.as_str())?;
-    Ok(config)
+    Ok((config, path))
 }
 
 #[derive(Debug, thiserror::Error)]
