@@ -25,7 +25,7 @@ use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
-use smithay::reexports::input;
+use smithay::reexports::input::{self, DeviceCapability, SendEventsMode};
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -769,7 +769,149 @@ impl Fht {
         output_presentation_feedback
     }
 
-    pub fn add_libinput_device(&mut self, device: input::Device) {
+    pub fn add_libinput_device(&mut self, mut device: input::Device) {
+        // The following input configuration logic is from hyprland.
+        let input_config = &self.config.input;
+        let per_device_config = input_config
+            .per_device
+            .get(device.name())
+            .or_else(|| input_config.per_device.get(device.sysname()));
+
+        self.keyboard.change_repeat_info(
+            input_config.keyboard.repeat_rate,
+            input_config.keyboard.repeat_delay,
+        );
+
+        let disable = per_device_config.map_or(false, |c| c.disable);
+        // The device is disabled, no need to apply any configuration
+        if disable {
+            if let Err(err) = device.config_send_events_set_mode(SendEventsMode::DISABLED) {
+                error!(?err, device = device.sysname(), "Failed to disable device");
+            }
+        } else {
+            if let Err(err) = device.config_tap_set_enabled(true) {
+                error!(?err, device = device.sysname(), "Failed to enable device");
+            }
+
+            // Aquamarine (hyprland's input backend) determines a libinput device is a mouse by
+            // the pointer capability:
+            // https://github.com/hyprwm/aquamarine/blob/752d0fbd141fabb5a1e7f865199b80e6e76f8d8e/src/backend/Session.cpp#L826
+            //
+            // TODO: Separate touchpad config
+            if device.has_capability(DeviceCapability::Pointer) {
+                let mouse_config = per_device_config.map_or(&input_config.mouse, |c| &c.mouse);
+
+                if let Some(click_method) = mouse_config.click_method {
+                    let _ = device.config_click_set_method(click_method.into());
+                } else if let Some(default) = device.config_click_default_method() {
+                    let _ = device.config_click_set_method(default);
+                }
+
+                if device.config_left_handed_default() {
+                    if let Some(left_handed) = mouse_config.left_handed {
+                        let _ = device.config_left_handed_set(left_handed);
+                    } else {
+                        let default = device.config_left_handed_default();
+                        let _ = device.config_left_handed_set(default);
+                    }
+                }
+
+                if let Some(scroll_method) = mouse_config.scroll_method {
+                    let _ = device.config_scroll_set_method(scroll_method.into());
+                } else if let Some(default) = device.config_scroll_default_method() {
+                    let _ = device.config_scroll_set_method(default);
+                }
+
+                if let Some(tap_and_drag) = mouse_config.tap_and_drag {
+                    let _ = device.config_tap_set_drag_enabled(tap_and_drag);
+                } else {
+                    let default = device.config_tap_default_drag_enabled();
+                    let _ = device.config_tap_set_drag_enabled(default);
+                }
+
+                if let Some(drag_lock) = mouse_config.drag_lock {
+                    let _ = device.config_tap_set_drag_lock_enabled(drag_lock);
+                } else {
+                    let default = device.config_tap_default_drag_lock_enabled();
+                    let _ = device.config_tap_set_drag_lock_enabled(default);
+                }
+
+                if device.config_middle_emulation_is_available() {
+                    if let Some(middle_button_emulation) = mouse_config.middle_button_emulation {
+                        let _ = device.config_middle_emulation_set_enabled(middle_button_emulation);
+                    } else {
+                        let default = device.config_middle_emulation_default_enabled();
+                        let _ = device.config_middle_emulation_set_enabled(default);
+                    }
+
+                    if let Some(tap_button_map) = mouse_config.tap_button_map {
+                        let _ = device.config_tap_set_button_map(tap_button_map.into());
+                    } else if let Some(default) = device.config_tap_default_button_map() {
+                        let _ = device.config_tap_set_button_map(default);
+                    }
+                }
+
+                if device.config_tap_finger_count() > 0 {
+                    if let Some(tap_to_click) = mouse_config.tap_to_click {
+                        let _ = device.config_tap_set_enabled(tap_to_click);
+                    } else {
+                        let default = device.config_tap_default_enabled();
+                        let _ = device.config_tap_set_enabled(default);
+                    }
+                }
+
+                if device.config_scroll_has_natural_scroll() {
+                    if let Some(natural_scrolling) = mouse_config.natural_scrolling {
+                        let _ = device.config_scroll_set_natural_scroll_enabled(natural_scrolling);
+                    } else {
+                        let default = device.config_scroll_default_natural_scroll_enabled();
+                        let _ = device.config_scroll_set_natural_scroll_enabled(default);
+                    }
+                }
+
+                if device.config_dwt_is_available() {
+                    if let Some(dwt) = mouse_config.disable_while_typing {
+                        let _ = device.config_dwt_set_enabled(dwt);
+                    } else {
+                        let default = device.config_dwt_default_enabled();
+                        let _ = device.config_dwt_set_enabled(default);
+                    }
+                }
+
+                if let Some(speed) = mouse_config.acceleration_speed {
+                    let speed = speed.clamp(-1.0, 1.0);
+                    let _ = device.config_accel_set_speed(speed);
+                } else {
+                    let default = device.config_accel_default_speed();
+                    let _ = device.config_accel_set_speed(default);
+                }
+
+                if let Some(profile) = mouse_config.acceleration_profile {
+                    // TODO: Custom profile when input.rs updates libinput bindings
+                    let _ = device.config_accel_set_profile(profile.into());
+                } else if let Some(default) = device.config_accel_default_profile() {
+                    let _ = device.config_accel_set_profile(default);
+                }
+
+                if let Some(scroll_button_lock) = mouse_config.scroll_button_lock {
+                    let _ = device.config_scroll_set_button_lock(match scroll_button_lock {
+                        true => input::ScrollButtonLockState::Enabled,
+                        false => input::ScrollButtonLockState::Disabled,
+                    });
+                } else {
+                    let default = device.config_scroll_default_button_lock();
+                    let _ = device.config_scroll_set_button_lock(default);
+                }
+
+                if let Some(scroll_button) = mouse_config.scroll_button {
+                    let _ = device.config_scroll_set_button(scroll_button.button_code());
+                } else {
+                    let default = device.config_scroll_default_button();
+                    let _ = device.config_scroll_set_button(default);
+                }
+            }
+        }
+
         self.devices.push(device);
     }
 }

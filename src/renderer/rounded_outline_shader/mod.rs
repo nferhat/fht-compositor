@@ -1,3 +1,4 @@
+use fht_compositor_config::Color;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::{GlesPixelProgram, Uniform};
@@ -6,7 +7,6 @@ use smithay::utils::{Logical, Rectangle};
 use super::pixel_shader_element::FhtPixelShaderElement;
 use super::shaders::Shaders;
 use super::AsGlowRenderer;
-use fht_compositor_config::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RoundedOutlineSettings {

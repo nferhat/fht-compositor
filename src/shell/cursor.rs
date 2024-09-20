@@ -6,6 +6,7 @@ use std::io::Read;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use fht_compositor_config::Cursor;
 use rustc_hash::FxHashMap;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::{
@@ -21,7 +22,6 @@ use smithay::wayland::compositor::with_states;
 use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;
 
-use fht_compositor_config::Cursor;
 use crate::renderer::FhtRenderer;
 
 pub struct CursorThemeManager {

@@ -22,10 +22,10 @@
 use std::cmp::min;
 use std::ops::Mul;
 
+use fht_compositor_config::WorkspaceLayout;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Size};
-use fht_compositor_config::WorkspaceLayout;
 
 use super::tile::Tile;
 use crate::utils::output::OutputExt;

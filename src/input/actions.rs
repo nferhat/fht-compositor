@@ -43,39 +43,81 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 fht_compositor_config::SimpleKeyAction::Quit => Self::Quit,
                 fht_compositor_config::SimpleKeyAction::ReloadConfig => Self::ReloadConfig,
                 fht_compositor_config::SimpleKeyAction::SelectNextLayout => Self::SelectNextLayout,
-                fht_compositor_config::SimpleKeyAction::SelectPreviousLayout => Self::SelectPreviousLayout,
-                fht_compositor_config::SimpleKeyAction::MaximizeFocusedWindow => Self::MaximizeFocusedWindow,
-                fht_compositor_config::SimpleKeyAction::FullscreenFocusedWindow => Self::FullscreenFocusedWindow,
+                fht_compositor_config::SimpleKeyAction::SelectPreviousLayout => {
+                    Self::SelectPreviousLayout
+                }
+                fht_compositor_config::SimpleKeyAction::MaximizeFocusedWindow => {
+                    Self::MaximizeFocusedWindow
+                }
+                fht_compositor_config::SimpleKeyAction::FullscreenFocusedWindow => {
+                    Self::FullscreenFocusedWindow
+                }
                 fht_compositor_config::SimpleKeyAction::FocusNextWindow => Self::FocusNextWindow,
-                fht_compositor_config::SimpleKeyAction::FocusPreviousWindow => Self::FocusPreviousWindow,
-                fht_compositor_config::SimpleKeyAction::SwapWithNextWindow => Self::SwapWithNextWindow,
-                fht_compositor_config::SimpleKeyAction::SwapWithPreviousWindow => Self::SwapWithPreviousWindow,
+                fht_compositor_config::SimpleKeyAction::FocusPreviousWindow => {
+                    Self::FocusPreviousWindow
+                }
+                fht_compositor_config::SimpleKeyAction::SwapWithNextWindow => {
+                    Self::SwapWithNextWindow
+                }
+                fht_compositor_config::SimpleKeyAction::SwapWithPreviousWindow => {
+                    Self::SwapWithPreviousWindow
+                }
                 fht_compositor_config::SimpleKeyAction::FocusNextOutput => Self::FocusNextOutput,
-                fht_compositor_config::SimpleKeyAction::FocusPreviousOutput => Self::FocusPreviousOutput,
-                fht_compositor_config::SimpleKeyAction::CloseFocusedWindow => Self::CloseFocusedWindow,
+                fht_compositor_config::SimpleKeyAction::FocusPreviousOutput => {
+                    Self::FocusPreviousOutput
+                }
+                fht_compositor_config::SimpleKeyAction::CloseFocusedWindow => {
+                    Self::CloseFocusedWindow
+                }
                 fht_compositor_config::SimpleKeyAction::None => Self::None,
-            }
+            },
             fht_compositor_config::KeyActionDesc::Complex(value) => match value {
                 fht_compositor_config::ComplexKeyAction::Quit => Self::Quit,
                 fht_compositor_config::ComplexKeyAction::ReloadConfig => Self::ReloadConfig,
                 fht_compositor_config::ComplexKeyAction::SelectNextLayout => Self::SelectNextLayout,
-                fht_compositor_config::ComplexKeyAction::SelectPreviousLayout => Self::SelectPreviousLayout,
-                fht_compositor_config::ComplexKeyAction::MaximizeFocusedWindow => Self::MaximizeFocusedWindow,
-                fht_compositor_config::ComplexKeyAction::FullscreenFocusedWindow => Self::FullscreenFocusedWindow,
+                fht_compositor_config::ComplexKeyAction::SelectPreviousLayout => {
+                    Self::SelectPreviousLayout
+                }
+                fht_compositor_config::ComplexKeyAction::MaximizeFocusedWindow => {
+                    Self::MaximizeFocusedWindow
+                }
+                fht_compositor_config::ComplexKeyAction::FullscreenFocusedWindow => {
+                    Self::FullscreenFocusedWindow
+                }
                 fht_compositor_config::ComplexKeyAction::FocusNextWindow => Self::FocusNextWindow,
-                fht_compositor_config::ComplexKeyAction::FocusPreviousWindow => Self::FocusPreviousWindow,
-                fht_compositor_config::ComplexKeyAction::SwapWithNextWindow => Self::SwapWithNextWindow,
-                fht_compositor_config::ComplexKeyAction::SwapWithPreviousWindow => Self::SwapWithPreviousWindow,
+                fht_compositor_config::ComplexKeyAction::FocusPreviousWindow => {
+                    Self::FocusPreviousWindow
+                }
+                fht_compositor_config::ComplexKeyAction::SwapWithNextWindow => {
+                    Self::SwapWithNextWindow
+                }
+                fht_compositor_config::ComplexKeyAction::SwapWithPreviousWindow => {
+                    Self::SwapWithPreviousWindow
+                }
                 fht_compositor_config::ComplexKeyAction::FocusNextOutput => Self::FocusNextOutput,
-                fht_compositor_config::ComplexKeyAction::FocusPreviousOutput => Self::FocusPreviousOutput,
-                fht_compositor_config::ComplexKeyAction::CloseFocusedWindow => Self::CloseFocusedWindow,
+                fht_compositor_config::ComplexKeyAction::FocusPreviousOutput => {
+                    Self::FocusPreviousOutput
+                }
+                fht_compositor_config::ComplexKeyAction::CloseFocusedWindow => {
+                    Self::CloseFocusedWindow
+                }
                 fht_compositor_config::ComplexKeyAction::None => Self::None,
                 fht_compositor_config::ComplexKeyAction::RunCommand(cmd) => Self::RunCommand(cmd),
-                fht_compositor_config::ComplexKeyAction::ChangeMwfact(delta) => Self::ChangeMwfact(delta),
-                fht_compositor_config::ComplexKeyAction::ChangeNmaster(delta) => Self::ChangeNmaster(delta),
-                fht_compositor_config::ComplexKeyAction::ChangeCfact(delta) => Self::ChangeCfact(delta),
-                fht_compositor_config::ComplexKeyAction::FocusWorkspace(idx) => Self::FocusWorkspace(idx),
-                fht_compositor_config::ComplexKeyAction::SendToWorkspace(idx) => Self::SendFocusedWindowToWorkspace(idx),
+                fht_compositor_config::ComplexKeyAction::ChangeMwfact(delta) => {
+                    Self::ChangeMwfact(delta)
+                }
+                fht_compositor_config::ComplexKeyAction::ChangeNmaster(delta) => {
+                    Self::ChangeNmaster(delta)
+                }
+                fht_compositor_config::ComplexKeyAction::ChangeCfact(delta) => {
+                    Self::ChangeCfact(delta)
+                }
+                fht_compositor_config::ComplexKeyAction::FocusWorkspace(idx) => {
+                    Self::FocusWorkspace(idx)
+                }
+                fht_compositor_config::ComplexKeyAction::SendToWorkspace(idx) => {
+                    Self::SendFocusedWindowToWorkspace(idx)
+                }
             },
         }
     }

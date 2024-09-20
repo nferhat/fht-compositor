@@ -108,7 +108,13 @@ impl Tile {
 
         // TODO: When implementing fractional layout, use f64
         let rules = self.window.rules();
-        Some(self.config.decorations.border.with_overrides(&rules.border_overrides).thickness as i32)
+        Some(
+            self.config
+                .decorations
+                .border
+                .with_overrides(&rules.border_overrides)
+                .thickness as i32,
+        )
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
@@ -211,7 +217,11 @@ impl Tile {
 
     pub fn render_location(&self) -> Point<i32, Logical> {
         let mut render_location = self.location;
-        if let Some(offset) = self.location_animation.as_ref().map(LocationAnimation::value) {
+        if let Some(offset) = self
+            .location_animation
+            .as_ref()
+            .map(LocationAnimation::value)
+        {
             render_location += offset;
         }
 
@@ -386,7 +396,9 @@ impl Tile {
         drop(rules);
         let need_rounding = !self.window.fullscreen();
         let radius = border_config.radius - border_config.thickness / 2.0;
-        let border_thickness = if self.window.fullscreen() { None } else {
+        let border_thickness = if self.window.fullscreen() {
+            None
+        } else {
             // TODO: Get rid of truncating when switching to fractional layout
             Some(border_config.thickness as i32)
         };

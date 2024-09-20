@@ -17,7 +17,7 @@ use smithay::backend::input::MouseButton as SmithayMouseButton;
 use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
-use smithay::reexports::input::{AccelProfile, ScrollMethod, TapButtonMap};
+use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
 
 static DEFAULT_CONFIG_CONTENTS: &'static str = include_str!("../../res/compositor.toml");
 
@@ -233,7 +233,7 @@ pub enum ComplexKeyAction {
     SendToWorkspace(usize),
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum MouseButton {
     Left,
@@ -252,6 +252,19 @@ impl From<SmithayMouseButton> for MouseButton {
             SmithayMouseButton::Forward => Self::Forward,
             SmithayMouseButton::Back => Self::Back,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl MouseButton {
+    pub fn button_code(&self) -> u32 {
+        // These are from linux/input-event-codes.h
+        match self {
+            MouseButton::Left => 0x110,
+            MouseButton::Middle => 0x111,
+            MouseButton::Right => 0x112,
+            MouseButton::Forward => 0x115,
+            MouseButton::Back => 0x116,
         }
     }
 }
@@ -375,97 +388,95 @@ impl Keyboard {
     }
 }
 
-fn default_scrollmethod() -> ScrollMethod {
-    ScrollMethod::TwoFinger
-}
-
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(remote = "ScrollMethod")]
-enum ScrollMethodDef {
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ScrollMethodDef {
     NoScroll,
     TwoFinger,
     Edge,
     OnButtonDown,
 }
-
-fn default_tap_to_click_behaviour() -> TapButtonMap {
-    // An educated guess, I can't seem to find anything on the docs
-    TapButtonMap::LeftRightMiddle
+impl Into<ScrollMethod> for ScrollMethodDef {
+    fn into(self) -> ScrollMethod {
+        match self {
+            ScrollMethodDef::NoScroll => ScrollMethod::NoScroll,
+            ScrollMethodDef::TwoFinger => ScrollMethod::TwoFinger,
+            ScrollMethodDef::Edge => ScrollMethod::Edge,
+            ScrollMethodDef::OnButtonDown => ScrollMethod::OnButtonDown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(remote = "TapButtonMap")]
-enum TapButtonMapDef {
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TapButtonMapDef {
     LeftRightMiddle,
     LeftMiddleRight,
 }
-
-const fn default_accelprofile() -> AccelProfile {
-    // Based on libinput docs this is the default
-    AccelProfile::Adaptive
+impl Into<TapButtonMap> for TapButtonMapDef {
+    fn into(self) -> TapButtonMap {
+        match self {
+            TapButtonMapDef::LeftRightMiddle => TapButtonMap::LeftRightMiddle,
+            TapButtonMapDef::LeftMiddleRight => TapButtonMap::LeftMiddleRight,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(remote = "AccelProfile")]
-enum AccelProfileDef {
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum AccelProfileDef {
     Flat,
     Adaptive,
 }
-
-const fn default_accelspeed() -> f64 {
-    1.0
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-pub struct Mouse {
-    #[serde(default = "default_accelprofile")]
-    #[serde(with = "AccelProfileDef")]
-    pub acceleration_profile: AccelProfile,
-    #[serde(default = "default_accelspeed")]
-    pub acceleration_speed: f64,
-    #[serde(default = "default_false")]
-    pub left_handed: bool,
-    #[serde(default = "default_scrollmethod")]
-    #[serde(with = "ScrollMethodDef")]
-    pub scroll_method: ScrollMethod,
-    #[serde(default = "default_false")]
-    pub natural_scrolling: bool,
-    #[serde(default = "default_false")]
-    pub middle_button_emulation: bool,
-    #[serde(default = "default_true")]
-    pub disable_while_typing: bool,
-    #[serde(default = "default_false")]
-    pub tap_to_click: bool,
-    #[serde(default = "default_tap_to_click_behaviour")]
-    #[serde(with = "TapButtonMapDef")]
-    pub tap_to_click_behaviour: TapButtonMap,
-    #[serde(default = "default_true")]
-    pub tap_and_drag: bool,
-}
-
-impl Default for Mouse {
-    fn default() -> Self {
-        Self {
-            acceleration_profile: default_accelprofile(),
-            acceleration_speed: default_accelspeed(),
-            left_handed: default_false(),
-            scroll_method: default_scrollmethod(),
-            natural_scrolling: default_false(),
-            middle_button_emulation: default_false(),
-            disable_while_typing: default_true(),
-            tap_to_click: default_false(),
-            tap_to_click_behaviour: default_tap_to_click_behaviour(),
-            tap_and_drag: default_true(),
+impl Into<AccelProfile> for AccelProfileDef {
+    fn into(self) -> AccelProfile {
+        match self {
+            AccelProfileDef::Flat => AccelProfile::Flat,
+            AccelProfileDef::Adaptive => AccelProfile::Adaptive,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClickMethodDef {
+    ButtonAreas,
+    Clickfinger,
+}
+impl Into<ClickMethod> for ClickMethodDef {
+    fn into(self) -> ClickMethod {
+        match self {
+            ClickMethodDef::ButtonAreas => ClickMethod::ButtonAreas,
+            ClickMethodDef::Clickfinger => ClickMethod::Clickfinger,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Mouse {
+    pub acceleration_profile: Option<AccelProfileDef>,
+    pub acceleration_speed: Option<f64>,
+    pub left_handed: Option<bool>,
+    pub scroll_method: Option<ScrollMethodDef>,
+    pub scroll_button_lock: Option<bool>,
+    pub scroll_button: Option<MouseButton>,
+    pub click_method: Option<ClickMethodDef>,
+    pub natural_scrolling: Option<bool>,
+    pub middle_button_emulation: Option<bool>,
+    pub disable_while_typing: Option<bool>,
+    pub tap_to_click: Option<bool>,
+    pub tap_button_map: Option<TapButtonMapDef>,
+    pub tap_and_drag: Option<bool>,
+    pub drag_lock: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PerDeviceInput {
     pub disable: bool,
-    pub keyboard: Keyboard,
+    // NOTE: For now this is irrelevant since all keyboard config is global to wl_seat
+    // pub keyboard: PerDeviceKeyboard,
     pub mouse: Mouse,
 }
 

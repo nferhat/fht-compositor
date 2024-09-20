@@ -1,6 +1,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::time::Duration;
 
+use fht_animation::{Animation, AnimationCurve};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::texture::{TextureBuffer, TextureRenderElement};
@@ -12,7 +13,6 @@ use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
-use fht_animation::{Animation, AnimationCurve};
 
 use super::tile::TileRenderElement;
 use crate::fht_render_elements;

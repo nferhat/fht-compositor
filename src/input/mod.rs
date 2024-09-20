@@ -323,8 +323,15 @@ impl State {
                         }
 
                         if key_state == KeyState::Pressed && !inhibited {
-                            let key_pattern = fht_compositor_config::KeyPattern(modifiers.into(), keysym);
-                            let action = state.fht.config.keybinds.get(&key_pattern).cloned().map(Into::into);
+                            let key_pattern =
+                                fht_compositor_config::KeyPattern(modifiers.into(), keysym);
+                            let action = state
+                                .fht
+                                .config
+                                .keybinds
+                                .get(&key_pattern)
+                                .cloned()
+                                .map(Into::into);
                             debug!(?keysym, ?key_pattern, ?action);
 
                             if let Some(action) = action {
@@ -491,9 +498,13 @@ impl State {
                     self.update_keyboard_focus();
 
                     if let Some(button) = event.button() {
-                        let mouse_pattern =
-                            fht_compositor_config::MousePattern(self.fht.keyboard.modifier_state().into(), button.into());
-                        if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        let mouse_pattern = fht_compositor_config::MousePattern(
+                            self.fht.keyboard.modifier_state().into(),
+                            button.into(),
+                        );
+                        if let Some(action) =
+                            self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                        {
                             self.process_mouse_action(action, serial);
                         }
                     }
