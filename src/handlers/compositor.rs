@@ -7,8 +7,8 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
-    BufferAssignment, CompositorHandler, SurfaceAttributes,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
+    with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
@@ -186,6 +186,10 @@ impl State {
                         workspace.close_window(&window, true);
                     }
                 });
+
+                if let Some(pre_commit_hook) = window.take_pre_commit_hook_id() {
+                    remove_pre_commit_hook(surface, pre_commit_hook);
+                }
 
                 // When a window gets unmapped, it needs to go through all the initial configure
                 // sequence again to set its render buffers and toplevel surface again.
