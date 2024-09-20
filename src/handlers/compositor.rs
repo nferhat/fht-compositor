@@ -73,7 +73,7 @@ impl State {
                 let rules = ResolvedWindowRules::resolve(
                     &window,
                     &self.fht.config.rules,
-                    output.name(),
+                    output.name().as_str(),
                     workspace_idx,
                     false, // we are still unmapped
                 );

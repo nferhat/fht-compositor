@@ -46,7 +46,7 @@ impl CursorThemeManager {
     }
 
     #[profiling::function]
-    pub fn reload(&mut self, new_config: Cursor) {
+    pub fn reload_config(&mut self, new_config: Cursor) {
         if self.config != new_config {
             self.config = new_config;
             self.cursor_theme = CursorTheme::load(&self.config.name);

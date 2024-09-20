@@ -42,31 +42,64 @@ pub struct Layout {
     // eachother. Up to the user
     inner_gaps: i32,
     outer_gaps: i32,
+    // When reloading the configuration, we dont want to overrides changes that the user applied
+    // Example situation: you focus a workspace and change the nmaster to 0.3, then when the user
+    // reloads the configuration, the nmaster gets reset to the default.
+    //
+    // This is really annoying since this also affects mwfact, nmaster, gaps, etc...
+    has_transient_changes: bool,
 }
 
 impl Layout {
-    pub fn new(
-        output: &Output,
-        layouts: Vec<WorkspaceLayout>,
-        nmaster: usize,
-        mwfact: f32,
-        inner_gaps: i32,
-        outer_gaps: i32,
-    ) -> Self {
+    pub fn check_invariants(config: &fht_compositor_config::Config) -> anyhow::Result<()> {
+        if config.general.nmaster == 0 {
+            anyhow::bail!("general.nmaster cannot be zero!");
+        }
+        if config.general.mwfact < 0.01 || config.general.mwfact > 0.99 {
+            anyhow::bail!("general.mwfact must be between 0.01 and 0.99")
+        }
+        if config.general.layouts.is_empty() {
+            anyhow::bail!("general.layouts must never be empty!");
+        }
+        Ok(())
+    }
+
+    pub fn new(output: &Output, config: &fht_compositor_config::Config) -> anyhow::Result<Self> {
+        Self::check_invariants(config)?;
         let output_geo = output.geometry();
+
         let mut layout = Self {
-            nmaster,
-            mwfact,
+            nmaster: config.general.nmaster,
+            mwfact: config.general.mwfact,
             output_geo,
             usable_geo: output_geo,
-            layouts,
+            layouts: config.general.layouts.clone(),
             active_idx: 0,
-            inner_gaps,
-            outer_gaps,
+            inner_gaps: config.general.inner_gaps,
+            outer_gaps: config.general.outer_gaps,
+            has_transient_changes: false,
         };
         layout.usable_geo = layout.get_usable_geo(output);
 
-        layout
+        Ok(layout)
+    }
+
+    pub fn reload_config(
+        &mut self,
+        output: &Output,
+        config: &fht_compositor_config::Config,
+    ) -> anyhow::Result<()> {
+        Self::check_invariants(config)?;
+        if !self.has_transient_changes {
+            self.nmaster = config.general.nmaster;
+            self.mwfact = config.general.mwfact;
+            self.inner_gaps = config.general.inner_gaps;
+            self.outer_gaps = config.general.outer_gaps;
+            self.layouts = config.general.layouts.clone();
+        }
+        self.output_resized(output);
+
+        Ok(())
     }
 
     pub fn output_resized(&mut self, output: &Output) {
@@ -84,18 +117,6 @@ impl Layout {
 
     pub fn usable_geo(&self) -> Rectangle<i32, Logical> {
         self.usable_geo
-    }
-
-    pub fn nmaster(&self) -> usize {
-        self.nmaster
-    }
-
-    pub fn mwfact(&self) -> f32 {
-        self.mwfact
-    }
-
-    pub fn active(&self) -> WorkspaceLayout {
-        self.layouts[self.active_idx]
     }
 
     pub fn select_next(&mut self) {
@@ -118,24 +139,13 @@ impl Layout {
         };
     }
 
-    pub fn set_layouts(&mut self, layouts: Vec<WorkspaceLayout>) {
-        self.layouts = layouts;
-        self.active_idx = self.active_idx.clamp(0, self.layouts.len());
-    }
-
-    pub fn set_mwfact(&mut self, mwfact: f32) {
-        self.mwfact = mwfact.clamp(0.01, 0.99);
-    }
-
     pub fn change_mwfact(&mut self, delta: f32) {
+        self.has_transient_changes = true;
         self.mwfact = (self.mwfact + delta).clamp(0.01, 0.99);
     }
 
-    pub fn set_nmaster(&mut self, nmaster: usize) {
-        self.nmaster = nmaster.clamp(1, usize::MAX);
-    }
-
     pub fn change_nmaster(&mut self, delta: i32) {
+        self.has_transient_changes = true;
         self.nmaster = self
             .nmaster
             .saturating_add_signed(delta as isize)

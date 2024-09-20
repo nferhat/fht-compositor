@@ -138,10 +138,7 @@ impl State {
                 .fht
                 .stop
                 .store(true, std::sync::atomic::Ordering::SeqCst),
-            KeyAction::ReloadConfig => {
-                // TODO
-                // self.reload_config()
-            }
+            KeyAction::ReloadConfig => self.reload_config(),
             KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
             KeyAction::SelectNextLayout => active.select_next_layout(true),
             KeyAction::SelectPreviousLayout => active.select_previous_layout(true),

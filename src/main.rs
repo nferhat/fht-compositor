@@ -97,9 +97,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         (dh, socket_name)
     };
 
-    // if let Err(err) = config::init_config_file_watcher(&loop_handle) {
-    //     error!(?err, "Failed to start config file watcher!");
-    // }
     #[cfg(any(feature = "xdg-screencast-portal"))]
     if let Err(err) = portals::start(&loop_handle) {
         error!(?err, "Failed to start XDG portals")

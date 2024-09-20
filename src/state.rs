@@ -122,6 +122,7 @@ impl State {
             .workspaces_mut()
             .for_each(|(_, wset)| wset.refresh());
         self.fht.popups.cleanup();
+        self.fht.resolve_rules_for_all_windows_if_needed();
         // Redraw queued outputs.
         {
             profiling::scope!("redraw_queued_outputs");
@@ -218,6 +219,61 @@ impl State {
 
         // Send frame callbacks
         self.fht.send_frames(&output);
+    }
+
+    pub fn reload_config(&mut self) {
+        let new_config = match fht_compositor_config::load(None) {
+            Ok(config) => config,
+            Err(err) => {
+                error!(?err, "Failed to reload configuration file!");
+                // TODO: Config ui error message type thing
+                return;
+            }
+        };
+        // let old_config = Arc::clone(&self.fht.config);
+        let config = Arc::new(new_config);
+
+        // Some invariants must be upheld when reloading the configuration
+        // If any reloading function errors out, the configuration is not valid
+        //
+        // FIXME: A big issue with this function is that the compositor can be in a state where some
+        // parts or subsystems merged to the new configuration and some others are still using the
+        // old (since any error here is short circuiting)
+        //
+        // FIXME: Either add check_invariants functions everywhere or load configuration from
+        // previous working file if possible
+
+        let keyboard = self.fht.keyboard.clone();
+        if let Err(err) = keyboard.set_xkb_config(self, config.input.keyboard.xkb_config()) {
+            error!(?err, "Failed to apply configuration");
+            return;
+        }
+
+        // NOTE: A tricky problem here is that a workspace set *can* apply the configuration just
+        // file but then one after it fails to apply it. Really confusing behaviour.
+        //
+        // Maybe we need to store the last working config if this happens
+        for wset in self.fht.workspaces.values_mut() {
+            if let Err(err) = wset.reload_config(&config) {
+                error!(?err, "Failed to apply configuration");
+                return;
+            }
+        }
+
+        self.fht
+            .cursor_theme_manager
+            .reload_config(config.cursor.clone());
+
+        // These devices are just handles, so cleaning the devices vector and adding them all
+        // back should not be an issue. (input device configuration code in inside
+        // add_libinput_device function)
+        let devices: Vec<_> = self.fht.devices.drain(..).collect();
+        for device in devices {
+            self.fht.add_libinput_device(device);
+        }
+
+        // If we made it up to here, the configuration must be valid
+        self.fht.config = config;
     }
 }
 
@@ -769,6 +825,77 @@ impl Fht {
         output_presentation_feedback
     }
 
+    pub fn resolve_rules_for_window_if_needed(&self, window: &Window) {
+        if !window.need_to_resolve_rules() {
+            return;
+        }
+
+        self.resolve_rules_for_window(window);
+    }
+
+    pub fn resolve_rules_for_window(&self, window: &Window) {
+        for wset in self.workspaces.values() {
+            let output_name = wset.output().name();
+            for (ws_idx, workspace) in wset.workspaces().enumerate() {
+                let focused_idx = workspace.focused_idx();
+                for (window_idx, other_window) in workspace.windows().enumerate() {
+                    if window == other_window {
+                        let is_focused = match focused_idx {
+                            // When Workspace::focused_idx == None this means theres a fullscreen
+                            // window and fullscreen windows are
+                            // exclusive and always take keyboard focus.
+                            None => workspace
+                                .current_fullscreen()
+                                .is_some_and(|fs_window| fs_window == *window),
+                            Some(idx) => idx == window_idx,
+                        };
+                        let rules = ResolvedWindowRules::resolve(
+                            window,
+                            &self.config.rules,
+                            &output_name,
+                            ws_idx,
+                            is_focused,
+                        );
+                        window.set_rules(rules);
+
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn resolve_rules_for_all_windows_if_needed(&self) {
+        for wset in self.workspaces.values() {
+            let output_name = wset.output().name();
+            for (ws_idx, workspace) in wset.workspaces().enumerate() {
+                let focused_idx = workspace.focused_idx();
+                for (window_idx, window) in workspace.windows().enumerate() {
+                    if !window.need_to_resolve_rules() {
+                        continue;
+                    }
+
+                    let is_focused = match focused_idx {
+                        // When Workspace::focused_idx == None this means theres a fullscreen window
+                        // and fullscreen windows are exclusive and always take keyboard focus.
+                        None => workspace
+                            .current_fullscreen()
+                            .is_some_and(|fs_window| fs_window == *window),
+                        Some(idx) => idx == window_idx,
+                    };
+                    let rules = ResolvedWindowRules::resolve(
+                        window,
+                        &self.config.rules,
+                        &output_name,
+                        ws_idx,
+                        is_focused,
+                    );
+                    window.set_rules(rules);
+                }
+            }
+        }
+    }
+
     pub fn add_libinput_device(&mut self, mut device: input::Device) {
         // The following input configuration logic is from hyprland.
         let input_config = &self.config.input;
@@ -1067,7 +1194,7 @@ impl ResolvedWindowRules {
     pub fn resolve(
         window: &Window,
         rules: &[fht_compositor_config::WindowRule],
-        current_output: String,
+        current_output: &str,
         current_workspace_idx: usize,
         is_focused: bool,
     ) -> Self {
@@ -1077,7 +1204,7 @@ impl ResolvedWindowRules {
             rule_matches(
                 rule,
                 window,
-                &current_output,
+                current_output,
                 current_workspace_idx,
                 is_focused,
             )

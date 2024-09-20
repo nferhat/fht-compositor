@@ -114,6 +114,7 @@ impl Window {
 
     pub fn set_rules(&self, rules: ResolvedWindowRules) {
         let mut guard = self.inner.data.lock().unwrap();
+        guard.need_to_resolve_rules = false;
         guard.rules = rules;
     }
 
@@ -121,6 +122,15 @@ impl Window {
         // Mutex madness, and interior mutability, I hate you :star_struck:
         let guard = self.inner.data.lock().unwrap();
         MutexGuardRef::new(guard).map(|data| &data.rules)
+    }
+
+    fn set_need_to_resolve_rules(&self) {
+        let mut guard = self.inner.data.lock().unwrap();
+        guard.need_to_resolve_rules = true;
+    }
+
+    pub fn need_to_resolve_rules(&self) -> bool {
+        self.inner.data.lock().unwrap().need_to_resolve_rules
     }
 
     pub fn request_size(&self, new_size: Size<i32, Logical>) {
@@ -174,6 +184,7 @@ impl Window {
     }
 
     pub fn request_fullscreen(&self, fullscreen: bool) {
+        self.set_need_to_resolve_rules();
         self.toplevel().with_pending_state(|state| {
             if fullscreen {
                 state.states.set(State::Fullscreen)
@@ -189,6 +200,7 @@ impl Window {
     }
 
     pub fn request_maximized(&self, maximize: bool) {
+        self.set_need_to_resolve_rules();
         self.toplevel().with_pending_state(|state| {
             if maximize {
                 state.states.set(State::Maximized)
@@ -204,6 +216,7 @@ impl Window {
     }
 
     pub fn request_bounds(&self, bounds: Option<Size<i32, Logical>>) {
+        self.set_need_to_resolve_rules();
         self.toplevel()
             .with_pending_state(|state| state.bounds = bounds);
     }
@@ -213,6 +226,7 @@ impl Window {
     }
 
     pub fn request_activated(&self, activated: bool) {
+        self.set_need_to_resolve_rules();
         self.toplevel().with_pending_state(|state| {
             if activated {
                 state.states.set(State::Activated)

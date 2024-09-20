@@ -9,6 +9,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, WmCapabilities,
 };
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
 use smithay::wayland::compositor::{
@@ -16,7 +17,7 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
 use crate::input::swap_tile_grab::SwapTileGrab;
@@ -228,6 +229,18 @@ impl XdgShellHandler for State {
         }
 
         surface.send_configure();
+    }
+
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+            self.fht.resolve_rules_for_window(&window);
+        }
+    }
+
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+            self.fht.resolve_rules_for_window(&window);
+        }
     }
 
     fn reposition_request(

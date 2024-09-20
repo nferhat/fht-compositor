@@ -73,19 +73,26 @@ impl WorkspaceSet {
         self.workspaces_mut().for_each(Workspace::refresh);
     }
 
-    pub fn reload_config(&mut self, config: &Arc<fht_compositor_config::Config>) {
-        self.config = Arc::clone(&config);
+    pub fn reload_config(
+        &mut self,
+        config: &Arc<fht_compositor_config::Config>,
+    ) -> anyhow::Result<()> {
+        // If one workspace layouts fails, we dont apply to the rest of the workspaces.
+        //
+        // We cant override all the workspaces with one layout since we need to check for transient
+        // changes on the layout properties.
+        layout::Layout::check_invariants(config.as_ref())?;
+        self.config = Arc::clone(config);
+
         for workspace in &mut self.workspaces {
             workspace.config = Arc::clone(&config);
-            workspace.layout = Layout::new(
-                &self.output,
-                config.general.layouts.clone(),
-                config.general.nmaster,
-                config.general.mwfact,
-                config.general.inner_gaps,
-                config.general.outer_gaps,
-            );
+            workspace
+                .layout
+                .reload_config(&self.output, config.as_ref())
+                .expect("Layout invariants already checked!");
         }
+
+        Ok(())
     }
 
     pub fn set_active_idx(&mut self, target_idx: usize, animate: bool) -> Option<Window> {
@@ -507,14 +514,8 @@ fht_render_elements! {
 
 impl Workspace {
     pub fn new(output: Output, config: Arc<fht_compositor_config::Config>) -> Self {
-        let layout = Layout::new(
-            &output,
-            config.general.layouts.clone(),
-            config.general.nmaster,
-            config.general.mwfact,
-            config.general.inner_gaps,
-            config.general.outer_gaps,
-        );
+        let layout =
+            Layout::new(&output, config.as_ref()).expect("Layout invariant checks failed!");
         Self {
             output,
             tiles: vec![],
@@ -549,6 +550,10 @@ impl Workspace {
 
     pub fn tiles(&self) -> impl Iterator<Item = &Tile> {
         self.tiles.iter()
+    }
+
+    pub fn windows(&self) -> impl Iterator<Item = &Window> {
+        self.tiles().map(Tile::window)
     }
 
     #[profiling::function]
@@ -811,6 +816,21 @@ impl Workspace {
 
 // window focus
 impl Workspace {
+    pub fn focused_idx(&self) -> Option<usize> {
+        if self.fullscreen.is_some() {
+            return None;
+        } else {
+            Some(self.focused_tile_idx)
+        }
+    }
+
+    pub fn current_fullscreen(&self) -> Option<Window> {
+        self.fullscreen
+            .as_ref()
+            .map(|fs| fs.inner.window())
+            .cloned()
+    }
+
     pub fn focused(&self) -> Option<Window> {
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             return Some(fullscreen.inner.window().clone());
