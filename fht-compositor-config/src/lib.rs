@@ -693,6 +693,7 @@ fn deserialize_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32;
 pub enum Color {
     Solid(#[serde(deserialize_with = "deserialize_color")] [f32; 4]),
     Gradient {
+        #[serde(deserialize_with = "deserialize_color")]
         start: [f32; 4],
         #[serde(deserialize_with = "deserialize_color")]
         end: [f32; 4],
