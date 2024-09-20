@@ -90,6 +90,9 @@ impl WorkspaceSet {
                 .layout
                 .reload_config(&self.output, config.as_ref())
                 .expect("Layout invariants already checked!");
+            for tile in workspace.tiles.iter_mut() {
+                tile.config = Arc::clone(&config);
+            }
         }
 
         Ok(())

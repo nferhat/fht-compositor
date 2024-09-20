@@ -41,7 +41,7 @@ pub struct Tile {
     // Sometimes we want to prepare these in advance since a surface could be destroyed/not alive
     // by the time we actually display the ClosingTile
     close_animation_snapshot: Option<Vec<TileRenderElement<GlowRenderer>>>,
-    config: Arc<fht_compositor_config::Config>,
+    pub(super) config: Arc<fht_compositor_config::Config>,
     // TODO: Introcude this back
     // debug_overlay: Option<EguiElement>,
 }
