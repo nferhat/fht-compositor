@@ -2,6 +2,7 @@ use std::cell::{RefCell, RefMut};
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -56,7 +57,6 @@ use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
-use std::thread::JoinHandle;
 
 use crate::backend::Backend;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
@@ -223,24 +223,20 @@ impl State {
     }
 
     pub fn reload_config(&mut self) {
-        let (new_config, path) = match fht_compositor_config::load(None) {
-            Ok((config, path)) => (config, Some(path)),
+        let (new_config, paths) = match fht_compositor_config::load(None) {
+            Ok((config, paths)) => (config, paths),
             Err(err) => {
                 error!(?err, "Failed to load configuration, using default");
                 self.fht.last_config_error = Some(err);
-                (Default::default(), None)
+                (Default::default(), vec![])
             }
         };
 
-        let config_watcher = path.and_then(|path| {
-            crate::config::init_watcher(path, &self.fht.loop_handle)
-                .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
-                .ok()
-        });
-        if let Some((registration_token, _join_handle)) =
-            std::mem::replace(&mut self.fht.config_watcher, config_watcher)
-        {
-            self.fht.loop_handle.remove(registration_token);
+        let config_watcher = crate::config::init_watcher(paths, &self.fht.loop_handle)
+            .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
+            .ok();
+        if let Some(watcher) = std::mem::replace(&mut self.fht.config_watcher, config_watcher) {
+            watcher.stop(&self.fht.loop_handle);
             // The associated thread will die alone since it will error out (tx.send will fail since
             // the channel does not exist anymore) So there's nothing todo with the
             // join_handle!
@@ -319,7 +315,7 @@ pub struct Fht {
     pub config: Arc<fht_compositor_config::Config>,
     // We keep the config watcher around in case the configuration file path changes.
     // This will be useful for configuration file imports (when implemented)
-    pub config_watcher: Option<(RegistrationToken, JoinHandle<()>)>,
+    pub config_watcher: Option<crate::config::Watcher>,
     pub last_config_error: Option<fht_compositor_config::Error>,
 
     #[cfg(feature = "xdg-screencast-portal")]
@@ -347,20 +343,18 @@ impl Fht {
     ) -> Self {
         let mut last_config_error = None;
         // TODO: Get path from a cli argument or something
-        let (config, path) = match fht_compositor_config::load(None) {
-            Ok((config, path)) => (config, Some(path)),
+        let (config, paths) = match fht_compositor_config::load(None) {
+            Ok((config, paths)) => (config, paths),
             Err(err) => {
                 error!(?err, "Failed to load configuration, using default");
                 last_config_error = Some(err);
-                (Default::default(), None)
+                (Default::default(), vec![])
             }
         };
 
-        let config_watcher = path.and_then(|path| {
-            crate::config::init_watcher(path, &loop_handle)
-                .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
-                .ok()
-        });
+        let config_watcher = crate::config::init_watcher(paths, &loop_handle)
+            .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
+            .ok();
 
         let clock = Clock::<Monotonic>::new();
 

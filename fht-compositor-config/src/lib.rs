@@ -5,6 +5,7 @@
 extern crate tracing;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, path};
 
@@ -18,6 +19,7 @@ use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
 use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
+use toml::{Table, Value};
 
 static DEFAULT_CONFIG_CONTENTS: &'static str = include_str!("../../res/compositor.toml");
 
@@ -950,7 +952,7 @@ fn fallback_path() -> path::PathBuf {
     path
 }
 
-pub fn load(path: Option<path::PathBuf>) -> Result<(Config, path::PathBuf), Error> {
+pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>), Error> {
     let path = path.or_else(|| {
         get_xdg_path().inspect_err(|err| {
             warn!(?err, "Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml")
@@ -972,8 +974,88 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, path::PathBuf), Erro
     let mut buf = String::new();
     let _ = file.read_to_string(&mut buf)?;
 
-    let config: Config = toml::de::from_str(buf.as_str())?;
-    Ok((config, path))
+    // First deserialize as a toml::Value and try to get the imports table to merge with.
+    let mut config: Value = toml::de::from_str(buf.as_str())?;
+    let mut paths = vec![path];
+
+    if let Some(imports) = config.get("imports").cloned() {
+        let imports = Value::try_into::<Vec<PathBuf>>(imports);
+        if let Ok(imports) = imports {
+            for mut path in imports {
+                if let Ok(stripped) = path.strip_prefix("~/") {
+                    // NOTE: Deprecation is only relevant on windows, where this library should
+                    // never be used.
+                    #[allow(deprecated)]
+                    let home_dir = std::env::home_dir().expect("No $HOME directory?");
+                    path = home_dir.join(stripped);
+                }
+
+                let mut file = match fs::OpenOptions::new().read(true).write(false).open(&path) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        error!(?err, ?path, "Failed to open import file");
+                        continue;
+                    }
+                };
+                let mut buf = String::new();
+                if let Err(err) = file.read_to_string(&mut buf) {
+                    error!(?err, "Failed to read import file");
+                    continue;
+                }
+                match toml::de::from_str(&buf) {
+                    Ok(value) => {
+                        debug!(?path, "Merging configuration from path");
+                        paths.push(path);
+                        config = merge(config, value);
+                    }
+                    Err(err) => {
+                        error!(?err, ?path, "Failed to read configuration from import path")
+                    }
+                }
+            }
+        }
+    }
+
+    if let Value::Table(table) = &mut config {
+        // We dont want it inside the final config struct
+        // If the config is not a table it will error down below so there's not need to error here
+        table.remove("imports");
+    }
+
+    let config = Value::try_into(config)?;
+    Ok((config, paths))
+}
+
+/// Merge two serde structures.
+///
+/// This will take all values from `replacement` and use `base` whenever a value isn't present in
+/// `replacement`.
+///
+/// Copyright https://github.com/alacritty/alacritty under the apache 2.0 license
+/// Thank you very much!
+fn merge(base: Value, replacement: Value) -> Value {
+    fn merge_tables(mut base: Table, replacement: Table) -> Table {
+        for (key, value) in replacement {
+            let value = match base.remove(&key) {
+                Some(base_value) => merge(base_value, value),
+                None => value,
+            };
+            base.insert(key, value);
+        }
+
+        base
+    }
+
+    match (base, replacement) {
+        (Value::Array(mut base), Value::Array(mut replacement)) => {
+            base.append(&mut replacement);
+            Value::Array(base)
+        }
+        (Value::Table(base), Value::Table(replacement)) => {
+            Value::Table(merge_tables(base, replacement))
+        }
+        (_, value) => value,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
