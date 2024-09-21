@@ -276,6 +276,9 @@ impl State {
             .cursor_theme_manager
             .reload_config(config.cursor.clone());
 
+        // If we made it up to here, the configuration must be valid
+        self.fht.config = config;
+
         // These devices are just handles, so cleaning the devices vector and adding them all
         // back should not be an issue. (input device configuration code in inside
         // add_libinput_device function)
@@ -283,9 +286,6 @@ impl State {
         for device in devices {
             self.fht.add_libinput_device(device);
         }
-
-        // If we made it up to here, the configuration must be valid
-        self.fht.config = config;
     }
 }
 
