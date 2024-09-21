@@ -10,6 +10,7 @@ use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use clap::Parser;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
@@ -17,6 +18,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 use state::State;
 
 mod backend;
+mod cli;
 mod config;
 mod egui;
 mod handlers;
@@ -40,6 +42,12 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         .compact()
         .with_env_filter(filter)
         .init();
+
+    let cli = cli::Cli::parse();
+    if let Some(cli::Command::CheckConfiguration) = cli.command {
+        check_configuration(cli);
+        return Ok(());
+    }
 
     info!(
         version = std::env!("CARGO_PKG_VERSION"),
@@ -106,6 +114,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
+        cli,
         socket_name.clone(),
     );
 
@@ -137,4 +146,19 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     info!("Shutting down! Goodbye~");
 
     Ok(())
+}
+
+fn check_configuration(cli: cli::Cli) {
+    match fht_compositor_config::load(cli.config_path) {
+        Ok(_) => info!("There's no issues with your configuration"),
+        Err(err) => match err {
+            fht_compositor_config::Error::IO(err) => {
+                error!(?err, "Failed to load your configuration");
+            }
+            fht_compositor_config::Error::Parse(err) => {
+                // toml error has a pretty formatter that is good enough for this.
+                print!("\n{}", err);
+            }
+        },
+    }
 }

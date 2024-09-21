@@ -59,6 +59,7 @@ use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
+use crate::cli;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::workspaces::{WorkspaceId, WorkspaceSet};
@@ -79,20 +80,20 @@ impl State {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        cli: cli::Cli,
         _socket_name: String,
     ) -> Self {
         let mut fht = Fht::new(dh, loop_handle, loop_signal);
-        let backend: crate::backend::Backend = if let Ok(backend_name) =
-            std::env::var("FHTC_BACKEND")
-        {
-            match backend_name.trim().to_lowercase().as_str() {
+        let backend: crate::backend::Backend = if let Some(backend_type) = cli.backend {
+            match backend_type {
                 #[cfg(feature = "x11_backend")]
-                "x11" => crate::backend::x11::X11Data::new(&mut fht).unwrap().into(),
+                cli::BackendType::X11 => {
+                    crate::backend::x11::X11Data::new(&mut fht).unwrap().into()
+                }
                 #[cfg(feature = "udev_backend")]
-                "kms" | "udev" => crate::backend::udev::UdevData::new(&mut fht)
+                cli::BackendType::Udev => crate::backend::udev::UdevData::new(&mut fht)
                     .unwrap()
                     .into(),
-                x => unimplemented!("No such backend implemented!: {x}"),
             }
         } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
             info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window");
