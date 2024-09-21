@@ -279,7 +279,7 @@ fn add_window_pre_commit_hook(window: &Window) {
         let got_unmapped = with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
             let attrs = guard.pending();
-            matches!(attrs.buffer, Some(BufferAssignment::Removed) | None)
+            matches!(attrs.buffer, Some(BufferAssignment::Removed))
         });
 
         if got_unmapped {
