@@ -1,3 +1,5 @@
 /target
 # Useless log files in the repo
 std*
+# mdbook generated files for serving into HTML
+docs/book

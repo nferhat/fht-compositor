@@ -1,16 +1,9 @@
 # fht-compositor config.
 #
 # This config is not exhaustive, just a starter for you to change.
-# You will be able to find all configuration keys on the wiki. (when it's done)
+# Check out the documentation for more details!
 
-# Environment variables, if you need to set some before anything else starts
-# (including the autostart section!)
-# env.key = "val"
-
-autostart = [
-  "dex -a", # autostart XDG programs
-  "swaybg -i ~/.config/wallpaper.jpg",
-]
+autostart = []
 
 # Should the compositor warp the cursor arbitrarily (for example when focusing window,
 # when an output is added, etc...)
@@ -37,8 +30,8 @@ inner-gaps = 5
 [cursor]
 # Cursor theme. The compositor can also read `XCURSOR_THEME` and `XCURSOR_SIZE` if
 # these values are not set.
-name = "Vimix"
-size = 32
+# name = "Vimix"
+# size = 32
 
 [decorations]
 # Should we allow clients to draw client-side decorations?
@@ -84,7 +77,7 @@ repeat-delay = 250
 # - The device pretty name (aka the readable name, which you would see in a device manager)
 # - The device dev name
 # - The raw device path `/dev/input/XXXXX`
-
+#
 # See: man libinput
 [input.per-device."AT Translated Set 2 keyboard"]
 disable = true # get rid of the device entierly
@@ -150,61 +143,7 @@ Super-Shift-9 = { action = "send-focused-window-to-workspace", arg = 8 }
 
 [mousebinds]
 Super-Left = "move-tile"
-Super-Right = "resize-tile"
 
 # Window rules.
-#
-# These are a giant toml array. These are from my personal configuration, in order
-# to represent a "large" variety of possible rules, and ways to match applications
-#
-# Each match string *is* a regular expression.
+# Refer to the documentation for more details
 [[rules]]
-# If you need your window rule to match ALL the criteria specified here,
-# uncomment the following line:
-# match-all = true
-match-app-id = [
-  "nvidia-settings",
-  "org.keepassxc.KeePassXC",
-  "nwg-look",
-  "Virt-Manager",
-  "pinentry-qt",
-  "file_progress",
-  "confirm",
-  "dialog",
-  "download",
-  "notification",
-  "error",
-  "splash",
-  "confirmreset",
-  "fht.desktop.ScreenCastSourcePicker",
-  "org.inkscape.Inkscape",
-]
-# centered = true
-# floating = true
-
-[[rules]]
-match-app-id = ["Alacritty"]
-workspace = 2
-
-[[rules]]
-# Web browsers
-match-app-id = ["LibreWolf", "Firefox"]
-workspace = 1                           # workspaces are zero-indexed
-
-[[rules]]
-on-workspace = 5 # if the opened window is on this workspace
-match-app-id = [
-  "Celeste.bin.x86_64",
-  "osu!.exe",
-  "Grapejuice",
-  "Etterna",
-  "Quaver",
-  "Steam",
-  "org.prismlauncher.PrismLauncher",
-  "love",                            # olympus for celeste.
-]
-workspace = 5
-# floating = true
-
-[[rules]]
-opacity = 0.5

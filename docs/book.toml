@@ -1,0 +1,7 @@
+[book]
+authors = ["nferhat"]
+language = "en"
+multilingual = false
+src = "src"
+title = "fht-compositor documention"
+output.html.smart-punctuation = true
