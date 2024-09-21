@@ -876,7 +876,7 @@ checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
 [[package]]
 name = "fht-animation"
 version = "0.1.0"
-source = "git+https://github.com/nferhat/fht-animation#323a251d0c1879a1d34e9c18136d217e39db0ff4"
+source = "git+https://github.com/nferhat/fht-animation#278ad8f0fb62c4e2e76cc5718fe3f08f4f2bb992"
 dependencies = [
  "keyframe",
  "rustix",
@@ -1336,7 +1336,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
