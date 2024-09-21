@@ -28,7 +28,9 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 #[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::{Bind, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture};
+use smithay::backend::renderer::{
+    Bind, Color32F, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture,
+};
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
@@ -186,6 +188,8 @@ impl Fht {
     ) where
         FhtRenderElement<R>: smithay::backend::renderer::element::RenderElement<R>,
     {
+        use smithay::backend::renderer::Color32F;
+
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
@@ -245,7 +249,7 @@ impl Fht {
                 };
 
                 if let Err(err) =
-                    dt.render_output_with(renderer, dmabuf, 0, &elements, [0., 0., 0., 0.])
+                    dt.render_output_with(renderer, dmabuf, 0, &elements, Color32F::TRANSPARENT)
                 {
                     error!(?err, "Failed to render elements to DMABUF");
                     continue;
@@ -389,7 +393,7 @@ pub fn render_to_texture(
         .context("error starting frame")?;
 
     frame
-        .clear([0., 0., 0., 0.], &[output_rect])
+        .clear(Color32F::TRANSPARENT, &[output_rect])
         .context("error clearing")?;
 
     for element in elements {

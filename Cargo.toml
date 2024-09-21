@@ -26,12 +26,12 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-rev = "f208cd7"
+rev = "0cd0895"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "f208cd7"
+rev = "0cd0895"
 
 [profile.opt]
 inherits = "release"

@@ -64,8 +64,8 @@ use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::shm::{self, shm_format_to_fourcc};
+use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-use smithay_drm_extras::edid::EdidInfo;
 
 use crate::renderer::shaders::Shaders;
 use crate::renderer::{AsGlowRenderer, FhtRenderElement, OutputElementsResult};
@@ -493,7 +493,14 @@ impl UdevData {
             return Ok(());
         };
 
-        for event in device.drm_scanner.scan_connectors(&device.drm) {
+        let Ok(result) = device
+            .drm_scanner
+            .scan_connectors(&device.drm)
+            .inspect_err(|err| warn!(?err, ?device_node, "Failed to scan connectors for device"))
+        else {
+            return Ok(());
+        };
+        for event in result {
             match event {
                 DrmScanEvent::Connected { connector, crtc } => {
                     if let Some(crtc) = crtc {
@@ -602,9 +609,15 @@ impl UdevData {
                 }
             };
 
-        let (make, model) = EdidInfo::for_connector(&device.drm, connector.handle())
-            .map(|info| (info.manufacturer, info.model))
-            .unwrap_or_else(|| ("Unknown".into(), "Unknown".into()));
+        let info = display_info::for_connector(&device.drm, connector.handle());
+        let make = info
+            .as_ref()
+            .and_then(|info| info.make())
+            .unwrap_or_else(|| "Unknown".into());
+        let model = info
+            .as_ref()
+            .and_then(|info| info.model())
+            .unwrap_or_else(|| "Unknown".into());
 
         if non_desktop {
             debug!(

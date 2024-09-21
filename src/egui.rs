@@ -13,7 +13,7 @@ use smithay::backend::renderer::element::texture::{TextureRenderBuffer, TextureR
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{self, GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Frame, Offscreen, Renderer, Unbind};
+use smithay::backend::renderer::{Bind, Color32F, Frame, Offscreen, Renderer, Unbind};
 use smithay::input::keyboard::{xkb, ModifiersState};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
 
@@ -189,7 +189,10 @@ impl EguiElement {
             renderer.bind(texture.clone())?;
             {
                 let mut frame = renderer.render(size, Transform::Normal)?;
-                frame.clear([0.; 4], &[Rectangle::from_loc_and_size((0, 0), size)])?;
+                frame.clear(
+                    Color32F::TRANSPARENT,
+                    &[Rectangle::from_loc_and_size((0, 0), size)],
+                )?;
                 painter.painter.paint_and_update_textures(
                     [size.w as u32, size.h as u32],
                     scale as f32,

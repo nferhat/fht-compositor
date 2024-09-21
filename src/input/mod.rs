@@ -638,7 +638,8 @@ impl State {
                 };
 
                 let tool = event.tool();
-                tablet_seat.add_tool::<Self>(&self.fht.display_handle, &tool);
+                let dh = self.fht.display_handle.clone();
+                tablet_seat.add_tool::<Self>(self, &dh, &tool);
 
                 let pointer_location =
                     event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
