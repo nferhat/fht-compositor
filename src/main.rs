@@ -46,7 +46,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     let cli = cli::Cli::parse();
     if let Some(cli::Command::CheckConfiguration) = cli.command {
         check_configuration(cli);
-        return Ok(());
     }
 
     info!(
@@ -148,16 +147,21 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn check_configuration(cli: cli::Cli) {
+fn check_configuration(cli: cli::Cli) -> ! {
     match fht_compositor_config::load(cli.config_path) {
-        Ok(_) => info!("There's no issues with your configuration"),
+        Ok(_) => {
+            info!("There's no issues with your configuration");
+            std::process::exit(0)
+        }
         Err(err) => match err {
             fht_compositor_config::Error::IO(err) => {
                 error!(?err, "Failed to load your configuration");
+                std::process::exit(1)
             }
             fht_compositor_config::Error::Parse(err) => {
                 // toml error has a pretty formatter that is good enough for this.
                 print!("\n{}", err);
+                std::process::exit(1)
             }
         },
     }
