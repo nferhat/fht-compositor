@@ -130,7 +130,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 
     event_loop
         .run(None, &mut state, |state| {
-            if state.fht.stop.load(std::sync::atomic::Ordering::SeqCst) {
+            if state.fht.stop {
                 state.fht.loop_signal.stop();
                 state.fht.loop_signal.wakeup();
                 return;

@@ -293,7 +293,7 @@ pub struct Fht {
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, State>,
     pub loop_signal: LoopSignal,
-    pub stop: Arc<AtomicBool>,
+    pub stop: bool,
 
     pub seat_state: SeatState<State>,
     pub seat: Seat<State>,
@@ -431,7 +431,7 @@ impl Fht {
             display_handle: dh.clone(),
             loop_handle,
             loop_signal,
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: false,
 
             clock,
             suppressed_keys: HashSet::new(),
@@ -516,7 +516,7 @@ impl Fht {
 
         if self.workspaces.is_empty() {
             // There's nothing more todo, just adandon everything.
-            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.stop = true;
             return;
         }
 

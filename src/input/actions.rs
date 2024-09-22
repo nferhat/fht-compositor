@@ -134,10 +134,7 @@ impl State {
         let active = wset.active_mut();
 
         match action {
-            KeyAction::Quit => self
-                .fht
-                .stop
-                .store(true, std::sync::atomic::Ordering::SeqCst),
+            KeyAction::Quit => self.fht.stop = true,
             KeyAction::ReloadConfig => self.reload_config(),
             KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
             KeyAction::SelectNextLayout => active.select_next_layout(true),
