@@ -6,6 +6,7 @@ use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
+use smithay::utils::Rectangle;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
     with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
@@ -52,22 +53,22 @@ impl State {
                 window.refresh();
 
                 let mut output = self.fht.focus_state.output.clone().unwrap();
-                let mut workspace_idx = self.fht.wset_for(&output).get_active_idx();
+                let (mut workspace_id, mut workspace_idx) = {
+                    let workspace = self.fht.space.active_workspace_mut();
+                    (workspace.id(), workspace.index())
+                };
 
                 // Prefer parent workspace and output when matching
-                if let Some((parent_index, parent_output)) =
+                if let Some(parent_workspace) =
                     window.toplevel().parent().and_then(|parent_surface| {
-                        self.fht.workspaces().find_map(|(output, wset)| {
-                            let idx = wset
-                                .workspaces()
-                                .enumerate()
-                                .position(|(_, ws)| ws.has_surface(&parent_surface))?;
-                            Some((idx, output.clone()))
-                        })
+                        self.fht
+                            .space
+                            .workspace_mut_for_window_surface(&parent_surface)
                     })
                 {
-                    workspace_idx = parent_index;
-                    output = parent_output;
+                    workspace_id = parent_workspace.id();
+                    workspace_idx = parent_workspace.index();
+                    output = parent_workspace.output().clone();
                 }
 
                 let rules = ResolvedWindowRules::resolve(
@@ -108,14 +109,9 @@ impl State {
                     });
                 }
 
-                // Now apply our rules
-                let wset = self.fht.wset_mut_for(&output);
-                let workspace_idx = rules.open_on_workspace.unwrap_or(wset.get_active_idx());
-                let workspace = wset.get_workspace_mut(workspace_idx);
-                let workspace_id = workspace.id();
+                // TODO:
+                // self.fht.space.prepare_window_geometry(&window, workspace_id)
 
-                // Pre compute window geometry for insertion.
-                workspace.prepare_window_geometry(window.clone());
                 window.set_rules(rules);
                 window.send_configure();
                 self.fht.unmapped_windows.push(UnmappedWindow::Configured {
@@ -138,35 +134,31 @@ impl State {
                 unreachable!("Tried to map an unconfigured window!");
             };
 
-            let workspace = match self.fht.get_workspace_mut(workspace_id) {
+            let workspace = match self.fht.space.workspace_mut_for_id(workspace_id) {
                 Some(ws) => ws,
                 None => {
                     warn!(?workspace_id, "Unmapped window has an invalid workspace id");
-                    let output = self.fht.active_output();
-                    self.fht.wset_mut_for(&output).active_mut()
+                    self.fht.space.active_workspace_mut()
                 }
             };
 
-            let output = workspace.output();
+            let output = workspace.output().clone();
             workspace.insert_window(window.clone(), true);
-            let mut geometry = workspace.window_geometry(&window).unwrap();
-            geometry.loc += output.current_location();
+            let window_geometry = Rectangle::from_loc_and_size(
+                self.fht.space.window_location(&window).unwrap(),
+                window.size(),
+            );
 
-            let wset = self.fht.wset_for(&output);
-            let is_active = wset.active().id() == workspace_id;
-            let is_switching = wset.has_switch_animation();
-            // From using the compositor opening a window when a switch is being done feels more
-            // natural when the window gets focus, even if focus_new_windows is none.
-            let should_focus =
-                (self.fht.config.general.focus_new_windows || is_switching) && is_active;
+            let is_active = self.fht.space.active_workspace_id() == workspace_id;
+            let should_focus = self.fht.config.general.focus_new_windows && is_active;
 
             if should_focus {
-                let center = geometry.center();
+                let center = window_geometry.center();
                 self.fht.loop_handle.insert_idle(move |state| {
                     if state.fht.config.general.cursor_warps {
                         state.move_pointer(center.to_f64());
                     }
-                    state.set_focus_target(Some(window.clone().into()));
+                    state.set_focus_target(Some(window));
                 });
             }
 
@@ -174,7 +166,7 @@ impl State {
         }
 
         // Other check: its a mapped window.
-        if let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(surface) {
+        if let Some((window, workspace)) = self.fht.space.find_window_and_workspace_mut(surface) {
             window.on_commit();
             let is_mapped = has_render_buffer(surface);
             #[allow(unused_assignments)]
@@ -182,8 +174,8 @@ impl State {
                 // workspace.close_window will remove the window from the workspace tiles and
                 // create a ClosingTile to represent the last frame of the closing window.
                 self.backend.with_renderer(|renderer| {
-                    if workspace.prepare_window_close_animation(&window, renderer) {
-                        workspace.close_window(&window, true);
+                    if workspace.prepare_close_animation_for_window(&window, renderer) {
+                        workspace.close_window(&window, renderer, true);
                     }
                 });
 
@@ -193,13 +185,13 @@ impl State {
 
                 // When a window gets unmapped, it needs to go through all the initial configure
                 // sequence again to set its render buffers and toplevel surface again.
-                let output = workspace.output();
+                let output = workspace.output().clone();
                 self.fht
                     .unmapped_windows
                     .push(UnmappedWindow::Unconfigured(window));
                 return Some(output);
             }
-            return Some(workspace.output());
+            return Some(workspace.output().clone());
         }
 
         None
@@ -348,9 +340,9 @@ impl CompositorHandler for State {
         //
         // As niri states it, this is not perfect, but still better than nothing.
         if let Some(root) = self.fht.root_surfaces.get(surface).cloned() {
-            if let Some((window, workspace)) = self.fht.find_window_and_workspace_mut(&root) {
+            if let Some((window, workspace)) = self.fht.space.find_window_and_workspace_mut(&root) {
                 self.backend.with_renderer(|renderer| {
-                    workspace.prepare_window_close_animation(&window, renderer);
+                    workspace.prepare_close_animation_for_window(&window, renderer);
                 });
             }
         }

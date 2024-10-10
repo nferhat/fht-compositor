@@ -410,6 +410,7 @@ impl State {
                             if output.is_none() {
                                 if let Some(o) = self
                                     .fht
+                                    .space
                                     .outputs()
                                     .find(|o| o.geometry().intersection(*rec).is_some())
                                     .cloned()

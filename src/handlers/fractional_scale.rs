@@ -37,19 +37,22 @@ impl FractionalScaleHandler for State {
             // We are the root surface.
             with_states(&root, |states| get_scanout_output(&root, states)).or_else(|| {
                 // Use window workspace output.
-                self.fht.find_window_and_output(&root).map(|(_, o)| o)
+                self.fht
+                    .space
+                    .workspace_for_window_surface(&root)
+                    .map(|ws| ws.output().clone())
             })
         } else {
             // We are not the root surface, try from surface state.
             with_states(&surface, |states| get_scanout_output(&surface, states)).or_else(|| {
                 // Try the root of the surface, if possible
-                self.fht.find_window_and_output(&root).map(|(_, o)| o)
+                self.fht
+                    .space
+                    .workspace_for_window_surface(&root)
+                    .map(|ws| ws.output().clone())
             })
         }
-        .unwrap_or_else(|| {
-            // Final blow: the first available output.
-            self.fht.outputs().next().unwrap().clone()
-        });
+        .unwrap_or_else(|| self.fht.space.primary_output().clone());
 
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional_scale| {

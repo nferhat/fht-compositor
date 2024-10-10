@@ -10,7 +10,6 @@ pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;
 pub mod rounded_element;
-pub mod rounded_outline_shader;
 pub mod shaders;
 pub mod texture_element;
 
@@ -43,22 +42,47 @@ use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::shell::cursor::CursorRenderElement;
-use crate::shell::workspaces::WorkspaceSetRenderElement;
+use crate::space::{MonitorRenderElement, MonitorRenderResult};
 use crate::state::Fht;
 use crate::utils::fps::Fps;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
-        Color = SolidColorRenderElement,
+        Debug = DebugRenderElement,
         Wayland = WaylandSurfaceRenderElement<R>,
-        WorkspaceSet = WorkspaceSetRenderElement<R>,
+        Monitor = MonitorRenderElement<R>,
     }
 }
 
+crate::fht_render_elements! {
+    DebugRenderElement => {
+        Damage = SolidColorRenderElement,
+    }
+}
+
+/// Result of [`Fht::output_elements`].
+///
+/// Tracking of `cursor_elements_len` is done for screencast purposes (see
+/// [`Fht::render_screencast`])
 pub struct OutputElementsResult<R: FhtRenderer> {
-    pub render_elements: Vec<FhtRenderElement<R>>,
+    /// The render elements
+    pub elements: Vec<FhtRenderElement<R>>,
+    /// The render elements len.
+    ///
+    /// With how smithay does rendering, the cursor elements are always at the front of
+    /// `self.elements`, to exclude the cursor elements from them, you can slice the vector at
+    /// `[cursor_elements_len..]`
     pub cursor_elements_len: usize,
+}
+
+impl<R: FhtRenderer> Default for OutputElementsResult<R> {
+    fn default() -> Self {
+        Self {
+            elements: vec![],
+            cursor_elements_len: 0,
+        }
+    }
 }
 
 impl Fht {
@@ -68,114 +92,89 @@ impl Fht {
         output: &Output,
         _fps: &mut Fps,
     ) -> OutputElementsResult<R> {
-        assert!(
-            self.workspaces.get(output).is_some(),
-            "Tried to render a non-existing output!"
-        );
+        let active_output = self.active_output();
+        let monitor = self
+            .space
+            .monitor_mut_for_output(output)
+            .expect("output_elements should only accept registered Output!");
+        // TODO: Fractional scale support.
+        let output_scale = output.current_scale();
+        let scale = (output_scale.integer_scale() as f64);
 
-        let mut elements = vec![];
+        let mut rv = OutputElementsResult::default();
 
         // Start with the cursor
         //
         // Why include cursor_elements_len? Since if we are rendering to screencast, we can take a
         // slice of elements to skip cursor_elements (slice [cursor_elements_len..])
-        let cursor_elements = self.cursor_elements(renderer, output);
-        let cursor_elements_len = cursor_elements.len();
-        elements.extend(cursor_elements);
+        if active_output == *output {
+            // Render the cursor only on the active output
+            let reset = matches!(
+                self.cursor_theme_manager.image_status(),
+                CursorImageStatus::Surface(ref surface) if !surface.alive()
+            );
+            if reset {
+                self.cursor_theme_manager
+                    .set_image_status(CursorImageStatus::default_named());
+            }
 
-        // Then overlay layer shells + their popups
-        let output_scale = output.current_scale().fractional_scale();
+            let cursor_element_pos = (self.pointer.current_location()
+                - output.current_location().to_f64())
+            .to_physical_precise_round(scale);
+            if let Ok(elements) = self.cursor_theme_manager.render(
+                renderer,
+                cursor_element_pos,
+                scale,
+                output_scale.integer_scale(), // TODO: Fractional scale support
+                1.0,
+                self.clock.now().into(),
+            ) {
+                rv.cursor_elements_len += elements.len();
+                rv.elements.extend(elements.into_iter().map(Into::into));
+            }
+
+            // Draw drag and drop icon.
+            if let Some(surface) = self.dnd_icon.as_ref().filter(IsAlive::alive) {
+                let elements = AsRenderElements::<R>::render_elements(
+                    &SurfaceTree::from_surface(surface),
+                    renderer,
+                    cursor_element_pos,
+                    scale.into(),
+                    1.0,
+                );
+                rv.cursor_elements_len += elements.len();
+                rv.elements.extend(elements);
+            }
+        }
+
+        // Overlay layer shells are drawn above everything else, including fullscreen windows
         let overlay_elements = layer_elements(renderer, output, Layer::Overlay);
-        elements.extend(overlay_elements);
+        rv.elements.extend(overlay_elements);
 
-        // Then we come to Top layer shells and windows.
-        // If we have a fullscreen window, it should be drawn above the Top layer shell, otherwise
-        // draw the top layer then the rest of the windows.
-        let (has_fullscreen, wset_elements) = self
-            .wset_for(output)
-            .render_elements(renderer, output_scale.into());
+        // Top layer shells sit between the normal windows and fullscreen windows.
+        let MonitorRenderResult {
+            elements: monitor_elements,
+            has_fullscreen,
+        } = monitor.render(renderer, scale);
         if !has_fullscreen {
-            elements.extend(layer_elements(renderer, output, Layer::Top));
-            elements.extend(
-                wset_elements
-                    .into_iter()
-                    .map(FhtRenderElement::WorkspaceSet),
-            );
+            rv.elements
+                .extend(layer_elements(renderer, output, Layer::Top));
+            rv.elements
+                .extend(monitor_elements.into_iter().map(Into::into));
         } else {
-            elements.extend(
-                wset_elements
-                    .into_iter()
-                    .map(FhtRenderElement::WorkspaceSet),
-            );
-            elements.extend(layer_elements(renderer, output, Layer::Top));
+            rv.elements
+                .extend(monitor_elements.into_iter().map(Into::into));
+            rv.elements
+                .extend(layer_elements(renderer, output, Layer::Top));
         }
 
         // Finally we have background and bottom elements.
         let background = layer_elements(renderer, output, Layer::Bottom)
             .into_iter()
             .chain(layer_elements(renderer, output, Layer::Background));
-        elements.extend(background);
+        rv.elements.extend(background);
 
-        OutputElementsResult {
-            render_elements: elements,
-            cursor_elements_len,
-        }
-    }
-
-    pub fn cursor_elements<R: FhtRenderer>(
-        &mut self,
-        renderer: &mut R,
-        output: &Output,
-    ) -> Vec<FhtRenderElement<R>> {
-        if self
-            .focus_state
-            .output
-            .as_ref()
-            .is_some_and(|o| o != output)
-        {
-            // Do not render the cursor for a non-focused output.
-            return vec![];
-        }
-
-        let mut reset = false;
-        if let CursorImageStatus::Surface(ref surface) = self.cursor_theme_manager.image_status() {
-            reset = !surface.alive();
-        }
-        if reset {
-            self.cursor_theme_manager
-                .set_image_status(CursorImageStatus::default_named());
-        }
-
-        let output_scale = output.current_scale().fractional_scale().into();
-        let cursor_element_pos =
-            self.pointer.current_location() - output.current_location().to_f64();
-        let cursor_element_pos_scaled = cursor_element_pos.to_physical(output_scale).to_i32_round();
-        let cursor_scale = output.current_scale().integer_scale();
-
-        let mut elements = vec![];
-        if let Ok(cursor_elements) = self.cursor_theme_manager.render(
-            renderer,
-            cursor_element_pos_scaled,
-            output_scale,
-            cursor_scale,
-            1.0,
-            self.clock.now().into(),
-        ) {
-            elements.extend(cursor_elements)
-        }
-
-        // Draw drag and drop icon.
-        if let Some(surface) = self.dnd_icon.as_ref().filter(IsAlive::alive) {
-            elements.extend(AsRenderElements::<R>::render_elements(
-                &SurfaceTree::from_surface(surface),
-                renderer,
-                cursor_element_pos_scaled,
-                output_scale,
-                1.0,
-            ));
-        }
-
-        elements.into_iter().map(FhtRenderElement::Cursor).collect()
+        rv
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
@@ -242,10 +241,9 @@ impl Fht {
                     .cursor_mode
                     .contains(crate::portals::CursorMode::EMBEDDED)
                 {
-                    &output_elements_result.render_elements
+                    &output_elements_result.elements
                 } else {
-                    &output_elements_result.render_elements
-                        [output_elements_result.cursor_elements_len..]
+                    &output_elements_result.elements[output_elements_result.cursor_elements_len..]
                 };
 
                 if let Err(err) =
@@ -370,11 +368,12 @@ pub fn layer_elements<R: FhtRenderer>(
 pub fn render_to_texture(
     renderer: &mut GlowRenderer,
     size: Size<i32, Physical>,
-    scale: Scale<f64>,
+    scale: impl Into<Scale<f64>>,
     transform: Transform,
     fourcc: Fourcc,
     elements: impl Iterator<Item = impl RenderElement<GlowRenderer>>,
 ) -> anyhow::Result<(GlesTexture, SyncPoint)> {
+    let scale = scale.into();
     let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
 
     let texture: GlesTexture = renderer

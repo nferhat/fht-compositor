@@ -25,12 +25,13 @@ impl PointerGrab<State> for SwapTileGrab {
     ) {
         // No focus while motion is active
         handle.motion(data, None, event);
-        if let Some(workspace) = data.fht.workspace_for_window_mut(&self.window) {
-            let delta = (event.location - self.start_data.location).to_i32_round();
-            if workspace.handle_interactive_swap_motion(&self.window, delta) {
-                return;
-            }
-        }
+        // TODO: Handle interactive swap
+        // if let Some(workspace) = data.fht.space.workspace_mut_for_window(&self.window) {
+        //     let delta = (event.location - self.start_data.location).to_i32_round();
+        //     if workspace.handle_interactive_swap_motion(&self.window, delta) {
+        //         return;
+        //     }
+        // }
 
         handle.unset_grab(self, data, event.serial, event.time, true)
     }
@@ -53,12 +54,13 @@ impl PointerGrab<State> for SwapTileGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            if let Some(workspace) = data.fht.workspace_for_window_mut(&self.window) {
-                let pointer_location =
-                    handle.current_location() - workspace.output().current_location().to_f64();
-                workspace.handle_interactive_swap_end(&self.window, pointer_location);
-            }
-            handle.unset_grab(self, data, event.serial, event.time, true);
+            // TODO: Handle interactive swap
+            // if let Some(workspace) = data.fht.space.workspace_mut_for_window(&self.window) {
+            //     let pointer_location =
+            //         handle.current_location() - workspace.output().current_location().to_f64();
+            //     workspace.handle_interactive_swap_end(&self.window, pointer_location);
+            // }
+            // handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
 

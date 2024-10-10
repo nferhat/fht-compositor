@@ -282,7 +282,7 @@ impl X11Data {
         let res = surface.damage_tracker.render_output(
             &mut self.renderer,
             buffer_age as usize,
-            &output_elements_result.render_elements,
+            &output_elements_result.elements,
             [0.1, 0.1, 0.1, 1.0],
         );
 

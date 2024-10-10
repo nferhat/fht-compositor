@@ -28,6 +28,7 @@ mod portals;
 mod protocols;
 mod renderer;
 mod shell;
+mod space;
 mod state;
 mod utils;
 mod window;

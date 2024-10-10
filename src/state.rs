@@ -1,8 +1,6 @@
 use std::cell::{RefCell, RefMut};
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -62,8 +60,8 @@ use crate::backend::Backend;
 use crate::cli;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
-use crate::shell::workspaces::{WorkspaceId, WorkspaceSet};
 use crate::shell::KeyboardFocusTarget;
+use crate::space::{Space, WorkspaceId};
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::PipeWire;
@@ -120,9 +118,7 @@ impl State {
 
     #[profiling::function]
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
-        self.fht
-            .workspaces_mut()
-            .for_each(|(_, wset)| wset.refresh());
+        self.fht.space.refresh();
         self.fht.popups.cleanup();
         self.fht.resolve_rules_for_all_windows_if_needed();
         // Redraw queued outputs.
@@ -130,6 +126,7 @@ impl State {
             profiling::scope!("redraw_queued_outputs");
             for output in self
                 .fht
+                .space
                 .outputs()
                 .filter_map(|o| {
                     let is_queued = OutputState::get(o).render_state.is_queued();
@@ -153,15 +150,7 @@ impl State {
             profiling::scope!("refresh_focus");
             if old_focus_dead {
                 // We are focusing nothing, default to the active workspace focused window.
-                if let Some(window) = self.fht.focus_state.output.as_ref().and_then(|o| {
-                    let active = self.fht.wset_for(o).active();
-                    active.focused()
-                }) {
-                    self.set_focus_target(Some(window.into()));
-                } else {
-                    // just reset
-                    self.set_focus_target(None);
-                }
+                self.set_focus_target(self.fht.space.active_window());
             }
         }
 
@@ -247,13 +236,6 @@ impl State {
 
         // Some invariants must be upheld when reloading the configuration
         // If any reloading function errors out, the configuration is not valid
-        //
-        // FIXME: A big issue with this function is that the compositor can be in a state where some
-        // parts or subsystems merged to the new configuration and some others are still using the
-        // old (since any error here is short circuiting)
-        //
-        // FIXME: Either add check_invariants functions everywhere or load configuration from
-        // previous working file if possible
 
         let keyboard = self.fht.keyboard.clone();
         if let Err(err) = keyboard.set_xkb_config(self, config.input.keyboard.xkb_config()) {
@@ -265,12 +247,10 @@ impl State {
         // file but then one after it fails to apply it. Really confusing behaviour.
         //
         // Maybe we need to store the last working config if this happens
-        for wset in self.fht.workspaces.values_mut() {
-            if let Err(err) = wset.reload_config(&config) {
-                error!(?err, "Failed to apply configuration");
-                return;
-            }
+        if let Err(err) = crate::space::Config::check_invariants(&config) {
+            error!(?err, "Failed to apply configuration");
         }
+        self.fht.space.reload_config(&config);
 
         self.fht
             .cursor_theme_manager
@@ -307,7 +287,7 @@ pub struct Fht {
 
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
-    pub workspaces: IndexMap<Output, WorkspaceSet>,
+    pub space: Space,
     pub unmapped_windows: Vec<UnmappedWindow>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
@@ -427,6 +407,8 @@ impl Fht {
         let cursor_theme_manager = CursorThemeManager::new(config.cursor.clone());
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 
+        let space = Space::new(&config);
+
         Self {
             display_handle: dh.clone(),
             loop_handle,
@@ -444,7 +426,7 @@ impl Fht {
 
             dnd_icon: None,
             cursor_theme_manager,
-            workspaces: IndexMap::new(),
+            space,
             unmapped_windows: vec![],
             popups: PopupManager::default(),
             resize_grab_active: false,
@@ -473,13 +455,9 @@ impl Fht {
         }
     }
 
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        self.workspaces.keys()
-    }
-
     pub fn add_output(&mut self, output: Output) {
         assert!(
-            self.workspaces.get(&output).is_none(),
+            !self.space.has_output(&output),
             "Tried to add an output twice!"
         );
 
@@ -490,12 +468,10 @@ impl Fht {
         // When adding an output, put it to the right of every other output.
         // Right now this assumption can be false for alot of users, but this is just as a
         // fallback.
-        let x: i32 = self.outputs().map(|o| o.geometry().loc.x).sum();
+        let x = self.space.outputs().map(|o| o.geometry().loc.x).sum();
         debug!(?x, y = 0, "Using fallback output location");
         output.change_current_state(None, None, None, Some((x, 0).into()));
-
-        let workspace_set = WorkspaceSet::new(output.clone(), Arc::clone(&self.config));
-        self.workspaces.insert(output.clone(), workspace_set);
+        self.space.add_output(output.clone());
 
         // Focus output now.
         if self.config.general.cursor_warps {
@@ -509,68 +485,33 @@ impl Fht {
 
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output");
-        let removed_wset = self
-            .workspaces
-            .swap_remove(output)
-            .expect("Tried to remove a non-existing output!");
-
-        if self.workspaces.is_empty() {
-            // There's nothing more todo, just adandon everything.
-            self.stop = true;
-            return;
-        }
-
-        let wset = self.workspaces.first_mut().unwrap().1;
-        wset.merge_with(removed_wset);
+        self.space.remove_output(output);
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
         for layer in layer_map_for_output(output).layers() {
             layer.layer_surface().send_close()
         }
-
-        wset.refresh();
-        wset.arrange();
     }
 
     pub fn output_resized(&mut self, output: &Output) {
         layer_map_for_output(output).arrange();
-        self.wset_mut_for(output).output_resized();
+        // self.space.output_resized(output);
     }
 
     pub fn active_output(&self) -> Output {
         self.focus_state
             .output
             .clone()
-            .unwrap_or_else(|| self.outputs().next().unwrap().clone())
+            .unwrap_or_else(|| self.space.outputs().next().unwrap().clone())
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
         if name == "active" {
             Some(self.active_output())
         } else {
-            self.outputs().find(|o| &o.name() == name).cloned()
+            self.space.outputs().find(|o| &o.name() == name).cloned()
         }
-    }
-
-    pub fn workspaces(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
-        self.workspaces.iter()
-    }
-
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = (&Output, &mut WorkspaceSet)> {
-        self.workspaces.iter_mut()
-    }
-
-    pub fn wset_for(&self, output: &Output) -> &WorkspaceSet {
-        self.workspaces
-            .get(output)
-            .expect("Tried to get the WorkspaceSet of a non-existing output!")
-    }
-
-    pub fn wset_mut_for(&mut self, output: &Output) -> &mut WorkspaceSet {
-        self.workspaces
-            .get_mut(output)
-            .expect("Tried to get the WorkspaceSet of a non-existing output!")
     }
 
     #[profiling::function]
@@ -615,7 +556,7 @@ impl Fht {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
 
-        for window in self.wset_for(output).visible_windows() {
+        for window in self.space.visible_windows_for_output(output) {
             window.send_frame(output, time, throttle, should_send_frames);
         }
 
@@ -669,7 +610,7 @@ impl Fht {
         // Both windows and layer surfaces can only be drawn on a single output at a time, so there
         // no need to update all the windows of the output.
 
-        for window in self.wset_for(output).visible_windows() {
+        for window in self.space.visible_windows_for_output(output) {
             let offscreen_id = window.offscreen_element_id();
             window.with_surfaces(|surface, surface_data| {
                 // We do the work of update_surface_primary_scanout_output, but use our own
@@ -760,7 +701,7 @@ impl Fht {
             );
         }
 
-        for window in self.wset_for(output).visible_windows() {
+        for window in self.space.visible_windows_for_output(output) {
             window.send_dmabuf_feedback(
                 output,
                 |_, _| Some(output.clone()),
@@ -821,7 +762,7 @@ impl Fht {
             );
         }
 
-        for window in self.wset_for(output).visible_windows() {
+        for window in self.space.visible_windows_for_output(output) {
             window.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
@@ -846,35 +787,24 @@ impl Fht {
     }
 
     pub fn resolve_rules_for_window_if_needed(&self, window: &Window) {
-        if !window.need_to_resolve_rules() {
-            return;
+        if window.need_to_resolve_rules() {
+            self.resolve_rules_for_window(window);
         }
-
-        self.resolve_rules_for_window(window);
     }
 
     pub fn resolve_rules_for_window(&self, window: &Window) {
-        for wset in self.workspaces.values() {
-            let output_name = wset.output().name();
-            for (ws_idx, workspace) in wset.workspaces().enumerate() {
-                let focused_idx = workspace.focused_idx();
+        for monitor in self.space.monitors() {
+            let output_name = monitor.output().name();
+            for (ws_idx, workspace) in monitor.workspaces().enumerate() {
+                let focused_idx = workspace.active_tile_idx();
                 for (window_idx, other_window) in workspace.windows().enumerate() {
                     if window == other_window {
-                        let is_focused = match focused_idx {
-                            // When Workspace::focused_idx == None this means theres a fullscreen
-                            // window and fullscreen windows are
-                            // exclusive and always take keyboard focus.
-                            None => workspace
-                                .current_fullscreen()
-                                .is_some_and(|fs_window| fs_window == *window),
-                            Some(idx) => idx == window_idx,
-                        };
                         let rules = ResolvedWindowRules::resolve(
                             window,
                             &self.config.rules,
                             &output_name,
                             ws_idx,
-                            is_focused,
+                            focused_idx.is_some_and(|idx| idx == window_idx),
                         );
                         window.set_rules(rules);
 
@@ -886,29 +816,17 @@ impl Fht {
     }
 
     pub fn resolve_rules_for_all_windows_if_needed(&self) {
-        for wset in self.workspaces.values() {
-            let output_name = wset.output().name();
-            for (ws_idx, workspace) in wset.workspaces().enumerate() {
-                let focused_idx = workspace.focused_idx();
+        for monitor in self.space.monitors() {
+            let output_name = monitor.output().name();
+            for (ws_idx, workspace) in monitor.workspaces().enumerate() {
+                let focused_idx = workspace.active_tile_idx();
                 for (window_idx, window) in workspace.windows().enumerate() {
-                    if !window.need_to_resolve_rules() {
-                        continue;
-                    }
-
-                    let is_focused = match focused_idx {
-                        // When Workspace::focused_idx == None this means theres a fullscreen window
-                        // and fullscreen windows are exclusive and always take keyboard focus.
-                        None => workspace
-                            .current_fullscreen()
-                            .is_some_and(|fs_window| fs_window == *window),
-                        Some(idx) => idx == window_idx,
-                    };
                     let rules = ResolvedWindowRules::resolve(
                         window,
                         &self.config.rules,
                         &output_name,
                         ws_idx,
-                        is_focused,
+                        focused_idx.is_some_and(|idx| idx == window_idx),
                     );
                     window.set_rules(rules);
                 }
@@ -1205,6 +1123,7 @@ pub struct ResolvedWindowRules {
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub opacity: Option<f32>,
+    pub proportion: Option<f64>,
     pub allow_csd: Option<bool>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
@@ -1242,6 +1161,10 @@ impl ResolvedWindowRules {
 
             if let Some(opacity) = rule.opacity {
                 resolved_rules.opacity = Some(opacity)
+            }
+
+            if let Some(proportion) = rule.proportion {
+                resolved_rules.proportion = Some(proportion)
             }
 
             if let Some(allow_csd) = rule.allow_csd {

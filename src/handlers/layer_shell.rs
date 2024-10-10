@@ -28,16 +28,18 @@ impl WlrLayerShellHandler for State {
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| self.fht.workspaces.keys().next().unwrap().clone());
+            .or_else(|| self.fht.space.outputs().next().cloned())
+            .expect("layer-shell requested output should not be invalid!");
         let layer_surface = LayerSurface::new(surface, namespace);
         let mut map = layer_map_for_output(&output);
-        map.map_layer(&layer_surface)
-            .expect("Failed to map layer shell!");
+        if let Err(err) = map.map_layer(&layer_surface) {
+            error!(?err, "Failed to map layer-shell");
+        }
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
         let mut layer_output = None;
-        if let Some((mut layer_map, layer, output)) = self.fht.outputs().find_map(|o| {
+        if let Some((mut layer_map, layer, output)) = self.fht.space.outputs().find_map(|o| {
             let layer_map = layer_map_for_output(o);
             let layer = layer_map
                 .layers()
@@ -60,7 +62,7 @@ impl WlrLayerShellHandler for State {
 impl State {
     pub fn process_layer_shell_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
         let mut layer_output = None;
-        if let Some(output) = state.outputs().find(|o| {
+        if let Some(output) = state.space.outputs().find(|o| {
             let map = layer_map_for_output(o);
             map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .is_some()

@@ -53,7 +53,11 @@ impl State {
 
         let pointer_loc = pointer.current_location();
         let layer_map = layer_map_for_output(output);
-        let wset = self.fht.wset_mut_for(output);
+        let monitor = self
+            .fht
+            .space
+            .monitor_mut_for_output(output)
+            .expect("focused output should always have a monitor");
 
         if let Some(layer) = layer_map.layer_under(Layer::Overlay, pointer_loc) {
             if layer.can_receive_keyboard_focus() {
@@ -65,17 +69,18 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone().into()));
+                    self.set_focus_target(Some(layer.clone()));
                     return;
                 }
             }
-        } else if let Some((fullscreen, _)) = wset.current_fullscreen() {
+        } else if let Some(fullscreen) = monitor.active_workspace().fullscreened_window() {
+            // Fullscreen focus is always exclusive
             if fullscreen
                 .surface_under(pointer_loc - output_loc.to_f64(), WindowSurfaceType::ALL)
                 .is_some()
             {
                 let fullscreen = fullscreen.clone();
-                self.set_focus_target(Some(fullscreen.into()));
+                self.set_focus_target(Some(fullscreen));
                 return;
             }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
@@ -88,18 +93,13 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone().into()));
+                    self.set_focus_target(Some(layer.clone()));
                     return;
                 }
             }
-        } else if let Some(window) = wset
-            .active()
-            .window_under(pointer_loc)
-            .map(|(w, _)| w.clone())
-        {
-            let active = wset.active_mut();
-            active.focus_window(&window, true);
-            self.set_focus_target(Some(window.into()));
+        } else if let Some((window, _)) = self.fht.space.window_under(pointer_loc) {
+            assert!(self.fht.space.activate_window(&window, true));
+            self.set_focus_target(Some(window));
         } else if let Some(layer) = layer_map
             .layer_under(Layer::Bottom, pointer_loc)
             .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc))
@@ -113,23 +113,15 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone().into()));
+                    self.set_focus_target(Some(layer.clone()));
                     return;
                 }
             }
         }
     }
 
-    pub fn set_focus_target(&mut self, ft: Option<KeyboardFocusTarget>) {
-        let old_focus = self.fht.focus_state.focus_target.take();
-        if let Some(KeyboardFocusTarget::Window(w)) = old_focus.as_ref() {
-            w.request_activated(false);
-        };
-
-        if let Some(KeyboardFocusTarget::Window(w)) = ft.as_ref() {
-            w.request_activated(true);
-        };
-
+    pub fn set_focus_target(&mut self, ft: Option<impl Into<KeyboardFocusTarget>>) {
+        let ft = ft.map(Into::into);
         self.fht.focus_state.focus_target = ft.clone();
         self.fht
             .keyboard
@@ -156,7 +148,7 @@ impl State {
         pointer.frame(self);
 
         // FIXME: More granular, maybe check for where the point was and is now
-        for output in self.fht.outputs() {
+        for output in self.fht.space.outputs() {
             OutputState::get(output).render_state.queue()
         }
     }
@@ -165,11 +157,13 @@ impl State {
         let (pos_x, pos_y) = pos.into();
         let max_x = self
             .fht
+            .space
             .outputs()
             .fold(0, |acc, o| acc + o.geometry().size.w);
         let clamped_x = pos_x.clamp(0.0, max_x as f64);
         let max_y = self
             .fht
+            .space
             .outputs()
             .find(|o| o.geometry().contains((clamped_x as i32, 0)))
             .map(|o| o.geometry().size.h);
@@ -229,7 +223,7 @@ impl State {
                     if data.keyboard_interactivity == KeyboardInteractivity::Exclusive
                         && (data.layer == Layer::Top || data.layer == Layer::Overlay)
                     {
-                        let surface = self.fht.outputs().find_map(|o| {
+                        let surface = self.fht.space.outputs().find_map(|o| {
                             let layer_map = layer_map_for_output(o);
                             let cloned = layer_map
                                 .layers()
@@ -238,7 +232,7 @@ impl State {
                             cloned
                         });
                         if let Some(surface) = surface {
-                            self.set_focus_target(Some(surface.into()));
+                            self.set_focus_target(Some(surface));
                             keyboard.input::<(), _>(
                                 self,
                                 keycode,
@@ -413,6 +407,7 @@ impl State {
 
                 let maybe_new_output = self
                     .fht
+                    .space
                     .outputs()
                     .find(|output| output.geometry().to_f64().contains(pointer_location))
                     .cloned();
@@ -574,6 +569,7 @@ impl State {
                 let tablet_seat = self.fht.seat.tablet_seat();
                 let Some(output_geometry) = self
                     .fht
+                    .space
                     .outputs()
                     .next()
                     .map(OutputExt::geometry)
@@ -633,7 +629,8 @@ impl State {
             InputEvent::TabletToolProximity { event } => {
                 let tablet_seat = self.fht.seat.tablet_seat();
 
-                let Some(output_geo) = self.fht.outputs().next().map(OutputExt::geometry) else {
+                let Some(output_geo) = self.fht.space.outputs().next().map(OutputExt::geometry)
+                else {
                     return;
                 };
 
@@ -804,7 +801,7 @@ impl State {
         }
 
         // FIXME: Granular
-        for output in self.fht.outputs() {
+        for output in self.fht.space.outputs() {
             OutputState::get(output).render_state.queue()
         }
     }

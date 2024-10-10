@@ -140,7 +140,7 @@ impl CursorThemeManager {
         &self,
         renderer: &mut R,
         mut location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        scale: f64,
         cursor_scale: i32,
         alpha: f32,
         time: Duration,

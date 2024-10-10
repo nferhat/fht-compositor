@@ -228,9 +228,9 @@ pub enum ComplexKeyAction {
     CloseFocusedWindow,
     None,
     RunCommand(String),
-    ChangeMwfact(f32),
+    ChangeMwfact(f64),
     ChangeNmaster(i32),
-    ChangeCfact(f32),
+    ChangeWindowProportion(f64),
     FocusWorkspace(usize),
     SendToWorkspace(usize),
 }
@@ -490,7 +490,7 @@ const fn default_nmaster() -> usize {
     1
 }
 
-const fn default_mwfact() -> f32 {
+const fn default_mwfact() -> f64 {
     0.5
 }
 
@@ -511,7 +511,7 @@ pub struct General {
     #[serde(default = "default_nmaster")]
     pub nmaster: usize,
     #[serde(default = "default_mwfact")]
-    pub mwfact: f32,
+    pub mwfact: f64,
     #[serde(default = "default_gaps")]
     pub outer_gaps: i32,
     #[serde(default = "default_gaps")]
@@ -542,7 +542,7 @@ pub enum WorkspaceLayout {
     Floating,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum InsertWindowStrategy {
     #[default]
@@ -857,6 +857,7 @@ pub struct WindowRule {
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub border_overrides: BorderOverrides,
+    pub proportion: Option<f64>,
     pub opacity: Option<f32>,
     pub allow_csd: Option<bool>,
     pub maximized: Option<bool>,
@@ -920,7 +921,7 @@ pub struct Debug {
     pub disable_overlay_planes: bool,
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
-    pub damage_color: Option<[f32; 4]>,
+    pub draw_damage: bool,
     pub debug_overlay: bool,
     pub tile_debug_overlay: bool,
 }
@@ -931,7 +932,7 @@ impl Default for Debug {
             disable_10bit: default_disable_10bit(),
             disable_overlay_planes: default_disable_overlay_planes(),
             render_node: default_render_node(),
-            damage_color: None,
+            draw_damage: false,
             debug_overlay: false,
             tile_debug_overlay: false,
         }

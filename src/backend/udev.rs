@@ -19,7 +19,7 @@ use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::Element;
+use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::GlesRenderbuffer;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
@@ -31,7 +31,7 @@ use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 #[cfg(feature = "egl")]
 use smithay::backend::renderer::ImportEgl;
 use smithay::backend::renderer::{
-    buffer_type, Bind, Blit, BufferType, ExportMem, ImportDma, ImportMemWl, Offscreen,
+    buffer_type, Bind, Blit, BufferType, Color32F, ExportMem, ImportDma, ImportMemWl, Offscreen,
     TextureFilter,
 };
 use smithay::backend::session::libseat::LibSeatSession;
@@ -68,7 +68,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::renderer::shaders::Shaders;
-use crate::renderer::{AsGlowRenderer, FhtRenderElement, OutputElementsResult};
+use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, OutputElementsResult};
 use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
 use crate::utils::drm as drm_utils;
 use crate::utils::fps::Fps;
@@ -226,7 +226,7 @@ impl UdevData {
                         }
                     }
 
-                    for output in state.fht.outputs() {
+                    for output in state.fht.space.outputs() {
                         OutputState::get(output).render_state.queue()
                     }
                 }
@@ -854,28 +854,22 @@ impl UdevData {
 
         let output_elements_result = {
             let OutputElementsResult {
-                render_elements,
+                mut elements,
                 mut cursor_elements_len,
             } = fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
             surface.fps.elements();
 
             // To render damage we just use solid color elements,
-            let damage_elements = fht
-                .config
-                .debug
-                .damage_color
-                .map(|damage_color| {
-                    let mut state = OutputState::get(output);
-                    draw_damage(&mut state.damage_tracker, &render_elements, damage_color)
-                })
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-            // Also skip rendering damage in screencopy.
-            cursor_elements_len += damage_elements.len();
+            if fht.config.debug.draw_damage {
+                let mut state = OutputState::get(output);
+                let damage_elements = draw_damage(&mut state.damage_tracker, &elements);
+                // HACK: We dont want damage rectangles inside screencopy.
+                cursor_elements_len += damage_elements.len();
+                elements = damage_elements.into_iter().chain(elements).collect();
+            }
 
             OutputElementsResult {
-                render_elements: damage_elements.into_iter().chain(render_elements).collect(),
+                elements,
                 cursor_elements_len,
             }
         };
@@ -884,7 +878,7 @@ impl UdevData {
             .compositor
             .render_frame(
                 &mut renderer,
-                &output_elements_result.render_elements,
+                &output_elements_result.elements,
                 [0.1, 0.1, 0.1, 1.0],
             )
             .map_err(|err| match err {
@@ -1439,10 +1433,11 @@ fn render_screencopy<'a>(
     }
 }
 
+const DAMAGE_COLOR: Color32F = Color32F::new(0.05, 0.0, 0.0, 0.05);
+
 fn draw_damage<'a>(
     dt: &mut OutputDamageTracker,
     elements: &[FhtRenderElement<UdevRenderer<'a>>],
-    damage_color: [f32; 4],
 ) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
     let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
         return vec![];
@@ -1450,15 +1445,15 @@ fn draw_damage<'a>(
 
     let mut damage_elements = vec![];
     for damage_rect in damage {
-        let solid = SolidColorRenderElement::new(
-            smithay::backend::renderer::element::Id::new(),
+        let damage_element: DebugRenderElement = SolidColorRenderElement::new(
+            Id::new(),
             *damage_rect,
             CommitCounter::default(),
-            damage_color,
-            smithay::backend::renderer::element::Kind::Unspecified,
+            DAMAGE_COLOR,
+            Kind::Unspecified,
         )
         .into();
-        damage_elements.push(solid)
+        damage_elements.push(damage_element.into())
     }
 
     damage_elements

@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
 use fht_compositor_config::MouseAction;
-use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
-use smithay::utils::Serial;
-use smithay::wayland::shell::xdg::XdgShellHandler;
+use smithay::utils::{Rectangle, Serial};
 
-use super::swap_tile_grab::SwapTileGrab;
-use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
@@ -18,9 +14,9 @@ pub enum KeyAction {
     RunCommand(String),
     SelectNextLayout,
     SelectPreviousLayout,
-    ChangeMwfact(f32),
+    ChangeMwfact(f64),
     ChangeNmaster(i32),
-    ChangeCfact(f32),
+    ChangeProportion(f64),
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FocusNextWindow,
@@ -32,7 +28,6 @@ pub enum KeyAction {
     CloseFocusedWindow,
     FocusWorkspace(usize),
     SendFocusedWindowToWorkspace(usize),
-    ToggleDebugOverlayOnFocusedTile,
     None,
 }
 
@@ -71,7 +66,7 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 }
                 fht_compositor_config::SimpleKeyAction::None => Self::None,
             },
-            fht_compositor_config::KeyActionDesc::Complex(value) => match value {
+            fht_compositor_config::KeyActionDesc::Complex { action } => match action {
                 fht_compositor_config::ComplexKeyAction::Quit => Self::Quit,
                 fht_compositor_config::ComplexKeyAction::ReloadConfig => Self::ReloadConfig,
                 fht_compositor_config::ComplexKeyAction::SelectNextLayout => Self::SelectNextLayout,
@@ -109,8 +104,8 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 fht_compositor_config::ComplexKeyAction::ChangeNmaster(delta) => {
                     Self::ChangeNmaster(delta)
                 }
-                fht_compositor_config::ComplexKeyAction::ChangeCfact(delta) => {
-                    Self::ChangeCfact(delta)
+                fht_compositor_config::ComplexKeyAction::ChangeWindowProportion(delta) => {
+                    Self::ChangeProportion(delta)
                 }
                 fht_compositor_config::ComplexKeyAction::FocusWorkspace(idx) => {
                     Self::FocusWorkspace(idx)
@@ -130,93 +125,98 @@ impl State {
             return;
         };
         let config = Arc::clone(&self.fht.config);
-        let wset = self.fht.wset_mut_for(output);
-        let active = wset.active_mut();
-
+        let active_window = self.fht.space.active_window();
         match action {
             KeyAction::Quit => self.fht.stop = true,
             KeyAction::ReloadConfig => self.reload_config(),
             KeyAction::RunCommand(cmd) => crate::utils::spawn(cmd),
-            KeyAction::SelectNextLayout => active.select_next_layout(true),
-            KeyAction::SelectPreviousLayout => active.select_previous_layout(true),
-            KeyAction::ChangeMwfact(delta) => active.change_mwfact(delta, true),
-            KeyAction::ChangeNmaster(delta) => active.change_nmaster(delta, true),
-            KeyAction::ChangeCfact(delta) => {
-                let mut arrange = false;
-                if let Some(tile) = active.focused_tile_mut() {
-                    tile.change_cfact(delta);
-                    arrange = true;
-                }
-                if arrange {
-                    active.arrange_tiles(true);
+            KeyAction::SelectNextLayout => self.fht.space.select_next_layout(true),
+            KeyAction::SelectPreviousLayout => self.fht.space.select_previous_layout(true),
+            KeyAction::ChangeMwfact(delta) => self.fht.space.change_mwfact(delta, true),
+            KeyAction::ChangeNmaster(delta) => self.fht.space.change_nmaster(delta, true),
+            KeyAction::ChangeProportion(delta) => {
+                if let Some(window) = active_window {
+                    self.fht.space.change_proportion(&window, delta, true)
                 }
             }
             KeyAction::MaximizeFocusedWindow => {
-                if let Some(window) = active.focused() {
-                    let new_maximized = !window.maximized();
-                    window.request_maximized(new_maximized);
-                    active.arrange_tiles(true);
+                if let Some(window) = active_window {
+                    self.fht.space.maximize_window(&window, true, true);
                 }
             }
             KeyAction::FullscreenFocusedWindow => {
-                if let Some(window) = active.focused() {
+                if let Some(window) = active_window {
                     if window.fullscreen() {
+                        // Workspace will take care of removing fullscreen
                         window.request_fullscreen(false);
                     } else {
-                        let toplevel = window.toplevel().clone();
-                        self.fullscreen_request(toplevel, None);
+                        self.fht.space.fullscreen_window(&window, true);
                     }
                 }
             }
             KeyAction::FocusNextWindow => {
-                let new_focus = active.focus_next_window(true);
-                if let Some(window) = new_focus {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_next_tile(true) {
                     if config.general.cursor_warps {
-                        let center = active.window_geometry(&window).unwrap().center();
-                        self.move_pointer(center.to_f64())
+                        let window_geometry = Rectangle::from_loc_and_size(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_focus_target(Some(window.into()));
+                    self.set_focus_target(Some(window));
                 }
             }
             KeyAction::FocusPreviousWindow => {
-                let new_focus = active.focus_previous_window(true);
-                if let Some(window) = new_focus {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_previous_tile(true) {
                     if config.general.cursor_warps {
-                        let center = active.window_geometry(&window).unwrap().center();
-                        self.move_pointer(center.to_f64())
+                        let window_geometry = Rectangle::from_loc_and_size(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_focus_target(Some(window.into()));
+                    self.set_focus_target(Some(window));
                 }
             }
             KeyAction::SwapWithNextWindow => {
-                active.swap_with_next_window(true);
-                if let Some(window) = active.focused() {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_active_tile_with_next(true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
                     if config.general.cursor_warps {
-                        let center = active.window_geometry(&window).unwrap().center();
-                        self.move_pointer(center.to_f64())
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_focus_target(Some(window.into()));
+                    self.set_focus_target(Some(window));
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
-                active.swap_with_previous_window(true);
-                if let Some(window) = active.focused() {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_active_tile_with_previous(true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
                     if config.general.cursor_warps {
-                        let center = active.window_geometry(&window).unwrap().center();
-                        self.move_pointer(center.to_f64())
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_focus_target(Some(window.into()));
+                    self.set_focus_target(Some(window));
                 }
             }
             KeyAction::FocusNextOutput => {
-                let outputs_len = self.fht.workspaces.len();
+                let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
+                let outputs_len = outputs.len();
                 if outputs_len < 2 {
                     return;
                 }
 
-                let current_output_idx = self
-                    .fht
-                    .outputs()
+                let current_output_idx = outputs
+                    .iter()
                     .position(|o| o == output)
                     .expect("Focused output is not registered");
 
@@ -225,13 +225,7 @@ impl State {
                     next_output_idx = 0;
                 }
 
-                let output = self
-                    .fht
-                    .outputs()
-                    .skip(next_output_idx)
-                    .next()
-                    .unwrap()
-                    .clone();
+                let output = outputs.into_iter().skip(next_output_idx).next().unwrap();
                 if config.general.cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
@@ -239,14 +233,14 @@ impl State {
                 self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::FocusPreviousOutput => {
-                let outputs_len = self.fht.workspaces.len();
+                let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
+                let outputs_len = outputs.len();
                 if outputs_len < 2 {
                     return;
                 }
 
-                let current_output_idx = self
-                    .fht
-                    .outputs()
+                let current_output_idx = outputs
+                    .iter()
                     .position(|o| o == output)
                     .expect("Focused output is not registered");
 
@@ -255,13 +249,7 @@ impl State {
                     None => outputs_len - 1,
                 };
 
-                let output = self
-                    .fht
-                    .outputs()
-                    .skip(next_output_idx)
-                    .next()
-                    .unwrap()
-                    .clone();
+                let output = outputs.into_iter().skip(next_output_idx).next().unwrap();
                 if config.general.cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
@@ -269,38 +257,31 @@ impl State {
                 self.fht.focus_state.output.replace(output).unwrap();
             }
             KeyAction::CloseFocusedWindow => {
-                let Some(window) = active.focused() else {
-                    return;
-                };
-                window.toplevel().send_close();
-            }
-            KeyAction::FocusWorkspace(idx) => {
-                if let Some(window) = wset.set_active_idx(idx, true) {
-                    self.set_focus_target(Some(window.into()));
-                };
-            }
-            KeyAction::SendFocusedWindowToWorkspace(idx) => {
-                let Some(window) = active.focused() else {
-                    return;
-                };
-                let window = active.remove_tile(&window, true).unwrap().into_window();
-                let new_focus = active.focused();
-                let idx = idx.clamp(0, 9);
-                wset.get_workspace_mut(idx).insert_window(window, true);
-
-                if let Some(window) = new_focus {
-                    self.set_focus_target(Some(window.into()));
+                if let Some(window) = active_window {
+                    window.toplevel().send_close();
                 }
             }
-            KeyAction::ToggleDebugOverlayOnFocusedTile => {
-                // TODO:
-                // let Some(tile) = active.focused_tile_mut() else {
-                //     return;
-                // };
-                //
-                // if tile.debug_overlay.take().is_none() {
-                //     tile.debug_overlay = Some(crate::egui::EguiElement::new(tile.element.size()))
-                // }
+            KeyAction::FocusWorkspace(idx) => {
+                let mon = self.fht.space.active_monitor_mut();
+                if let Some(window) = mon.set_active_workspace_idx(idx) {
+                    self.set_focus_target(Some(window));
+                }
+            }
+            KeyAction::SendFocusedWindowToWorkspace(idx) => {
+                let active = self.fht.space.active_workspace_mut();
+                let Some(window) = active.active_window() else {
+                    return;
+                };
+                if active.remove_window(&window, true) {
+                    if let Some(window) = active.active_window() {
+                        // Focus the new one now
+                        self.set_focus_target(Some(window));
+                    }
+
+                    let idx = idx.clamp(0, 9);
+                    let mon = self.fht.space.active_monitor_mut();
+                    mon.workspace_mut_by_index(idx).insert_window(window, true);
+                }
             }
             _ => {}
         }
@@ -309,39 +290,40 @@ impl State {
 
 impl State {
     #[profiling::function]
-    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
-        let pointer_loc = self.fht.pointer.current_location();
-
+    pub fn process_mouse_action(&mut self, action: MouseAction, _serial: Serial) {
+        // TODO: Handle mouse actions again.
+        // Currently needs re-implementation from the space side
         match action {
-            MouseAction::SwapTile => {
-                if let Some((PointerFocusTarget::Window(window), _)) =
-                    self.fht.focus_target_under(pointer_loc)
-                {
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        let pointer = state.fht.pointer.clone();
-                        if !pointer.has_grab(serial) {
-                            return;
-                        }
-                        let Some(start_data) = pointer.grab_start_data() else {
-                            return;
-                        };
-                        if let Some(workspace) = state.fht.workspace_for_window_mut(&window) {
-                            if workspace.start_interactive_swap(&window) {
-                                state.fht.loop_handle.insert_idle(|state| {
-                                    // TODO: Figure out why I have todo this inside a idle
-                                    state.fht.interactive_grab_active = true;
-                                    state.fht.cursor_theme_manager.set_image_status(
-                                        CursorImageStatus::Named(CursorIcon::Grabbing),
-                                    );
-                                });
-                                let grab = SwapTileGrab { window, start_data };
-                                pointer.set_grab(state, grab, serial, Focus::Clear);
-                            }
-                        }
-                    });
-                }
-            }
             _ => (),
+            // MouseAction::SwapTile => {
+            //     if let Some((PointerFocusTarget::Window(window), _)) =
+            //         self.fht.focus_target_under(pointer_loc)
+            //     {
+            //         self.fht.loop_handle.insert_idle(move |state| {
+            //             let pointer = state.fht.pointer.clone();
+            //             if !pointer.has_grab(serial) {
+            //                 return;
+            //             }
+            //             let Some(start_data) = pointer.grab_start_data() else {
+            //                 return;
+            //             };
+            //             if let Some(workspace) = state.fht.space.workspace_mut_for_window(&window) {
+            //                 // TODO: Re-implement swap
+            //                 // if workspace.start_interactive_swap(&window) {
+            //                 //     state.fht.loop_handle.insert_idle(|state| {
+            //                 //         // TODO: Figure out why I have todo this inside a idle
+            //                 //         state.fht.interactive_grab_active = true;
+            //                 //         state.fht.cursor_theme_manager.set_image_status(
+            //                 //             CursorImageStatus::Named(CursorIcon::Grabbing),
+            //                 //         );
+            //                 //     });
+            //                 //     let grab = SwapTileGrab { window, start_data };
+            //                 //     pointer.set_grab(state, grab, serial, Focus::Clear);
+            //                 // }
+            //             }
+            //         });
+            //     }
+            // }
             // MouseAction::ResizeTile => {
             //     if let Some((PointerFocusTarget::Window(window), _)) =
             //         self.fht.focus_target_under(pointer_loc)

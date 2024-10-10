@@ -163,6 +163,8 @@ impl Window {
         }
     }
 
+    /// Get the window visual's geometry start, relative to its buffer.
+    /// This might be used for CSD, for example
     pub fn render_offset(&self) -> Point<i32, Logical> {
         let bbox = self.bbox();
         if let Some(surface) = self.wl_surface() {
@@ -452,9 +454,10 @@ impl Window {
         &self,
         renderer: &mut R,
         mut location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>> {
+        let scale = scale.into();
         let Some(surface) = self.wl_surface() else {
             return vec![];
         };
@@ -474,12 +477,13 @@ impl Window {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>> {
         let Some(surface) = self.wl_surface() else {
             return vec![];
         };
+        let scale = scale.into();
         PopupManager::popups_for_surface(&surface)
             .flat_map(|(popup, popup_offset)| {
                 let offset = (popup_offset - popup.geometry().loc).to_physical_precise_round(scale);

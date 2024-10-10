@@ -1,9 +1,9 @@
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
-use smithay::backend::renderer::gles::GlesError;
+use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev_backend")]
 use super::AsGlowFrame;
@@ -11,7 +11,24 @@ use super::AsGlowFrame;
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
-pub struct FhtPixelShaderElement(pub PixelShaderElement);
+pub struct FhtPixelShaderElement(PixelShaderElement);
+
+impl FhtPixelShaderElement {
+    /// Create a new [`FhtPixelShaderElement`].
+    ///
+    /// See [`PixelShaderElement::new`]
+    pub fn new(
+        program: GlesPixelProgram,
+        geometry: Rectangle<i32, Logical>,
+        alpha: f32,
+        additional_uniforms: Vec<Uniform<'static>>,
+        kind: Kind,
+    ) -> Self {
+        let inner =
+            PixelShaderElement::new(program, geometry, None, alpha, additional_uniforms, kind);
+        Self(inner)
+    }
+}
 
 impl Element for FhtPixelShaderElement {
     fn id(&self) -> &Id {

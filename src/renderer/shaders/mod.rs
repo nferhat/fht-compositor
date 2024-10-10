@@ -7,11 +7,11 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 
 use super::{AsGlowFrame, AsGlowRenderer};
 
-const ROUNDED_OUTLINE_SRC: &str = include_str!("./rounded_outline_shader/shader.frag");
-const ROUNDED_QUAD_SRC: &str = include_str!("./rounded_element/shader.frag");
+const BORDER_SRC: &str = include_str!("./border.frag");
+const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
 
 pub struct Shaders {
-    pub rounded_outline: GlesPixelProgram,
+    pub border: GlesPixelProgram,
     pub rounded_quad: GlesTexProgram,
 }
 
@@ -33,7 +33,7 @@ impl Shaders {
             .expect("Shader source should always compile!");
         let rounded_outline = renderer
             .compile_custom_pixel_shader(
-                ROUNDED_OUTLINE_SRC,
+                BORDER_SRC,
                 &[
                     UniformName::new("v_start_color", UniformType::_4f),
                     UniformName::new("v_end_color", UniformType::_4f),
@@ -45,7 +45,7 @@ impl Shaders {
             .expect("Shader source should always compile!");
 
         let shaders = Self {
-            rounded_outline,
+            border: rounded_outline,
             rounded_quad,
         };
 

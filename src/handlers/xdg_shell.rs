@@ -3,13 +3,12 @@ use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
     PopupUngrabStrategy, WindowSurfaceType,
 };
-use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
+use smithay::input::pointer::Focus;
 use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, WmCapabilities,
 };
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::utils::Serial;
 use smithay::wayland::compositor::{
@@ -17,10 +16,9 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
-    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
-use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::{OutputState, State, UnmappedWindow};
 use crate::window::Window;
@@ -49,8 +47,10 @@ impl XdgShellHandler for State {
             return;
         }
 
-        let Some((window, workspace)) =
-            self.fht.find_window_and_workspace_mut(surface.wl_surface())
+        let Some((window, workspace)) = self
+            .fht
+            .space
+            .find_window_and_workspace_mut(surface.wl_surface())
         else {
             warn!("Destroyed toplevel missing from mapped windows and unmapped windows");
             return;
@@ -58,8 +58,8 @@ impl XdgShellHandler for State {
         OutputState::get(&workspace.output()).render_state.queue();
 
         self.backend.with_renderer(|renderer| {
-            if workspace.prepare_window_close_animation(&window, renderer) {
-                workspace.close_window(&window, true);
+            if workspace.prepare_close_animation_for_window(&window, renderer) {
+                workspace.close_window(&window, renderer, true);
             }
         });
     }
@@ -73,27 +73,30 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
         let pointer = self.fht.pointer.clone();
-        if let Some((window, workspace)) =
-            self.fht.find_window_and_workspace_mut(surface.wl_surface())
+        if let Some((window, workspace)) = self
+            .fht
+            .space
+            .find_window_and_workspace_mut(surface.wl_surface())
         {
-            if !pointer.has_grab(serial) {
-                return;
-            }
-            let Some(start_data) = pointer.grab_start_data() else {
-                return;
-            };
-            if workspace.start_interactive_swap(&window) {
-                self.fht.loop_handle.insert_idle(|state| {
-                    // TODO: Figure out why I have todo this inside a idle
-                    state.fht.interactive_grab_active = true;
-                    state
-                        .fht
-                        .cursor_theme_manager
-                        .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
-                });
-                let grab = SwapTileGrab { window, start_data };
-                pointer.set_grab(self, grab, serial, Focus::Clear);
-            }
+            // TODO: Handle grabs
+            // if !pointer.has_grab(serial) {
+            //     return;
+            // }
+            // let Some(start_data) = pointer.grab_start_data() else {
+            //     return;
+            // };
+            // if workspace.start_interactive_swap(&window) {
+            //     self.fht.loop_handle.insert_idle(|state| {
+            //         // TODO: Figure out why I have todo this inside a idle
+            //         state.fht.interactive_grab_active = true;
+            //         state
+            //             .fht
+            //             .cursor_theme_manager
+            //             .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
+            //     });
+            //     let grab = SwapTileGrab { window, start_data };
+            //     pointer.set_grab(self, grab, serial, Focus::Clear);
+            // }
         }
     }
 
@@ -113,10 +116,12 @@ impl XdgShellHandler for State {
 
         if let Some(root) = find_popup_root_surface(&popup_kind).ok().and_then(|root| {
             self.fht
+                .space
                 .find_window(&root)
                 .map(KeyboardFocusTarget::Window)
                 .or_else(|| {
                     self.fht
+                        .space
                         .outputs()
                         .find_map(|o| {
                             layer_map_for_output(o)
@@ -156,12 +161,13 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, toplevel: ToplevelSurface) {
-        if let Some((window, ws)) = self
+        if let Some((window, workspace)) = self
             .fht
+            .space
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
             window.request_maximized(true);
-            ws.arrange_tiles(true);
+            workspace.arrange_tiles(true);
         }
 
         toplevel.send_configure();
@@ -170,6 +176,7 @@ impl XdgShellHandler for State {
     fn unmaximize_request(&mut self, toplevel: ToplevelSurface) {
         if let Some((window, ws)) = self
             .fht
+            .space
             .find_window_and_workspace_mut(toplevel.wl_surface())
         {
             window.request_maximized(false);
@@ -190,33 +197,14 @@ impl XdgShellHandler for State {
             .contains(WmCapabilities::Fullscreen)
         {
             let wl_surface = surface.wl_surface();
-            let requested_output = wl_output.as_ref().and_then(Output::from_resource);
-
-            // If the surface request for a specific output to be fullscreened on, move it to the
-            // active workspace of that output, then fullscreen it.
-            //
-            // If not, then fullscreen it inside its active workspace.
-            if let Some((window, requested_output, mut output)) =
-                requested_output.and_then(|requested_output| {
-                    let (window, current_output) = self.fht.find_window_and_output(wl_surface)?;
-                    Some((window.clone(), requested_output, current_output.clone()))
-                })
-            {
-                if requested_output != output {
-                    output = requested_output;
-
-                    let ws = self.fht.workspace_for_window_mut(&window).unwrap();
-                    let tile = ws.remove_tile(&window, true).unwrap();
-                    let window = tile.into_window();
-                    let new_ws = self.fht.wset_mut_for(&output).active_mut();
-                    new_ws.insert_window(window, true);
+            if let Some(window) = self.fht.space.find_window(wl_surface) {
+                if let Some(requested) = wl_output.as_ref().and_then(Output::from_resource) {
+                    self.fht
+                        .space
+                        .move_window_to_output(&window, &requested, true);
                 }
 
-                let ws = self.fht.workspace_for_window_mut(&window).unwrap();
-                ws.fullscreen_window(&window, true);
-            } else if let Some(window) = self.fht.find_window(wl_surface) {
-                let ws = self.fht.workspace_for_window_mut(&window).unwrap();
-                ws.fullscreen_window(&window, true);
+                self.fht.space.fullscreen_window(&window, true);
             }
         }
 
@@ -224,7 +212,8 @@ impl XdgShellHandler for State {
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
+            // NOTE: Workspaces take care of unfullscreening and arranging
             window.request_fullscreen(false);
         }
 
@@ -232,13 +221,13 @@ impl XdgShellHandler for State {
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
             self.fht.resolve_rules_for_window(&window);
         }
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.fht.find_window(surface.wl_surface()) {
+        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
             self.fht.resolve_rules_for_window(&window);
         }
     }
@@ -264,7 +253,8 @@ fn add_window_pre_commit_hook(window: &Window) {
     // the ones that should do this.
     let wl_surface = window.wl_surface().unwrap();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
-        let Some((window, workspace)) = state.fht.find_window_and_workspace_mut(surface) else {
+        let Some((window, workspace)) = state.fht.space.find_window_and_workspace_mut(surface)
+        else {
             warn!("Window pre-commit hook should be removed when unmapped");
             return;
         };
@@ -284,10 +274,10 @@ fn add_window_pre_commit_hook(window: &Window) {
 
         if got_unmapped {
             state.backend.with_renderer(|renderer| {
-                workspace.prepare_window_close_animation(&window, renderer);
+                workspace.prepare_close_animation_for_window(&window, renderer);
             });
         } else {
-            workspace.clear_window_close_animation_snapshot(&window);
+            workspace.clear_close_animation_for_window(&window);
         }
     });
 
