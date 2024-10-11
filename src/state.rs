@@ -81,7 +81,7 @@ impl State {
         cli: cli::Cli,
         _socket_name: String,
     ) -> Self {
-        let mut fht = Fht::new(dh, loop_handle, loop_signal);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, cli.config_path);
         let backend: crate::backend::Backend = if let Some(backend_type) = cli.backend {
             match backend_type {
                 #[cfg(feature = "x11_backend")]
@@ -321,10 +321,10 @@ impl Fht {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        config_path: Option<std::path::PathBuf>,
     ) -> Self {
         let mut last_config_error = None;
-        // TODO: Get path from a cli argument or something
-        let (config, paths) = match fht_compositor_config::load(None) {
+        let (config, paths) = match fht_compositor_config::load(config_path) {
             Ok((config, paths)) => (config, paths),
             Err(err) => {
                 error!(?err, "Failed to load configuration, using default");
