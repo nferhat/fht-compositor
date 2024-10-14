@@ -1129,6 +1129,8 @@ pub struct ResolvedWindowRules {
     pub allow_csd: Option<bool>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
+    pub floating: Option<bool>,
+    pub centered: Option<bool>,
 }
 
 impl ResolvedWindowRules {
@@ -1179,6 +1181,14 @@ impl ResolvedWindowRules {
 
             if let Some(fullscreen) = rule.fullscreen {
                 resolved_rules.fullscreen = Some(fullscreen)
+            }
+
+            if let Some(floating) = rule.floating {
+                resolved_rules.floating = Some(floating);
+            }
+
+            if let Some(centered) = rule.centered {
+                resolved_rules.centered = Some(centered);
             }
         }
 

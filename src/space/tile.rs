@@ -191,6 +191,13 @@ impl Tile {
     ///
     /// This accounts for any ongoing location animation.
     pub fn geometry(&self) -> Rectangle<i32, Logical> {
+        Rectangle::from_loc_and_size(self.location, self.size())
+    }
+
+    /// Get this [`Tile`]'s size, in other words its effective [`Size`].
+    ///
+    /// The returned [`Size`] is the size of the whole [`Tile`], including its border.
+    pub fn size(&self) -> Size<i32, Logical> {
         let window_size = self.window.size();
         let border_thickness = if self.window.fullscreen() {
             0 // No border is drawn when the window is fullscreened.
@@ -202,12 +209,10 @@ impl Tile {
                 .with_overrides(&rules.border_overrides)
                 .thickness as i32
         };
-        let tile_size = Size::from((
+        Size::from((
             window_size.w + 2 * border_thickness,
             window_size.h + 2 * border_thickness,
-        ));
-
-        Rectangle::from_loc_and_size(self.location, tile_size)
+        ))
     }
 
     /// Get this [`Tile`]'s visual geometry, in other words where the [`Tile`]'s [`Rectangle`] will
@@ -233,6 +238,7 @@ impl Tile {
             let [x, y] = *animation.value();
             tile_location += Point::from((x, y));
         }
+        // WARN: Do NOT use self.size() since it will cause a DEADLOCK!
         let tile_size = Size::from((
             window_size.w + 2 * border_thickness,
             window_size.h + 2 * border_thickness,

@@ -243,6 +243,38 @@ impl Window {
             .with_pending_state(|state| state.states.contains(State::Activated))
     }
 
+    // NOTE: Tiled implementation can vastly different by the client, since we have 4 possible
+    // states to toggle on for tiling, and a client can check for any of these to determine whether
+    // they are tiled.
+    //
+    // Another issue is that the clients also use the **tiled** property to check for CSD (bruh)
+
+    pub fn request_tiled(&self, tiled: bool) {
+        self.set_need_to_resolve_rules();
+        self.toplevel().with_pending_state(|state| {
+            if tiled {
+                state.states.set(State::TiledLeft);
+                state.states.set(State::TiledRight);
+                state.states.set(State::TiledTop);
+                state.states.set(State::TiledBottom);
+            } else {
+                state.states.unset(State::TiledLeft);
+                state.states.unset(State::TiledRight);
+                state.states.unset(State::TiledTop);
+                state.states.unset(State::TiledBottom);
+            }
+        });
+    }
+
+    pub fn tiled(&self) -> bool {
+        self.toplevel().with_pending_state(|state| {
+            state.states.contains(State::TiledLeft)
+                || state.states.contains(State::TiledRight)
+                || state.states.contains(State::TiledTop)
+                || state.states.contains(State::TiledBottom)
+        })
+    }
+
     pub fn title(&self) -> Option<String> {
         with_states(self.wl_surface().as_deref()?, |states| {
             let data = states

@@ -862,6 +862,8 @@ pub struct WindowRule {
     pub allow_csd: Option<bool>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
+    pub floating: Option<bool>,
+    pub centered: Option<bool>, // only effective if floating == Some(true)
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize)]

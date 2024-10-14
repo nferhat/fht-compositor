@@ -13,7 +13,7 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
+use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
 
 use crate::state::{Fht, OutputState, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
@@ -109,6 +109,23 @@ impl State {
                     });
                 }
 
+                if let Some(fullscreen) = rules.fullscreen {
+                    window.request_fullscreen(fullscreen);
+                }
+
+                if let Some(maximized) = rules.maximized {
+                    window.request_maximized(maximized);
+                }
+
+                // We have to set a floating value, no matter what.
+                // - If the user asked for a floating value, use it.
+                // - Default to tiled
+                if let Some(floating) = rules.floating {
+                    window.request_tiled(!floating);
+                } else {
+                    window.request_tiled(true);
+                }
+
                 // TODO:
                 // self.fht.space.prepare_window_geometry(&window, workspace_id)
 
@@ -122,7 +139,10 @@ impl State {
             }
 
             if !has_render_buffer(surface) {
-                self.fht.unmapped_windows[idx].window().send_configure();
+                let window = self.fht.unmapped_windows[idx].window();
+                window.on_commit();
+                window.refresh();
+                window.send_configure();
                 return None;
             }
 
@@ -133,6 +153,9 @@ impl State {
             else {
                 unreachable!("Tried to map an unconfigured window!");
             };
+
+            window.on_commit();
+            window.refresh();
 
             let workspace = match self.fht.space.workspace_mut_for_id(workspace_id) {
                 Some(ws) => ws,

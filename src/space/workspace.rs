@@ -16,6 +16,7 @@ use super::Config;
 use crate::fht_render_elements;
 use crate::renderer::FhtRenderer;
 use crate::utils::output::OutputExt;
+use crate::utils::RectCenterExt;
 use crate::window::Window;
 
 static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
@@ -473,6 +474,19 @@ impl Workspace {
         let mut tile = Tile::new(window.clone(), Rc::clone(&self.config));
         tile.start_opening_animation();
 
+        if !tile.window().tiled() {
+            let centered = tile.window().rules().centered;
+            if let Some(true) = centered {
+                // Center the window after insertion.
+                let size = tile.size();
+                let output_geometry = self.output.geometry();
+                tile.set_location(
+                    output_geometry.center() - size.downscale(2).to_point() - output_geometry.loc,
+                    false,
+                );
+            }
+        }
+
         let new_idx = if tile.window().fullscreen() {
             // When the window is fullscreened, we insert at the end of the slave stack and set
             // fullscreen_idx. We still dont run the location animation though.
@@ -719,6 +733,7 @@ impl Workspace {
         let (maximized, tiles) = self
             .tiles
             .iter_mut()
+            .filter(|tile| tile.window().tiled())
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
         let work_area = {
             let mut work_area = output_geometry;
