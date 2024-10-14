@@ -13,7 +13,9 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
+use smithay::wayland::shell::xdg::{
+    SurfaceCachedState, XdgPopupSurfaceData, XdgToplevelSurfaceData,
+};
 
 use crate::state::{Fht, OutputState, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
@@ -71,7 +73,7 @@ impl State {
                     output = parent_workspace.output().clone();
                 }
 
-                let rules = ResolvedWindowRules::resolve(
+                let mut rules = ResolvedWindowRules::resolve(
                     &window,
                     &self.fht.config.rules,
                     output.name().as_str(),
@@ -119,9 +121,34 @@ impl State {
 
                 // We have to set a floating value, no matter what.
                 // - If the user asked for a floating value, use it.
+                // - If the window has a parent
+                // - If the window requests a size with limits (min/max)
+                //      ^^^ (copied from sway)
                 // - Default to tiled
+                let mut has_parent = window.toplevel().parent().is_some();
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
+                } else if has_parent || {
+                    let (min_size, max_size) = with_states(surface, |data| {
+                        let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
+                        let surface_data = cached_state.current();
+                        (surface_data.min_size, surface_data.max_size)
+                    });
+
+                    // If one axis is constrained, the size is constrained.
+                    ((min_size.w != 0 && max_size.w != 0) && (min_size.w == max_size.w))
+                        || ((min_size.h != 0 && max_size.h != 0) && (min_size.h == max_size.h))
+                } {
+                    rules.floating = Some(true);
+                    if has_parent {
+                        // We need to center around the parent if it exists.
+                        // For example OBS child window.
+                        rules.centered_in_parent = Some(true);
+                    } else {
+                        // Otherwise center in the workspace.
+                        rules.centered = Some(true);
+                    }
+                    window.request_tiled(false);
                 } else {
                     window.request_tiled(true);
                 }

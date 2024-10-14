@@ -9,6 +9,7 @@ use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
+use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
@@ -475,15 +476,53 @@ impl Workspace {
         tile.start_opening_animation();
 
         if !tile.window().tiled() {
-            let centered = tile.window().rules().centered;
+            let rules = tile.window().rules();
+            let (centered, centered_in_parent) = (rules.centered, rules.centered_in_parent);
+            drop(rules);
+
+            let size = tile.size();
+            let output_geometry = self.output.geometry();
+
             if let Some(true) = centered {
                 // Center the window after insertion.
-                let size = tile.size();
-                let output_geometry = self.output.geometry();
                 tile.set_location(
                     output_geometry.center() - size.downscale(2).to_point() - output_geometry.loc,
                     false,
                 );
+            } else if let Some(true) = centered_in_parent {
+                // We must have a parent since this can only be set inside src/handlers/compositor.rs
+                let parent_surface = tile.window().toplevel().parent().unwrap();
+                if let Some(parent_geometry) = self
+                    .tiles
+                    .iter()
+                    .find(|tile| tile.window().wl_surface().as_deref() == Some(&parent_surface))
+                    .map(|tile| tile.geometry())
+                {
+                    let new_location = parent_geometry.center() - size.downscale(2).to_point();
+                    if output_geometry
+                        .contains_rect(Rectangle::from_loc_and_size(new_location, size))
+                    {
+                        tile.set_location(new_location, false);
+                    } else {
+                        // Output geometry cannot contain centered in parent geometry.
+                        // Fallback to simple centering
+                        tile.set_location(
+                            output_geometry.center()
+                                - size.downscale(2).to_point()
+                                - output_geometry.loc,
+                            false,
+                        );
+                    }
+                } else {
+                    // We did not find the parent in this workspace.
+                    // Fallback to simple centering.
+                    tile.set_location(
+                        output_geometry.center()
+                            - size.downscale(2).to_point()
+                            - output_geometry.loc,
+                        false,
+                    );
+                }
             }
         }
 

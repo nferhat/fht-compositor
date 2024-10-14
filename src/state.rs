@@ -1131,6 +1131,7 @@ pub struct ResolvedWindowRules {
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
     pub centered: Option<bool>,
+    pub centered_in_parent: Option<bool>,
 }
 
 impl ResolvedWindowRules {
