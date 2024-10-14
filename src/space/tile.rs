@@ -50,7 +50,7 @@ pub struct Tile {
     ///
     /// This animation value's (if any) gets added to `self.location` in order to get the final
     /// location where to render the tile.
-    location_animation: Option<LocationAnimation>,
+    location_animation: Option<Animation<[i32; 2]>>,
 
     /// Extra damage bag to apply when the tile corners are being rounded.
     /// This is due to an implementation detail of [`RoundedCornerElement`]
@@ -230,7 +230,8 @@ impl Tile {
         };
         let mut tile_location = self.location;
         if let Some(animation) = &self.location_animation {
-            tile_location += animation.value();
+            let [x, y] = *animation.value();
+            tile_location += Point::from((x, y));
         }
         let tile_size = Size::from((
             window_size.w + 2 * border_thickness,
@@ -247,12 +248,20 @@ impl Tile {
         if let Some(window_geometry_animation) = &self.config.window_geometry_animation {
             let mut old_location = self.location;
             if let Some(previous_animation) = self.location_animation.take() {
-                old_location += previous_animation.value();
+                let [x, y] = *previous_animation.value();
+                old_location += Point::from((x, y));
             }
             self.location = new_location;
             if animate {
-                self.location_animation =
-                    LocationAnimation::new(old_location, new_location, window_geometry_animation);
+                let (delta_x, delta_y) = (old_location - new_location).into();
+                self.location_animation = Some(
+                    Animation::new(
+                        [delta_x, delta_y],
+                        [0, 0],
+                        window_geometry_animation.duration,
+                    )
+                    .with_curve(window_geometry_animation.curve),
+                );
             }
         } else {
             if self.location != new_location {
@@ -267,7 +276,8 @@ impl Tile {
     pub fn visual_location(&self) -> Point<i32, Logical> {
         let mut tile_location = self.location;
         if let Some(animation) = &self.location_animation {
-            tile_location += animation.value();
+            let [x, y] = *animation.value();
+            tile_location += Point::from((x, y));
         }
         tile_location
     }
@@ -571,48 +581,4 @@ impl Tile {
 fn opening_animation_progress_to_scale(progress: f64) -> f64 {
     const OPEN_SCALE_THRESHOLD: f64 = 0.5;
     progress * (1.0 - OPEN_SCALE_THRESHOLD) + OPEN_SCALE_THRESHOLD
-}
-
-#[derive(Debug)]
-struct LocationAnimation {
-    /// The x offset of this animation.
-    x: Animation<i32>,
-    /// The y offset of this animation.
-    y: Animation<i32>,
-}
-
-impl LocationAnimation {
-    /// Create a new [`LocationAnimation`]
-    fn new(
-        prev: Point<i32, Logical>,
-        next: Point<i32, Logical>,
-        config: &super::AnimationConfig,
-    ) -> Option<Self> {
-        if prev == next {
-            return None;
-        }
-
-        let delta = prev - next;
-        Some(Self {
-            x: Animation::new(delta.x, 0, config.duration).with_curve(config.curve),
-            y: Animation::new(delta.y, 0, config.duration).with_curve(config.curve),
-        })
-    }
-
-    /// Tick this animation at a given [`Duration`].
-    fn tick(&mut self, now: Duration) {
-        self.x.tick(now);
-        self.y.tick(now);
-    }
-
-    /// Check whether this animation finished or not.
-    fn is_finished(&self) -> bool {
-        // NOTE: The finished should always be matching since they have the same duration.
-        self.x.is_finished() /* || self.y.is_finished() */
-    }
-
-    /// Get the latest value calculated from [`Self::tick`]
-    fn value(&self) -> Point<i32, Logical> {
-        (*self.x.value(), *self.y.value()).into()
-    }
 }
