@@ -819,14 +819,16 @@ impl Fht {
         for monitor in self.space.monitors() {
             let output_name = monitor.output().name();
             for (ws_idx, workspace) in monitor.workspaces().enumerate() {
-                let focused_idx = workspace.active_tile_idx();
+                let Some(focused_idx) = workspace.active_tile_idx() else {
+                    continue; // No windows on the workspace, do not bother.
+                };
                 for (window_idx, window) in workspace.windows().enumerate() {
                     let rules = ResolvedWindowRules::resolve(
                         window,
                         &self.config.rules,
                         &output_name,
                         ws_idx,
-                        focused_idx.is_some_and(|idx| idx == window_idx),
+                        window_idx == focused_idx,
                     );
                     window.set_rules(rules);
                 }

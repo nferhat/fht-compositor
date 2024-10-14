@@ -404,7 +404,7 @@ impl Space {
             }
 
             if let Some(new_workspace_idx) = new_workspace_idx {
-                monitor.set_active_workspace_idx(new_workspace_idx);
+                monitor.set_active_workspace_idx(new_workspace_idx, animate);
                 new_monitor_idx = Some(monitor_idx);
             }
         }
@@ -664,7 +664,10 @@ impl Space {
 /// In an animation field is None, this means the animation is disabled.
 #[derive(Debug)]
 pub struct Config {
-    pub workspace_switch_animation: Option<AnimationConfig>,
+    pub workspace_switch_animation: Option<(
+        AnimationConfig,
+        fht_compositor_config::WorkspaceSwitchAnimationDirection,
+    )>,
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
@@ -697,7 +700,8 @@ impl Config {
                 config.animations.workspace_switch.duration,
                 config.animations.workspace_switch.curve,
                 config.animations.workspace_switch.disable,
-            ),
+            )
+            .map(|a| (a, config.animations.workspace_switch.direction)),
             window_geometry_animation: AnimationConfig::new(
                 config.animations.window_geometry.duration,
                 config.animations.window_geometry.curve,

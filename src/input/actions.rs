@@ -263,7 +263,7 @@ impl State {
             }
             KeyAction::FocusWorkspace(idx) => {
                 let mon = self.fht.space.active_monitor_mut();
-                if let Some(window) = mon.set_active_workspace_idx(idx) {
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
                     self.set_focus_target(Some(window));
                 }
             }

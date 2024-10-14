@@ -876,7 +876,7 @@ checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
 [[package]]
 name = "fht-animation"
 version = "0.1.0"
-source = "git+https://github.com/nferhat/fht-animation#278ad8f0fb62c4e2e76cc5718fe3f08f4f2bb992"
+source = "git+https://github.com/nferhat/fht-animation#9fbd314e07f7083255313ecf8e599e95c729da47"
 dependencies = [
  "keyframe",
  "rustix",

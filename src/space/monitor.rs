@@ -6,9 +6,10 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use fht_compositor_config::WorkspaceSwitchAnimationDirection;
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::output::Output;
-use smithay::utils::Scale;
+use smithay::utils::{Point, Scale};
 
 use super::workspace::{Workspace, WorkspaceRenderElement};
 use super::Config;
@@ -116,9 +117,56 @@ impl Monitor {
     }
 
     /// Set the active [`Workspace`] index.
-    pub fn set_active_workspace_idx(&mut self, idx: usize) -> Option<Window> {
+    pub fn set_active_workspace_idx(&mut self, idx: usize, animate: bool) -> Option<Window> {
         if self.active_idx == idx {
             return None;
+        }
+
+        // The workspace switch animation is done on a per-workspace level.
+        // Each workspace has a render offset.
+        if animate {
+            if let Some((config, direction)) = &self.config.workspace_switch_animation {
+                let (width, height) = self.output.geometry().size.into();
+                match direction {
+                    WorkspaceSwitchAnimationDirection::Horizontal => {
+                        if self.active_idx > idx {
+                            self.workspaces[self.active_idx].start_render_offset_animation(
+                                Point::default(),
+                                (width, 0).into(),
+                                config,
+                            );
+                            self.workspaces[idx].start_render_offset_animation(
+                                (-width, 0).into(),
+                                Point::default(),
+                                config,
+                            );
+                        } else {
+                            self.workspaces[self.active_idx].start_render_offset_animation(
+                                Point::default(),
+                                (-width, 0).into(),
+                                config,
+                            );
+                            self.workspaces[idx].start_render_offset_animation(
+                                (width, 0).into(),
+                                Point::default(),
+                                config,
+                            );
+                        }
+                    }
+                    WorkspaceSwitchAnimationDirection::Vertical => {}
+                };
+
+                // self.workspaces[self.active_idx].start_render_offset_animation(
+                //     Point::default(),
+                //     offset,
+                //     config,
+                // );
+                // self.workspaces[idx].start_render_offset_animation(
+                //     offset,
+                //     Point::default(),
+                //     config,
+                // );
+            }
         }
 
         self.active_idx = idx;
@@ -142,23 +190,30 @@ impl Monitor {
 
     /// Advance animations for this [`Monitor`].
     pub fn advance_animations(&mut self, now: Duration) -> bool {
-        let mut ret = false;
-        for workspace in &mut self.workspaces {
-            ret |= workspace.advance_animations(now);
-        }
-        ret
+        self.workspaces
+            .iter_mut()
+            .fold(false, |acc, ws| ws.advance_animations(now) || acc)
     }
 
     /// Create the render elements for this [`Monitor`]
     pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: f64) -> MonitorRenderResult<R> {
-        let active = &self.workspaces[self.active_idx];
-        let elements = active
-            .render(renderer, scale)
-            .into_iter()
-            .map(Into::into)
-            .collect();
-        let has_fullscreen = active.has_fullscreened_tile();
-        // TODO: Rewrite workspace switch render elements.
+        // We want to render workspaces that currently have a render offset animation
+        // as they could be displayed on the monitor (well this depends, but most of the time, yes)
+        let mut elements = vec![];
+        let mut has_fullscreen = false;
+
+        for (idx, workspace) in self.workspaces.iter().enumerate() {
+            if idx == self.active_idx || workspace.has_render_offset_animation() {
+                elements.extend(
+                    workspace
+                        .render(renderer, scale)
+                        .into_iter()
+                        .map(Into::into),
+                );
+                continue;
+            }
+        }
+
         MonitorRenderResult {
             elements,
             has_fullscreen,

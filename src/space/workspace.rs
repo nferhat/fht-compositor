@@ -3,7 +3,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use fht_animation::Animation;
 use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
@@ -105,6 +107,12 @@ pub struct Workspace {
     /// user experience.
     has_transient_layout_changes: bool,
 
+    /// Render offset of this workspace.
+    ///
+    /// This is used to achieve workspace switch animations, this relocates all the generated
+    /// render elements from [`Workspace::render`].
+    render_offset: Option<Animation<[i32; 2]>>,
+
     /// Shared configuration of the workspace system
     pub config: Rc<Config>,
 }
@@ -126,6 +134,7 @@ impl Workspace {
             nmaster: config.nmaster,
             gaps: config.gaps,
             has_transient_layout_changes: false,
+            render_offset: None,
             config: Rc::clone(config),
         }
     }
@@ -270,6 +279,7 @@ impl Workspace {
 
             true
         });
+        self.closing_tiles.retain(|tile| !tile.is_finished());
 
         if !self.tiles.is_empty() {
             if let Some(active_idx) = &mut self.active_tile_idx {
@@ -929,15 +939,53 @@ impl Workspace {
         }
     }
 
+    /// Returns whether this [`Workspace`] has a render offset animation.
+    pub fn has_render_offset_animation(&self) -> bool {
+        self.render_offset.is_some()
+    }
+
+    /// Start a render offset animation
+    pub fn start_render_offset_animation(
+        &mut self,
+        mut start: Point<i32, Logical>,
+        end: Point<i32, Logical>,
+        animation_config: &super::AnimationConfig,
+    ) {
+        if let Some(animation) = self.render_offset.take() {
+            let [x, y] = *animation.value();
+            start = Point::from((x, y));
+        }
+
+        self.render_offset = Some(
+            Animation::new(
+                [start.x, start.y],
+                [end.x, end.y],
+                animation_config.duration,
+            )
+            .with_curve(animation_config.curve),
+        );
+    }
+
     /// Advance animations for this [`Workspace`]
     pub fn advance_animations(&mut self, now: Duration) -> bool {
-        self.tiles
-            .iter_mut()
-            .fold(false, |acc, tile| tile.advance_animations(now) || acc)
-            || self.closing_tiles.iter_mut().fold(false, |acc, tile| {
-                tile.advance_animations(now);
-                acc || tile.is_finished()
-            })
+        let mut running = false;
+
+        let _ = self.render_offset.take_if(|a| a.is_finished());
+        if let Some(animation) = &mut self.render_offset {
+            animation.tick(now);
+            running = true;
+        }
+
+        for tile in &mut self.tiles {
+            running |= tile.advance_animations(now);
+        }
+
+        for closing_tile in &mut self.closing_tiles {
+            closing_tile.advance_animations(now);
+            running = true;
+        }
+
+        running
     }
 
     /// Render all the needed elements of this [`Workspace`].
@@ -948,23 +996,46 @@ impl Workspace {
     ) -> Vec<WorkspaceRenderElement<R>> {
         let mut elements = vec![];
 
+        let render_offset = self
+            .render_offset
+            .as_ref()
+            .map(|animation| {
+                let [x, y] = *animation.value();
+                Point::<i32, Logical>::from((x, y))
+            })
+            .unwrap_or_default()
+            .to_physical_precise_round(scale);
+
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             //
             // TODO: Maybe fade out the other tiles when fullscreen is resizing? Would be better
             // than just removing them right away.
             let tile = &self.tiles[fullscreen_idx];
-            return tile.render(renderer, scale, true).map(Into::into).collect();
+            return tile
+                .render(renderer, scale, true)
+                .map(|element| {
+                    RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                        .into()
+                })
+                .collect();
         }
 
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
-            elements.push(closing_tile.render(scale, 1.0).into())
+            let element = closing_tile.render(scale, 1.0);
+            let element =
+                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                    .into();
+            elements.push(element);
         }
 
         if let Some(tile) = self.active_tile() {
             // Active gets rendered above others.
-            elements.extend(tile.render(renderer, scale, true).map(Into::into));
+            elements.extend(tile.render(renderer, scale, true).map(|element| {
+                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                    .into()
+            }));
         }
 
         // Now render others, just fine.
@@ -973,7 +1044,10 @@ impl Workspace {
                 continue; // active tile has already been rendered.
             }
 
-            elements.extend(tile.render(renderer, scale, true).map(Into::into));
+            elements.extend(tile.render(renderer, scale, false).map(|element| {
+                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                    .into()
+            }));
         }
 
         elements
@@ -982,8 +1056,8 @@ impl Workspace {
 
 fht_render_elements! {
     WorkspaceRenderElement<R> => {
-        Tile = TileRenderElement<R>,
-        ClosingTile = ClosingTileRenderElement,
+        Tile = RelocateRenderElement<TileRenderElement<R>>,
+        ClosingTile = RelocateRenderElement<ClosingTileRenderElement>,
     }
 }
 

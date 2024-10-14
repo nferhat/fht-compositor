@@ -721,7 +721,7 @@ fn deserialize_duration_millis<'de, D: Deserializer<'de>>(
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Animations {
     pub disable: bool,
-    pub workspace_switch: WorkspaceSwitchAnimationConfig,
+    pub workspace_switch: WorkspaceSwitchAnimation,
     pub window_open_close: WindowOpenCloseAnimation,
     pub window_geometry: WindowGeometryAnimation,
 }
@@ -736,7 +736,7 @@ fn default_workspace_switch_curve() -> AnimationCurve {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-pub struct WorkspaceSwitchAnimationConfig {
+pub struct WorkspaceSwitchAnimation {
     #[serde(default = "default_false")]
     pub disable: bool,
     pub direction: WorkspaceSwitchAnimationDirection,
@@ -750,7 +750,7 @@ pub struct WorkspaceSwitchAnimationConfig {
     pub duration: Duration,
 }
 
-impl Default for WorkspaceSwitchAnimationConfig {
+impl Default for WorkspaceSwitchAnimation {
     fn default() -> Self {
         Self {
             disable: false,
