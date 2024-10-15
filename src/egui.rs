@@ -4,86 +4,39 @@
 //! [smithay-egui](https://github.com/smithay/smithay-egui), with additional tailoring to fit the
 //! compositor's needs.
 
-use std::borrow::BorrowMut;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::input::MouseButton;
 use smithay::backend::renderer::element::texture::{TextureRenderBuffer, TextureRenderElement};
 use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::gles::{self, GlesError, GlesTexture};
+use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Color32F, Frame, Offscreen, Renderer, Unbind};
-use smithay::input::keyboard::{xkb, ModifiersState};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
 
 use crate::renderer::texture_element::FhtTextureElement;
 
 pub struct EguiElement {
     size: Size<i32, Logical>,
-    inner: Arc<Mutex<EguiElementInner>>,
+    ctx: egui::Context,
+    render_buffer: Arc<Mutex<Option<(i32, TextureRenderBuffer<GlesTexture>)>>>,
 }
 
 impl EguiElement {
     pub fn new(size: Size<i32, Logical>) -> Self {
-        let xkb_keymap = xkb::Keymap::new_from_names(
-            &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
-            "",
-            "",
-            "",
-            "",
-            None,
-            xkb::KEYMAP_COMPILE_NO_FLAGS,
-        )
-        .unwrap();
-        let xkb_state = xkb::State::new(&xkb_keymap);
         Self {
             size,
-            inner: Arc::new(Mutex::new(EguiElementInner {
-                context: egui::Context::default(),
-                painter: None,
-                last_pointer_position: None,
-                last_modifiers: ModifiersState::default(),
-                xkb_keymap,
-                xkb_state,
-                events: Vec::new(),
-            })),
+            ctx: Default::default(),
+            render_buffer: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn set_size(&mut self, new_size: Size<i32, Logical>) {
         self.size = new_size;
-        let mut guard = self.inner.lock().unwrap();
-        if let Some(painter) = guard.painter.as_mut() {
-            // New size, new buffer
-            let _ = painter.render_buffer.take();
-        }
-    }
-
-    pub fn run(&self, ui: impl FnOnce(&egui::Context), time: std::time::Duration, scale: i32) {
-        let mut guard = self.inner.lock().unwrap();
-        let size = self.size.to_physical(scale);
-
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect {
-                min: egui::pos2(0.0, 0.0),
-                max: egui::pos2(size.w as f32, size.h as f32),
-            }),
-            time: Some(time.as_secs_f64()),
-            predicted_dt: 1.0 / 60.0,
-            modifiers: convert_modifiers(guard.last_modifiers),
-            events: guard.events.drain(..).collect(),
-            hovered_files: Vec::with_capacity(0),
-            dropped_files: Vec::with_capacity(0),
-            focused: true,
-            max_texture_side: guard
-                .painter
-                .as_ref()
-                .map(|painter| painter.max_texture_size),
-            ..Default::default()
-        };
-
-        let _ = guard.context.run(input, ui);
+        // Reset render buffer on resize to avoid artifacts
+        let _ = self.render_buffer.lock().unwrap().take();
     }
 
     pub fn render(
@@ -92,54 +45,54 @@ impl EguiElement {
         scale: i32,
         alpha: f32,
         location: Point<i32, Physical>,
-        ui: impl FnOnce(&egui::Context),
-        time: std::time::Duration,
+        ui: impl FnMut(&egui::Context),
     ) -> Result<EguiRenderElement, GlesError> {
-        let guard = &mut *self.inner.lock().unwrap();
-
         let size = self.size.to_physical(scale);
         let buffer_size = self.size.to_buffer(scale, Transform::Normal);
 
-        let painter = match guard.painter.as_mut() {
-            Some(painter) => painter,
-            None => {
-                let mut max_texture_size = 0;
-                {
-                    let gles_renderer: &mut gles::GlesRenderer = renderer.borrow_mut();
-                    let _ = gles_renderer.with_context(|gles| unsafe {
-                        gles.GetIntegerv(gles::ffi::MAX_TEXTURE_SIZE, &mut max_texture_size);
-                    });
-                }
-
-                let mut frame = renderer
-                    .render(size, Transform::Normal)
-                    .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output");
-                        err
-                    })
-                    .expect("Failed to create frame");
-
-                let painter = frame
-                    .with_context(|context| {
-                        // SAFETY: In the context of this compositor, the glow renderer/context
-                        // lives for 'static, so the pointer to it should always be valid.
-                        egui_glow::Painter::new(context.clone(), "", None)
-                    })?
-                    .map_err(|err| {
-                        warn!(?err, "Failed to create egui glow painter for output");
-                        GlesError::ShaderCompileError
-                    })?;
-
-                guard.painter.insert(EguiGlowPainter {
-                    painter,
-                    render_buffer: None,
-                    max_texture_size: max_texture_size as usize,
+        if renderer
+            .egl_context()
+            .user_data()
+            .get::<RefCell<egui_glow::Painter>>()
+            .is_none()
+        {
+            let mut frame = renderer
+                .render(size, Transform::Normal)
+                .map_err(|err| {
+                    warn!(?err, "Failed to create egui glow painter for output");
+                    err
                 })
-            }
-        };
+                .expect("Failed to create frame");
 
-        let _ = painter.render_buffer.take_if(|(s, _)| *s != scale);
-        let render_buffer = match painter.render_buffer.as_mut() {
+            let painter = frame
+                .with_context(|context| {
+                    // SAFETY: In the context of this compositor, the glow renderer/context
+                    // lives for 'static, so the pointer to it should always be valid.
+                    egui_glow::Painter::new(context.clone(), "", None, true)
+                })?
+                .map_err(|err| {
+                    warn!(?err, "Failed to create egui glow painter for output");
+                    GlesError::ShaderCompileError
+                })?;
+            drop(frame);
+
+            renderer
+                .egl_context()
+                .user_data()
+                .insert_if_missing(|| Rc::new(RefCell::new(painter)));
+        }
+
+        let painter = renderer
+            .egl_context()
+            .user_data()
+            .get::<Rc<RefCell<egui_glow::Painter>>>()
+            .cloned()
+            .unwrap();
+        let painter = &mut *RefCell::borrow_mut(&painter);
+
+        let render_buffer = &mut *self.render_buffer.lock().unwrap();
+        let _ = render_buffer.take_if(|(s, _)| *s != scale);
+        let render_buffer = match render_buffer.as_mut() {
             Some((_, render_buffer)) => render_buffer,
             None => {
                 let render_texture: GlesTexture = renderer
@@ -157,33 +110,25 @@ impl EguiElement {
                     None,                  // TODO: Calc opaque regions?
                 );
 
-                let render_buffer = painter.render_buffer.insert((scale, texture_buffer));
+                let render_buffer = render_buffer.insert((scale, texture_buffer));
                 &mut render_buffer.1
             }
         };
 
-        let max_texture_size = painter.max_texture_size;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect {
                 min: egui::pos2(0.0, 0.0),
                 max: egui::pos2(size.w as f32, size.h as f32),
             }),
-            time: Some(time.as_secs_f64()),
             predicted_dt: 1.0 / 60.0,
-            modifiers: convert_modifiers(guard.last_modifiers),
-            events: guard.events.drain(..).collect(),
-            hovered_files: Vec::with_capacity(0),
-            dropped_files: Vec::with_capacity(0),
             focused: true,
-            max_texture_side: Some(max_texture_size),
-            pixels_per_point: Some(scale as f32),
             ..Default::default()
         };
         let egui::FullOutput {
             shapes,
             textures_delta,
             ..
-        } = guard.context.run(input.clone(), ui);
+        } = self.ctx.run(input.clone(), ui);
 
         render_buffer.render().draw(|texture| {
             renderer.bind(texture.clone())?;
@@ -193,10 +138,10 @@ impl EguiElement {
                     Color32F::TRANSPARENT,
                     &[Rectangle::from_loc_and_size((0, 0), size)],
                 )?;
-                painter.painter.paint_and_update_textures(
+                painter.paint_and_update_textures(
                     [size.w as u32, size.h as u32],
                     scale as f32,
-                    &guard.context.tessellate(shapes),
+                    &self.ctx.tessellate(shapes, scale as f32),
                     &textures_delta,
                 );
             };
@@ -223,205 +168,9 @@ impl EguiElement {
     }
 }
 
+#[derive(Debug)]
 pub struct EguiElementInner {
     context: egui::Context,
-    painter: Option<EguiGlowPainter>,
-
-    last_pointer_position: Option<Point<i32, Logical>>,
-    last_modifiers: ModifiersState,
-    #[allow(unused)] // we have to keep it as long as xkb_state
-    xkb_keymap: xkb::Keymap,
-    xkb_state: xkb::State,
-    events: Vec<egui::Event>,
-}
-
-impl std::fmt::Debug for EguiElementInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EguiOutputState")
-            .field("context", &self.context)
-            .field("painter", &self.painter)
-            .field("last_modifiers", &self.last_modifiers)
-            .field("xkb_keymap", &"...")
-            .field("xkb_state", &"...")
-            .field("events", &self.events)
-            .finish()
-    }
-}
-
-impl EguiElementInner {
-    pub fn input_event_pointer_position(&mut self, position: Point<i32, Logical>) {
-        // NOTE: No need to check for wants_pointer_input since it tries to base this off the
-        // pointer position, so it must be updated regardless.
-        self.last_pointer_position = Some(position);
-        self.events.push(egui::Event::PointerMoved(egui::pos2(
-            position.x as f32,
-            position.y as f32,
-        )));
-    }
-
-    pub fn input_event_pointer_axis(&mut self, x_amount: f64, y_amount: f64) -> bool {
-        if !self.context.wants_pointer_input() {
-            return false;
-        }
-
-        self.events.push(egui::Event::Scroll(egui::vec2(
-            x_amount as f32,
-            y_amount as f32,
-        )));
-
-        true
-    }
-
-    pub fn input_event_pointer_button(&mut self, button: MouseButton, pressed: bool) -> bool {
-        if !self.context.wants_pointer_input() {
-            return false;
-        }
-
-        let Some(last_pointer_position) = self.last_pointer_position else {
-            return false;
-        };
-
-        let button = match button {
-            MouseButton::Left => egui::PointerButton::Primary,
-            MouseButton::Middle => egui::PointerButton::Middle,
-            MouseButton::Right => egui::PointerButton::Secondary,
-            _ => return false,
-        };
-
-        self.events.push(egui::Event::PointerButton {
-            pos: egui::pos2(
-                last_pointer_position.x as f32,
-                last_pointer_position.y as f32,
-            ),
-            button,
-            pressed,
-            modifiers: convert_modifiers(self.last_modifiers),
-        });
-
-        true
-    }
-
-    pub fn input_event_keyboard(
-        &mut self,
-        key_code: u32,
-        pressed: bool,
-        modifiers: ModifiersState,
-    ) -> bool {
-        self.last_modifiers = modifiers;
-        if let Some(key) = convert_keysym(key_code) {
-            self.events.push(egui::Event::Key {
-                key,
-                pressed,
-                repeat: false,
-                modifiers: convert_modifiers(modifiers),
-            });
-        }
-
-        self.xkb_state.update_key(
-            xkb::Keycode::new(key_code),
-            match pressed {
-                true => xkb::KeyDirection::Down,
-                false => xkb::KeyDirection::Up,
-            },
-        );
-
-        // Pass to egui the text we just inserted.
-        if pressed {
-            let text = self.xkb_state.key_get_utf8(xkb::Keycode::new(key_code));
-            self.events.push(egui::Event::Text(text));
-        }
-
-        self.context.wants_keyboard_input()
-    }
-}
-
-pub struct EguiGlowPainter {
-    painter: egui_glow::Painter,
-    // We need a buffer in which the painter will draw and track damage.
-    // This should get invalidated on each scale change
-    render_buffer: Option<(i32, TextureRenderBuffer<GlesTexture>)>,
-    max_texture_size: usize,
-}
-
-impl std::fmt::Debug for EguiGlowPainter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EguiGlowPainter")
-            .field("painter", &"...")
-            .field("render_buffers", &self.render_buffer)
-            .field("max_texture_size", &self.max_texture_size)
-            .finish()
-    }
-}
-
-fn convert_modifiers(modifiers: ModifiersState) -> egui::Modifiers {
-    egui::Modifiers {
-        alt: modifiers.alt,
-        ctrl: modifiers.ctrl,
-        shift: modifiers.shift,
-        mac_cmd: false,          // we dont support mac here.
-        command: modifiers.ctrl, // ^^^
-    }
-}
-
-fn convert_keysym(raw: u32) -> Option<egui::Key> {
-    use egui::Key::*;
-    use smithay::input::keyboard::keysyms;
-
-    #[allow(non_upper_case_globals)]
-    Some(match raw {
-        keysyms::KEY_Down => ArrowDown,
-        keysyms::KEY_Left => ArrowLeft,
-        keysyms::KEY_Right => ArrowRight,
-        keysyms::KEY_Up => ArrowUp,
-        keysyms::KEY_Escape => Escape,
-        keysyms::KEY_Tab => Tab,
-        keysyms::KEY_BackSpace => Backspace,
-        keysyms::KEY_Return => Enter,
-        keysyms::KEY_space => Space,
-        keysyms::KEY_Insert => Insert,
-        keysyms::KEY_Delete => Delete,
-        keysyms::KEY_Home => Home,
-        keysyms::KEY_End => End,
-        keysyms::KEY_Page_Up => PageUp,
-        keysyms::KEY_Page_Down => PageDown,
-        keysyms::KEY_0 => Num0,
-        keysyms::KEY_1 => Num1,
-        keysyms::KEY_2 => Num2,
-        keysyms::KEY_3 => Num3,
-        keysyms::KEY_4 => Num4,
-        keysyms::KEY_5 => Num5,
-        keysyms::KEY_6 => Num6,
-        keysyms::KEY_7 => Num7,
-        keysyms::KEY_8 => Num8,
-        keysyms::KEY_9 => Num9,
-        keysyms::KEY_A => A,
-        keysyms::KEY_B => B,
-        keysyms::KEY_C => C,
-        keysyms::KEY_D => D,
-        keysyms::KEY_E => E,
-        keysyms::KEY_F => F,
-        keysyms::KEY_G => G,
-        keysyms::KEY_H => H,
-        keysyms::KEY_I => I,
-        keysyms::KEY_J => J,
-        keysyms::KEY_K => K,
-        keysyms::KEY_L => L,
-        keysyms::KEY_M => M,
-        keysyms::KEY_N => N,
-        keysyms::KEY_O => O,
-        keysyms::KEY_P => P,
-        keysyms::KEY_Q => Q,
-        keysyms::KEY_R => R,
-        keysyms::KEY_S => S,
-        keysyms::KEY_T => T,
-        keysyms::KEY_U => U,
-        keysyms::KEY_V => V,
-        keysyms::KEY_W => W,
-        keysyms::KEY_X => X,
-        keysyms::KEY_Y => Y,
-        keysyms::KEY_Z => Z,
-        _ => return None,
-    })
 }
 
 crate::fht_render_elements! {
