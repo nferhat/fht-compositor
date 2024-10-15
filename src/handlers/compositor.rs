@@ -135,10 +135,12 @@ impl State {
                 // - If the window requests a size with limits (min/max)
                 //      ^^^ (copied from sway)
                 // - Default to tiled
-                let mut has_parent = window.toplevel().parent().is_some();
+                let has_parent = window.toplevel().parent().is_some();
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
                     if !floating {
+                        window.set_rules(rules); // NOTE: apply window rules here since we need them
+                                                 // for the right border config to be considered
                         self.fht
                             .space
                             .prepare_unconfigured_window(&window, workspace_id);
@@ -163,15 +165,17 @@ impl State {
                         // Otherwise center in the workspace.
                         rules.centered = Some(true);
                     }
+                    window.set_rules(rules);
                     window.request_tiled(false);
                 } else {
+                    window.set_rules(rules); // NOTE: apply window rules here since we need them
+                                             // for the right border config to be considered
                     window.request_tiled(true);
                     self.fht
                         .space
                         .prepare_unconfigured_window(&window, workspace_id);
                 }
 
-                window.set_rules(rules);
                 window.send_configure();
                 self.fht.unmapped_windows.push(UnmappedWindow::Configured {
                     window,
