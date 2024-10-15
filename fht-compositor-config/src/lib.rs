@@ -588,14 +588,14 @@ impl Default for Cursor {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Decorations {
     pub border: Border,
-    pub allow_csd: bool,
+    pub decoration_mode: DecorationMode,
 }
 
 impl Default for Decorations {
     fn default() -> Self {
         Self {
             border: Default::default(),
-            allow_csd: false,
+            decoration_mode: DecorationMode::default(),
         }
     }
 }
@@ -628,6 +628,17 @@ impl Default for Border {
             radius: default_radius(),
         }
     }
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum DecorationMode {
+    ClientPreference,
+    #[default]
+    PreferServerSide,
+    PreferClientSide,
+    ForceServerSide,
+    ForceClientSide,
 }
 
 impl Border {
@@ -861,7 +872,7 @@ pub struct WindowRule {
     pub border_overrides: BorderOverrides,
     pub proportion: Option<f64>,
     pub opacity: Option<f32>,
-    pub allow_csd: Option<bool>,
+    pub decoration_mode: Option<DecorationMode>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,

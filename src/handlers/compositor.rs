@@ -1,3 +1,4 @@
+use fht_compositor_config::DecorationMode;
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
 use smithay::desktop::{find_popup_root_surface, PopupKind};
@@ -89,27 +90,36 @@ impl State {
                     output = named_output;
                 }
 
-                if let Some(allow_csd) = rules.allow_csd {
-                    window.toplevel().with_pending_state(|state| {
-                        if allow_csd {
-                            state.decoration_mode =
-                                Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
-                        } else {
+                let decoration_mode = rules
+                    .decoration_mode
+                    .unwrap_or(self.fht.config.decorations.decoration_mode);
+                window.toplevel().with_pending_state(|state| {
+                    // Prefer* == Set server side if client didn't specify anything.
+                    // Force* == set regardless of what the client set.
+                    match decoration_mode {
+                        DecorationMode::ClientPreference => {
+                            // Whatever the client has specified.
+                        }
+                        DecorationMode::PreferServerSide => {
+                            let _ = state
+                                .decoration_mode
+                                .get_or_insert(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+                        }
+                        DecorationMode::PreferClientSide => {
+                            let _ = state
+                                .decoration_mode
+                                .get_or_insert(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+                        }
+                        DecorationMode::ForceServerSide => {
                             state.decoration_mode =
                                 Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
                         }
-                    });
-                } else {
-                    window.toplevel().with_pending_state(|state| {
-                        if self.fht.config.decorations.allow_csd {
+                        DecorationMode::ForceClientSide => {
                             state.decoration_mode =
                                 Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
-                        } else {
-                            state.decoration_mode =
-                                Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
                         }
-                    });
-                }
+                    }
+                });
 
                 if let Some(fullscreen) = rules.fullscreen {
                     window.request_fullscreen(fullscreen);

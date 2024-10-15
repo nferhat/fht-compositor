@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
-use fht_compositor_config::BorderOverrides;
+use fht_compositor_config::{BorderOverrides, DecorationMode};
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -1126,7 +1126,7 @@ pub struct ResolvedWindowRules {
     pub open_on_workspace: Option<usize>,
     pub opacity: Option<f32>,
     pub proportion: Option<f64>,
-    pub allow_csd: Option<bool>,
+    pub decoration_mode: Option<DecorationMode>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
@@ -1172,8 +1172,8 @@ impl ResolvedWindowRules {
                 resolved_rules.proportion = Some(proportion)
             }
 
-            if let Some(allow_csd) = rule.allow_csd {
-                resolved_rules.allow_csd = Some(allow_csd)
+            if let Some(decoration_mode) = rule.decoration_mode {
+                resolved_rules.decoration_mode = Some(decoration_mode)
             }
 
             if let Some(maximized) = rule.maximized {
