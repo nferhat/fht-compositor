@@ -40,6 +40,12 @@ impl std::fmt::Debug for WorkspaceId {
 }
 
 #[derive(Debug)]
+struct InteractiveSwap {
+    window: Window,
+    initial_window_location: Point<i32, Logical>,
+}
+
+#[derive(Debug)]
 pub struct Workspace {
     /// The unique ID of this workspace.
     id: WorkspaceId,
@@ -115,6 +121,13 @@ pub struct Workspace {
     /// render elements from [`Workspace::render`].
     render_offset: Option<Animation<[i32; 2]>>,
 
+    /// An interactive tile "swap".
+    ///
+    /// It can
+    /// - Swap two **tiled** (non-floating) tiles in the tile list
+    /// - Move around floating tiles
+    interactive_swap: Option<InteractiveSwap>,
+
     /// Shared configuration of the workspace system
     pub config: Rc<Config>,
 }
@@ -137,6 +150,7 @@ impl Workspace {
             gaps: config.gaps,
             has_transient_layout_changes: false,
             render_offset: None,
+            interactive_swap: None,
             config: Rc::clone(config),
         }
     }
@@ -378,6 +392,19 @@ impl Workspace {
         });
         self.arrange_tiles(animate);
         self.active_window()
+    }
+
+    /// Swap the two [`Tile`]s associated with these [`Window`]s
+    pub fn swap_tiles(&mut self, a: &Window, b: &Window, animate: bool) {
+        let Some(a_idx) = self.tiles.iter().position(|tile| tile.window() == a) else {
+            return;
+        };
+        let Some(b_idx) = self.tiles.iter().position(|tile| tile.window() == b) else {
+            return;
+        };
+
+        self.tiles.swap(a_idx, b_idx);
+        self.arrange_tiles(animate);
     }
 
     /// Swaps the currently active [`Tile`] with the next one.
@@ -991,6 +1018,96 @@ impl Workspace {
             }
             WorkspaceLayout::Floating => {}
         }
+    }
+
+    /// Start an interactive swap grab.
+    ///
+    /// Returns [`true`] if the grab was successfully registered.
+    pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
+        if self.interactive_swap.is_some() {
+            // Can't have two interactive swaps at a time.
+            return false;
+        }
+
+        let Some(tile) = self.tiles.iter().find(|tile| tile.window() == window) else {
+            // Can't find the adequate tile
+            return false;
+        };
+
+        let initial_window_location = tile.location();
+        self.interactive_swap = Some(InteractiveSwap {
+            window: window.clone(),
+            initial_window_location,
+        });
+
+        true
+    }
+
+    /// Handle an interactive swap grab motion.
+    ///
+    /// `delta` is how much the cursor moved from its initial window location.
+    ///
+    /// Returns [`true`] if the grab was successfully registered.
+    pub fn handle_interactive_swap_motion(
+        &mut self,
+        window: &Window,
+        delta: Point<i32, Logical>,
+    ) -> bool {
+        let Some(interactive_swap) = &self.interactive_swap else {
+            return false;
+        };
+
+        if interactive_swap.window != *window {
+            return false;
+        }
+
+        let new_location = interactive_swap.initial_window_location + delta;
+        let Some(tile) = self.tiles.iter_mut().find(|tile| tile.window() == window) else {
+            // Can't find the adequate tile
+            return false;
+        };
+        tile.set_location(new_location, false);
+
+        true
+    }
+
+    /// Handle an interactive swap grab motion.
+    ///
+    /// `position` is the cursor position relative to the workspace.
+    ///
+    /// Returns [`true`] if the grab was successfully registered.
+    pub fn handle_interactive_swap_end(
+        &mut self,
+        window: &Window,
+        position: Point<f64, Logical>,
+    ) -> bool {
+        let Some(interactive_swap) = self.interactive_swap.take() else {
+            return false;
+        };
+
+        if interactive_swap.window != *window {
+            return false;
+        }
+
+        if window.tiled() && self.layouts[self.active_layout_idx] != WorkspaceLayout::Floating {
+            // We only do the swap part if the window is tiled.
+            // Otherwise for floating windows just let them move
+            if let Some(other_window) = self
+                .tiles
+                .iter()
+                .filter(|tile| tile.window() != window)
+                .find(|tile| tile.geometry().to_f64().contains(position))
+                .map(Tile::window)
+                .cloned()
+            {
+                self.swap_tiles(window, &other_window, true);
+            } else {
+                // We still run the arrange tiles function in order to get the swapped/grabbed
+                // window back to its original place.
+                self.arrange_tiles(true);
+            }
+        }
+        true
     }
 
     /// Returns whether this [`Workspace`] has a render offset animation.

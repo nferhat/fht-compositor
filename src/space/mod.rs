@@ -657,6 +657,55 @@ impl Space {
             }
         }
     }
+
+    /// Start an interactive swap in the [`Workspace`] of this [`Window`].
+    ///
+    /// Returns [`true`] if the grab got started inside the [`Workspace`].
+    pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                if workspace.start_interactive_swap(window) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Handle the iteractive swap motion for this window.
+    ///
+    /// Returns [`true`] if the grab should continue.
+    pub fn handle_interactive_swap_motion(
+        &mut self,
+        window: &Window,
+        delta: Point<i32, Logical>,
+    ) -> bool {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                if workspace.handle_interactive_swap_motion(window, delta) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Handle the iteractive swap motion for this window.
+    ///
+    /// Returns [`true`] if the grab should continue.
+    pub fn handle_interactive_swap_end(&mut self, window: &Window, position: Point<f64, Logical>) {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                let position_in_workspace =
+                    position - workspace.output().current_location().to_f64();
+                if workspace.handle_interactive_swap_end(window, position_in_workspace) {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// Configuration for the workspace system derived from the compositor configuration.

@@ -10,6 +10,10 @@ use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::window::Window;
 
+// NOTE: It is named swap-tile grab, but this name is quite misleading.
+//
+// In case the window is floating, the window will only be moving, the swapping
+// process is only between tiled windows.
 pub struct SwapTileGrab {
     pub window: Window,
     pub start_data: GrabStartData<State>,
@@ -25,13 +29,14 @@ impl PointerGrab<State> for SwapTileGrab {
     ) {
         // No focus while motion is active
         handle.motion(data, None, event);
-        // TODO: Handle interactive swap
-        // if let Some(workspace) = data.fht.space.workspace_mut_for_window(&self.window) {
-        //     let delta = (event.location - self.start_data.location).to_i32_round();
-        //     if workspace.handle_interactive_swap_motion(&self.window, delta) {
-        //         return;
-        //     }
-        // }
+        let delta = (event.location - self.start_data.location).to_i32_round();
+        if data
+            .fht
+            .space
+            .handle_interactive_swap_motion(&self.window, delta)
+        {
+            return;
+        }
 
         handle.unset_grab(self, data, event.serial, event.time, true)
     }
@@ -54,13 +59,10 @@ impl PointerGrab<State> for SwapTileGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            // TODO: Handle interactive swap
-            // if let Some(workspace) = data.fht.space.workspace_mut_for_window(&self.window) {
-            //     let pointer_location =
-            //         handle.current_location() - workspace.output().current_location().to_f64();
-            //     workspace.handle_interactive_swap_end(&self.window, pointer_location);
-            // }
-            // handle.unset_grab(self, data, event.serial, event.time, true);
+            data.fht
+                .space
+                .handle_interactive_swap_end(&self.window, handle.current_location());
+            handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
 

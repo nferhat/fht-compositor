@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
 use fht_compositor_config::MouseAction;
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Rectangle, Serial};
 
+use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
+
+use super::swap_tile_grab::SwapTileGrab;
 
 #[derive(Debug, Clone)]
 pub enum KeyAction {
@@ -305,40 +309,39 @@ impl State {
 
 impl State {
     #[profiling::function]
-    pub fn process_mouse_action(&mut self, action: MouseAction, _serial: Serial) {
+    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
         // TODO: Handle mouse actions again.
         // Currently needs re-implementation from the space side
         match action {
+            MouseAction::SwapTile => {
+                let pointer_loc = self.fht.pointer.current_location();
+                if let Some((PointerFocusTarget::Window(window), _)) =
+                    self.fht.focus_target_under(pointer_loc)
+                {
+                    self.fht.loop_handle.insert_idle(move |state| {
+                        let pointer = state.fht.pointer.clone();
+                        if !pointer.has_grab(serial) {
+                            return;
+                        }
+                        let Some(start_data) = pointer.grab_start_data() else {
+                            return;
+                        };
+
+                        if state.fht.space.start_interactive_swap(&window) {
+                            state.fht.loop_handle.insert_idle(|state| {
+                                // TODO: Figure out why I have todo this inside a idle
+                                state.fht.interactive_grab_active = true;
+                                state.fht.cursor_theme_manager.set_image_status(
+                                    CursorImageStatus::Named(CursorIcon::Grabbing),
+                                );
+                            });
+                            let grab = SwapTileGrab { window, start_data };
+                            pointer.set_grab(state, grab, serial, Focus::Clear);
+                        }
+                    });
+                }
+            }
             _ => (),
-            // MouseAction::SwapTile => {
-            //     if let Some((PointerFocusTarget::Window(window), _)) =
-            //         self.fht.focus_target_under(pointer_loc)
-            //     {
-            //         self.fht.loop_handle.insert_idle(move |state| {
-            //             let pointer = state.fht.pointer.clone();
-            //             if !pointer.has_grab(serial) {
-            //                 return;
-            //             }
-            //             let Some(start_data) = pointer.grab_start_data() else {
-            //                 return;
-            //             };
-            //             if let Some(workspace) = state.fht.space.workspace_mut_for_window(&window) {
-            //                 // TODO: Re-implement swap
-            //                 // if workspace.start_interactive_swap(&window) {
-            //                 //     state.fht.loop_handle.insert_idle(|state| {
-            //                 //         // TODO: Figure out why I have todo this inside a idle
-            //                 //         state.fht.interactive_grab_active = true;
-            //                 //         state.fht.cursor_theme_manager.set_image_status(
-            //                 //             CursorImageStatus::Named(CursorIcon::Grabbing),
-            //                 //         );
-            //                 //     });
-            //                 //     let grab = SwapTileGrab { window, start_data };
-            //                 //     pointer.set_grab(state, grab, serial, Focus::Clear);
-            //                 // }
-            //             }
-            //         });
-            //     }
-            // }
             // MouseAction::ResizeTile => {
             //     if let Some((PointerFocusTarget::Window(window), _)) =
             //         self.fht.focus_target_under(pointer_loc)

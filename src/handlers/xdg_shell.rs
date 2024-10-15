@@ -3,7 +3,7 @@ use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
     PopupUngrabStrategy, WindowSurfaceType,
 };
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
@@ -19,6 +19,7 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
+use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::shell::KeyboardFocusTarget;
 use crate::state::{OutputState, State, UnmappedWindow};
 use crate::window::Window;
@@ -73,30 +74,26 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
         let pointer = self.fht.pointer.clone();
-        if let Some((window, workspace)) = self
-            .fht
-            .space
-            .find_window_and_workspace_mut(surface.wl_surface())
-        {
+        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
             // TODO: Handle grabs
-            // if !pointer.has_grab(serial) {
-            //     return;
-            // }
-            // let Some(start_data) = pointer.grab_start_data() else {
-            //     return;
-            // };
-            // if workspace.start_interactive_swap(&window) {
-            //     self.fht.loop_handle.insert_idle(|state| {
-            //         // TODO: Figure out why I have todo this inside a idle
-            //         state.fht.interactive_grab_active = true;
-            //         state
-            //             .fht
-            //             .cursor_theme_manager
-            //             .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
-            //     });
-            //     let grab = SwapTileGrab { window, start_data };
-            //     pointer.set_grab(self, grab, serial, Focus::Clear);
-            // }
+            if !pointer.has_grab(serial) {
+                return;
+            }
+            let Some(start_data) = pointer.grab_start_data() else {
+                return;
+            };
+            if self.fht.space.start_interactive_swap(&window) {
+                self.fht.loop_handle.insert_idle(|state| {
+                    // TODO: Figure out why I have todo this inside a idle
+                    state.fht.interactive_grab_active = true;
+                    state
+                        .fht
+                        .cursor_theme_manager
+                        .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
+                });
+                let grab = SwapTileGrab { window, start_data };
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
         }
     }
 
