@@ -227,7 +227,7 @@ impl State {
                     if state.fht.config.general.cursor_warps {
                         state.move_pointer(center.to_f64());
                     }
-                    state.set_focus_target(Some(window));
+                    state.set_keyboard_focus(Some(window));
                 });
             }
 

@@ -22,6 +22,8 @@ mod screencopy;
 mod seat;
 mod security_context;
 mod selection;
+mod session_lock;
+pub use session_lock::LockState;
 mod shm;
 mod viewporter;
 mod virtual_keyboard;

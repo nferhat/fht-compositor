@@ -16,6 +16,7 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Serial};
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::session_lock::LockSurface;
 
 use crate::state::State;
 use crate::window::Window;
@@ -24,6 +25,7 @@ use crate::window::Window;
 pub enum KeyboardFocusTarget {
     Window(Window),
     LayerSurface(LayerSurface),
+    LockSurface(LockSurface),
     Popup(PopupKind),
 }
 
@@ -39,6 +41,12 @@ impl From<LayerSurface> for KeyboardFocusTarget {
     }
 }
 
+impl From<LockSurface> for KeyboardFocusTarget {
+    fn from(value: LockSurface) -> Self {
+        Self::LockSurface(value)
+    }
+}
+
 impl From<PopupKind> for KeyboardFocusTarget {
     fn from(value: PopupKind) -> Self {
         Self::Popup(value)
@@ -50,6 +58,7 @@ impl WaylandFocus for KeyboardFocusTarget {
         match self {
             Self::Window(w) => w.wl_surface(),
             Self::LayerSurface(l) => Some(Cow::Owned(l.wl_surface().clone())),
+            Self::LockSurface(l) => Some(Cow::Owned(l.wl_surface().clone())),
             Self::Popup(p) => Some(Cow::Owned(p.wl_surface().clone())),
         }
     }
@@ -58,6 +67,7 @@ impl WaylandFocus for KeyboardFocusTarget {
         match self {
             Self::Window(w) => w.same_client_as(object_id),
             Self::LayerSurface(l) => l.same_client_as(object_id),
+            Self::LockSurface(l) => l.wl_surface().same_client_as(object_id),
             Self::Popup(p) => p.wl_surface().same_client_as(object_id),
         }
     }
@@ -68,6 +78,7 @@ impl IsAlive for KeyboardFocusTarget {
         match self {
             Self::Window(w) => w.alive(),
             Self::LayerSurface(l) => l.alive(),
+            Self::LockSurface(l) => l.alive(),
             Self::Popup(p) => p.alive(),
         }
     }
@@ -88,6 +99,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             Self::LayerSurface(l) => {
                 KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
             }
+            Self::LockSurface(l) => KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial),
             Self::Popup(p) => KeyboardTarget::enter(p.wl_surface(), seat, data, keys, serial),
         }
     }
@@ -96,6 +108,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
         match self {
             Self::Window(w) => KeyboardTarget::leave(w.toplevel().wl_surface(), seat, data, serial),
             Self::LayerSurface(l) => KeyboardTarget::leave(l.wl_surface(), seat, data, serial),
+            Self::LockSurface(l) => KeyboardTarget::leave(l.wl_surface(), seat, data, serial),
             Self::Popup(p) => KeyboardTarget::leave(p.wl_surface(), seat, data, serial),
         }
     }
@@ -122,6 +135,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             Self::LayerSurface(l) => {
                 KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
             }
+            Self::LockSurface(l) => {
+                KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
+            }
             Self::Popup(p) => {
                 KeyboardTarget::key(p.wl_surface(), seat, data, key, state, serial, time)
             }
@@ -142,6 +158,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             Self::LayerSurface(l) => {
                 KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
             }
+            Self::LockSurface(l) => {
+                KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
+            }
             Self::Popup(p) => {
                 KeyboardTarget::modifiers(p.wl_surface(), seat, data, modifiers, serial)
             }
@@ -160,6 +179,9 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
         match value {
             KeyboardFocusTarget::Window(w) => Self::Window(w),
             KeyboardFocusTarget::LayerSurface(surface) => {
+                PointerFocusTarget::from(surface.wl_surface().clone())
+            }
+            KeyboardFocusTarget::LockSurface(surface) => {
                 PointerFocusTarget::from(surface.wl_surface().clone())
             }
             KeyboardFocusTarget::Popup(popup) => {

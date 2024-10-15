@@ -11,6 +11,7 @@ use smithay::backend::input::{
 };
 #[cfg(feature = "udev_backend")]
 use smithay::backend::session::Session;
+use smithay::desktop::utils::under_from_surface_tree;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
@@ -21,6 +22,7 @@ use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::session_lock::LockSurface;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
@@ -50,6 +52,29 @@ impl State {
         let output_loc = output.current_location();
 
         let pointer_loc = pointer.current_location();
+
+        {
+            // NOTE: We do not use set_keyboard_focus here since it checks for
+            // Fht::is_locked which will return true in the case we have a lock surface.
+            let output_state = OutputState::get(output);
+            if let Some(lock_surface) = output_state.lock_surface.clone() {
+                if under_from_surface_tree(
+                    lock_surface.wl_surface(),
+                    pointer_loc - output_loc.to_f64(),
+                    Point::default(),
+                    WindowSurfaceType::ALL,
+                )
+                .is_some()
+                {
+                    self.set_keyboard_focus(Some(lock_surface));
+                    return;
+                }
+            } else {
+                self.set_keyboard_focus(Option::<LockSurface>::None);
+                return;
+            }
+        }
+
         let layer_map = layer_map_for_output(output);
         let monitor = self
             .fht
@@ -67,7 +92,7 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone()));
+                    self.set_keyboard_focus(Some(layer.clone()));
                     return;
                 }
             }
@@ -78,7 +103,7 @@ impl State {
                 .is_some()
             {
                 let fullscreen = fullscreen.clone();
-                self.set_focus_target(Some(fullscreen));
+                self.set_keyboard_focus(Some(fullscreen));
                 return;
             }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
@@ -91,13 +116,13 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone()));
+                    self.set_keyboard_focus(Some(layer.clone()));
                     return;
                 }
             }
         } else if let Some((window, _)) = self.fht.space.window_under(pointer_loc) {
             assert!(self.fht.space.activate_window(&window, true));
-            self.set_focus_target(Some(window));
+            self.set_keyboard_focus(Some(window));
         } else if let Some(layer) = layer_map
             .layer_under(Layer::Bottom, pointer_loc)
             .or_else(|| layer_map.layer_under(Layer::Background, pointer_loc))
@@ -111,16 +136,16 @@ impl State {
                     )
                     .is_some()
                 {
-                    self.set_focus_target(Some(layer.clone()));
+                    self.set_keyboard_focus(Some(layer.clone()));
                     return;
                 }
             }
         }
     }
 
-    pub fn set_focus_target(&mut self, ft: Option<impl Into<KeyboardFocusTarget>>) {
+    pub fn set_keyboard_focus(&mut self, ft: Option<impl Into<KeyboardFocusTarget>>) {
         let ft = ft.map(Into::into);
-        self.fht.focus_state.focus_target = ft.clone();
+        self.fht.focus_state.keyboard_focus = ft.clone();
         self.fht
             .keyboard
             .clone()
@@ -230,7 +255,7 @@ impl State {
                             cloned
                         });
                         if let Some(surface) = surface {
-                            self.set_focus_target(Some(surface));
+                            self.set_keyboard_focus(Some(surface));
                             keyboard.input::<(), _>(
                                 self,
                                 keycode,

@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use fht_compositor_config::{BorderOverrides, DecorationMode};
-use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
@@ -29,7 +28,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Monotonic};
+use smithay::utils::{Clock, IsAlive, Monotonic, SERIAL_COUNTER};
 use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -46,6 +45,7 @@ use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState;
+use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState};
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -58,6 +58,7 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
 use crate::cli;
+use crate::handlers::LockState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::KeyboardFocusTarget;
@@ -121,36 +122,75 @@ impl State {
         self.fht.space.refresh();
         self.fht.popups.cleanup();
         self.fht.resolve_rules_for_all_windows_if_needed();
-        // Redraw queued outputs.
+
         {
-            profiling::scope!("redraw_queued_outputs");
-            for output in self
-                .fht
-                .space
-                .outputs()
-                .filter_map(|o| {
-                    let is_queued = OutputState::get(o).render_state.is_queued();
-                    is_queued.then(|| o.clone())
-                })
-                .collect::<Vec<_>>()
-            {
+            profiling::scope!("redraw_and_update_outputs");
+            let mut outputs_to_redraw = vec![];
+            for output in self.fht.space.outputs() {
+                let mut output_state = OutputState::get(output);
+                if !self.fht.is_locked() {
+                    // Take away the lock surface
+                    output_state.has_lock_backdrop = false;
+                    output_state.lock_surface = None;
+                } else {
+                    let _ = output_state
+                        .lock_surface
+                        .take_if(|surface| !surface.alive());
+                }
+
+                if output_state.render_state.is_queued() {
+                    outputs_to_redraw.push(output.clone());
+                }
+            }
+
+            for output in outputs_to_redraw {
                 self.redraw(output);
             }
         }
+
+        let locked_all_outputs = self
+            .fht
+            .space
+            .outputs()
+            .all(|output| OutputState::get(output).has_lock_backdrop);
+        self.fht.lock_state = match std::mem::take(&mut self.fht.lock_state) {
+            // Switch from pending to locked when apprioriate
+            LockState::Pending(locker) if locked_all_outputs => {
+                locker.lock();
+                LockState::Locked
+            }
+            state => state,
+        };
 
         // Make sure the surface is not dead (otherwise wayland wont be happy)
         // NOTE: focus_target from state is always guaranteed to be the same as keyboard focus.
         let old_focus_dead = self
             .fht
             .focus_state
-            .focus_target
+            .keyboard_focus
             .as_ref()
             .is_some_and(|ft| !ft.alive());
         {
             profiling::scope!("refresh_focus");
             if old_focus_dead {
-                // We are focusing nothing, default to the active workspace focused window.
-                self.set_focus_target(self.fht.space.active_window());
+                if self.fht.is_locked() {
+                    // If we are locked, locked surface of active output gets precedence before
+                    // everything. This also includes pointer focus too.
+                    //
+                    // For example, the prompt of your lock screen might need keyboard input.
+                    let active_output = self.fht.space.active_output().clone();
+                    let output_state = OutputState::get(&active_output);
+                    if let Some(lock_surface) = output_state.lock_surface.clone() {
+                        self.set_keyboard_focus(Some(lock_surface));
+                    } else {
+                        // We do not have a lock surface on active output, default to not focusing
+                        // anything.
+                        self.set_keyboard_focus(Option::<LockSurface>::None);
+                    }
+                } else {
+                    // We are focusing nothing, default to the active workspace focused window.
+                    self.set_keyboard_focus(self.fht.space.active_window());
+                }
             }
         }
 
@@ -292,6 +332,7 @@ pub struct Fht {
     pub focus_state: FocusState,
     pub popups: PopupManager,
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
+    pub lock_state: LockState,
 
     pub config: Arc<fht_compositor_config::Config>,
     // We keep the config watcher around in case the configuration file path changes.
@@ -311,6 +352,7 @@ pub struct Fht {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub layer_shell_state: WlrLayerShellState,
     pub primary_selection_state: PrimarySelectionState,
+    pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
@@ -348,6 +390,13 @@ impl Fht {
         let layer_shell_state = WlrLayerShellState::new::<State>(dh);
         let shm_state =
             ShmState::new::<State>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
+        let session_lock_manager_state = SessionLockManagerState::new::<State, _>(dh, |client| {
+            // From: https://wayland.app/protocols/security-context-v1
+            // "Compositors should forbid nesting multiple security contexts"
+            client
+                .get_data::<ClientState>()
+                .map_or(true, |data| data.security_context.is_none())
+        });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(&dh);
@@ -423,6 +472,7 @@ impl Fht {
             keyboard,
             pointer,
             focus_state: FocusState::default(),
+            lock_state: LockState::Unlocked,
 
             dnd_icon: None,
             cursor_theme_manager,
@@ -450,6 +500,7 @@ impl Fht {
             layer_shell_state,
             primary_selection_state,
             shm_state,
+            session_lock_manager_state,
             xdg_activation_state,
             xdg_shell_state,
         }
@@ -541,6 +592,16 @@ impl Fht {
             }
         };
 
+        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+            send_frames_surface_tree(
+                lock_surface.wl_surface(),
+                output,
+                time,
+                throttle,
+                should_send_frames,
+            );
+        }
+
         if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             send_frames_surface_tree(surface, output, time, throttle, should_send_frames);
         }
@@ -564,6 +625,24 @@ impl Fht {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+            with_surface_tree_downward(
+                lock_surface.wl_surface(),
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |surface, states, _| {
+                    update_surface_primary_scanout_output(
+                        surface,
+                        output,
+                        states,
+                        render_element_states,
+                        default_primary_scanout_output_compare,
+                    );
+                },
+                |_, _, _| true,
+            );
+        }
+
         if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             with_surface_tree_downward(
                 surface,
@@ -662,6 +741,22 @@ impl Fht {
         feedback: &SurfaceDmabufFeedback,
         render_element_states: &RenderElementStates,
     ) {
+        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+            send_dmabuf_feedback_surface_tree(
+                lock_surface.wl_surface(),
+                output,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    select_dmabuf_feedback(
+                        surface,
+                        render_element_states,
+                        &feedback.render_feedback,
+                        &feedback.scanout_feedback,
+                    )
+                },
+            );
+        }
+
         if let Some(surface) = &self.dnd_icon {
             send_dmabuf_feedback_surface_tree(
                 surface,
@@ -732,6 +827,17 @@ impl Fht {
         render_element_states: &RenderElementStates,
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+            take_presentation_feedback_surface_tree(
+                lock_surface.wl_surface(),
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
 
         if let CursorImageStatus::Surface(surface) = self.cursor_theme_manager.image_status() {
             take_presentation_feedback_surface_tree(
@@ -1000,7 +1106,7 @@ impl ClientData for ClientState {
 
 #[derive(Default, Debug)]
 pub struct FocusState {
-    pub focus_target: Option<KeyboardFocusTarget>,
+    pub keyboard_focus: Option<KeyboardFocusTarget>,
 }
 
 #[derive(Debug)]
@@ -1010,6 +1116,10 @@ pub struct OutputState {
     pub current_frame_sequence: u32,
     pub pending_screencopy: Option<Screencopy>,
     pub damage_tracker: OutputDamageTracker,
+    pub lock_surface: Option<LockSurface>,
+    // For a proper session lock implementation, we draw on all outputs for at least ONE frame
+    // a black backdrop before receiving a lock surface (that will be set above)
+    pub has_lock_backdrop: bool,
 }
 
 impl OutputState {
@@ -1030,6 +1140,8 @@ impl OutputState {
                 current_frame_sequence: 0,
                 pending_screencopy: None,
                 damage_tracker: OutputDamageTracker::from_output(output),
+                lock_surface: None,
+                has_lock_backdrop: false,
             })
         });
     }

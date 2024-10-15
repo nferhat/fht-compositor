@@ -183,7 +183,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_focus_target(Some(window));
+                    self.set_keyboard_focus(Some(window));
                 }
             }
             KeyAction::FocusPreviousWindow => {
@@ -198,7 +198,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_focus_target(Some(window));
+                    self.set_keyboard_focus(Some(window));
                 }
             }
             KeyAction::SwapWithNextWindow => {
@@ -210,7 +210,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_focus_target(Some(window));
+                    self.set_keyboard_focus(Some(window));
                 }
             }
             KeyAction::SwapWithPreviousWindow => {
@@ -222,7 +222,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_focus_target(Some(window));
+                    self.set_keyboard_focus(Some(window));
                 }
             }
             KeyAction::FocusNextOutput => {
@@ -281,7 +281,7 @@ impl State {
             KeyAction::FocusWorkspace(idx) => {
                 let mon = self.fht.space.active_monitor_mut();
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_focus_target(Some(window));
+                    self.set_keyboard_focus(Some(window));
                 }
             }
             KeyAction::SendFocusedWindowToWorkspace(idx) => {
@@ -292,7 +292,7 @@ impl State {
                 if active.remove_window(&window, true) {
                     if let Some(window) = active.active_window() {
                         // Focus the new one now
-                        self.set_focus_target(Some(window));
+                        self.set_keyboard_focus(Some(window));
                     }
 
                     let idx = idx.clamp(0, 9);

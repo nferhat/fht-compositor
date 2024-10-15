@@ -18,8 +18,10 @@ use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
+use smithay::backend::renderer::element::{self, AsRenderElements, Kind, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
 };
@@ -27,6 +29,7 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 #[cfg(feature = "udev_backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::sync::SyncPoint;
+use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::{
     Bind, Color32F, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture,
 };
@@ -34,7 +37,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::Output;
-use smithay::utils::{IsAlive, Physical, Rectangle, Scale, Size, Transform};
+use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 #[cfg(feature = "udev_backend")]
@@ -43,12 +46,14 @@ use crate::backend::udev::UdevRenderError;
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::shell::cursor::CursorRenderElement;
 use crate::space::{MonitorRenderElement, MonitorRenderResult};
-use crate::state::Fht;
+use crate::state::{Fht, OutputState};
 use crate::utils::fps::Fps;
+use crate::utils::output::OutputExt;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
+        Solid = SolidColorRenderElement,
         Debug = DebugRenderElement,
         Wayland = WaylandSurfaceRenderElement<R>,
         Monitor = MonitorRenderElement<R>,
@@ -60,6 +65,8 @@ crate::fht_render_elements! {
         Damage = SolidColorRenderElement,
     }
 }
+
+const LOCKED_OUTPUT_BACKDROP_COLOR: Color32F = Color32F::new(0.0, 0.0, 0.0, 0.0);
 
 /// Result of [`Fht::output_elements`].
 ///
@@ -144,6 +151,37 @@ impl Fht {
             }
         }
 
+        // Render session lock surface between output and elements
+        if self.is_locked() {
+            let mut output_state = OutputState::get(&output);
+            if let Some(lock_surface) = output_state.lock_surface.as_ref() {
+                rv.elements.extend(render_elements_from_surface_tree(
+                    renderer,
+                    lock_surface.wl_surface(),
+                    Point::default(),
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                ));
+            } else {
+                // We still render a black drop to not show desktop content
+                let mut output_geo = output.geometry().to_physical_precise_round(scale);
+                output_geo.loc = Point::default(); // render at output origin.
+                rv.elements.push(
+                    SolidColorRenderElement::new(
+                        element::Id::new(),
+                        output_geo,
+                        CommitCounter::default(),
+                        LOCKED_OUTPUT_BACKDROP_COLOR,
+                        Kind::Unspecified,
+                    )
+                    .into(),
+                );
+            }
+
+            output_state.has_lock_backdrop = true;
+        }
+
         // Overlay layer shells are drawn above everything else, including fullscreen windows
         let overlay_elements = layer_elements(renderer, output, Layer::Overlay);
         rv.elements.extend(overlay_elements);
@@ -182,7 +220,7 @@ impl Fht {
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
     ) where
-        FhtRenderElement<R>: smithay::backend::renderer::element::RenderElement<R>,
+        FhtRenderElement<R>: element::RenderElement<R>,
     {
         use smithay::backend::renderer::Color32F;
 

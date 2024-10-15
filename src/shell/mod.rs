@@ -1,6 +1,7 @@
 pub mod cursor;
 pub mod focus_target;
 
+use smithay::desktop::utils::under_from_surface_tree;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface,
     PopupKind, WindowSurfaceType,
@@ -13,7 +14,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::PopupSurface;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use crate::state::Fht;
+use crate::state::{Fht, OutputState};
 use crate::utils::output::OutputExt;
 
 impl Fht {
@@ -26,10 +27,28 @@ impl Fht {
         let point_in_output = point - output_loc.to_f64();
         let layer_map = layer_map_for_output(output);
 
+        {
+            let output_state = OutputState::get(output);
+            if let Some(lock_surface) = &output_state.lock_surface {
+                // NOTE: Lock surface is always position at (0,0)
+                if let Some((surface, surface_loc)) = under_from_surface_tree(
+                    lock_surface.wl_surface(),
+                    point_in_output,
+                    Point::default(),
+                    WindowSurfaceType::ALL,
+                ) {
+                    return Some((
+                        PointerFocusTarget::WlSurface(surface),
+                        (surface_loc + output_loc).to_f64(),
+                    ));
+                }
+            }
+        }
+
         if let Some(layer) = layer_map.layer_under(Layer::Overlay, point_in_output) {
             let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
             if let Some((surface, surface_loc)) =
-                layer.surface_under(point - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                layer.surface_under(point_in_output - layer_loc.to_f64(), WindowSurfaceType::ALL)
             {
                 return Some((
                     PointerFocusTarget::WlSurface(surface),
@@ -44,7 +63,10 @@ impl Fht {
             // NOTE: window location passed here is already global, since its from
             // `Fht::window_geometry`
             if let Some(ret) = fullscreen
-                .surface_under(point - fullscreen_loc.to_f64(), WindowSurfaceType::ALL)
+                .surface_under(
+                    point_in_output - fullscreen_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
                 .map(|(surface, surface_loc)| {
                     if surface == *window_wl_surface {
                         // Use the window immediatly when we are the toplevel surface.
@@ -70,7 +92,7 @@ impl Fht {
         if let Some(layer) = layer_map.layer_under(Layer::Top, point_in_output) {
             let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
             if let Some((surface, surface_loc)) =
-                layer.surface_under(point - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                layer.surface_under(point_in_output - layer_loc.to_f64(), WindowSurfaceType::ALL)
             {
                 return Some((
                     PointerFocusTarget::WlSurface(surface),
@@ -85,7 +107,10 @@ impl Fht {
             // NOTE: window location passed here is already global, since its from
             // `Fht::window_geometry`
             if let Some(ret) = window
-                .surface_under(point - window_loc.to_f64(), WindowSurfaceType::ALL)
+                .surface_under(
+                    point_in_output - window_loc.to_f64(),
+                    WindowSurfaceType::ALL,
+                )
                 .map(|(surface, surface_loc)| {
                     if surface == *window_wl_surface {
                         // Use the window immediatly when we are the toplevel surface.
@@ -113,7 +138,7 @@ impl Fht {
         {
             let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
             if let Some((surface, surface_loc)) =
-                layer.surface_under(point - layer_loc.to_f64(), WindowSurfaceType::ALL)
+                layer.surface_under(point_in_output - layer_loc.to_f64(), WindowSurfaceType::ALL)
             {
                 return Some((
                     PointerFocusTarget::WlSurface(surface),
@@ -126,19 +151,28 @@ impl Fht {
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
-        self.space
-            .outputs()
-            .find(|o| {
-                // Is the surface a layer shell?
-                let layer_map = layer_map_for_output(o);
-                layer_map
-                    .layer_for_surface(surface, WindowSurfaceType::ALL)
-                    .is_some()
-            })
-            .or_else(|| {
-                // Mapped window?
-                self.space.output_for_surface(surface)
-            })
+        for output in self.space.outputs() {
+            // Lock surface and layer shells take priority.
+            let output_state = OutputState::get(output);
+            if output_state
+                .lock_surface
+                .as_ref()
+                .is_some_and(|lock_surface| lock_surface.wl_surface() == surface)
+            {
+                drop(output_state); // avoid deadlocks
+                return Some(output);
+            }
+
+            let layer_map = layer_map_for_output(output);
+            if layer_map
+                .layer_for_surface(surface, WindowSurfaceType::ALL)
+                .is_some()
+            {
+                return Some(output);
+            }
+        }
+
+        self.space.output_for_surface(surface)
     }
 
     pub fn unconstrain_popup(&self, popup: &PopupSurface) {
