@@ -21,7 +21,7 @@ impl Fht {
         &self,
         point: Point<f64, Logical>,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
-        let output = self.focus_state.output.as_ref()?;
+        let output = self.space.active_output();
         let output_loc = output.current_location();
         let point_in_output = point - output_loc.to_f64();
         let layer_map = layer_map_for_output(output);

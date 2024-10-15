@@ -142,7 +142,7 @@ impl X11Data {
                         // Adapt mouse events to match our x11 windows outputs
                         if let Some(window_id) = window_id {
                             let surface = backend.surfaces.get(&window_id).unwrap();
-                            state.fht.focus_state.output = Some(surface.output.clone());
+                            state.fht.space.set_active_output(&surface.output);
                         }
                         state.process_input_event(event)
                     }
@@ -150,8 +150,8 @@ impl X11Data {
                         focused: true,
                         window_id,
                     } => {
-                        let output = backend.surfaces.get_mut(&window_id).unwrap().output.clone();
-                        state.fht.focus_state.output = Some(output);
+                        let output = &backend.surfaces.get_mut(&window_id).unwrap().output;
+                        state.fht.space.set_active_output(&output);
                     }
                     X11Event::Focus { focused: false, .. } => {}
                 }
@@ -236,7 +236,6 @@ impl X11Data {
 
         // Register the output
         state.add_output(output.clone());
-        state.focus_state.output = Some(output.clone());
         // Create rendering state
         let damage_tracker = OutputDamageTracker::from_output(&output);
         OutputState::get(&output).render_state.queue();

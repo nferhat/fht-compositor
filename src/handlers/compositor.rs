@@ -55,7 +55,7 @@ impl State {
                 window.on_commit();
                 window.refresh();
 
-                let mut output = self.fht.focus_state.output.clone().unwrap();
+                let mut output = self.fht.space.active_output().clone();
                 let (mut workspace_id, mut workspace_idx) = {
                     let workspace = self.fht.space.active_workspace_mut();
                     (workspace.id(), workspace.index())
@@ -138,6 +138,11 @@ impl State {
                 let mut has_parent = window.toplevel().parent().is_some();
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
+                    if !floating {
+                        self.fht
+                            .space
+                            .prepare_unconfigured_window(&window, workspace_id);
+                    }
                 } else if has_parent || {
                     let (min_size, max_size) = with_states(surface, |data| {
                         let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
@@ -161,10 +166,10 @@ impl State {
                     window.request_tiled(false);
                 } else {
                     window.request_tiled(true);
+                    self.fht
+                        .space
+                        .prepare_unconfigured_window(&window, workspace_id);
                 }
-
-                // TODO:
-                // self.fht.space.prepare_window_geometry(&window, workspace_id)
 
                 window.set_rules(rules);
                 window.send_configure();

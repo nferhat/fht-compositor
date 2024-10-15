@@ -20,7 +20,6 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
-pub use tile::Tile;
 pub use workspace::{Workspace, WorkspaceId};
 
 use crate::utils::output::OutputExt;
@@ -82,11 +81,6 @@ impl Space {
                 workspace.reload_config(&self.config)
             }
         }
-    }
-
-    /// Get a mutable iterator over the [`Space`]'s tracked [`Monitor`](s)
-    pub fn monitors_mut(&mut self) -> impl Iterator<Item = &mut Monitor> + ExactSizeIterator {
-        self.monitors.iter_mut()
     }
 
     /// Get an iterator over the [`Space`]'s tracked [`Monitor`](s)
@@ -172,15 +166,6 @@ impl Space {
         active_monitor.active_workspace_mut()
     }
 
-    /// Get a mutable reference to the active [`Workspace`] of the [`Monitor`] of this [`Output`]
-    pub fn active_workspace_mut_on_output(&mut self, output: &Output) -> Option<&mut Workspace> {
-        let monitor = self
-            .monitors
-            .iter_mut()
-            .find(|mon| mon.output() == output)?;
-        Some(monitor.active_workspace_mut())
-    }
-
     /// Get the active [`Window`] of this [`Space`], if any.
     pub fn active_window(&self) -> Option<Window> {
         let active_monitor = &self.monitors[self.active_idx];
@@ -189,22 +174,13 @@ impl Space {
     }
 
     /// Get the active [`Window`] of this [`Space`], if any.
+    pub fn active_monitor(&self) -> &Monitor {
+        &self.monitors[self.active_idx]
+    }
+
+    /// Get the active [`Window`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]
-    }
-
-    /// Get a mutable reference to the active [`Tile`] of this [`Space`], if any.
-    pub fn active_tile_mut(&mut self) -> Option<&mut Tile> {
-        let active_monitor = &mut self.monitors[self.active_idx];
-        let active_workspace = active_monitor.active_workspace_mut();
-        active_workspace.active_tile_mut()
-    }
-
-    /// Get a reference to the active [`Tile`] of this [`Space`], if any.
-    pub fn active_tile(&self) -> Option<&Tile> {
-        let active_monitor = &self.monitors[self.active_idx];
-        let active_workspace = active_monitor.active_workspace();
-        active_workspace.active_tile()
     }
 
     /// Set the active [`Output`]
@@ -244,16 +220,6 @@ impl Space {
     }
 
     /// Get the workspace that has a [`Window`] with this toplevel [`WlSurface`].
-    pub fn workspace_mut_for_surface(&mut self, surface: &WlSurface) -> Option<&mut Workspace> {
-        self.monitors.iter_mut().find_map(|mon| {
-            mon.workspaces_mut().find(|ws| {
-                ws.tiles()
-                    .any(|tile| tile.has_surface(surface, WindowSurfaceType::ALL))
-            })
-        })
-    }
-
-    /// Get the workspace that has a [`Window`] with this toplevel [`WlSurface`].
     pub fn workspace_mut_for_window_surface(
         &mut self,
         surface: &WlSurface,
@@ -263,14 +229,6 @@ impl Space {
                 ws.tiles()
                     .any(|tile| tile.has_surface(surface, WindowSurfaceType::TOPLEVEL))
             })
-        })
-    }
-
-    /// Get the [`Workspace`] that has this [`Window`]..
-    pub fn workspace_mut_for_window(&mut self, window: &Window) -> Option<&mut Workspace> {
-        self.monitors.iter_mut().find_map(|mon| {
-            mon.workspaces_mut()
-                .find(|ws| ws.tiles().any(|tile| tile.window() == window))
         })
     }
 
@@ -341,21 +299,6 @@ impl Space {
 
                 if let Some(w) = w {
                     return Some((w, workspace));
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Get the [`Output`] holding this window.
-    pub fn output_for_window(&self, window: &Window) -> Option<Output> {
-        for monitor in &self.monitors {
-            for workspace in monitor.workspaces() {
-                for tile in workspace.tiles() {
-                    if tile.window() == window {
-                        return Some(monitor.output().clone());
-                    }
                 }
             }
         }
@@ -505,12 +448,15 @@ impl Space {
     /// Wayland's motto is that "every frame is perfect". Before we sent an initial configure to the
     /// [`Window`], we first need to send it its adequate buffer size in order to be inserted with
     /// its correct size acked.
-    pub fn prepare_unconfigured_window(
-        &mut self,
-        window: &Window,
-        workspace_id: WorkspaceId,
-    ) -> bool {
-        true
+    pub fn prepare_unconfigured_window(&mut self, window: &Window, workspace_id: WorkspaceId) {
+        let Some(workspace) = self.workspace_mut_for_id(workspace_id) else {
+            return;
+        };
+
+        // HACK: To "prepare" the window geometry we simulate an insert then remove it
+        // immediatly. This is not optimal since it causes two calls to arrange_tiles
+        workspace.insert_window(window.clone(), false);
+        workspace.remove_window(window, false);
     }
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.

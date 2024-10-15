@@ -46,9 +46,7 @@ impl State {
             return;
         }
 
-        let Some(ref output) = self.fht.focus_state.output.clone() else {
-            return;
-        };
+        let ref output = self.fht.space.active_output().clone();
         let output_loc = output.current_location();
 
         let pointer_loc = pointer.current_location();
@@ -412,7 +410,7 @@ impl State {
                     .find(|output| output.geometry().to_f64().contains(pointer_location))
                     .cloned();
                 if let Some(new_output) = maybe_new_output {
-                    self.fht.focus_state.output = Some(new_output);
+                    self.fht.space.set_active_output(&new_output);
                 }
 
                 // Confine pointer if possible.
@@ -464,7 +462,7 @@ impl State {
                 }
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                let output_geo = self.fht.active_output().geometry();
+                let output_geo = self.fht.space.active_output().geometry();
                 let pointer_location =
                     event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
                 let serial = SERIAL_COUNTER.next_serial();

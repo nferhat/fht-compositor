@@ -480,7 +480,7 @@ impl Fht {
                 state.move_pointer(center.to_f64());
             });
         }
-        self.focus_state.output = Some(output);
+        self.space.set_active_output(&output);
     }
 
     pub fn remove_output(&mut self, output: &Output) {
@@ -499,16 +499,9 @@ impl Fht {
         // self.space.output_resized(output);
     }
 
-    pub fn active_output(&self) -> Output {
-        self.focus_state
-            .output
-            .clone()
-            .unwrap_or_else(|| self.space.outputs().next().unwrap().clone())
-    }
-
     pub fn output_named(&self, name: &str) -> Option<Output> {
         if name == "active" {
-            Some(self.active_output())
+            Some(self.space.active_output().clone())
         } else {
             self.space.outputs().find(|o| &o.name() == name).cloned()
         }
@@ -1007,7 +1000,6 @@ impl ClientData for ClientState {
 
 #[derive(Default, Debug)]
 pub struct FocusState {
-    pub output: Option<Output>,
     pub focus_target: Option<KeyboardFocusTarget>,
 }
 

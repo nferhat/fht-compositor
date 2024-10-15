@@ -132,9 +132,7 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
 impl State {
     #[profiling::function]
     pub fn process_key_action(&mut self, action: KeyAction) {
-        let Some(ref output) = self.fht.focus_state.output.clone() else {
-            return;
-        };
+        let output = self.fht.space.active_output().clone();
         let config = Arc::clone(&self.fht.config);
         let active_window = self.fht.space.active_window();
         match action {
@@ -236,7 +234,7 @@ impl State {
 
                 let current_output_idx = outputs
                     .iter()
-                    .position(|o| o == output)
+                    .position(|o| *o == output)
                     .expect("Focused output is not registered");
 
                 let mut next_output_idx = current_output_idx + 1;
@@ -249,7 +247,7 @@ impl State {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
-                self.fht.focus_state.output.replace(output).unwrap();
+                self.fht.space.set_active_output(&output);
             }
             KeyAction::FocusPreviousOutput => {
                 let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
@@ -260,7 +258,7 @@ impl State {
 
                 let current_output_idx = outputs
                     .iter()
-                    .position(|o| o == output)
+                    .position(|o| *o == output)
                     .expect("Focused output is not registered");
 
                 let next_output_idx = match current_output_idx.checked_sub(1) {
@@ -273,7 +271,7 @@ impl State {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
-                self.fht.focus_state.output.replace(output).unwrap();
+                self.fht.space.set_active_output(&output);
             }
             KeyAction::CloseFocusedWindow => {
                 if let Some(window) = active_window {

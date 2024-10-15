@@ -92,11 +92,8 @@ impl Fht {
         output: &Output,
         _fps: &mut Fps,
     ) -> OutputElementsResult<R> {
-        let active_output = self.active_output();
-        let monitor = self
-            .space
-            .monitor_mut_for_output(output)
-            .expect("output_elements should only accept registered Output!");
+        let active_output = self.space.active_output();
+        let monitor = self.space.active_monitor();
         // TODO: Fractional scale support.
         let output_scale = output.current_scale();
         let scale = (output_scale.integer_scale() as f64);
@@ -107,7 +104,7 @@ impl Fht {
         //
         // Why include cursor_elements_len? Since if we are rendering to screencast, we can take a
         // slice of elements to skip cursor_elements (slice [cursor_elements_len..])
-        if active_output == *output {
+        if active_output == output {
             // Render the cursor only on the active output
             let reset = matches!(
                 self.cursor_theme_manager.image_status(),
