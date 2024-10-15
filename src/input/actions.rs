@@ -19,6 +19,7 @@ pub enum KeyAction {
     ChangeProportion(f64),
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
+    FloatFocusedWindow,
     FocusNextWindow,
     FocusPreviousWindow,
     SwapWithNextWindow,
@@ -46,6 +47,9 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 }
                 fht_compositor_config::SimpleKeyAction::FullscreenFocusedWindow => {
                     Self::FullscreenFocusedWindow
+                }
+                fht_compositor_config::SimpleKeyAction::FloatFocusedWindow => {
+                    Self::FloatFocusedWindow
                 }
                 fht_compositor_config::SimpleKeyAction::FocusNextWindow => Self::FocusNextWindow,
                 fht_compositor_config::SimpleKeyAction::FocusPreviousWindow => {
@@ -78,6 +82,9 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 }
                 fht_compositor_config::ComplexKeyAction::FullscreenFocusedWindow => {
                     Self::FullscreenFocusedWindow
+                }
+                fht_compositor_config::ComplexKeyAction::FloatFocusedWindow => {
+                    Self::FloatFocusedWindow
                 }
                 fht_compositor_config::ComplexKeyAction::FocusNextWindow => Self::FocusNextWindow,
                 fht_compositor_config::ComplexKeyAction::FocusPreviousWindow => {
@@ -153,6 +160,14 @@ impl State {
                         self.fht.space.fullscreen_window(&window, true);
                     }
                 }
+            }
+            KeyAction::FloatFocusedWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(tile) = active.active_tile() {
+                    let prev = tile.window().tiled();
+                    tile.window().request_tiled(!prev);
+                }
+                active.arrange_tiles(true);
             }
             KeyAction::FocusNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
