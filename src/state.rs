@@ -146,50 +146,56 @@ impl State {
             for output in outputs_to_redraw {
                 self.redraw(output);
             }
-        }
-
-        let locked_all_outputs = self
-            .fht
-            .space
-            .outputs()
-            .all(|output| OutputState::get(output).has_lock_backdrop);
+        };
         self.fht.lock_state = match std::mem::take(&mut self.fht.lock_state) {
-            // Switch from pending to locked when apprioriate
-            LockState::Pending(locker) if locked_all_outputs => {
+            // Switch from pending to locked when we finished drawing a backdrop at least once.
+            LockState::Pending(locker)
+                if self
+                    .fht
+                    .space
+                    .outputs()
+                    .all(|output| OutputState::get(output).has_lock_backdrop) =>
+            {
                 locker.lock();
                 LockState::Locked
             }
             state => state,
         };
 
-        // Make sure the surface is not dead (otherwise wayland wont be happy)
-        // NOTE: focus_target from state is always guaranteed to be the same as keyboard focus.
-        let old_focus_dead = self
-            .fht
-            .focus_state
-            .keyboard_focus
-            .as_ref()
-            .is_some_and(|ft| !ft.alive());
         {
             profiling::scope!("refresh_focus");
-            if old_focus_dead {
-                if self.fht.is_locked() {
-                    // If we are locked, locked surface of active output gets precedence before
-                    // everything. This also includes pointer focus too.
-                    //
-                    // For example, the prompt of your lock screen might need keyboard input.
-                    let active_output = self.fht.space.active_output().clone();
-                    let output_state = OutputState::get(&active_output);
-                    if let Some(lock_surface) = output_state.lock_surface.clone() {
-                        self.set_keyboard_focus(Some(lock_surface));
-                    } else {
-                        // We do not have a lock surface on active output, default to not focusing
-                        // anything.
-                        self.set_keyboard_focus(Option::<LockSurface>::None);
+            // Make sure the surface is not dead (otherwise wayland wont be happy)
+            // NOTE: focus_target from state is always guaranteed to be the same as keyboard focus.
+            if self.fht.is_locked() {
+                // If we are locked, locked surface of active output gets precedence before
+                // everything. This also includes pointer focus too.
+                //
+                // For example, the prompt of your lock screen might need keyboard input.
+                let active_output = self.fht.space.active_output().clone();
+                let output_state = OutputState::get(&active_output);
+                if let Some(lock_surface) = output_state.lock_surface.clone() {
+                    // Focus new surface if its different to avoid spamming wl_keyboard::enter event
+                    let new_focus = KeyboardFocusTarget::LockSurface(lock_surface);
+                    if self.fht.keyboard.current_focus().as_ref() != Some(&new_focus) {
+                        self.set_keyboard_focus(Some(new_focus));
                     }
                 } else {
-                    // We are focusing nothing, default to the active workspace focused window.
-                    self.set_keyboard_focus(self.fht.space.active_window());
+                    // We do not have a lock surface on active output, default to not focusing
+                    // anything.
+                    self.set_keyboard_focus(Option::<LockSurface>::None);
+                }
+            } else {
+                // We are focusing nothing, default to the active workspace focused window.
+                let old_focus_dead = self
+                    .fht
+                    .focus_state
+                    .keyboard_focus
+                    .as_ref()
+                    .is_some_and(|ft| !ft.alive());
+                {
+                    if old_focus_dead {
+                        self.set_keyboard_focus(self.fht.space.active_window());
+                    }
                 }
             }
         }

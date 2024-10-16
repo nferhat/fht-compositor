@@ -185,7 +185,14 @@ impl<'de> Deserialize<'de> for KeyPattern {
 #[serde(rename_all = "kebab-case", deny_unknown_fields, untagged)]
 pub enum KeyActionDesc {
     Simple(SimpleKeyAction),
-    Complex(ComplexKeyAction),
+    Complex {
+        #[serde(flatten)]
+        action: ComplexKeyAction,
+        // HACK: rename_all = "kebab-case" does not affect enum struct fields.
+        #[serde(default)]
+        #[serde(rename = "allow-while-locked")]
+        allow_while_locked: bool,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]

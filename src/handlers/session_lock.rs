@@ -31,21 +31,24 @@ impl SessionLockHandler for State {
             output_state.has_lock_backdrop = false;
             let _ = output_state.lock_surface.take();
         }
+        // Reset focus
+        let active_window = self.fht.space.active_window();
+        self.set_keyboard_focus(active_window);
     }
 
-    fn new_surface(&mut self, surface: LockSurface, wl_output: WlOutput) {
+    fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {
         let Some(output) = Output::from_resource(&wl_output) else {
             return;
         };
 
         // Configure our surface for the output
         let output_size = output.geometry().size;
-        surface.with_pending_state(|state| {
+        lock_surface.with_pending_state(|state| {
             state.size = Some((output_size.w as u32, output_size.h as u32).into());
         });
         let scale = output.current_scale();
         let transform = output.current_transform();
-        let wl_surface = surface.wl_surface();
+        let wl_surface = lock_surface.wl_surface();
         with_states(wl_surface, |data| {
             send_surface_state(wl_surface, data, scale.integer_scale(), transform);
             with_fractional_scale(data, |fractional| {
@@ -53,9 +56,13 @@ impl SessionLockHandler for State {
             });
         });
 
-        surface.send_configure();
+        lock_surface.send_configure();
 
-        OutputState::get(&output).lock_surface = Some(surface);
+        OutputState::get(&output).lock_surface = Some(lock_surface.clone());
+        if output == *self.fht.space.active_output() {
+            // Focus the newly placed lock surface.
+            self.set_keyboard_focus(Some(lock_surface));
+        }
     }
 }
 

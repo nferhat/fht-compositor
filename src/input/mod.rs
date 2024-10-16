@@ -53,22 +53,11 @@ impl State {
 
         let pointer_loc = pointer.current_location();
 
-        {
-            // NOTE: We do not use set_keyboard_focus here since it checks for
-            // Fht::is_locked which will return true in the case we have a lock surface.
+        if self.fht.is_locked() {
             let output_state = OutputState::get(output);
             if let Some(lock_surface) = output_state.lock_surface.clone() {
-                if under_from_surface_tree(
-                    lock_surface.wl_surface(),
-                    pointer_loc - output_loc.to_f64(),
-                    Point::default(),
-                    WindowSurfaceType::ALL,
-                )
-                .is_some()
-                {
-                    self.set_keyboard_focus(Some(lock_surface));
-                    return;
-                }
+                self.set_keyboard_focus(Some(lock_surface));
+                return;
             } else {
                 self.set_keyboard_focus(Option::<LockSurface>::None);
                 return;
@@ -321,7 +310,7 @@ impl State {
                                         error!(?err, "Failed switching virtual terminal");
                                     }
                                     suppressed_keys.insert(keysym);
-                                    return FilterResult::Intercept(KeyAction::None);
+                                    return FilterResult::Intercept(KeyAction::none());
                                 }
                             }
                         }
@@ -358,7 +347,7 @@ impl State {
                                 FilterResult::Forward
                             }
                         } else if suppressed_keys.remove(&keysym) {
-                            FilterResult::Intercept(KeyAction::None)
+                            FilterResult::Intercept(KeyAction::none())
                         } else {
                             FilterResult::Forward
                         }
