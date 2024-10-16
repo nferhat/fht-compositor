@@ -928,6 +928,9 @@ impl Fht {
                     continue; // No windows on the workspace, do not bother.
                 };
                 for (window_idx, window) in workspace.windows().enumerate() {
+                    if !window.need_to_resolve_rules() {
+                        continue;
+                    }
                     let rules = ResolvedWindowRules::resolve(
                         window,
                         &self.config.rules,
