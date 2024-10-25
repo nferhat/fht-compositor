@@ -4,12 +4,11 @@ use fht_compositor_config::MouseAction;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Rectangle, Serial};
 
+use super::swap_tile_grab::SwapTileGrab;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
-
-use super::swap_tile_grab::SwapTileGrab;
 
 /// The "type" of a [`KeyAction`].
 ///

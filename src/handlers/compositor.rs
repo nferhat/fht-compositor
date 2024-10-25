@@ -132,8 +132,7 @@ impl State {
                 // We have to set a floating value, no matter what.
                 // - If the user asked for a floating value, use it.
                 // - If the window has a parent
-                // - If the window requests a size with limits (min/max)
-                //      ^^^ (copied from sway)
+                // - If the window requests a size with limits (min/max) ^^^ (copied from sway)
                 // - Default to tiled
                 let has_parent = window.toplevel().parent().is_some();
                 if let Some(floating) = rules.floating {

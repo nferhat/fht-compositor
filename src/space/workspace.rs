@@ -517,7 +517,8 @@ impl Workspace {
                     false,
                 );
             } else if let Some(true) = centered_in_parent {
-                // We must have a parent since this can only be set inside src/handlers/compositor.rs
+                // We must have a parent since this can only be set inside
+                // src/handlers/compositor.rs
                 let parent_surface = tile.window().toplevel().parent().unwrap();
                 if let Some(parent_geometry) = self
                     .tiles

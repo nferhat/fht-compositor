@@ -409,7 +409,8 @@ impl Fht {
                     Default::default(),
                     vec![
                         // We still track the user-provided config path (or the default one)
-                        // so that if the user changed and reloaded the config path, we can pick it up.
+                        // so that if the user changed and reloaded the config path, we can pick it
+                        // up.
                         config_path
                             .clone()
                             .unwrap_or_else(fht_compositor_config::config_path),

@@ -251,8 +251,8 @@ impl Space {
         None
     }
 
-    /// Get the [`Window`] and a reference [`Workspace`] holding it with this [`WlSurface`] as its toplevel
-    /// surface
+    /// Get the [`Window`] and a reference [`Workspace`] holding it with this [`WlSurface`] as its
+    /// toplevel surface
     pub fn find_window_and_workspace(&self, surface: &WlSurface) -> Option<(Window, &Workspace)> {
         for monitor in &self.monitors {
             for workspace in monitor.workspaces() {
@@ -477,7 +477,8 @@ impl Space {
         ))
     }
 
-    /// Move this [`Window`] on the active [`Workspace`] of the [`Monitor`] associated with this output, if any.
+    /// Move this [`Window`] on the active [`Workspace`] of the [`Monitor`] associated with this
+    /// output, if any.
     pub fn move_window_to_output(&mut self, window: &Window, output: &Output, animate: bool) {
         // If we try to add the window back into its original workspace.
         let mut original_workspace_id = None;

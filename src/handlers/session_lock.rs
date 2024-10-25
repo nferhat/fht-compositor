@@ -1,18 +1,12 @@
-use smithay::{
-    delegate_session_lock,
-    output::Output,
-    reexports::wayland_server::protocol::wl_output::WlOutput,
-    wayland::{
-        compositor::{send_surface_state, with_states},
-        fractional_scale::with_fractional_scale,
-        session_lock::{self, LockSurface, SessionLockHandler},
-    },
-};
+use smithay::delegate_session_lock;
+use smithay::output::Output;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
+use smithay::wayland::compositor::{send_surface_state, with_states};
+use smithay::wayland::fractional_scale::with_fractional_scale;
+use smithay::wayland::session_lock::{self, LockSurface, SessionLockHandler};
 
-use crate::{
-    state::{Fht, OutputState, State},
-    utils::output::OutputExt,
-};
+use crate::state::{Fht, OutputState, State};
+use crate::utils::output::OutputExt;
 
 impl SessionLockHandler for State {
     fn lock_state(&mut self) -> &mut session_lock::SessionLockManagerState {
@@ -83,8 +77,8 @@ pub enum LockState {
     /// The compositor is unlocked and displays content as usual.
     #[default]
     Unlocked,
-    /// The compositor has received a lock request and is in the process of drawing a black backdrop
-    /// Over all the [`Output`]s
+    /// The compositor has received a lock request and is in the process of drawing a black
+    /// backdrop Over all the [`Output`]s
     Pending(session_lock::SessionLocker),
     /// The compositor is fully locked.
     Locked,

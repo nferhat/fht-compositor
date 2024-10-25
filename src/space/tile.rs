@@ -185,7 +185,8 @@ impl Tile {
         self.set_size(new_geometry.size, animate);
     }
 
-    /// Get this [`Tile`]'s geometry, in other words its effective [`Rectangle`] in compositor space.
+    /// Get this [`Tile`]'s geometry, in other words its effective [`Rectangle`] in compositor
+    /// space.
     ///
     /// The returned [`Rectangle`] is the geometry of the whole [`Tile`], including its border.
     ///

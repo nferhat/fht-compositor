@@ -1,17 +1,15 @@
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
+use std::time::Duration;
 
-use fht_animation::{curve::Easing, get_monotonic_time, Animation, AnimationCurve};
-use smithay::{
-    backend::renderer::element::utils::RelocateRenderElement,
-    reexports::rustix::path::Arg,
-    utils::{Logical, Point, Size},
-};
+use fht_animation::curve::Easing;
+use fht_animation::{get_monotonic_time, Animation, AnimationCurve};
+use smithay::backend::renderer::element::utils::RelocateRenderElement;
+use smithay::reexports::rustix::path::Arg;
+use smithay::utils::{Logical, Point, Size};
 
-use crate::{
-    egui::{EguiElement, EguiRenderElement},
-    renderer::FhtRenderer,
-    utils::output::OutputExt,
-};
+use crate::egui::{EguiElement, EguiRenderElement};
+use crate::renderer::FhtRenderer;
+use crate::utils::output::OutputExt;
 
 // A 800x640 rectangle should always suffice to display egui with room to spare.
 // egui will do its geometry and layout magic in order to keep some space for shadows, so we should
