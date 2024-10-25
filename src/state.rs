@@ -29,12 +29,14 @@ use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Monotonic};
+use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
 };
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
@@ -50,11 +52,13 @@ use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::wayland::xdg_foreign::XdgForeignState;
 
 use crate::backend::Backend;
 use crate::cli;
@@ -382,6 +386,7 @@ pub struct Fht {
     pub data_control_state: DataControlState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
+    pub foreign_toplevel_list_state: ForeignToplevelListState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub layer_shell_state: WlrLayerShellState,
     pub primary_selection_state: PrimarySelectionState,
@@ -389,6 +394,7 @@ pub struct Fht {
     pub shm_state: ShmState,
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
+    pub xdg_foreign_state: XdgForeignState,
 }
 
 impl Fht {
@@ -430,6 +436,7 @@ impl Fht {
         let data_control_state =
             DataControlState::new::<State, _>(dh, Some(&primary_selection_state), |_| true);
         let data_device_state = DataDeviceState::new::<State>(dh);
+        let foreign_toplevel_list_state = ForeignToplevelListState::new::<State>(dh);
         let dmabuf_state = DmabufState::new();
         let layer_shell_state = WlrLayerShellState::new::<State>(dh);
         let shm_state =
@@ -443,6 +450,7 @@ impl Fht {
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
+        let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(&dh);
         TextInputManagerState::new::<State>(&dh);
         InputMethodManagerState::new::<State, _>(&dh, |_| true);
@@ -467,6 +475,8 @@ impl Fht {
         OutputManagerState::new_with_xdg_output::<State>(dh);
         PresentationState::new::<State>(dh, clock.id() as u32);
         ViewporterState::new::<State>(dh);
+        SinglePixelBufferState::new::<State>(dh);
+        AlphaModifierState::new::<State>(dh);
 
         // Initialize a seat and immediatly attach a keyboard and pointer to it.
         // If clients try to connect and do not find any of them they will try to initialize them
@@ -542,6 +552,7 @@ impl Fht {
             data_control_state,
             data_device_state,
             dmabuf_state,
+            foreign_toplevel_list_state,
             keyboard_shortcuts_inhibit_state,
             layer_shell_state,
             primary_selection_state,
@@ -549,6 +560,7 @@ impl Fht {
             session_lock_manager_state,
             xdg_activation_state,
             xdg_shell_state,
+            xdg_foreign_state,
         }
     }
 

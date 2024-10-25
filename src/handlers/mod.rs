@@ -1,3 +1,4 @@
+mod alpha_modifiers;
 mod buffer;
 mod compositor;
 mod cursor_shape;
@@ -23,10 +24,13 @@ mod seat;
 mod security_context;
 mod selection;
 mod session_lock;
+mod single_pixel_buffer;
 pub use session_lock::LockState;
+mod foreign_toplevel_list;
 mod shm;
 mod viewporter;
 mod virtual_keyboard;
 mod xdg_activation;
 mod xdg_decoration;
+mod xdg_foreign;
 mod xdg_shell;
