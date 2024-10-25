@@ -53,7 +53,7 @@ impl EguiElement {
         if renderer
             .egl_context()
             .user_data()
-            .get::<RefCell<egui_glow::Painter>>()
+            .get::<Rc<RefCell<egui_glow::Painter>>>()
             .is_none()
         {
             let mut frame = renderer
