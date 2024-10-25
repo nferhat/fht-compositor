@@ -3,12 +3,12 @@ pub mod focus_target;
 
 use smithay::desktop::utils::under_from_surface_tree;
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface,
-    PopupKind, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKind,
+    WindowSurfaceType,
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle};
+use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::PopupSurface;
@@ -102,7 +102,6 @@ impl Fht {
         }
 
         if let Some((window, window_loc)) = self.space.window_under(point) {
-            let render_offset = window.render_offset();
             let window_wl_surface = window.wl_surface().unwrap();
             // NOTE: window location passed here is already global, since its from
             // `Fht::window_geometry`

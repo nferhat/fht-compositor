@@ -223,10 +223,6 @@ impl Window {
             .with_pending_state(|state| state.bounds = bounds);
     }
 
-    pub fn bounds(&self) -> Option<Size<i32, Logical>> {
-        self.toplevel().with_pending_state(|state| state.bounds)
-    }
-
     pub fn request_activated(&self, activated: bool) {
         self.set_need_to_resolve_rules();
         self.toplevel().with_pending_state(|state| {
@@ -236,11 +232,6 @@ impl Window {
                 state.states.unset(State::Activated)
             }
         });
-    }
-
-    pub fn activated(&self) -> bool {
-        self.toplevel()
-            .with_pending_state(|state| state.states.contains(State::Activated))
     }
 
     // NOTE: Tiled implementation can vastly different by the client, since we have 4 possible
@@ -332,7 +323,7 @@ impl Window {
             send_surface_state(surface, data, scale.integer_scale(), transform);
         });
 
-        self.with_surfaces(|surface, data| {
+        self.with_surfaces(|_, data| {
             with_fractional_scale(data, |fractional_scale_state| {
                 fractional_scale_state.set_preferred_scale(scale.fractional_scale());
             })

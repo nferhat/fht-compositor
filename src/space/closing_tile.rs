@@ -16,8 +16,8 @@ use smithay::utils::{Logical, Point, Rectangle, Scale, Transform};
 
 use super::tile::TileRenderElement;
 use crate::fht_render_elements;
+use crate::renderer::render_to_texture;
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::renderer::{render_to_texture, FhtRenderer};
 
 const CLOSE_SCALE_THRESHOLD: f64 = 0.8;
 const FALLBACK_BUFFER_COLOR: Color32F = Color32F::new(1.0, 0.0, 0.0, 1.0);

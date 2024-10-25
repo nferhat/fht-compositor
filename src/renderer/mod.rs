@@ -105,7 +105,7 @@ impl Fht {
         let monitor = self.space.active_monitor();
         // TODO: Fractional scale support.
         let output_scale = output.current_scale();
-        let scale = (output_scale.integer_scale() as f64);
+        let scale = output_scale.integer_scale() as f64;
 
         let mut rv = OutputElementsResult::default();
 

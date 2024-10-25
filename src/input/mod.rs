@@ -11,7 +11,6 @@ use smithay::backend::input::{
 };
 #[cfg(feature = "udev_backend")]
 use smithay::backend::session::Session;
-use smithay::desktop::utils::under_from_surface_tree;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};

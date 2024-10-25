@@ -17,7 +17,7 @@ use smithay::backend::renderer::element::surface::{
 };
 use smithay::backend::renderer::element::Kind;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
-use smithay::utils::{Logical, Physical, Point, Scale, Size, Transform};
+use smithay::utils::{Logical, Physical, Point, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;

@@ -14,9 +14,7 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::{
-    SurfaceCachedState, XdgPopupSurfaceData, XdgToplevelSurfaceData,
-};
+use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
 
 use crate::state::{Fht, OutputState, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;

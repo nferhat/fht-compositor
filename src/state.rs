@@ -28,7 +28,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Monotonic, SERIAL_COUNTER};
+use smithay::utils::{Clock, IsAlive, Monotonic};
 use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -929,12 +929,6 @@ impl Fht {
         }
 
         output_presentation_feedback
-    }
-
-    pub fn resolve_rules_for_window_if_needed(&self, window: &Window) {
-        if window.need_to_resolve_rules() {
-            self.resolve_rules_for_window(window);
-        }
     }
 
     pub fn resolve_rules_for_window(&self, window: &Window) {

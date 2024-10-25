@@ -462,11 +462,6 @@ impl Workspace {
         self.tiles.get(self.active_tile_idx?)
     }
 
-    /// Get a mutable reference to the the [`Workspace`]'s active [`Tile`].
-    pub fn active_tile_mut(&mut self) -> Option<&mut Tile> {
-        self.tiles.get_mut(self.active_tile_idx?)
-    }
-
     /// Get an iterator of the [`Workspace`]'s [`Window`]s
     ///
     /// This includes the fullscreened [`Window`], if any.
@@ -703,11 +698,6 @@ impl Workspace {
                 .window()
                 .request_fullscreen(false);
         }
-    }
-
-    /// Return whether this [`Workspace`] has a fullscreened [`Tile`].
-    pub fn has_fullscreened_tile(&self) -> bool {
-        self.fullscreened_tile_idx.is_some()
     }
 
     /// Get the current fullscreened [`Window`]

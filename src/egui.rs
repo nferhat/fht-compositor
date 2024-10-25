@@ -177,11 +177,6 @@ impl EguiElement {
     }
 }
 
-#[derive(Debug)]
-pub struct EguiElementInner {
-    context: egui::Context,
-}
-
 crate::fht_render_elements! {
     EguiRenderElement => {
         Texture = FhtTextureElement,

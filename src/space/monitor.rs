@@ -9,7 +9,7 @@ use std::time::Duration;
 use fht_compositor_config::WorkspaceSwitchAnimationDirection;
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::output::Output;
-use smithay::utils::{Point, Scale};
+use smithay::utils::Point;
 
 use super::workspace::{Workspace, WorkspaceRenderElement};
 use super::Config;
@@ -153,29 +153,37 @@ impl Monitor {
                             );
                         }
                     }
-                    WorkspaceSwitchAnimationDirection::Vertical => {}
+                    WorkspaceSwitchAnimationDirection::Vertical => {
+                        if self.active_idx > idx {
+                            self.workspaces[self.active_idx].start_render_offset_animation(
+                                Point::default(),
+                                (0, height).into(),
+                                config,
+                            );
+                            self.workspaces[idx].start_render_offset_animation(
+                                (0, -height).into(),
+                                Point::default(),
+                                config,
+                            );
+                        } else {
+                            self.workspaces[self.active_idx].start_render_offset_animation(
+                                Point::default(),
+                                (0, -height).into(),
+                                config,
+                            );
+                            self.workspaces[idx].start_render_offset_animation(
+                                (0, height).into(),
+                                Point::default(),
+                                config,
+                            );
+                        }
+                    }
                 };
-
-                // self.workspaces[self.active_idx].start_render_offset_animation(
-                //     Point::default(),
-                //     offset,
-                //     config,
-                // );
-                // self.workspaces[idx].start_render_offset_animation(
-                //     offset,
-                //     Point::default(),
-                //     config,
-                // );
             }
         }
 
         self.active_idx = idx;
         self.workspaces[self.active_idx].active_window()
-    }
-
-    /// Get the active [`Workspace`] index.
-    pub fn active_workspace_idx(&self) -> usize {
-        self.active_idx
     }
 
     /// Get a reference to the active [`Workspace`].
@@ -204,6 +212,7 @@ impl Monitor {
 
         for (idx, workspace) in self.workspaces.iter().enumerate() {
             if idx == self.active_idx || workspace.has_render_offset_animation() {
+                has_fullscreen |= workspace.fullscreened_tile().is_some();
                 elements.extend(
                     workspace
                         .render(renderer, scale)
