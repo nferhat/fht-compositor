@@ -7,6 +7,8 @@ use smithay::reexports::rustix::path::Arg;
 
 use crate::state::State;
 
+pub mod ui;
+
 pub struct Watcher {
     // This token is a handle to the calloop channel that drives the reload_config messages
     token: RegistrationToken,

@@ -199,6 +199,11 @@ impl Fht {
             .space
             .monitor_mut_for_output(output)
             .expect("all outputs should be tracked by Space");
-        monitor.advance_animations(now)
+        let mut ret = false;
+        ret |= self
+            .config_ui
+            .advance_animations(now, !self.config.animations.disable);
+        ret |= monitor.advance_animations(now);
+        ret
     }
 }

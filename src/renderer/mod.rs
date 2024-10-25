@@ -44,6 +44,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev_backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
+use crate::config::ui::ConfigUiRenderElement;
 use crate::shell::cursor::CursorRenderElement;
 use crate::space::{MonitorRenderElement, MonitorRenderResult};
 use crate::state::{Fht, OutputState};
@@ -53,6 +54,7 @@ use crate::utils::output::OutputExt;
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
+        ConfigUi = ConfigUiRenderElement,
         Solid = SolidColorRenderElement,
         Debug = DebugRenderElement,
         Wayland = WaylandSurfaceRenderElement<R>,
@@ -149,6 +151,18 @@ impl Fht {
                 rv.cursor_elements_len += elements.len();
                 rv.elements.extend(elements);
             }
+        }
+
+        if !self.config_ui.hidden() {
+            // Draw config ui below cursor, only if we didnt start drawing it on another output.
+            let config_ui_output = self.config_ui_output.get_or_insert_with(|| output.clone());
+            if config_ui_output == output {
+                if let Some(element) = self.config_ui.render(renderer, output, scale) {
+                    rv.elements.push(element.into())
+                }
+            }
+        } else {
+            let _ = self.config_ui_output.take();
         }
 
         // Render session lock surface between output and elements

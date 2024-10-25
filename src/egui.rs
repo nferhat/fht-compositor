@@ -39,6 +39,15 @@ impl EguiElement {
         let _ = self.render_buffer.lock().unwrap().take();
     }
 
+    pub fn ctx(&self) -> &egui::Context {
+        &self.ctx
+    }
+
+    pub fn reset_ctx(&mut self) {
+        let ctx = egui::Context::default();
+        self.ctx = ctx;
+    }
+
     pub fn render(
         &self,
         renderer: &mut GlowRenderer,

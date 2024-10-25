@@ -976,12 +976,14 @@ fn fallback_path() -> path::PathBuf {
     path
 }
 
+pub fn config_path() -> PathBuf {
+    get_xdg_path().inspect_err(|err| {
+            warn!(?err, "Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml");
+    }).ok().unwrap_or_else(fallback_path)
+}
+
 pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>), Error> {
-    let path = path.or_else(|| {
-        get_xdg_path().inspect_err(|err| {
-            warn!(?err, "Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml")
-        }).ok()
-    }).unwrap_or_else(fallback_path);
+    let path = path.unwrap_or_else(config_path);
     debug!(?path, "Loading compositor configuration");
 
     let mut file = match fs::OpenOptions::new().read(true).write(false).open(&path) {

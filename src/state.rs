@@ -58,6 +58,7 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::backend::Backend;
 use crate::cli;
+use crate::config::ui as config_ui;
 use crate::handlers::LockState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
@@ -259,14 +260,28 @@ impl State {
     }
 
     pub fn reload_config(&mut self) {
-        let (new_config, paths) = match fht_compositor_config::load(None) {
-            Ok((config, paths)) => (config, paths),
-            Err(err) => {
-                error!(?err, "Failed to load configuration, using default");
-                self.fht.last_config_error = Some(err);
-                (Default::default(), vec![])
-            }
-        };
+        let (new_config, paths) =
+            match fht_compositor_config::load(self.fht.cli_config_path.clone()) {
+                Ok((config, paths)) => {
+                    self.fht.config_ui.show(
+                        config_ui::Content::Reloaded {
+                            paths: paths.clone(),
+                        },
+                        !self.fht.config.animations.disable,
+                    );
+
+                    (config, paths)
+                }
+                Err(err) => {
+                    error!(?err, "Failed to load configuration, using default");
+                    self.fht.config_ui.show(
+                        config_ui::Content::ReloadError { error: err },
+                        !self.fht.config.animations.disable,
+                    );
+                    // Keep the user with the current configuration
+                    return;
+                }
+            };
 
         let config_watcher = crate::config::init_watcher(paths, &self.fht.loop_handle)
             .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
@@ -341,10 +356,22 @@ pub struct Fht {
     pub lock_state: LockState,
 
     pub config: Arc<fht_compositor_config::Config>,
+    pub cli_config_path: Option<std::path::PathBuf>,
+    // The config_ui also tracks the last configuration error, if any.
+    pub config_ui: config_ui::ConfigUi,
+    // Keep track of whether we already opened/drawed a config_ui on one output.
+    // so that we don't "warp it" to another output while its displayed.
+    //
+    // Example: user has three outputs, he is focused on the output number 2, so
+    // the config_ui is displayed there, but lets say the user focuses the third
+    // output, by compositor drawing logic, the config_ui will go and warp to
+    // the third output.
+    //
+    // We avoid this by checking this variable.
+    pub config_ui_output: Option<Output>,
     // We keep the config watcher around in case the configuration file path changes.
     // This will be useful for configuration file imports (when implemented)
     pub config_watcher: Option<crate::config::Watcher>,
-    pub last_config_error: Option<fht_compositor_config::Error>,
 
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire_initialised: std::sync::Once,
@@ -371,13 +398,23 @@ impl Fht {
         loop_signal: LoopSignal,
         config_path: Option<std::path::PathBuf>,
     ) -> Self {
-        let mut last_config_error = None;
-        let (config, paths) = match fht_compositor_config::load(config_path) {
+        let mut config_ui = config_ui::ConfigUi::new();
+        let (config, paths) = match fht_compositor_config::load(config_path.clone()) {
             Ok((config, paths)) => (config, paths),
             Err(err) => {
                 error!(?err, "Failed to load configuration, using default");
-                last_config_error = Some(err);
-                (Default::default(), vec![])
+                // NOTE: By default we enable animationns, justifying animate = true
+                config_ui.show(config_ui::Content::ReloadError { error: err }, true);
+                (
+                    Default::default(),
+                    vec![
+                        // We still track the user-provided config path (or the default one)
+                        // so that if the user changed and reloaded the config path, we can pick it up.
+                        config_path
+                            .clone()
+                            .unwrap_or_else(fht_compositor_config::config_path),
+                    ],
+                )
             }
         };
 
@@ -490,8 +527,10 @@ impl Fht {
             root_surfaces: FxHashMap::default(),
 
             config: Arc::new(config),
+            cli_config_path: config_path,
+            config_ui,
+            config_ui_output: None,
             config_watcher,
-            last_config_error,
 
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire_initialised: std::sync::Once::new(),
