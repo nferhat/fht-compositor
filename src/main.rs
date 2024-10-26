@@ -118,11 +118,15 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         socket_name.clone(),
     );
 
-    std::env::set_var("WAYLAND_DISPLAY", &socket_name);
-    std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");
-    std::env::set_var("XDG_SESSION_TYPE", "wayland");
-    std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
-    std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
+    // SAFETY: We do not access these environment variables during these writes/set_var calls,
+    // so the race-condition concerns should be non-existent.
+    unsafe {
+        std::env::set_var("WAYLAND_DISPLAY", &socket_name);
+        std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");
+        std::env::set_var("XDG_SESSION_TYPE", "wayland");
+        std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
+        std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
+    }
 
     for cmd in &state.fht.config.autostart {
         utils::spawn(cmd.clone());
