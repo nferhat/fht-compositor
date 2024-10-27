@@ -201,6 +201,13 @@ impl Fht {
         rv.elements.extend(overlay_elements);
 
         // Top layer shells sit between the normal windows and fullscreen windows.
+        //
+        // NOTE: About the location of render elements.
+        // The compositor logic for now does not have a notion of "global space", similar to what
+        // smithay::desktop::Space provides, but instead, each tile stores its location relative to
+        // the output its mapped in.
+        //
+        // We do not have to offset the render elements in order to position them on the Output.
         let MonitorRenderResult {
             elements: monitor_elements,
             has_fullscreen,

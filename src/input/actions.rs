@@ -215,7 +215,8 @@ impl State {
             }
             KeyActionType::MaximizeFocusedWindow => {
                 if let Some(window) = active_window {
-                    self.fht.space.maximize_window(&window, true, true);
+                    let prev = window.maximized();
+                    self.fht.space.maximize_window(&window, !prev, true);
                 }
             }
             KeyActionType::FullscreenFocusedWindow => {
