@@ -14,6 +14,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use fht_animation::AnimationCurve;
+use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
 pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
@@ -453,10 +454,7 @@ impl Space {
             return;
         };
 
-        // HACK: To "prepare" the window geometry we simulate an insert then remove it
-        // immediatly. This is not optimal since it causes two calls to arrange_tiles
-        workspace.insert_window(window.clone(), false);
-        workspace.remove_window(window, false);
+        workspace.prepare_unconfigured_window(window);
     }
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.

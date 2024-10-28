@@ -771,15 +771,308 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// Prepare an unconfigured [`Window`] for insertion in the workspace.
+    ///
+    /// This function runs the same algorithms that are used inside [`Self::arrange_tiles`] but
+    /// without affecting the already inserted tiles inside the workspace.
+    pub fn prepare_unconfigured_window(&self, unconfigured_window: &Window) {
+        let mut output_geometry = self.output.geometry();
+        output_geometry.loc = Point::default(); // tile locations are all relative to output
+
+        if !unconfigured_window.tiled() {
+            // The window is floating, no need to send a size at all
+            return;
+        }
+
+        // TODO: Use actual value of border width
+        let rules = unconfigured_window.rules();
+        let border_width = self
+            .config
+            .border
+            .with_overrides(&rules.border_overrides)
+            .thickness as i32;
+        let prepared_proportion = rules.proportion.unwrap_or(1.0);
+
+        if unconfigured_window.fullscreen() {
+            let fullscreen_size = Size::<_, Logical>::from((
+                output_geometry.size.w - (2 * border_width),
+                output_geometry.size.h - (2 * border_width),
+            ));
+
+            unconfigured_window.request_size(fullscreen_size);
+            return;
+        }
+
+        let (outer_gaps, inner_gaps) = self.gaps;
+        let work_area = {
+            let mut work_area = output_geometry;
+            work_area.loc += Point::from((outer_gaps, outer_gaps));
+            work_area.size -= Size::from((outer_gaps, outer_gaps)).upscale(2);
+            work_area
+        };
+
+        if self.tiles.is_empty() || unconfigured_window.maximized() {
+            let maximized_size = Size::<_, Logical>::from((
+                work_area.size.w - (2 * border_width),
+                work_area.size.h - (2 * border_width),
+            ));
+
+            unconfigured_window.request_size(maximized_size);
+            return;
+        }
+
+        // Now we only care about the tiled windows.
+        //
+        // The tile structs are just annoying to deal with, since in order to "insert" the to-be
+        // -prepared tile inside, we need to instantiate a new Tile. Instead just work with
+        // [f64] (where the f64 is the proportion)
+        let active_tile = self
+            .active_tile()
+            .expect("there should be an active tile here");
+        let mut active_idx = None;
+        let mut tiled_proportions: Vec<_> = self
+            .tiles
+            .iter()
+            .filter(|tile| tile.window().tiled() && !tile.window().maximized())
+            .enumerate()
+            .map(|(idx, tile)| {
+                if tile.window() == active_tile.window() {
+                    active_idx = Some(idx);
+                }
+                tile.proportion()
+            })
+            .collect();
+
+        let unconfigured_idx = match self.config.insert_window_strategy {
+            InsertWindowStrategy::EndOfSlaveStack => {
+                tiled_proportions.push(prepared_proportion);
+                tiled_proportions.len() - 1
+            }
+            InsertWindowStrategy::ReplaceMaster => {
+                tiled_proportions.insert(0, prepared_proportion);
+                0
+            }
+            InsertWindowStrategy::AfterFocused => {
+                let active_idx = active_idx.map_or(0, |idx| idx + 1);
+                if active_idx == tiled_proportions.len() {
+                    // Dont wrap around if we are on the last window, to avoid cyclic confusion.
+                    tiled_proportions.push(prepared_proportion);
+                    tiled_proportions.len() - 1
+                } else {
+                    tiled_proportions.insert(active_idx, prepared_proportion);
+                    active_idx
+                }
+            }
+        };
+
+        let tiles_len =
+            i32::try_from(tiled_proportions.len()).expect("tiled_windows.len() overflow");
+        let mwfact = self.mwfact;
+        let nmaster = min(
+            i32::try_from(self.nmaster).expect("nmaster overflow"),
+            tiles_len,
+        );
+
+        // TODO: Maybe be a little smarter about how we proceed?
+        let mut master_geo @ mut stack_geo = work_area;
+        match self.layouts[self.active_layout_idx] {
+            WorkspaceLayout::Tile => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1).max(0) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                };
+
+                if (0..nmaster).contains(&(unconfigured_idx as i32)) {
+                    let tiles = tiled_proportions
+                        .get(0..nmaster as usize)
+                        .unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|proportion| *proportion)
+                        .collect::<Vec<_>>();
+                    let lengths = proportion_length(&proportions, master_geo.size.h);
+                    // subtract border, of course.
+                    let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
+                    let prepared_width = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                } else {
+                    let tiles = tiled_proportions
+                        .get(nmaster as usize..)
+                        .unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|proportion| *proportion)
+                        .collect::<Vec<_>>();
+                    let lengths = proportion_length(&proportions, stack_geo.size.h);
+                    // subtract border, of course.
+                    let prepared_height =
+                        lengths[unconfigured_idx - nmaster as usize] - (2 * border_width);
+                    let prepared_width = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                }
+            }
+            WorkspaceLayout::BottomStack => {
+                master_geo.size.w -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.w -= (tiles_len - nmaster).max(0) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.h =
+                        (f64::from(master_geo.size.h - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.h -= inner_gaps + stack_geo.size.h;
+                    stack_geo.loc.y = master_geo.loc.y + master_geo.size.h + inner_gaps;
+                };
+
+                if (0..nmaster).contains(&(unconfigured_idx as i32)) {
+                    let tiles = tiled_proportions
+                        .get(0..nmaster as usize)
+                        .unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|proportion| *proportion)
+                        .collect::<Vec<_>>();
+                    let lengths = proportion_length(&proportions, master_geo.size.w);
+                    // subtract border, of course.
+                    let prepared_width = lengths[unconfigured_idx] - (2 * border_width);
+                    let prepared_height = master_geo.size.h - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                } else {
+                    let tiles = tiled_proportions
+                        .get(nmaster as usize..)
+                        .unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|proportion| *proportion)
+                        .collect::<Vec<_>>();
+                    let lengths = proportion_length(&proportions, stack_geo.size.w);
+                    // subtract border, of course.
+                    let prepared_width =
+                        lengths[unconfigured_idx - nmaster as usize] - (2 * border_width);
+                    let prepared_height = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                }
+            }
+            WorkspaceLayout::CenteredMaster => {
+                let master_len = min(tiles_len, nmaster);
+                let left_len = tiles_len.saturating_sub(nmaster) / 2;
+                let right_len = (tiles_len.saturating_sub(nmaster) / 2)
+                    + (tiles_len.saturating_sub(nmaster) % 2);
+
+                let mut master_geo @ mut left_geo @ mut right_geo = work_area;
+                master_geo.size.h -= inner_gaps * master_len.saturating_sub(1) as i32;
+                left_geo.size.h -= inner_gaps * left_len.saturating_sub(1) as i32;
+                right_geo.size.h -= inner_gaps * right_len.saturating_sub(1) as i32;
+
+                if tiles_len > nmaster {
+                    if (tiles_len - nmaster) > 1 {
+                        master_geo.size.w =
+                            (f64::from(master_geo.size.w - 2 * inner_gaps) * mwfact).round() as i32;
+                        left_geo.size.w =
+                            (work_area.size.w - master_geo.size.w - 2 * inner_gaps) / 2;
+                        right_geo.size.w =
+                            work_area.size.w - master_geo.size.w - 2 * inner_gaps - left_geo.size.w;
+                        master_geo.loc.x += left_geo.size.w + inner_gaps;
+                    } else {
+                        master_geo.size.w =
+                            (f64::from(master_geo.size.w - inner_gaps) * mwfact).round() as i32;
+                        left_geo.size.w = 0;
+                        right_geo.size.w -= master_geo.size.w - inner_gaps;
+                    }
+
+                    left_geo.loc = work_area.loc;
+                    right_geo.loc = work_area.loc; // for y value only
+                    right_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                // Due to how the CenteredMaster layout works, we keep around the original index
+                // to find the unconfigured_window back, this forces us to use looks
+                let (master_proportions, left_right_proportions) = tiled_proportions
+                    .into_iter()
+                    .enumerate()
+                    // .map(|(original_idx, prop)| (original_idx, prop))
+                    .partition::<Vec<_>, _>(|(idx, _)| (*idx as i32) < nmaster);
+                let (left_proportions, right_proportions) = left_right_proportions
+                    .into_iter()
+                    .partition::<Vec<_>, _>(|(idx, _)| {
+                        ((*idx as i32).saturating_sub(nmaster) % 2) != 0
+                    });
+
+                if unconfigured_idx < nmaster as usize {
+                    let master_heights = {
+                        let proportions = master_proportions
+                            .iter()
+                            .map(|(_, prop)| *prop)
+                            .collect::<Vec<_>>();
+                        let heights = proportion_length(&proportions, master_geo.size.h);
+                        heights
+                            .into_iter()
+                            .zip(master_proportions)
+                            .map(|(height, (idx, _))| (idx, height))
+                    };
+                    for (idx, height) in master_heights {
+                        if idx == unconfigured_idx {
+                            let size = Size::from((master_geo.size.w - 2 * border_width, height));
+                            unconfigured_window.request_size(size);
+                            return;
+                        }
+                    }
+                } else if unconfigured_idx % 2 == 0 {
+                    // With how CenteredMaster logic works, pair indexes are on the right col.
+                    let right_heights = {
+                        let proportions = right_proportions
+                            .iter()
+                            .map(|(_, prop)| *prop)
+                            .collect::<Vec<_>>();
+                        let heights = proportion_length(&proportions, right_geo.size.h);
+                        heights
+                            .into_iter()
+                            .zip(right_proportions)
+                            .map(|(height, (idx, _))| (idx, height))
+                    };
+                    for (idx, height) in right_heights {
+                        if idx == unconfigured_idx {
+                            let size = Size::from((right_geo.size.w - 2 * border_width, height));
+                            unconfigured_window.request_size(size);
+                            return;
+                        }
+                    }
+                } else {
+                    let left_heights = {
+                        let proportions = left_proportions
+                            .iter()
+                            .map(|(_, prop)| *prop)
+                            .collect::<Vec<_>>();
+                        let heights = proportion_length(&proportions, left_geo.size.h);
+                        heights
+                            .into_iter()
+                            .zip(left_proportions)
+                            .map(|(height, (idx, _))| (idx, height))
+                    };
+                    for (idx, height) in left_heights {
+                        if idx == unconfigured_idx {
+                            let size = Size::from((left_geo.size.w - 2 * border_width, height));
+                            unconfigured_window.request_size(size);
+                            return;
+                        }
+                    }
+                }
+            }
+            WorkspaceLayout::Floating => {}
+        }
+    }
+
     /// Arrange all the [`Tile`]s in this [`Workspace`]
     pub fn arrange_tiles(&mut self, animate: bool) {
-        let output_geometry = self.output.geometry();
+        let mut output_geometry = self.output.geometry();
+        output_geometry.loc = Point::default(); // tile locations are all relative to output
+
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // The fullscreen tile should be positionned at (0,0), the origin of the output.
-            self.tiles[fullscreen_idx].set_geometry(
-                Rectangle::from_loc_and_size((0, 0), output_geometry.size),
-                animate,
-            );
+            self.tiles[fullscreen_idx].set_geometry(output_geometry, animate);
         }
 
         if self.tiles.is_empty() {
