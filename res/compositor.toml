@@ -1,67 +1,70 @@
-# fht-compositor config.
-#
-# This config is not exhaustive, just a starter for you to change.
-# Check out the documentation for more details!
+# Example configuration for fht-compositor.
+# This configuration uses the TOML format: https://toml.io/en/
+# 
+# This configuration is enough to get you started. Refer to the wiki for more details.
+# You can open it using: `cd fht-compositor/docs && mdbook serve --open`
 
-autostart = []
 
-# Should the compositor warp the cursor arbitrarily (for example when focusing window,
-# when an output is added, etc...)
-cursor-warps = true
-# Should the compositor focus new windows, or just insert it without focusing.
-focus-new-windows = true
-# Layout settings.
+# If you need any applications to run when the compositor is starting, (for example, wallpaper,
+# sound daemon, notification daemon, etc...), add them here.
 #
-# Currently three layouts exist: tile, bottom_stack, and centered_master (all from dwm patches)
-# (and floating which disables all layouting logic)
+# Each entry is a full cmdline that will be executed using `/bin/sh -c "<ITEM>"`, so you benefit
+# from shell expansion.
+autostart = [
+  # "/usr/bin/swaybg -i ~/Pictures/wall/mountainous-landspace.png",
+  # "nm-applet",
+]
+
+
+# ---------------------------------------------------------
+
+
+# General compositor behaviour
+# See section 5.1: general
+[general]
+cursor-warps = true # Move the cursor to newly opened windows
+focus-new-windows = true # Give newly inserted windows keyboard focus
+
+# fht-compositor is a dynamic tiler, so windows (that are not floating) will get arranged
+# according some parameters, like the nmaster, or mwfact.
 #
-# The layout logic is very similar to dwm's, you have one or more master windows (determined
-# by nmaster), a factor that divies the screen space between the master stack and the slave stack,
-# and optionally gaps.
+# Refer to the docs for more informations and details about how these layouts work!
 layouts = ["tile", "floating"]
-# These values are set on a per-workspace basis, and can be changed transiently (before any config
-# reload, which will set them to whatever value is here)
-# See keybinds section
 nmaster = 1
 mwfact = 0.5
-outer-gaps = 20
-inner-gaps = 5
+inner-gaps = 5 # gaps between tiles
+outer-gaps = 20 # gaps around the screen
 
-[cursor]
-# Cursor theme. The compositor can also read `XCURSOR_THEME` and `XCURSOR_SIZE` if
-# these values are not set.
-# name = "Vimix"
-# size = 32
 
+# ---------------------------------------------------------
+
+
+# Decorations: I.E the pretty
+# See section 5.2: decorations
 [decorations]
-# Should we allow clients to draw client-side decorations?
+# server-side is the best mode in the case you want to have a true tiled feeling, making clients
+# disable title bars and shadows.
 #
-# This is basically the switch for allowing/disawolling windows to draw their own
-# titlebars, shadows, etc.
-#
-# You are recommended to set this to false, though GNOME applications (and also
-# libadwaita applications) don't respect this setting.
-allow-csd = true
+# WARN: libadwaita and GNOME applications IGNORE this hint/mode, do not complain about them.
+# Just ask GNOME devs to implement xdg_decoration for this to actually work.
+decoration-mode = "force-server-side"
+
+# Border around windows! (You'd probably want to leave this on)
 [decorations.border]
 thickness = 2
-radius = 20
-# You can either use solid border color, or use gradients, like the following
-#
-# ```toml
-# normal-color.start = "<start color>"
-# normal-color.end = "<end color>"
-# normal-color.angle = "<angle in degrees>"
-# ```
-#
-# Setting both the solid and gradient fields will cause an error!
-#
-# CSS-like color syntax is supported! so you have access to hsl functions
-normal-color = "#44474f"
-focused-color = "#87c7a1"
+radius = 10
+# You can either use a gradient color or a solid color.
+# Refer to the docs for more details on how to use them.
+focused-color = "#6791c9"
+normal-color = "#222230"
+
+
+# ---------------------------------------------------------
+
 
 # Input configuration
+# Refer to section 5.2: input
 [input]
-
 [input.keyboard]
 # Keyboard XKB settings, applied globally.
 # See: man xkeyboard-config(7)
@@ -75,51 +78,91 @@ repeat-delay = 250
 #
 # The devide is identified using the key into the table, by the following order:
 # - The device pretty name (aka the readable name, which you would see in a device manager)
-# - The device dev name
 # - The raw device path `/dev/input/XXXXX`
 #
-# See: man libinput
-[input.per-device."AT Translated Set 2 keyboard"]
-disable = true # get rid of the device entierly
-keyboard.layout = "fr" # override layout
-[input.per-device."SynPS/2 Synaptics TouchPad"]
-mouse.tap-to-click = true
+# You can use `libinput list-devices` to get a list of all your devices.
 
+# You can fully disable a device if needed. The following example disables what is usually
+# registered as a laptop's built-in keyboard
+# [input.per-device."AT Translated Set 2 keyboard"]
+# disable = true
+
+# [input.per-device."SynPS/2 Synaptics TouchPad"]
+# Per mouse configuration
+# mouse.tap-to-click = true
+
+
+# ---------------------------------------------------------
+
+
+# Animations: Cause we love 'em
+# See section 5.6: animations
 [animations]
-# Whether to get rid of ALL animations.
-disable = false
-# Read the wiki to get a list of all the animations you can customize, aswell as
-# possible animation curves you can use.
+# In case you don't need them, here's a global switch
+# Each animation kind have a disable section, for more fine-grained control.
+# Again refer to the documention for more details!
+# disable = true
 
+
+# ---------------------------------------------------------
+
+
+# Key bindings.
+#
+# WARN: You should AT ALL times keep a bind to quit the compositor and reload the config.
+# Why? Since key bindings is the only section that the compositor does not fill by
+# default for you!
+#
+# Refer to section 5.4: keybinds for a list!
 [keybinds]
-# Example key actions that do not need any argument
+# Most keybinds will not need an argument passed to them, so you can just use the following
+# syntax to bind those "simple" actions
 Super-q = "quit"
 Super-Ctrl-r = "reload-config"
+
+# Some other keybinds will require an action passed in, here is how you achieve that
+#
+# NOTE: run-command argument is a command line, executed in the same fashion as the autostart section
 # Example key actions that need an argument passed in
 Super-Return = { action = "run-command", arg = "alacritty" }
 Super-p = { action = "run-command", arg = "wofi --show drun" }
 Super-Shift-s = { action = "run-command", arg = """grim -g "`slurp -o`" - | wl-copy --type image/png""" }
-# Focus management
+Super-Alt-l = { action = "run-command", arg = "gtklock" }
+
+# If you need to run an action even when the compositor is locked, here's how you can achieve this.
+XF86AudioRaiseVolume.action = "run-command"
+XF86AudioRaiseVolume.arg = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"
+XF86AudioRaiseVolume.allow-while-locked = true
+#############################################
+XF86AudioLowerVolume.action = "run-command"
+XF86AudioLowerVolume.arg = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%-"
+XF86AudioLowerVolume.allow-while-locked = true
+
+# Focus management, defaults are similar to what DWM provides.
 Super-j = "focus-next-window"
 Super-k = "focus-previous-window"
-Super-Shift-j = "swap-with-next-window"
-Super-Shift-k = "swap-with-previous-window"
 Super-Ctrl-j = "focus-next-output"
 Super-Ctrl-k = "focus-previous-output"
+
 # Window management
 Super-m = "maximize-focused-window"
 Super-f = "fullscreen-focused-window"
 Super-Shift-c = "close-focused-window"
+Super-Ctrl-Space = "float-focused-window"
+Super-Shift-j = "swap-with-next-window"
+Super-Shift-k = "swap-with-previous-window"
+
 # Transient layout changes.
-# Any changes set using these keybinds will be reset on configuration reload
+# These changes persist through configuration reloads
 Super-Space = "select-next-layout"
 Super-Shift-Space = "select-previous-layout"
 Super-h = { action = "change-mwfact", arg = -0.01 }
 Super-l = { action = "change-mwfact", arg = +0.01 }
-Super-Shift-h = { action = "change-nmaster", arg = -1 }
-Super-Shift-l = { action = "change-nmaster", arg = +1 }
-Super-i = { action = "change-cfact", arg = +0.1 }
-Super-o = { action = "change-cfact", arg = -0.1 }
+Super-Shift-h = { action = "change-nmaster", arg = +1 }
+Super-Shift-l = { action = "change-nmaster", arg = -1 }
+Super-i = { action = "change-window-proportion", arg = +0.1 }
+Super-o = { action = "change-window-proportion", arg = -0.1 }
+
 # Workspaces
 Super-1 = { action = "focus-workspace", arg = 0 }
 Super-2 = { action = "focus-workspace", arg = 1 }
@@ -130,20 +173,64 @@ Super-6 = { action = "focus-workspace", arg = 5 }
 Super-7 = { action = "focus-workspace", arg = 6 }
 Super-8 = { action = "focus-workspace", arg = 7 }
 Super-9 = { action = "focus-workspace", arg = 8 }
+
 # Sending windows to workspaces
-Super-Shift-1 = { action = "send-focused-window-to-workspace", arg = 0 }
-Super-Shift-2 = { action = "send-focused-window-to-workspace", arg = 1 }
-Super-Shift-3 = { action = "send-focused-window-to-workspace", arg = 2 }
-Super-Shift-4 = { action = "send-focused-window-to-workspace", arg = 3 }
-Super-Shift-5 = { action = "send-focused-window-to-workspace", arg = 4 }
-Super-Shift-6 = { action = "send-focused-window-to-workspace", arg = 5 }
-Super-Shift-7 = { action = "send-focused-window-to-workspace", arg = 6 }
-Super-Shift-8 = { action = "send-focused-window-to-workspace", arg = 7 }
-Super-Shift-9 = { action = "send-focused-window-to-workspace", arg = 8 }
+Super-Shift-1 = { action = "send-to-workspace", arg = 0 }
+Super-Shift-2 = { action = "send-to-workspace", arg = 1 }
+Super-Shift-3 = { action = "send-to-workspace", arg = 2 }
+Super-Shift-4 = { action = "send-to-workspace", arg = 3 }
+Super-Shift-5 = { action = "send-to-workspace", arg = 4 }
+Super-Shift-6 = { action = "send-to-workspace", arg = 5 }
+Super-Shift-7 = { action = "send-to-workspace", arg = 6 }
+Super-Shift-8 = { action = "send-to-workspace", arg = 7 }
+Super-Shift-9 = { action = "send-to-workspace", arg = 8 }
 
+
+# ---------------------------------------------------------
+
+
+# Mouse bindings
+# Refer to section 5.5: mousebinds
 [mousebinds]
-Super-Left = "move-tile"
+# We don't have much here, sadly :/
+Super-Left = "swap-tile"
 
-# Window rules.
-# Refer to the documentation for more details
-[[rules]]
+
+# ---------------------------------------------------------
+
+
+# Window rules
+# Refer to section 5.6: window rules
+#
+# NOTE: Window rule order matter, since they combine and stack up.
+# If window rule 1, 3 and 4 match onto a Window, the compositor will apply the rules from 1, then 3,
+# then 4 onto the said window.
+
+# All windows on workspace 6 (so index 5) will be floating and centered
+# [[rules]]
+# on-workspace = 5
+# floating = true
+# centered = true
+
+# Web browsers get send on output eDP-1 on workspace 2
+# [[rules]]
+# match-app-id = ["LibreWolf", "Firefox"]
+# open-on-output = "eDP-1"
+# open-on-workspace = 1
+
+# Chat clients open on workspace 3
+# [[rules]]
+# match-app-id = ["Discord", "Telegram"]
+# match-title = [".*Telegram.*"] # all of these are Regexes!
+# open-on-workspace = 2
+
+# You can also have stricter rule sets using `match-all = true`, in order to make the rule
+# apply only if all criteria matches
+#
+# For example windows opening output HDMI-A-1 that are on workspace 5 must be
+# fullscreened.
+# [[rules]]
+# match-all = true
+# on-output = "HDMI-A-1"
+# on-workspace = 4
+# fullscreen = true
