@@ -14,7 +14,6 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use fht_animation::AnimationCurve;
-use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
 pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;

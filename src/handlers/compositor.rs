@@ -4,6 +4,7 @@ use smithay::delegate_compositor;
 use smithay::desktop::{find_popup_root_surface, PopupKind};
 use smithay::output::Output;
 use smithay::reexports::calloop::Interest;
+use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
@@ -12,6 +13,7 @@ use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
     with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
+use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
@@ -119,20 +121,58 @@ impl State {
                     }
                 });
 
-                if let Some(fullscreen) = rules.fullscreen {
+                // Check whether the toplevel asked for fullscreen/maximized on creation.
+                // This can override checking for other values
+                let is_fullscreened = if let Some(fullscreen) = rules.fullscreen {
                     window.request_fullscreen(fullscreen);
-                }
+                    fullscreen
+                } else {
+                    window.fullscreen()
+                };
 
-                if let Some(maximized) = rules.maximized {
+                let is_maximized = if let Some(maximized) = rules.maximized {
                     window.request_maximized(maximized);
-                }
+                    maximized
+                } else {
+                    window.maximized()
+                };
 
                 // We have to set a floating value, no matter what.
                 // - If the user asked for a floating value, use it.
                 // - If the window has a parent
-                // - If the window requests a size with limits (min/max) ^^^ (copied from sway)
+                // - If the window requests a size with limits (min/max)
+                // - The toplevel has specified a content type
                 // - Default to tiled
                 let has_parent = window.toplevel().parent().is_some();
+                let (min_size, max_size) = with_states(surface, |data| {
+                    let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
+                    let surface_data = cached_state.current();
+                    (surface_data.min_size, surface_data.max_size)
+                });
+
+                // If one axis is constrained, the size is constrained.
+                let width_fixed =
+                    (min_size.w != 0 && max_size.w != 0) && (min_size.w == max_size.w);
+                let height_fixed =
+                    (min_size.h != 0 && max_size.h != 0) && (min_size.h == max_size.h);
+                let has_fixed_size = width_fixed || height_fixed;
+
+                // Games and media players get floating.
+                let has_content_type = with_states(surface, |data| {
+                    use wp_content_type_v1::Type;
+                    let mut guard = data.cached_state.get::<ContentTypeSurfaceCachedState>();
+                    let current = guard.current();
+                    matches!(
+                        current.content_type(),
+                        Type::Photo | Type::Video | Type::Game
+                    )
+                });
+
+                // We only honor our floating heuristics if we dont have a fullscreen/maximized
+                // state from client/rules, to avoid jankiness
+                let default_floating = !(is_maximized || is_fullscreened)
+                    && (has_parent || has_fixed_size || has_content_type);
+
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
                     if !floating {
@@ -142,17 +182,7 @@ impl State {
                             .space
                             .prepare_unconfigured_window(&window, workspace_id);
                     }
-                } else if has_parent || {
-                    let (min_size, max_size) = with_states(surface, |data| {
-                        let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
-                        let surface_data = cached_state.current();
-                        (surface_data.min_size, surface_data.max_size)
-                    });
-
-                    // If one axis is constrained, the size is constrained.
-                    ((min_size.w != 0 && max_size.w != 0) && (min_size.w == max_size.w))
-                        || ((min_size.h != 0 && max_size.h != 0) && (min_size.h == max_size.h))
-                } {
+                } else if default_floating {
                     rules.floating = Some(true);
                     if has_parent {
                         // We need to center around the parent if it exists.

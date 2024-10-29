@@ -34,6 +34,7 @@ use smithay::wayland::compositor::{
     with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
 };
+use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
@@ -451,6 +452,7 @@ impl Fht {
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
+        ContentTypeState::new::<State>(&dh);
         CursorShapeManagerState::new::<State>(&dh);
         TextInputManagerState::new::<State>(&dh);
         InputMethodManagerState::new::<State, _>(&dh, |_| true);

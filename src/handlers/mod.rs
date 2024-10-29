@@ -1,6 +1,7 @@
 mod alpha_modifiers;
 mod buffer;
 mod compositor;
+mod content_type;
 mod cursor_shape;
 mod data_control;
 mod data_device;
