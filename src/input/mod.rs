@@ -337,7 +337,7 @@ impl State {
                                 .get(&key_pattern)
                                 .cloned()
                                 .map(Into::into);
-                            debug!(?keysym, ?key_pattern, ?action);
+                            trace!(?keysym, ?key_pattern, ?action);
 
                             if let Some(action) = action {
                                 suppressed_keys.insert(keysym);
