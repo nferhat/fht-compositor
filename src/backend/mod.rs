@@ -5,26 +5,26 @@ use smithay::utils::{Monotonic, Time};
 use crate::renderer::AsGlowRenderer;
 use crate::state::Fht;
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 pub mod udev;
-#[cfg(feature = "x11_backend")]
-pub mod x11;
+#[cfg(feature = "winit-backend")]
+pub mod winit;
 
 pub enum Backend {
-    #[cfg(feature = "x11_backend")]
-    X11(x11::X11Data),
-    #[cfg(feature = "udev_backend")]
+    #[cfg(feature = "winit-backend")]
+    Winit(winit::WinitData),
+    #[cfg(feature = "udev-backend")]
     Udev(udev::UdevData),
 }
 
-#[cfg(feature = "x11_backend")]
-impl From<x11::X11Data> for Backend {
-    fn from(value: x11::X11Data) -> Self {
-        Self::X11(value)
+#[cfg(feature = "winit-backend")]
+impl From<winit::WinitData> for Backend {
+    fn from(value: winit::WinitData) -> Self {
+        Self::Winit(value)
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl From<udev::UdevData> for Backend {
     fn from(value: udev::UdevData) -> Self {
         Self::Udev(value)
@@ -32,16 +32,16 @@ impl From<udev::UdevData> for Backend {
 }
 
 impl Backend {
-    #[cfg(feature = "x11_backend")]
-    pub fn x11(&mut self) -> &mut x11::X11Data {
+    #[cfg(feature = "winit-backend")]
+    pub fn winit(&mut self) -> &mut winit::WinitData {
         #[allow(irrefutable_let_patterns)]
-        if let Self::X11(data) = self {
+        if let Self::Winit(data) = self {
             return data;
         }
-        unreachable!("Tried to get x11 backend data on non-x11 backend")
+        unreachable!("Tried to get winit backend data on non-winit backend")
     }
 
-    #[cfg(feature = "udev_backend")]
+    #[cfg(feature = "udev-backend")]
     pub fn udev(&mut self) -> &mut udev::UdevData {
         #[allow(irrefutable_let_patterns)]
         if let Self::Udev(data) = self {
@@ -58,10 +58,10 @@ impl Backend {
         current_time: Time<Monotonic>,
     ) -> anyhow::Result<bool> {
         match self {
-            #[cfg(feature = "x11_backend")]
+            #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::X11(ref mut data) => data.render(fht, output, current_time.into()),
-            #[cfg(feature = "udev_backend")]
+            Self::Winit(data) => data.render(fht),
+            #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.render(fht, output, current_time.into()),
         }
@@ -69,10 +69,13 @@ impl Backend {
 
     pub fn with_renderer<T>(&mut self, f: impl FnOnce(&mut GlowRenderer) -> T) -> T {
         match self {
-            #[cfg(feature = "x11_backend")]
+            #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::X11(ref mut data) => f(&mut data.renderer),
-            #[cfg(feature = "udev_backend")]
+            Self::Winit(ref mut data) => {
+                // f(&mut data.renderer)
+                todo!()
+            }
+            #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => {
                 let mut renderer = data

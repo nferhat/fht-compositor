@@ -9,7 +9,7 @@ use smithay::backend::input::{
     ProximityState, TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent,
     TabletToolTipEvent, TabletToolTipState,
 };
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use smithay::backend::session::Session;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::FilterResult;
@@ -291,7 +291,7 @@ impl State {
                         // sometime
                         let keysym = *handle.raw_syms().first().unwrap();
 
-                        #[cfg(feature = "udev_backend")]
+                        #[cfg(feature = "udev-backend")]
                         {
                             use smithay::input::keyboard::Keysym;
                             if key_state == KeyState::Pressed
@@ -316,10 +316,10 @@ impl State {
 
                         #[allow(unused_mut)]
                         let mut modifiers = *modifiers;
-                        // Swap ALT and SUPER under the x11 backend since you are probably running
+                        // Swap ALT and SUPER under the winit backend since you are probably running
                         // under a parent compositor that already has binds with the super key.
-                        #[cfg(feature = "x11_backend")]
-                        if matches!(&mut state.backend, crate::backend::Backend::X11(_)) {
+                        #[cfg(feature = "winit-backend")]
+                        if matches!(&mut state.backend, crate::backend::Backend::Winit(_)) {
                             modifiers = smithay::input::keyboard::ModifiersState {
                                 alt: modifiers.logo,
                                 logo: modifiers.alt,

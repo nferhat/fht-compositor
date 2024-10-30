@@ -91,33 +91,35 @@ impl State {
         let mut fht = Fht::new(dh, loop_handle, loop_signal, cli.config_path);
         let backend: crate::backend::Backend = if let Some(backend_type) = cli.backend {
             match backend_type {
-                #[cfg(feature = "x11_backend")]
-                cli::BackendType::X11 => {
-                    crate::backend::x11::X11Data::new(&mut fht).unwrap().into()
-                }
-                #[cfg(feature = "udev_backend")]
+                #[cfg(feature = "winit-backend")]
+                cli::BackendType::Winit => crate::backend::winit::WinitData::new(&mut fht)
+                    .unwrap()
+                    .into(),
+                #[cfg(feature = "udev-backend")]
                 cli::BackendType::Udev => crate::backend::udev::UdevData::new(&mut fht)
                     .unwrap()
                     .into(),
             }
         } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
-            info!("Detected (WAYLAND_)DISPLAY. Running in nested X11 window");
-            #[cfg(feature = "x11_backend")]
+            info!("Detected (WAYLAND_)DISPLAY. Running in nested Winit window");
+            #[cfg(feature = "winit-backend")]
             {
-                crate::backend::x11::X11Data::new(&mut fht).unwrap().into()
+                crate::backend::winit::WinitData::new(&mut fht)
+                    .unwrap()
+                    .into()
             }
-            #[cfg(not(feature = "x11_backend"))]
-            panic!("X11 backend not enabled on this build! Enable the 'x11_backend' feature when building")
+            #[cfg(not(feature = "winit-backend"))]
+            panic!("Winit backend not enabled on this build! Enable the 'winit-backend' feature when building")
         } else {
             info!("Running from TTY, initializing Udev backend");
-            #[cfg(feature = "udev_backend")]
+            #[cfg(feature = "udev-backend")]
             {
                 crate::backend::udev::UdevData::new(&mut fht)
                     .unwrap()
                     .into()
             }
-            #[cfg(not(feature = "udev_backend"))]
-            panic!("Udev backend not enabled on this build! Enable the 'udev_backend' feature when building")
+            #[cfg(not(feature = "udev-backend"))]
+            panic!("Udev backend not enabled on this build! Enable the 'udev-backend' feature when building")
         };
 
         Self { fht, backend }

@@ -20,10 +20,10 @@ pub enum Command {
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum BackendType {
-    #[cfg(feature = "x11_backend")]
-    /// Use the X11 backend, inside an X11 window.
-    X11,
-    #[cfg(feature = "udev_backend")]
+    #[cfg(feature = "winit-backend")]
+    /// Use the Winit backend, inside an Winit window.
+    Winit,
+    #[cfg(feature = "udev-backend")]
     /// Use the Udev backend, using a libseat session.
     Udev,
 }

@@ -5,9 +5,9 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use super::AsGlowFrame;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
@@ -106,7 +106,7 @@ impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
     fn draw(
         &self,

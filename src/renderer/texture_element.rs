@@ -2,15 +2,15 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::Texture;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use super::AsGlowFrame;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
@@ -93,7 +93,7 @@ impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
     fn draw(
         &self,
@@ -121,7 +121,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
     fn draw(
         &self,

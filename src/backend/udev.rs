@@ -28,11 +28,9 @@ use smithay::backend::renderer::multigpu::{
 };
 use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
-#[cfg(feature = "egl")]
-use smithay::backend::renderer::ImportEgl;
 use smithay::backend::renderer::{
-    buffer_type, Bind, Blit, BufferType, Color32F, ExportMem, ImportDma, ImportMemWl, Offscreen,
-    TextureFilter,
+    buffer_type, Bind, Blit, BufferType, Color32F, ExportMem, ImportDma, ImportEgl, ImportMemWl,
+    Offscreen, TextureFilter,
 };
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
@@ -409,21 +407,17 @@ impl UdevData {
         if device_node == self.primary_node {
             debug!("Adding primary node");
 
-            #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
             let mut renderer = self
                 .gpu_manager
                 .single_renderer(&render_node)
                 .context("Error creating renderer")?;
 
-            #[cfg(feature = "egl")]
-            {
-                match renderer.bind_wl_display(&fht.display_handle) {
-                    Ok(_) => info!(
-                        ?self.primary_gpu,
-                        "EGL hardware-acceleration enabled"
-                    ),
-                    Err(err) => warn!(?err, "Failed to initialize EGL hardware-acceleration"),
-                }
+            match renderer.bind_wl_display(&fht.display_handle) {
+                Ok(_) => info!(
+                    ?self.primary_gpu,
+                    "EGL hardware-acceleration enabled"
+                ),
+                Err(err) => warn!(?err, "Failed to initialize EGL hardware-acceleration"),
             }
 
             // Init dmabuf support with format list from our primary gpu

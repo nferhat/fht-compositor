@@ -372,12 +372,12 @@ impl State {
                 cursor_mode,
             } => {
                 // We don't support screencasting on X11 since eh, you prob dont need it.
-                #[cfg(not(feature = "udev_backend"))]
+                #[cfg(not(feature = "udev-backend"))]
                 {
                     warn!("ScreenCast is only supported on udev backend");
                     return;
                 }
-                #[cfg(feature = "udev_backend")]
+                #[cfg(feature = "udev-backend")]
                 {
                     #[allow(irrefutable_let_patterns)]
                     let Backend::Udev(ref mut data) = &mut self.backend

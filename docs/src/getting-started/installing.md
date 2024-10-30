@@ -31,7 +31,7 @@ Then, install the following dependencies, note that on some distros (like Debian
 
 ```sh
 git clone https://github.com/nferhat/fht-compositor/ && cd fht-compositor
-cargo build --no-default-features --features=udev_backend --profile opt
+cargo build --no-default-features --features=udev-backend --profile opt
 cp target/opt/fht-compositor /somewhere/inside/PATH
 ```
 
@@ -42,7 +42,7 @@ If you want to use the XDG screencast portal, install the portal configuration f
 > Always refer to the `Cargo.toml` file before enabling features.
 
 ```sh
-cargo build --no-default-features --features=udev_backend,xdg-screencast-portal --profile opt
+cargo build --no-default-features --features=udev-backend,xdg-screencast-portal --profile opt
 mkdir -p $XDG_CONFIG_HOME/xdg-desktop-portal/
 cp res/fht-compositor.portal $XDG_CONFIG_HOME/xdg-desktop-portal/portals/
 ```

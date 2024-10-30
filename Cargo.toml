@@ -63,10 +63,10 @@ indexmap = { version = "2.2.6" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 smithay = { workspace = true, features = [
-    "desktop",
-    "wayland_frontend",
-    "renderer_glow",
-    "backend_libinput"
+    "desktop", "wayland_frontend",   # Provide abstractions for wayland stuff
+    "renderer_glow",                 # Default renderer used everywhere
+    "use_system_lib", "backend_egl", # EGL support for wayland
+    "backend_libinput",              # Input handling
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
 bitflags = "2.6.0"
@@ -92,11 +92,14 @@ owning_ref = "0.4.1"
 clap = { version = "4.5.18", features = ["derive"] }
 
 [features]
-default = ["egl", "x11_backend", "udev_backend", "all-portals"]
-egl = ["smithay/use_system_lib", "smithay/backend_egl"]
-x11_backend = ["smithay/backend_x11", "x11rb", "smithay/renderer_glow", "smithay/backend_vulkan"]
+default = ["winit-backend", "udev-backend", "all-portals"]
 dbus = ["zbus", "zvariant"] # marker feature to enable the dbus connection
-udev_backend = [
+winit-backend = [
+    "smithay/backend_winit",
+    "smithay/renderer_glow",
+    "smithay/backend_drm",
+]
+udev-backend = [
     "smithay-drm-extras",
     "smithay/backend_libinput",
     "smithay/backend_udev",

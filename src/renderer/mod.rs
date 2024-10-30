@@ -26,7 +26,7 @@ use smithay::backend::renderer::gles::{
     GlesError, GlesRenderbuffer, GlesTexture, Uniform, UniformValue,
 };
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::utils::CommitCounter;
@@ -40,9 +40,9 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::UdevRenderError;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::config::ui::ConfigUiRenderElement;
 use crate::shell::cursor::CursorRenderElement;
@@ -342,7 +342,7 @@ impl FhtRenderer for GlowRenderer {
     type FhtError = GlesError;
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a> FhtRenderer for UdevRenderer<'a> {
     type FhtTextureId = MultiTexture;
     type FhtError = UdevRenderError<'a>;
@@ -378,7 +378,7 @@ impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a> AsGlowRenderer for UdevRenderer<'a> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
@@ -389,7 +389,7 @@ impl<'a> AsGlowRenderer for UdevRenderer<'a> {
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
     fn glow_frame(&self) -> &GlowFrame<'frame> {
         self.as_ref()

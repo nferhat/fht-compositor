@@ -380,7 +380,7 @@ impl CompositorHandler for State {
         // Have to call this at the top of here before handling anything otherwise it'll mess
         // buffer management
         on_commit_buffer_handler::<Self>(surface);
-        #[cfg(feature = "udev_backend")]
+        #[cfg(feature = "udev-backend")]
         #[allow(irrefutable_let_patterns)]
         if let crate::backend::Backend::Udev(ref mut data) = &mut self.backend {
             data.early_import(surface);

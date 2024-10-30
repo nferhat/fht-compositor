@@ -6,7 +6,7 @@ use smithay::utils::{Coordinate, Point, Rectangle};
 
 #[cfg(feature = "dbus")]
 pub mod dbus;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 pub mod drm;
 pub mod fps;
 pub mod geometry;

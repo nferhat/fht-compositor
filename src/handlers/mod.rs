@@ -7,7 +7,7 @@ mod data_control;
 mod data_device;
 mod dmabuf;
 mod dnd;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 mod drm_lease;
 mod fractional_scale;
 mod idle_inhibit;

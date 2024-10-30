@@ -9,7 +9,7 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, T
 
 use super::shaders::Shaders;
 use super::AsGlowFrame;
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
@@ -244,7 +244,7 @@ where
     }
 }
 
-#[cfg(feature = "udev_backend")]
+#[cfg(feature = "udev-backend")]
 impl<'a, E> RenderElement<UdevRenderer<'a>> for RoundedCornerElement<E>
 where
     E: Element, // base requirement for ^^^^^^^^^^^^

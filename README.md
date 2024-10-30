@@ -37,7 +37,7 @@ https://github.com/nferhat/fht-compositor/assets/104871514/b5484cb5-65e8-4936-85
 ```sh
 cargo build --profile opt
 # Or, if you want to customize features (see Cargo.toml)
-cargo build --no-default-features --features=egl,udev_backend --profile opt
+cargo build --no-default-features --features=udev-backend --profile opt
 cp target/opt/fht-compositor /somewhere/inside/path
 
 # If you are going to use freedesktop XDG portals.
