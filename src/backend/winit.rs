@@ -231,4 +231,8 @@ impl WinitData {
             notifier.failed();
         }
     }
+
+    pub fn renderer(&mut self) -> &mut GlowRenderer {
+        self.backend.renderer()
+    }
 }
