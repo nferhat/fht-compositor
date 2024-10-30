@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use fht_animation::get_monotonic_time;
+use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::glow::GlowRenderer;
@@ -12,7 +13,9 @@ use smithay::reexports::calloop::RegistrationToken;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::winit::window::WindowAttributes;
 use smithay::utils::Transform;
-use smithay::wayland::dmabuf::{DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal};
+use smithay::wayland::dmabuf::{
+    DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
+};
 
 use crate::renderer::OutputElementsResult;
 use crate::state::{Fht, OutputState, RenderState, State};
@@ -219,5 +222,13 @@ impl WinitData {
         }
 
         Ok(has_damage)
+    }
+
+    pub fn dmabuf_imported(&mut self, dmabuf: &Dmabuf, notifier: ImportNotifier) {
+        if self.backend.renderer().import_dmabuf(dmabuf, None).is_ok() {
+            let _ = notifier.successful::<State>();
+        } else {
+            notifier.failed();
+        }
     }
 }

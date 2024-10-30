@@ -18,10 +18,7 @@ impl DmabufHandler for State {
         match self.backend {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Backend::Winit(ref mut data) => {
-                // TODO:
-                // data.dmabuf_imported(&dmabuf, notifier)
-            }
+            Backend::Winit(ref mut data) => data.dmabuf_imported(&dmabuf, notifier),
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
