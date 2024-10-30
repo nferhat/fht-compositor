@@ -3,7 +3,7 @@ use std::process::Command;
 
 fn main() {
     if let Some(output) = Command::new("git")
-        .args(&["rev-parse", "HEAD"])
+        .args(&["rev-parse", "--short=8", "HEAD"])
         .output()
         .ok()
     {
