@@ -182,6 +182,8 @@ impl PipeWire {
                     debug!(?old, ?new, "state_changed");
 
                     match new {
+                        StreamState::Unconnected => stop_cast(), // client gone
+                        StreamState::Connecting => inner.active = false,
                         StreamState::Streaming => {
                             inner.active = true;
                             redraw();
@@ -202,8 +204,13 @@ impl PipeWire {
                                     stop_cast();
                                 }
                             }
+
+                            inner.active = false;
                         }
-                        _ => inner.active = false,
+                        StreamState::Error(err) => {
+                            warn!("PipeWire stream error: {err}");
+                            stop_cast();
+                        }
                     }
                 }
             })
@@ -530,8 +537,9 @@ impl PipeWire {
                         spa_data.data = 0 as *mut _;
 
                         let spa_chunk = unsafe { &mut (*spa_data.chunk) };
-                        // clients have implemented to check chunk->size if the buffer is valid instead
-                        // of using the flags. Until they are patched we should use some arbitrary value.
+                        // clients have implemented to check chunk->size if the buffer is valid
+                        // instead of using the flags. Until they are
+                        // patched we should use some arbitrary value.
                         spa_chunk.size = 10;
                         spa_chunk.offset = offset;
                         spa_chunk.stride = stride as i32;
