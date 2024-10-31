@@ -14,7 +14,6 @@ repository = "https://github.com/nferhat/fht-compositor"
 
 [workspace.dependencies]
 anyhow = "1.0.79"
-async-std = "1.12.0"
 profiling = "1.0.14"
 # dbus IPC
 zbus = "4.3.1"
@@ -76,8 +75,7 @@ profiling.workspace = true
 zbus = { workspace = true, optional = true }
 zvariant = { workspace = true, optional = true }
 uuid = { version = "1.9.1", features = ["v4"] }
-pipewire = { version = "0.8.0", optional = true }
-async-std = { workspace = true, features = ["unstable"] }
+pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = ["v0_3_33"] }
 xcursor = "0.3.5"
 x11rb = { version = "0.12.0", optional = true, default-features = false, features = ["composite"] }
 fht-compositor-config.path = "./fht-compositor-config"
@@ -90,6 +88,8 @@ fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0
 # See tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
 owning_ref = "0.4.1"
 clap = { version = "4.5.18", features = ["derive"] }
+async-channel = "2.3.1"
+async-io = "2.3.4"
 
 [features]
 default = ["winit-backend", "udev-backend", "all-portals"]

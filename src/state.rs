@@ -65,13 +65,19 @@ use crate::backend::Backend;
 use crate::cli;
 use crate::config::ui as config_ui;
 use crate::handlers::LockState;
+#[cfg(feature = "xdg-screencast-portal")]
+use crate::portals::screencast::{
+    self, CursorMode, PortalSession, ScreencastSource, StreamMetadata,
+};
 use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::KeyboardFocusTarget;
 use crate::space::{Space, WorkspaceId};
+#[cfg(feature = "xdg-screencast-portal")]
+use crate::utils::dbus::DBUS_CONNECTION;
 use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
-use crate::utils::pipewire::PipeWire;
+use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -333,6 +339,140 @@ impl State {
         let devices: Vec<_> = self.fht.devices.drain(..).collect();
         for device in devices {
             self.fht.add_libinput_device(device);
+        }
+    }
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub fn handle_screencast_request(&mut self, req: screencast::Request) {
+        match req {
+            screencast::Request::StartCast {
+                session_handle,
+                metadata_sender,
+                source,
+                cursor_mode,
+            } => {
+                if let Err(err) = self.start_cast_inner(
+                    session_handle.clone(),
+                    metadata_sender.clone(),
+                    source,
+                    cursor_mode,
+                ) {
+                    error!(
+                        session_handle = session_handle.to_string(),
+                        ?err,
+                        "Failed to start pipewire screencast"
+                    );
+                    // If we errored out here we didn't send anything back to the portal yet.
+                    // Sending None signifies that we got an error, and to drop the session.
+                    let _ = metadata_sender.send(None);
+                }
+            }
+            screencast::Request::StopCast { cast_id } => {
+                self.fht.stop_cast(cast_id);
+            }
+        }
+    }
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    fn start_cast_inner(
+        &mut self,
+        session_handle: zvariant::OwnedObjectPath,
+        metadata_sender: async_channel::Sender<Option<StreamMetadata>>,
+        mut source: ScreencastSource,
+        cursor_mode: CursorMode,
+    ) -> anyhow::Result<()> {
+        // We don't support screencasting on X11 since eh, you prob dont need it.
+
+        use smithay::reexports::calloop;
+
+        #[cfg(not(feature = "udev-backend"))]
+        {
+            anyhow::bail!("ScreenCast is only supported on udev backend");
+        }
+        #[cfg(feature = "udev-backend")]
+        {
+            #[allow(irrefutable_let_patterns)]
+            let Backend::Udev(ref mut data) = &mut self.backend
+            else {
+                anyhow::bail!("screencast is only supported on udev")
+            };
+
+            let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
+            else {
+                anyhow::bail!("no primary GBM device")
+            };
+
+            let (cast_source, size, refresh, alpha) = match &mut source {
+                ScreencastSource::Output { name } => {
+                    let Some(output) = self.fht.output_named(name.as_str()) else {
+                        anyhow::bail!("invalid output from screencast source");
+                    };
+
+                    let mode = output.current_mode().unwrap();
+                    let transform = output.current_transform();
+                    let size = transform.transform_size(mode.size);
+                    let refresh = mode.refresh as u32;
+                    (CastSource::Output(output.downgrade()), size, refresh, false)
+                }
+            };
+
+            self.fht.pipewire_initialised.call_once(|| {
+                self.fht.pipewire = PipeWire::new(&self.fht.loop_handle)
+                    .map_err(|err| warn!(?err, "Failed to initialize PipeWire!"))
+                    .ok();
+            });
+
+            let Some(pipewire) = self.fht.pipewire.as_mut() else {
+                anyhow::bail!("no pipewire")
+            };
+
+            let render_formats = self
+                .backend
+                .with_renderer(|renderer| renderer.egl_context().dmabuf_render_formats().clone());
+
+            let (to_compositor, from_pw) = calloop::channel::channel();
+            let token = self
+                .fht
+                .loop_handle
+                .insert_source(from_pw, |event, (), state| {
+                    let calloop::channel::Event::Msg(msg) = event else {
+                        return;
+                    };
+                    match msg {
+                        PwToCompositor::Redraw { id, source } => match source {
+                            CastSource::Output(weak) => {
+                                if let Some(output) = weak.upgrade() {
+                                    OutputState::get(&output).render_state.queue();
+                                } else {
+                                    warn!(?id, "Received a redraw request for a non-existing output, stopping cast");
+                                    state.fht.stop_cast(id);
+                                }
+                            }
+                        },
+                        PwToCompositor::StopCast { id } => {
+                            state.fht.stop_cast(id);
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    anyhow::anyhow!("Failed to insert pipewire channel source: {err:?}")
+                })?;
+
+            pipewire.start_cast(
+                session_handle,
+                cast_source,
+                cursor_mode,
+                to_compositor,
+                token,
+                metadata_sender,
+                gbm_device,
+                &render_formats,
+                alpha,
+                size,
+                refresh,
+            )?;
+
+            Ok(())
         }
     }
 }
@@ -610,6 +750,25 @@ impl Fht {
     pub fn output_resized(&mut self, output: &Output) {
         layer_map_for_output(output).arrange();
         // self.space.output_resized(output);
+
+        #[cfg(feature = "xdg-screencast-portal")]
+        {
+            // Even though casts should automatically resize, inform the cast stream sooner so that
+            // we dont have to some frames to run ensure size in the draw iteration
+            if let Some(pipewire) = self.pipewire.as_mut() {
+                let cast_source = CastSource::Output(output.downgrade());
+                let transform = output.current_transform();
+                let size = transform.transform_size(output.current_mode().unwrap().size);
+
+                pipewire
+                    .casts
+                    .iter_mut()
+                    .filter(|cast| *cast.source() == cast_source)
+                    .for_each(|cast| {
+                        let _ = cast.ensure_size(size);
+                    });
+            }
+        }
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
@@ -1138,6 +1297,40 @@ impl Fht {
         }
 
         self.devices.push(device);
+    }
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    #[profiling::function]
+    pub fn stop_cast(&mut self, id: CastId) {
+        let Some(pipewire) = self.pipewire.as_mut() else {
+            return;
+        };
+
+        let Some(idx) = pipewire.casts.iter().position(|c| c.id() == id) else {
+            warn!("Tried to stop an invalid cast");
+            return;
+        };
+
+        let cast = pipewire.casts.swap_remove(idx);
+        self.loop_handle.remove(cast.to_compositor_token); // remove calloop stream
+        let _ = cast.stream.disconnect(); // even if this fails we dont use the stream anymore
+
+        let object_server = DBUS_CONNECTION.object_server();
+        let Ok(interface) = object_server.interface::<_, PortalSession>(&cast.session_handle)
+        else {
+            warn!(?id, "Cast session doesn't exist");
+            return;
+        };
+
+        async_io::block_on(async {
+            if let Err(err) = interface
+                .get()
+                .closed(interface.signal_context(), std::collections::HashMap::new())
+                .await
+            {
+                warn!(?err, "Failed to send closed signal to screencast session");
+            };
+        });
     }
 }
 

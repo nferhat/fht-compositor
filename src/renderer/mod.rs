@@ -243,13 +243,13 @@ impl Fht {
     ) where
         FhtRenderElement<R>: element::RenderElement<R>,
     {
-        use smithay::backend::renderer::Color32F;
+        use crate::utils::pipewire::CastSource;
 
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
-
-        let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
+        let scale = output.current_scale().fractional_scale().into();
+        let source = CastSource::Output(output.downgrade());
 
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
@@ -259,60 +259,33 @@ impl Fht {
             return;
         }
 
-        let dt = &mut crate::state::OutputState::get(output).damage_tracker;
         let mut casts = std::mem::take(&mut pipewire.casts);
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            if !cast.is_active.get() {
+            if !cast.active() {
+                trace!(id = ?cast.id(), "Cast is not active, skipping");
                 continue;
             }
 
-            if &cast.output != output {
+            if *cast.source() != source {
                 continue;
             }
 
-            if cast.size.to_physical_precise_round(scale) != size {
-                casts_to_stop.push(cast.session_handle.clone());
-                continue;
-            }
-
-            {
-                let mut buffer = match cast.stream.dequeue_buffer() {
-                    Some(buffer) => buffer,
-                    None => {
-                        debug!(
-                            session_handle = cast.session_handle.to_string(),
-                            "PipeWire stream out of buffers! Skipping frame."
-                        );
-                        continue;
-                    }
-                };
-
-                let data = &mut buffer.datas_mut()[0];
-                let fd = data.as_raw().fd as i32;
-                let dmabuf = cast.dmabufs.borrow()[&fd].clone();
-
-                let elements = if cast
-                    .cursor_mode
-                    .contains(crate::portals::CursorMode::EMBEDDED)
-                {
-                    &output_elements_result.elements
-                } else {
-                    &output_elements_result.elements[output_elements_result.cursor_elements_len..]
-                };
-
-                if let Err(err) =
-                    dt.render_output_with(renderer, dmabuf, 0, &elements, Color32F::TRANSPARENT)
-                {
-                    error!(?err, "Failed to render elements to DMABUF");
+            match cast.ensure_size(size) {
+                Ok(true) => (),
+                Ok(false) => {
+                    trace!(id = ?cast.id(), "Cast is resizing, skipping");
                     continue;
                 }
+                Err(err) => {
+                    warn!("error updating stream size, stopping screencast: {err:?}");
+                    casts_to_stop.push(cast.id());
+                }
+            }
 
-                let maxsize = data.as_raw().maxsize;
-                let chunk = data.chunk_mut();
-                *chunk.size_mut() = maxsize;
-                *chunk.stride_mut() = maxsize as i32 / size.h;
+            if let Err(err) = cast.render(renderer, output_elements_result, size, scale) {
+                error!(id = ?cast.id(), ?err, "Failed to render cast");
             }
         }
         pipewire.casts = casts;

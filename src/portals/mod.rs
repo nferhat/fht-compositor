@@ -5,31 +5,20 @@ use crate::state::State;
 use crate::utils::dbus::DBUS_CONNECTION;
 
 #[cfg(feature = "xdg-screencast-portal")]
-mod screencast;
-#[cfg(feature = "xdg-screencast-portal")]
-#[allow(unused_imports)]
-pub use screencast::{
-    CursorMode, Request as ScreenCastRequest, Response as ScreenCastResponse, SessionSource,
-    SourceType, PORTAL_VERSION,
-};
+pub mod screencast;
 
 pub fn start(loop_handle: &LoopHandle<'static, State>) -> anyhow::Result<()> {
     #[cfg(feature = "xdg-screencast-portal")]
     {
         info!("Starting XDG screencast portal");
-        let (to_compositor, from_screencast) = calloop::channel::channel::<ScreenCastRequest>();
-        let (to_screencast, from_compositor) =
-            async_std::channel::unbounded::<ScreenCastResponse>();
-        let portal = screencast::Portal {
-            from_compositor,
-            to_compositor: to_compositor.clone(),
-        };
+        let (to_compositor, from_screencast) = calloop::channel::channel::<screencast::Request>();
+        let portal = screencast::Portal { to_compositor };
         loop_handle
             .insert_source(from_screencast, move |event, _, state| {
                 let calloop::channel::Event::Msg(req) = event else {
                     return;
                 };
-                state.handle_screencast_request(req, &to_screencast, &to_compositor);
+                state.handle_screencast_request(req);
             })
             .map_err(|err| {
                 anyhow::anyhow!("Failed to insert XDG screencast portal source! {err}")

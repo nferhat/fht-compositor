@@ -1,24 +1,19 @@
-//! Very simple and rudimentary Freedesktop XDG ScreenCast portal implementation.
+//! XDG screencast implementation.
 //!
-//! This currently only supports screencasting outputs to dmabuf buffers. Currently planned TODOs
-//! are the following:
-//! - Support SHM (software rendering) as a fallback if we can't decide on a dmabuf format/modifier
-//! - Support window and area screencasting (needs changes to the pipewire support code)
-//! - Support persistent session with resume tokens.
+//! This file only handles D-Bus communication. For pipewire logic, see `src/pipewire/mod.rs`
 
 use std::collections::HashMap;
+use std::fmt::Write;
+use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
 use smithay::reexports::calloop;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalContext;
 use zbus::{interface, ObjectServer};
 
-use crate::backend::Backend;
 use crate::state::{Fht, State};
-use crate::utils::dbus::DBUS_CONNECTION;
-use crate::utils::output::OutputExt;
-use crate::utils::pipewire::PipeWire;
+use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
 
@@ -40,31 +35,25 @@ bitflags::bitflags! {
     }
 }
 
+/// A [XDG ScreenCast desktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html) instance
+///
+/// This structure can be added inside a zbus [`Connection`] to register the
+/// `org.freedesktop.impl.portal.ScreenCast` interface
 pub struct Portal {
     pub(super) to_compositor: calloop::channel::Sender<Request>,
-    pub(super) from_compositor: async_std::channel::Receiver<Response>,
 }
 
+/// A [`Request`] that the [`Portal`] or a [`Session`] can send to the compositor.
 pub enum Request {
+    /// The [`Portal`] has requested to start a cast.
     StartCast {
         session_handle: zvariant::OwnedObjectPath,
-        source: SessionSource,
-        source_type: SourceType,
+        metadata_sender: async_channel::Sender<Option<StreamMetadata>>,
+        source: ScreencastSource,
         cursor_mode: CursorMode,
     },
-    StopCast {
-        session_handle: zvariant::OwnedObjectPath,
-    },
-}
-
-pub enum Response {
-    PipeWireStreamData {
-        node_id: u32,
-        location: (i32, i32),
-        size: (i32, i32),
-        source_type: u32,
-    },
-    PipeWireFail,
+    /// The [`Portal`] has requested to stop the cast with the following ID.
+    StopCast { cast_id: CastId },
 }
 
 #[interface(name = "org.freedesktop.impl.portal.ScreenCast")]
@@ -88,54 +77,43 @@ impl Portal {
         &self,
         request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
-        app_id: String,
+        _app_id: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
-        debug!(
-            request_handle = request_handle.to_string(),
-            session_handle = session_handle.to_string(),
-            "create_session"
-        );
+        let span = make_screencast_span("create_session", &session_handle, &request_handle);
+        let _span_guard = span.enter();
 
-        // Setup request and session
-        let request = PRequest {
-            handle: request_handle.clone().into(),
-        };
+        let request = PortalRequest;
         if let Err(err) = object_server.at(&request_handle, request).await {
-            warn!(
-                ?err,
-                session_handle = session_handle.to_string(),
-                request_handle = request_handle.to_string(),
-                "Failed to create screencast request handle!"
-            );
-            return (1, HashMap::new());
+            warn!(?err, "Failed to create screencast request object");
+            return (2, HashMap::new());
         };
-        let session = Session {
-            _app_id: app_id,
-            request_handle: request_handle.clone().into(),
-            handle: session_handle.clone().into(),
-            cursor_mode: CursorMode::HIDDEN,
-            source_type: SourceType::empty(),
-            source: SessionSource::Unset,
+
+        let id = next_session_id();
+        let session = PortalSession {
+            id,
+            to_compositor: self.to_compositor.clone(),
+            cast_id: None,
+            source: None,      // lazily created when receiving metadata
+            cursor_mode: None, // ^^^^
         };
+
         if let Err(err) = object_server.at(&session_handle, session).await {
-            let request_ref = object_server
-                .interface::<_, PRequest>(&request_handle)
-                .await
-                .unwrap();
-            let request = request_ref.get_mut().await;
-            request.close(object_server).await;
-
-            warn!(
-                ?err,
-                session_handle = session_handle.to_string(),
-                "Failed to create screencast session handle!"
-            );
-            return (1, HashMap::new());
+            let _ = object_server
+                .remove::<PortalRequest, _>(&request_handle)
+                .await; // even we dont remove this its not really important
+            warn!(?err, "Failed to create screencast session object");
+            return (2, HashMap::new());
         };
 
-        (0, HashMap::new())
+        let mut session_id_string = String::new();
+        write!(&mut session_id_string, "session-{}", id).unwrap();
+
+        (
+            0,
+            HashMap::from_iter([("session_id", zvariant::Value::new(session_id_string))]),
+        )
     }
 
     async fn select_sources(
@@ -144,74 +122,63 @@ impl Portal {
         session_handle: zvariant::ObjectPath<'_>,
         app_id: String,
         options: HashMap<&str, zvariant::Value<'_>>,
+        #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
-        debug!(
-            request_handle = request_handle.to_string(),
-            session_handle = session_handle.to_string(),
-            "select_sources"
-        );
+        let span = make_screencast_span("select_sources", &session_handle, &request_handle);
+        let _span_guard = span.enter();
 
         let session_ref = object_server
-            .interface::<_, Session>(&session_handle)
+            .interface::<_, PortalSession>(&session_handle)
             .await
-            .unwrap();
+            .expect("select_sources call should be on a valid session");
         let mut session = session_ref.get_mut().await;
 
         let cursor_mode = get_option_value::<u32>(&options, "cursor_mode")
             .ok()
             .and_then(CursorMode::from_bits)
             .unwrap_or_else(|| {
-                warn!(
-                    session_handle = session_handle.to_string(),
-                    "Failed to get 'cursor_mode' from options, using EMBEDDED"
-                );
-                CursorMode::EMBEDDED
-            });
-        let source_type = get_option_value::<u32>(&options, "source_type")
-            .ok()
-            .and_then(SourceType::from_bits)
-            .unwrap_or_else(|| {
-                warn!(
-                    session_handle = session_handle.to_string(),
-                    "Failed to get 'source_type' from options, using MONITOR"
-                );
-                SourceType::MONITOR
+                warn!("Failed to get 'cursor_mode' from options, using HIDDEN");
+                CursorMode::HIDDEN
             });
 
-        let output = async_std::process::Command::new("fht-share-picker")
+        // TODO: Support more source types.
+        // Currently we dont take in consideration for the passed in value
+
+        let Ok(output) = std::process::Command::new("fht-share-picker")
             .stdout(std::process::Stdio::null())
             .arg(app_id)
             .output()
-            .await
-            .expect("Failed to spawn command!");
+        else {
+            warn!("failed to spawn fht-share-picker");
+            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            return (2, HashMap::new());
+        };
+
         if !output.status.success() {
-            warn!(
-                session_handle = session_handle.to_string(),
-                "Share picker exited unsuccessfully"
-            );
-            session.close(object_server).await;
-            return (1, HashMap::new());
+            warn!("fht-share-picker exited unsuccessfully");
+            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            return (2, HashMap::new());
         }
+        // TODO: Maybe to a better job at parsing this?
+        // Maybe use serde_json and HashMap to store different values
         let stderr = std::str::from_utf8(&output.stderr).expect("stderr contained invalid bytes!");
         let source = if let Some(output_name) = stderr
             .lines()
             .find(|line| line.contains("[select-output]"))
             .and_then(|line| line.split('/').skip(1).next())
         {
-            SessionSource::Output(output_name.to_string(), None)
+            ScreencastSource::Output {
+                name: output_name.to_string(),
+            }
         } else {
-            warn!(
-                session_handle = session_handle.to_string(),
-                "Unable to select source for screencopy!"
-            );
-            session.close(object_server).await;
-            return (1, HashMap::new());
+            warn!("Unable to select source for screencopy");
+            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            return (2, HashMap::new());
         };
 
-        session.source_type = source_type;
-        session.source = source;
-        session.cursor_mode = cursor_mode;
+        session.source = Some(source);
+        session.cursor_mode = Some(cursor_mode);
 
         (0, HashMap::new())
     }
@@ -223,284 +190,175 @@ impl Portal {
         _app_id: String,
         _parent_window: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
+        #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
-        debug!(
-            request_handle = request_handle.to_string(),
-            session_handle = session_handle.to_string(),
-            "start"
-        );
+        let span = make_screencast_span("start", &session_handle, &request_handle);
+        let _span_guard = span.enter();
 
         let session_ref = object_server
-            .interface::<_, Session>(&session_handle)
+            .interface::<_, PortalSession>(&session_handle)
             .await
             .unwrap();
-        let session = session_ref.get_mut().await;
+        let mut session = session_ref.get_mut().await;
+
+        let source = session
+            .source
+            .clone()
+            .expect("a session can only start after select_sources");
+        let cursor_mode = session
+            .cursor_mode
+            .clone()
+            .expect("a session can only start after select_sources");
+
+        // What we do now is ask the compositor to start the screencast.
+        // In the dbus thread we block on the receiver until we receive *something*.
+        //
+        // Receive Some(metadata) => continue with streaming
+        // receive None => something bad happened on the compositor/pipewire side, drop
+        let (metadata_sender, metadata_receiver) = async_channel::unbounded();
 
         if let Err(err) = self.to_compositor.send(Request::StartCast {
             session_handle: session_handle.clone().into(),
-            source: session.source.clone(),
-            source_type: session.source_type,
-            cursor_mode: session.cursor_mode,
+            metadata_sender,
+            source: source.clone(),
+            cursor_mode,
         }) {
-            warn!(
-                ?err,
-                session_handle = session_handle.to_string(),
-                "Pipewire failed to start cast!"
-            );
-            session.close(object_server).await;
-            return (1, HashMap::new());
+            warn!(?err, "Failed to send StartCast request to compositor");
+            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            return (2, HashMap::new());
         }
 
-        let (node_id, location, size, source_type) = match self.from_compositor.recv().await {
-            Ok(Response::PipeWireStreamData {
-                node_id,
-                location,
-                size,
-                source_type,
-            }) => (node_id, location, size, source_type),
-            Ok(Response::PipeWireFail) | Err(_) => {
-                warn!(
-                    session = session_handle.to_string(),
-                    "Pipewire failed to start cast!"
-                );
-                session.close(object_server).await;
+        let StreamMetadata {
+            cast_id,
+            node_id,
+            size,
+        } = match metadata_receiver.recv().await {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => {
+                let _ = session.closed(&signal_ctx, HashMap::new()).await;
                 return (1, HashMap::new());
+            }
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "Metadata receiver channel closed when it should not, weird..."
+                );
+                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                return (2, HashMap::new());
             }
         };
 
+        assert!(session.cast_id.replace(cast_id).is_none());
         let mut results = HashMap::new();
 
         results.insert(
             "streams",
             zvariant::Value::new(vec![(node_id, {
                 let mut response = HashMap::new();
-                response.insert("position", zvariant::Value::new(location));
-                response.insert("size", zvariant::Value::new(size));
-                response.insert("source_type", zvariant::Value::new(source_type));
+                // NOTE: Even we don't include position, it doesn't seem to be used at all
+                response.insert("size", zvariant::Value::new((size.w, size.h)));
+                response.insert(
+                    "source_type",
+                    zvariant::Value::new(match &source {
+                        ScreencastSource::Output { .. } => SourceType::MONITOR.bits(),
+                    }),
+                );
 
                 response
             })]),
         );
+        // TODO: Support persist mode
+        results.insert("persist_mode", zvariant::Value::U32(0));
 
-        //    node_id + data
+        // as per the portal API documentation,
+        // return 0 as the status code, and results contain our node metadata
         (0, results)
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub enum SessionSource {
-    Unset,
-    Output(String, Option<smithay::output::Output>),
-    Rectangle(Rectangle<i32, Logical>, Option<smithay::output::Output>),
+static SESSION_IDS: AtomicUsize = AtomicUsize::new(0);
+fn next_session_id() -> usize {
+    SESSION_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
-impl SessionSource {
-    pub fn output(&self) -> Option<&smithay::output::Output> {
-        match self {
-            Self::Unset => None,
-            Self::Output(_, output) | Self::Rectangle(_, output) => output.as_ref(),
-        }
-    }
-
-    pub fn rectangle(&self) -> Option<Rectangle<i32, Logical>> {
-        match self {
-            Self::Unset => None,
-            Self::Output(_, output) => output.as_ref().map(|o| o.geometry()),
-            Self::Rectangle(rec, _) => Some(*rec),
-        }
-    }
+/// A single screencast session.
+///
+/// Read more <https://flatpak.github.io/xdg-desktop-portal/docs/sessions.html>
+pub struct PortalSession {
+    /// The unique ID of this [`ScreenCastSession`].
+    #[allow(dead_code)]
+    id: usize,
+    /// Channel to send [`Request`]s to the compositor.
+    to_compositor: calloop::channel::Sender<Request>,
+    /// The pipewire cast that is streaming for this session.
+    cast_id: Option<CastId>,
+    /// The source used for this session.
+    source: Option<ScreencastSource>,
+    /// The cursor mode used for this session.
+    cursor_mode: Option<CursorMode>,
 }
 
-pub struct Session {
-    _app_id: String,
-    request_handle: zvariant::OwnedObjectPath,
-    handle: zvariant::OwnedObjectPath,
-    cursor_mode: CursorMode,
-    source_type: SourceType,
-    source: SessionSource,
+/// The metadata associated with a pipewire stream, received from the compositor.
+pub struct StreamMetadata {
+    pub cast_id: CastId,
+    pub node_id: u32,
+    pub size: Size<u32, Physical>,
 }
 
 #[interface(name = "org.freedesktop.impl.portal.Session")]
-impl Session {
-    async fn close(&self, #[zbus(object_server)] object_server: &ObjectServer) {
-        // We should have this object if we are being called.
-        assert!(object_server
-            .remove::<Session, _>(&self.handle)
-            .await
-            .unwrap());
-        // And if we have a session we surely have the request too
-        assert!(object_server
-            .remove::<PRequest, _>(&self.request_handle)
-            .await
-            .unwrap());
-    }
-
-    #[zbus(signal)]
-    async fn closed(&self, signal_ctx: &SignalContext<'_>) -> zbus::Result<()>;
-}
-
-pub struct PRequest {
-    handle: zvariant::OwnedObjectPath,
-}
-
-#[interface(name = "org.freedesktop.impl.Portal.Request")]
-impl PRequest {
-    async fn close(&self, #[zbus(object_server)] object_server: &ObjectServer) {
-        assert!(object_server
-            .remove::<PRequest, _>(&self.handle)
-            .await
-            .unwrap());
-    }
-
-    #[zbus(signal)]
-    async fn closed(&self, signal_ctx: &SignalContext<'_>) -> zbus::Result<()>;
-}
-
-impl State {
-    pub(super) fn handle_screencast_request(
-        &mut self,
-        req: Request,
-        to_screencast: &async_std::channel::Sender<Response>,
-        to_compositor: &calloop::channel::Sender<Request>,
-    ) {
-        match req {
-            Request::StartCast {
-                session_handle,
-                mut source,
-                source_type,
-                cursor_mode,
-            } => {
-                // We don't support screencasting on X11 since eh, you prob dont need it.
-                #[cfg(not(feature = "udev-backend"))]
-                {
-                    warn!("ScreenCast is only supported on udev backend");
-                    return;
-                }
-                #[cfg(feature = "udev-backend")]
-                {
-                    #[allow(irrefutable_let_patterns)]
-                    let Backend::Udev(ref mut data) = &mut self.backend
-                    else {
-                        warn!("ScreenCast is only supported on udev backend");
-                        return;
-                    };
-
-                    let Some(gbm_device) =
-                        data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
-                    else {
-                        warn!("No available GBM device");
-                        return;
-                    };
-
-                    match &mut source {
-                        SessionSource::Unset => unreachable!(),
-                        SessionSource::Output(name, output) => {
-                            if output.is_none() {
-                                if let Some(o) = self.fht.output_named(&name) {
-                                    *output = Some(o);
-                                } else {
-                                    warn!("Tried to start a screencast with an invalid output");
-                                    to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                    return;
-                                }
-                            }
-                        }
-                        SessionSource::Rectangle(rec, output) => {
-                            if output.is_none() {
-                                if let Some(o) = self
-                                    .fht
-                                    .space
-                                    .outputs()
-                                    .find(|o| o.geometry().intersection(*rec).is_some())
-                                    .cloned()
-                                {
-                                    *output = Some(o);
-                                } else {
-                                    warn!("Tried to start a screecast with an invalid region");
-                                    to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    self.fht.pipewire_initialised.call_once(|| {
-                        self.fht.pipewire = PipeWire::new(&self.fht.loop_handle)
-                            .map_err(|err| warn!(?err, "Failed to initialize PipeWire!"))
-                            .ok();
-                    });
-
-                    let Some(pipewire) = self.fht.pipewire.as_mut() else {
-                        warn!("PipeWire failed to initialize");
-                        to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                        return;
-                    };
-
-                    match pipewire.start_cast(
-                        to_compositor.clone(),
-                        to_screencast.clone(),
-                        gbm_device,
-                        session_handle,
-                        source.clone(),
-                        source_type,
-                        cursor_mode,
-                    ) {
-                        Ok(cast) => {
-                            pipewire.casts.push(cast);
-                        }
-                        Err(err) => {
-                            error!(?err, "Failed to start screen cast");
-                            to_screencast.send_blocking(Response::PipeWireFail).unwrap();
-                        }
-                    }
-                }
-            }
-            Request::StopCast { session_handle } => {
-                self.fht.stop_cast(session_handle);
+impl PortalSession {
+    pub fn close(&self) {
+        if let Some(cast_id) = self.cast_id {
+            if let Err(err) = self.to_compositor.send(Request::StopCast { cast_id }) {
+                warn!(?err, "Failed to send StopCast request to compositor");
             }
         }
     }
+
+    #[zbus(signal)]
+    pub async fn closed(
+        &self,
+        signal_ctx: &SignalContext<'_>,
+        details: HashMap<&str, zvariant::Value<'_>>,
+    ) -> zbus::Result<()>;
 }
 
-impl Fht {
-    #[profiling::function]
-    pub fn stop_cast(&mut self, session_handle: zvariant::OwnedObjectPath) {
-        debug!(session_handle = session_handle.to_string(), "Stopping cast");
-        let Some(pipewire) = self.pipewire.as_mut() else {
-            return;
-        };
+/// A singla screencast request.
+///
+/// NOTE: This does nothing much, expect being compliant with the portal interface? Even what
+/// xdg-desktop-portal-wlr does is just create it and forget about it.
+///
+/// Read more <https://flatpak.github.io/xdg-desktop-portal/docs/requests.html>
+pub struct PortalRequest;
 
-        let Some(idx) = pipewire
-            .casts
-            .iter()
-            .position(|c| c.session_handle == session_handle)
-        else {
-            warn!("Tried to stop an invalid cast");
-            return;
-        };
+#[interface(name = "org.freedesktop.portal.Request")]
+impl PortalRequest {
+    /// Closes the portal request to which this object refers and ends all related user interaction
+    /// (dialogs, etc).
+    ///
+    /// A [`Self::response`] signal will not be emitted in this case.
+    fn close(&self) {}
 
-        let cast = pipewire.casts.swap_remove(idx);
-        if let Err(err) = cast.stream.disconnect() {
-            warn!(?err, "Failed to disconnect PipeWire stream")
-        }
-
-        let object_server = DBUS_CONNECTION.object_server();
-        let Ok(interface) = object_server.interface::<_, Session>(&session_handle) else {
-            warn!(
-                session_handle = session_handle.to_string(),
-                "Cast session doesn't exist"
-            );
-            return;
-        };
-        async_std::task::block_on(async {
-            interface.get().close(object_server.inner()).await;
-            if let Err(err) = interface.get().closed(interface.signal_context()).await {
-                warn!(?err, "Failed to send closed signal to screencast session");
-            };
-        });
-    }
+    /// Emitted when the user interaction for a portal request is over.
+    #[zbus(signal)]
+    async fn response(
+        &self,
+        signal_ctx: &SignalContext<'_>,
+        reason: u32,
+        results: HashMap<&str, zvariant::Value<'_>>,
+    ) -> zbus::Result<()>;
 }
+
+#[derive(Clone, PartialEq)]
+pub enum ScreencastSource {
+    Output { name: String },
+    // TODO: Add workspace and window sources
+}
+
+impl State {}
+
+impl Fht {}
 
 fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
     options: &'value HashMap<&str, zvariant::Value<'value>>,
@@ -508,4 +366,32 @@ fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
 ) -> anyhow::Result<T> {
     T::try_from(options.get(name).context("Failed to get value!")?)
         .map_err(|_| anyhow::anyhow!("Failed to convert value!"))
+}
+
+// A simpler way to record spans.
+fn make_screencast_span<'a>(
+    event: &'static str,
+    session_handle: &zvariant::ObjectPath<'a>,
+    request_handle: &zvariant::ObjectPath<'a>,
+) -> tracing::Span {
+    let session_handle = session_handle.to_string();
+    let session_handle = session_handle
+        .strip_prefix("/org/freedesktop/portal/desktop/session/")
+        .expect("session handle should always contain prefix");
+    let request_handle = request_handle.to_string();
+    let request_handle = request_handle
+        .strip_prefix("/org/freedesktop/portal/desktop/request/")
+        .expect("request handle should always contain prefix");
+
+    let span = debug_span!(
+        "screencast",
+        event = tracing::field::Empty,
+        session = tracing::field::Empty,
+        request = tracing::field::Empty,
+    );
+    span.record("event", event);
+    span.record("session", session_handle);
+    span.record("request", request_handle);
+
+    span
 }
