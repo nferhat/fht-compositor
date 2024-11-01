@@ -344,19 +344,19 @@ impl Tile {
     }
 
     /// Advance animations for this [`Tile`].
-    pub fn advance_animations(&mut self, now: Duration) -> bool {
+    pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         let mut animations_ongoing = false;
 
         let _ = self.location_animation.take_if(|a| a.is_finished());
         if let Some(animation) = &mut self.location_animation {
             animations_ongoing = true;
-            animation.tick(now);
+            animation.tick(target_presentation_time);
         }
 
         let _ = self.opening_animation.take_if(|a| a.is_finished());
         if let Some(animation) = &mut self.opening_animation {
             animations_ongoing = true;
-            animation.tick(now);
+            animation.tick(target_presentation_time);
         }
 
         animations_ongoing

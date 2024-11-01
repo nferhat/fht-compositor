@@ -18,7 +18,7 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
 
-use crate::state::{Fht, OutputState, ResolvedWindowRules, State, UnmappedWindow};
+use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
@@ -407,7 +407,7 @@ impl CompositorHandler for State {
                 .process_window_commit(surface)
                 .or_else(|| State::process_layer_shell_commit(&surface, &mut self.fht))
             {
-                OutputState::get(&output).render_state.queue();
+                self.fht.queue_redraw(&output);
             }
         }
 
@@ -415,14 +415,14 @@ impl CompositorHandler for State {
         // Ensure initial configure.
         self.fht.popups.commit(surface);
         if let Some(output) = State::process_popup_commit(surface, &mut self.fht) {
-            OutputState::get(&output).render_state.queue();
+            self.fht.queue_redraw(&output);
             return;
         }
 
         // 2nd case if this isnt a root surface; some kind of subsurface.
         // For example firefox has its main webcontent as a subsurface.
-        if let Some(output) = self.fht.visible_output_for_surface(surface) {
-            OutputState::get(&output).render_state.queue();
+        if let Some(output) = self.fht.visible_output_for_surface(surface).cloned() {
+            self.fht.queue_redraw(&output);
         }
     }
 

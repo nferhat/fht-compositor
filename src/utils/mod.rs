@@ -1,18 +1,25 @@
 use std::mem::MaybeUninit;
 use std::os::unix::process::CommandExt;
 use std::process::Stdio;
+use std::time::Duration;
 
+use smithay::reexports::rustix;
 use smithay::utils::{Coordinate, Point, Rectangle};
 
 #[cfg(feature = "dbus")]
 pub mod dbus;
-#[cfg(feature = "udev-backend")]
-pub mod drm;
-pub mod fps;
-pub mod geometry;
-pub mod output;
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod pipewire;
+
+pub fn get_monotonic_time() -> Duration {
+    // This does the same job as a Clock<Monotonic> provided by smithay.
+    // I do not understand why they decided to put on an abstraction
+    //
+    // We also do not use the Time<Monotonic> structure provided by smithay since its really
+    // annoying to work with (addition, difference, etc...)
+    let timespec = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    Duration::new(timespec.tv_sec as u64, timespec.tv_nsec as u32)
+}
 
 #[profiling::function]
 pub fn spawn(cmd: String) {

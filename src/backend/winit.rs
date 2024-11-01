@@ -17,9 +17,9 @@ use smithay::wayland::dmabuf::{
     DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
 };
 
+use crate::output::RedrawState;
 use crate::renderer::OutputElementsResult;
-use crate::state::{Fht, OutputState, RenderState, State};
-use crate::utils::fps::Fps;
+use crate::state::{Fht, State};
 
 pub struct WinitData {
     backend: WinitGraphicsBackend<GlowRenderer>,
@@ -28,7 +28,6 @@ pub struct WinitData {
     damage_tracker: OutputDamageTracker,
     dmabuf_global: DmabufGlobal,
     dmabuf_feedback: Option<DmabufFeedback>,
-    fps: Fps,
     full_redraw: u8,
 }
 
@@ -67,14 +66,11 @@ impl WinitData {
                         None,
                     );
                     backend.output.set_preferred(new_mode);
-
                     state.fht.output_resized(&backend.output);
                 }
                 winit::WinitEvent::Input(event) => state.process_input_event(event),
                 winit::WinitEvent::CloseRequested => state.fht.stop = true,
-                winit::WinitEvent::Redraw => OutputState::get(&state.backend.winit().output)
-                    .render_state
-                    .queue(),
+                winit::WinitEvent::Redraw => state.fht.queue_redraw(&state.backend.winit().output),
                 winit::WinitEvent::Focus(_) => (), // we dont really care about focusing...
             })
             .map_err(|err| anyhow::anyhow!("Failed to insert the winit event source: {err}"))?;
@@ -102,7 +98,7 @@ impl WinitData {
             None,
         );
         output.set_preferred(mode);
-        fht.add_output(output.clone());
+        fht.add_output(output.clone(), None);
 
         let render_node = EGLDevice::device_for_display(backend.renderer().egl_context().display())
             .and_then(|device| device.try_get_render_node());
@@ -164,14 +160,12 @@ impl WinitData {
             dmabuf_global,
             dmabuf_feedback,
             full_redraw: 0,
-            fps: Fps::new(),
         })
     }
 
     pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
         let renderer = self.backend.renderer();
-        let OutputElementsResult { elements, .. } =
-            fht.output_elements(renderer, &self.output, &mut self.fps);
+        let OutputElementsResult { elements, .. } = fht.output_elements(renderer, &self.output);
 
         self.backend.bind().context("Failed to bind backend")?;
         let age = self.backend.buffer_age().unwrap();
@@ -205,12 +199,10 @@ impl WinitData {
             );
         }
 
-        let mut output_state = OutputState::get(&self.output);
-        match std::mem::replace(&mut output_state.render_state, RenderState::Idle) {
-            RenderState::Idle => unreachable!(),
-            RenderState::Queued => (),
-            RenderState::WaitingForVblank { .. } => unreachable!(),
-            RenderState::WaitingForVblankTimer { .. } => unreachable!(),
+        let output_state = fht.output_state.get_mut(&self.output).unwrap();
+        match std::mem::replace(&mut output_state.redraw_state, RedrawState::Idle) {
+            RedrawState::Queued => (),
+            _ => unreachable!(),
         }
 
         output_state.current_frame_sequence = output_state.current_frame_sequence.wrapping_add(1);

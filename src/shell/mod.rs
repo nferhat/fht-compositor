@@ -14,8 +14,8 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shell::xdg::PopupSurface;
 
 pub use self::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
-use crate::state::{Fht, OutputState};
-use crate::utils::output::OutputExt;
+use crate::output::OutputExt;
+use crate::state::Fht;
 
 impl Fht {
     pub fn focus_target_under(
@@ -28,7 +28,7 @@ impl Fht {
         let layer_map = layer_map_for_output(output);
 
         {
-            let output_state = OutputState::get(output);
+            let output_state = self.output_state.get(output).unwrap();
             if let Some(lock_surface) = &output_state.lock_surface {
                 // NOTE: Lock surface is always position at (0,0)
                 if let Some((surface, surface_loc)) = under_from_surface_tree(
@@ -152,13 +152,12 @@ impl Fht {
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
         for output in self.space.outputs() {
             // Lock surface and layer shells take priority.
-            let output_state = OutputState::get(output);
+            let output_state = self.output_state.get(output).unwrap();
             if output_state
                 .lock_surface
                 .as_ref()
                 .is_some_and(|lock_surface| lock_surface.wl_surface() == surface)
             {
-                drop(output_state); // avoid deadlocks
                 return Some(output);
             }
 
@@ -193,16 +192,10 @@ impl Fht {
         });
     }
 
-    pub fn advance_animations(&mut self, output: &Output, now: std::time::Duration) -> bool {
-        let monitor = self
-            .space
-            .monitor_mut_for_output(output)
-            .expect("all outputs should be tracked by Space");
-        let mut ret = false;
-        ret |= self
-            .config_ui
-            .advance_animations(now, !self.config.animations.disable);
-        ret |= monitor.advance_animations(now);
-        ret
-    }
+    // pub fn advance_animations(
+    //     &mut self,
+    //     output: &Output,
+    //     target_presentation_time: std::time::Duration,
+    // ) -> bool {
+    // }
 }

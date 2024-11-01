@@ -8,8 +8,8 @@ use smithay::reexports::rustix::path::Arg;
 use smithay::utils::{Logical, Point, Size};
 
 use crate::egui::{EguiElement, EguiRenderElement};
+use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
-use crate::utils::output::OutputExt;
 
 // A 800x640 rectangle should always suffice to display egui with room to spare.
 // egui will do its geometry and layout magic in order to keep some space for shadows, so we should
@@ -116,7 +116,11 @@ impl ConfigUi {
     }
 
     /// Advance the animations for this [`ConfigUi`].
-    pub fn advance_animations(&mut self, now: Duration, animate: bool) -> bool {
+    pub fn advance_animations(
+        &mut self,
+        target_presentation_time: Duration,
+        animate: bool,
+    ) -> bool {
         let mut animations_ongoing = false;
         self.state = match std::mem::take(&mut self.state) {
             State::Sliding {
@@ -125,15 +129,15 @@ impl ConfigUi {
                 hiding,
             } => {
                 animations_ongoing = true;
-                animation.tick(now);
+                animation.tick(target_presentation_time);
                 if animation.is_finished() {
                     if hiding {
                         State::Hidden
                     } else {
                         State::Shown {
                             content,
-                            started_at: now,
-                            last_tick: now,
+                            started_at: target_presentation_time,
+                            last_tick: target_presentation_time,
                         }
                     }
                 } else {
@@ -162,7 +166,7 @@ impl ConfigUi {
                         State::Hidden
                     }
                 } else {
-                    last_tick = now;
+                    last_tick = target_presentation_time;
                     State::Shown {
                         content,
                         started_at,

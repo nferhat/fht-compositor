@@ -1027,5 +1027,5 @@ fn allocate_dmabuf(
     let dmabuf = buffer
         .export()
         .context("error exporting GBM buffer object as dmabuf")?;
-    Ok((dmabuf))
+    Ok(dmabuf)
 }

@@ -25,9 +25,9 @@ use smithay::wayland::session_lock::LockSurface;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
+use crate::output::OutputExt;
 use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
-use crate::state::{OutputState, State};
-use crate::utils::output::OutputExt;
+use crate::state::State;
 
 impl State {
     #[profiling::function]
@@ -53,7 +53,7 @@ impl State {
         let pointer_loc = pointer.current_location();
 
         if self.fht.is_locked() {
-            let output_state = OutputState::get(output);
+            let output_state = self.fht.output_state.get(output).unwrap();
             if let Some(lock_surface) = output_state.lock_surface.clone() {
                 self.set_keyboard_focus(Some(lock_surface));
                 return;
@@ -159,9 +159,7 @@ impl State {
         pointer.frame(self);
 
         // FIXME: More granular, maybe check for where the point was and is now
-        for output in self.fht.space.outputs() {
-            OutputState::get(output).render_state.queue()
-        }
+        self.fht.queue_redraw_all();
     }
 
     pub fn clamp_coords(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
@@ -812,8 +810,6 @@ impl State {
         }
 
         // FIXME: Granular
-        for output in self.fht.space.outputs() {
-            OutputState::get(output).render_state.queue()
-        }
+        self.fht.queue_redraw_all();
     }
 }

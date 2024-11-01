@@ -15,8 +15,8 @@ use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
 use super::Config;
 use crate::fht_render_elements;
+use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
-use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -1422,21 +1422,21 @@ impl Workspace {
     }
 
     /// Advance animations for this [`Workspace`]
-    pub fn advance_animations(&mut self, now: Duration) -> bool {
+    pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         let mut running = false;
 
         let _ = self.render_offset.take_if(|a| a.is_finished());
         if let Some(animation) = &mut self.render_offset {
-            animation.tick(now);
+            animation.tick(target_presentation_time);
             running = true;
         }
 
         for tile in &mut self.tiles {
-            running |= tile.advance_animations(now);
+            running |= tile.advance_animations(target_presentation_time);
         }
 
         for closing_tile in &mut self.closing_tiles {
-            closing_tile.advance_animations(now);
+            closing_tile.advance_animations(target_presentation_time);
             running = true;
         }
 

@@ -41,13 +41,13 @@ use smithay::input::keyboard::XkbConfig;
 use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::reexports::calloop::{self, Dispatcher, LoopHandle, PostAction, RegistrationToken};
+use smithay::reexports::calloop::{self, Dispatcher, PostAction, RegistrationToken};
 use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
-use smithay::reexports::drm::control::ModeTypeFlags;
-use smithay::reexports::drm::Device as _;
+use smithay::reexports::drm::control::{ModeTypeFlags, ResourceHandle};
+use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::Device as GbmDevice;
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
@@ -56,7 +56,7 @@ use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_pre
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Monotonic, Point, Rectangle, Time, Transform};
+use smithay::utils::{DeviceFd, Monotonic, Point, Rectangle, Transform};
 use smithay::wayland::dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
@@ -65,11 +65,11 @@ use smithay::wayland::shm::{self, shm_format_to_fourcc};
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
+use crate::output::RedrawState;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, OutputElementsResult};
-use crate::state::{Fht, OutputState, RenderState, State, SurfaceDmabufFeedback};
-use crate::utils::drm as drm_utils;
-use crate::utils::fps::Fps;
+use crate::state::{Fht, State, SurfaceDmabufFeedback};
+use crate::utils::get_monotonic_time;
 
 // The compositor can't just pick the first format available since some formats even if supported
 // make so sense to use since they lose information or are not fun to work with.
@@ -224,9 +224,7 @@ impl UdevData {
                         }
                     }
 
-                    for output in state.fht.space.outputs() {
-                        OutputState::get(output).render_state.queue()
-                    }
+                    state.fht.queue_redraw_all();
                 }
             })
             .map_err(|_| anyhow::anyhow!("Failed to insert libseat event source!"))?;
@@ -590,18 +588,17 @@ impl UdevData {
         );
         debug!(?crtc, ?output_name, "Trying to setup connector");
 
-        let non_desktop =
-            match drm_utils::get_property_val(&device.drm, connector.handle(), "non-desktop") {
-                Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
-                Err(err) => {
-                    warn!(
-                        ?crtc,
-                        ?err,
-                        "Failed to get non-desktop property for connector, defaulting to false."
-                    );
-                    false
-                }
-            };
+        let non_desktop = match get_property_val(&device.drm, connector.handle(), "non-desktop") {
+            Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
+            Err(err) => {
+                warn!(
+                    ?crtc,
+                    ?err,
+                    "Failed to get non-desktop property for connector, defaulting to false."
+                );
+                false
+            }
+        };
 
         let info = display_info::for_connector(&device.drm, connector.handle());
         let make = info
@@ -673,7 +670,9 @@ impl UdevData {
 
         output.set_preferred(mode);
         output.change_current_state(Some(mode), None, None, None);
-        fht.add_output(output.clone());
+        let refresh_interval =
+            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
+        fht.add_output(output.clone(), Some(refresh_interval));
 
         let allocator = GbmAllocator::new(
             device.gbm.clone(),
@@ -739,7 +738,6 @@ impl UdevData {
         let surface = Surface {
             render_node: device.render_node,
             output: output.clone(),
-            fps: Fps::new(),
             output_global,
             compositor,
             dmabuf_feedback,
@@ -747,7 +745,7 @@ impl UdevData {
             last_primary_swapchain: CommitCounter::default(),
             last_primary_element: CommitCounter::default(),
         };
-        OutputState::get(&surface.output).render_state.queue();
+        fht.queue_redraw(&surface.output);
         device.surfaces.insert(crtc, surface);
 
         Ok(())
@@ -812,7 +810,7 @@ impl UdevData {
         &mut self,
         fht: &mut Fht,
         output: &Output,
-        current_time: Duration,
+        target_presentation_time: Duration,
     ) -> anyhow::Result<bool> {
         let Some((device_node, crtc)) =
             self.devices.iter_mut().find_map(|(device_node, device)| {
@@ -844,19 +842,17 @@ impl UdevData {
             anyhow::bail!("Failed to get renderer")
         };
 
-        surface.fps.start();
-
         let output_elements_result = {
             let OutputElementsResult {
                 mut elements,
                 mut cursor_elements_len,
-            } = fht.output_elements(&mut renderer, &surface.output, &mut surface.fps);
-            surface.fps.elements();
+            } = fht.output_elements(&mut renderer, output);
 
             // To render damage we just use solid color elements,
             if fht.config.debug.draw_damage {
-                let mut state = OutputState::get(output);
-                let damage_elements = draw_damage(&mut state.damage_tracker, &elements);
+                let state = fht.output_state.get_mut(output).unwrap();
+                let damage_elements =
+                    draw_damage(output, &mut state.debug_damage_tracker, &elements);
                 // HACK: We dont want damage rectangles inside screencopy.
                 cursor_elements_len += damage_elements.len();
                 elements = damage_elements.into_iter().chain(elements).collect();
@@ -868,6 +864,7 @@ impl UdevData {
             }
         };
 
+        // Renderand check for damage.
         let res = surface
             .compositor
             .render_frame(
@@ -882,7 +879,6 @@ impl UdevData {
                 }
                 _ => unreachable!(),
             });
-        surface.fps.render();
 
         match res {
             Err(err) => {
@@ -904,22 +900,21 @@ impl UdevData {
                 }
 
                 // wlr-screencopy have to be rendered whether we damaged or not.
-                self::render_screencopy(&mut renderer, surface, &res, fht.loop_handle.clone());
+                self::render_screencopy(&mut renderer, surface, &res, fht);
 
                 if !res.is_empty {
-                    let presentation_feedbacks =
-                        fht.take_presentation_feedback(output, &res.states);
-                    let data = (presentation_feedbacks, current_time);
+                    // We have damage to submit, take presentation feedback try to queue the next
+                    // frame, this is the only code path where we should send frames to clients that
+                    // are displayed on the Surface's output.
+                    let presentation_feedback = fht.take_presentation_feedback(output, &res.states);
 
-                    match surface.compositor.queue_frame(data) {
+                    match surface.compositor.queue_frame(presentation_feedback) {
                         Ok(()) => {
-                            let mut output_state = OutputState::get(&surface.output);
-                            let new_state = RenderState::WaitingForVblank {
-                                redraw_needed: false,
-                            };
-                            match std::mem::replace(&mut output_state.render_state, new_state) {
-                                RenderState::Queued => (),
-                                RenderState::WaitingForVblankTimer {
+                            let output_state = fht.output_state.get_mut(output).unwrap();
+                            let new_state = RedrawState::WaitingForVblank { queued: false };
+                            match std::mem::replace(&mut output_state.redraw_state, new_state) {
+                                RedrawState::Queued => (),
+                                RedrawState::WaitingForEstimatedVblankTimer {
                                     token,
                                     queued: true,
                                 } => {
@@ -934,7 +929,6 @@ impl UdevData {
                                 output_state.current_frame_sequence.wrapping_add(1);
                             // Also notify profiling or our sucess.
                             profiling::finish_frame!();
-                            drop(output_state);
 
                             // Damage also means screencast.
                             #[cfg(feature = "xdg-screencast-portal")]
@@ -944,7 +938,6 @@ impl UdevData {
                                     &mut renderer,
                                     &output_elements_result,
                                 );
-                                surface.fps.screencast();
                             }
 
                             return Ok(true);
@@ -957,27 +950,15 @@ impl UdevData {
             }
         }
 
-        // We didn't render anything so the output was not damaged, we are still going to try to
-        // render after an estimated time till the next Vblank.
-        //
-        // We use the surface Fps counter to estimate how much time it takes to display a frame, on
-        // the last 6 frames, but this could be anything else. (Maybe base this on output refresh?)
-        let mut estimated_vblank_duration = surface.fps.avg_frametime();
-        if estimated_vblank_duration.is_zero() {
-            // In case the average render time is null just use the output's refresh rate and
-            // multiply by 0.95 to give some leeway to the compositor to draw.
-            let output_refresh = surface.output.current_mode().unwrap().refresh;
-            estimated_vblank_duration =
-                Duration::from_millis(((1_000_000f32 / output_refresh as f32) * 0.95f32) as u64);
-        }
-
-        let mut output_state = OutputState::get(&surface.output);
-        match std::mem::take(&mut output_state.render_state) {
-            RenderState::Idle => unreachable!(),
-            RenderState::Queued => (),
-            RenderState::WaitingForVblank { .. } => unreachable!(),
-            RenderState::WaitingForVblankTimer { token, .. } => {
-                output_state.render_state = RenderState::WaitingForVblankTimer {
+        // Submitted buffers but there was no damage.
+        // Send frame callbacks after approx
+        let output_state = fht.output_state.get_mut(output).unwrap();
+        match std::mem::take(&mut output_state.redraw_state) {
+            RedrawState::Idle => unreachable!(),
+            RedrawState::Queued => (),
+            RedrawState::WaitingForVblank { .. } => unreachable!(),
+            RedrawState::WaitingForEstimatedVblankTimer { token, .. } => {
+                output_state.redraw_state = RedrawState::WaitingForEstimatedVblankTimer {
                     token,
                     queued: false,
                 };
@@ -985,22 +966,35 @@ impl UdevData {
             }
         };
 
-        let timer = Timer::from_duration(estimated_vblank_duration);
+        let now = get_monotonic_time();
+        let mut duration = target_presentation_time.saturating_sub(now);
+        if duration.is_zero() {
+            // No use setting a zero timer, since we'll send frame callbacks anyway right after the
+            // call to render(). This can happen for example with unknown presentation time from
+            // DRM.
+            duration += output_state
+                .frame_clock
+                .refresh_interval()
+                .expect("udev backend should not have unknown refresh interval");
+        }
+        trace!(?duration, "starting estimated vblank timer");
+
+        let timer = Timer::from_duration(duration);
         let output = surface.output.clone();
         let token = fht
             .loop_handle
             .insert_source(timer, move |_, _, state| {
                 profiling::scope!("estimated vblank timer");
-                let mut output_state = OutputState::get(&output);
+                let output_state = state.fht.output_state.get_mut(&output).unwrap();
                 output_state.current_frame_sequence =
                     output_state.current_frame_sequence.wrapping_add(1);
 
-                match std::mem::replace(&mut output_state.render_state, RenderState::Idle) {
+                match std::mem::replace(&mut output_state.redraw_state, RedrawState::Idle) {
                     // The timer fired just in front of a redraw.
-                    RenderState::WaitingForVblankTimer { queued, .. } => {
+                    RedrawState::WaitingForEstimatedVblankTimer { queued, .. } => {
                         if queued {
-                            output_state.render_state = RenderState::Queued;
-                            // If we are queued wait for the next render to send frame callback
+                            // Just wait for the next redraw call to send frame callbacks
+                            output_state.redraw_state = RedrawState::Queued;
                             return TimeoutAction::Drop;
                         }
                     }
@@ -1008,16 +1002,15 @@ impl UdevData {
                 }
 
                 if output_state.animations_running {
-                    output_state.render_state.queue();
+                    output_state.redraw_state.queue();
                 } else {
-                    drop(output_state);
                     state.fht.send_frames(&output);
                 }
 
                 TimeoutAction::Drop
             })
             .unwrap();
-        output_state.render_state = RenderState::WaitingForVblankTimer {
+        output_state.redraw_state = RedrawState::WaitingForEstimatedVblankTimer {
             token,
             queued: false,
         };
@@ -1054,43 +1047,44 @@ impl UdevData {
             return;
         };
 
-        surface.fps.displayed();
+        let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+        let redraw_queued =
+            match std::mem::replace(&mut output_state.redraw_state, RedrawState::Idle) {
+                RedrawState::WaitingForVblank { queued } => queued,
+                _ => unreachable!(),
+            };
+
+        let now = get_monotonic_time();
+        let presentation_time = match metadata.time {
+            DrmEventTime::Monotonic(tp) => tp.into(),
+            DrmEventTime::Realtime(_) => now,
+        };
 
         match surface
             .compositor
             .frame_submitted()
             .map_err(Into::<SwapBuffersError>::into)
         {
-            Ok(user_data) => {
-                if let Some((mut feedback, presentation_time)) = user_data {
-                    let seq = metadata.sequence;
+            Ok(Some(mut presentation_feedback)) => {
+                let refresh = output_state
+                    .frame_clock
+                    .refresh_interval()
+                    .unwrap_or(Duration::ZERO);
+                // FIXME: ideally should be monotonically increasing for a surface.
+                let seq = metadata.sequence as u64;
+                let mut flags = wp_presentation_feedback::Kind::Vsync
+                    | wp_presentation_feedback::Kind::HwCompletion;
 
-                    let (clock, flags) = match metadata.time {
-                        DrmEventTime::Monotonic(tp) => (
-                            tp.into(),
-                            wp_presentation_feedback::Kind::Vsync
-                                | wp_presentation_feedback::Kind::HwClock
-                                | wp_presentation_feedback::Kind::HwCompletion,
-                        ),
-                        DrmEventTime::Realtime(_) => {
-                            (presentation_time, wp_presentation_feedback::Kind::Vsync)
-                        }
-                    };
+                let time = if presentation_time.is_zero() {
+                    now
+                } else {
+                    flags.insert(wp_presentation_feedback::Kind::HwClock);
+                    presentation_time
+                };
 
-                    let refresh = surface
-                        .output
-                        .current_mode()
-                        .map(|mode| Duration::from_secs_f64(1_000f64 / mode.refresh as f64))
-                        .unwrap_or_default();
-
-                    feedback.presented::<Time<Monotonic>, _>(
-                        clock.into(),
-                        refresh,
-                        seq as u64,
-                        flags,
-                    );
-                }
+                presentation_feedback.presented::<_, Monotonic>(time, refresh, seq, flags);
             }
+            Ok(None) => (),
             Err(err) => {
                 warn!("Error during rendering: {:?}", err);
                 match err {
@@ -1100,17 +1094,12 @@ impl UdevData {
             }
         };
 
-        let mut output_state = OutputState::get(&surface.output);
-        let redraw_needed =
-            match std::mem::replace(&mut output_state.render_state, RenderState::Idle) {
-                RenderState::WaitingForVblank { redraw_needed } => redraw_needed,
-                _ => unreachable!(),
-            };
+        // Now update the frameclock
+        output_state.frame_clock.present(presentation_time);
 
-        if redraw_needed || output_state.animations_running {
-            output_state.render_state.queue();
+        if redraw_queued || output_state.animations_running {
+            fht.queue_redraw(&surface.output);
         } else {
-            drop(output_state);
             fht.send_frames(&surface.output);
         }
     }
@@ -1132,7 +1121,6 @@ pub struct Surface {
     render_node: DrmNode,
     output: Output,
     output_global: GlobalId,
-    fps: Fps,
     compositor: GbmDrmCompositor,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
     last_primary_swapchain: CommitCounter,
@@ -1142,7 +1130,7 @@ pub struct Surface {
 pub type GbmDrmCompositor = DrmCompositor<
     GbmAllocator<DrmDeviceFd>,
     GbmDevice<DrmDeviceFd>,
-    (OutputPresentationFeedback, Duration),
+    OutputPresentationFeedback,
     DrmDeviceFd,
 >;
 
@@ -1218,10 +1206,10 @@ fn render_screencopy<'a>(
         GbmFramebuffer,
         FhtRenderElement<UdevRenderer<'a>>,
     >,
-    loop_handle: LoopHandle<'static, State>,
+    fht: &mut Fht,
 ) {
-    let mut state = OutputState::get(&surface.output);
-    let Some(mut screencopy) = state.pending_screencopy.take() else {
+    let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+    let Some(mut screencopy) = output_state.pending_screencopy.take() else {
         return;
     };
     assert!(screencopy.output() == &surface.output);
@@ -1235,7 +1223,7 @@ fn render_screencopy<'a>(
     if screencopy.with_damage() {
         if render_frame_result.is_empty {
             // Protocols requires us to not send anything until we get damage.
-            state.pending_screencopy.replace(screencopy);
+            output_state.pending_screencopy.replace(screencopy);
             return;
         };
 
@@ -1276,7 +1264,7 @@ fn render_screencopy<'a>(
 
         if damage.is_empty() {
             // Still no damage, continue with your day.
-            state.pending_screencopy.replace(screencopy);
+            output_state.pending_screencopy.replace(screencopy);
             return;
         };
 
@@ -1410,7 +1398,7 @@ fn render_screencopy<'a>(
             };
             let mut screencopy = Some(screencopy);
             let source = Generic::new(sync_fd, calloop::Interest::READ, calloop::Mode::OneShot);
-            let res = loop_handle.insert_source(source, move |_, _, _| {
+            let res = fht.loop_handle.insert_source(source, move |_, _, _| {
                 let Some(screencopy) = screencopy.take() else {
                     unreachable!("This source is removed after one run");
                 };
@@ -1430,9 +1418,11 @@ fn render_screencopy<'a>(
 const DAMAGE_COLOR: Color32F = Color32F::new(0.05, 0.0, 0.0, 0.05);
 
 fn draw_damage<'a>(
-    dt: &mut OutputDamageTracker,
+    output: &Output,
+    dt: &mut Option<OutputDamageTracker>,
     elements: &[FhtRenderElement<UdevRenderer<'a>>],
 ) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
+    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(&output));
     let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
         return vec![];
     };
@@ -1451,4 +1441,41 @@ fn draw_damage<'a>(
     }
 
     damage_elements
+}
+
+fn get_property_val(
+    device: &impl drm::control::Device,
+    handle: impl ResourceHandle,
+    name: &str,
+) -> anyhow::Result<(
+    drm::control::property::ValueType,
+    drm::control::property::RawValue,
+)> {
+    let props = device.get_properties(handle)?;
+    let (prop_handles, values) = props.as_props_and_values();
+    for (&prop, &val) in prop_handles.iter().zip(values.iter()) {
+        let info = device.get_property(prop)?;
+        if Some(name) == info.name().to_str().ok() {
+            let val_type = info.value_type();
+            return Ok((val_type, val));
+        }
+    }
+    anyhow::bail!("No prop found for {}", name)
+}
+
+/// Calculate the refresh rate, in seconds of this [`Mode`](drm::control::Mode).
+///
+/// Code copied from mutter.
+fn calculate_refresh_rate(mode: &drm::control::Mode) -> f64 {
+    let htotal = mode.hsync().2 as u64;
+    let vtotal = mode.vsync().2 as u64;
+    let vscan = mode.vscan() as u64;
+
+    if htotal <= 0 || vtotal <= 0 {
+        return 0f64;
+    }
+    let numerator = mode.clock() as u64 * 1_000_000;
+    let denominator = vtotal * htotal * (if vscan > 1 { vscan } else { 1 });
+
+    (numerator / denominator) as f64
 }

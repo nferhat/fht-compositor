@@ -1,22 +1,20 @@
 use crate::delegate_screencopy;
 use crate::protocols::screencopy::{Screencopy, ScreencopyHandler};
-use crate::state::{OutputState, State};
+use crate::state::State;
 
 impl ScreencopyHandler for State {
     fn frame(&mut self, frame: Screencopy) {
-        // With wlr-screencopy, its up to the clients to manage frame timings, and not the
-        // compositor. We can't render at any time, so we just set this frame pending and submit to
-        // it by the next render.
-
-        let output = frame.output().clone();
-        let mut state = OutputState::get(&output);
+        let Some(output_state) = self.fht.output_state.get_mut(frame.output()) else {
+            warn!("wlr-screencopy frame with invalid output");
+            return;
+        };
 
         if !frame.with_damage() {
             // If we need damage, wait for the next render.
-            state.render_state.queue();
+            output_state.redraw_state.queue();
         }
 
-        state.pending_screencopy = Some(frame);
+        output_state.pending_screencopy = Some(frame);
     }
 }
 

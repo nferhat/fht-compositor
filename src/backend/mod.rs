@@ -1,6 +1,7 @@
+use std::time::Duration;
+
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
-use smithay::utils::{Monotonic, Time};
 
 use crate::renderer::AsGlowRenderer;
 use crate::state::Fht;
@@ -55,7 +56,7 @@ impl Backend {
         &mut self,
         fht: &mut Fht,
         output: &Output,
-        current_time: Time<Monotonic>,
+        target_presentation_time: Duration,
     ) -> anyhow::Result<bool> {
         match self {
             #[cfg(feature = "winit-backend")]
@@ -63,7 +64,7 @@ impl Backend {
             Self::Winit(data) => data.render(fht),
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::Udev(data) => data.render(fht, output, current_time.into()),
+            Self::Udev(data) => data.render(fht, output, target_presentation_time),
         }
     }
 

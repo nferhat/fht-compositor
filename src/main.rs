@@ -21,8 +21,10 @@ mod backend;
 mod cli;
 mod config;
 mod egui;
+mod frame_clock;
 mod handlers;
 mod input;
+mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
 mod portals;
 mod protocols;

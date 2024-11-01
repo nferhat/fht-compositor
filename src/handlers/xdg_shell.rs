@@ -21,7 +21,7 @@ use smithay::wayland::shell::xdg::{
 
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::shell::KeyboardFocusTarget;
-use crate::state::{OutputState, State, UnmappedWindow};
+use crate::state::{State, UnmappedWindow};
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -56,13 +56,15 @@ impl XdgShellHandler for State {
             warn!("Destroyed toplevel missing from mapped windows and unmapped windows");
             return;
         };
-        OutputState::get(&workspace.output()).render_state.queue();
 
         self.backend.with_renderer(|renderer| {
             if workspace.prepare_close_animation_for_window(&window, renderer) {
                 workspace.close_window(&window, renderer, true);
             }
         });
+
+        let output = workspace.output().clone();
+        self.fht.queue_redraw(&output);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {

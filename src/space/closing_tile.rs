@@ -92,8 +92,8 @@ impl ClosingTile {
         }
     }
 
-    pub fn advance_animations(&mut self, now: Duration) {
-        self.progress.tick(now);
+    pub fn advance_animations(&mut self, target_presentation_time: Duration) {
+        self.progress.tick(target_presentation_time);
     }
 
     /// Did we finish animating the closing animation.

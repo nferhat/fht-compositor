@@ -5,9 +5,9 @@ use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
+use crate::output::OutputExt;
 use crate::shell::PointerFocusTarget;
 use crate::state::State;
-use crate::utils::output::OutputExt;
 use crate::utils::RectCenterExt;
 
 /// The "type" of a [`KeyAction`].

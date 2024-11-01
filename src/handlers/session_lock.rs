@@ -5,8 +5,8 @@ use smithay::wayland::compositor::{send_surface_state, with_states};
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::session_lock::{self, LockSurface, SessionLockHandler};
 
-use crate::state::{Fht, OutputState, State};
-use crate::utils::output::OutputExt;
+use crate::output::OutputExt;
+use crate::state::{Fht, State};
 
 impl SessionLockHandler for State {
     fn lock_state(&mut self) -> &mut session_lock::SessionLockManagerState {
@@ -20,8 +20,9 @@ impl SessionLockHandler for State {
     fn unlock(&mut self) {
         self.fht.lock_state = LockState::Unlocked;
         // "Unlock" all the outputs
-        for output in self.fht.space.outputs() {
-            let mut output_state = OutputState::get(output);
+        let outputs = self.fht.space.outputs().cloned().collect::<Vec<_>>();
+        for output in &outputs {
+            let output_state = self.fht.output_state.get_mut(output).unwrap();
             output_state.has_lock_backdrop = false;
             let _ = output_state.lock_surface.take();
         }
@@ -52,7 +53,10 @@ impl SessionLockHandler for State {
 
         lock_surface.send_configure();
 
-        OutputState::get(&output).lock_surface = Some(lock_surface.clone());
+        let output_state = self.fht.output_state.get_mut(&output).unwrap();
+        output_state.lock_surface = Some(lock_surface.clone());
+        output_state.redraw_state.queue();
+
         if output == *self.fht.space.active_output() {
             // Focus the newly placed lock surface.
             self.set_keyboard_focus(Some(lock_surface));

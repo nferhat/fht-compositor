@@ -22,7 +22,7 @@ use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
 pub use workspace::{Workspace, WorkspaceId};
 
-use crate::utils::output::OutputExt;
+use crate::output::OutputExt;
 use crate::window::Window;
 
 mod border;

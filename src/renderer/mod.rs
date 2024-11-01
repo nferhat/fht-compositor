@@ -45,11 +45,10 @@ use crate::backend::udev::UdevRenderError;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderer};
 use crate::config::ui::ConfigUiRenderElement;
+use crate::output::OutputExt;
 use crate::shell::cursor::CursorRenderElement;
 use crate::space::{MonitorRenderElement, MonitorRenderResult};
-use crate::state::{Fht, OutputState};
-use crate::utils::fps::Fps;
-use crate::utils::output::OutputExt;
+use crate::state::Fht;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
@@ -99,7 +98,6 @@ impl Fht {
         &mut self,
         renderer: &mut R,
         output: &Output,
-        _fps: &mut Fps,
     ) -> OutputElementsResult<R> {
         let active_output = self.space.active_output();
         let monitor = self.space.active_monitor();
@@ -167,7 +165,7 @@ impl Fht {
 
         // Render session lock surface between output and elements
         if self.is_locked() {
-            let mut output_state = OutputState::get(&output);
+            let output_state = self.output_state.get_mut(output).unwrap();
             if let Some(lock_surface) = output_state.lock_surface.as_ref() {
                 rv.elements.extend(render_elements_from_surface_tree(
                     renderer,

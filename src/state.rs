@@ -1,12 +1,11 @@
-use std::cell::{RefCell, RefMut};
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
 use fht_compositor_config::{BorderOverrides, DecorationMode};
 use rustc_hash::FxHashMap;
-use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -22,7 +21,7 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
+use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::input::{self, DeviceCapability, SendEventsMode};
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
@@ -64,18 +63,19 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::cli;
 use crate::config::ui as config_ui;
+use crate::frame_clock::FrameClock;
 use crate::handlers::LockState;
+use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
     self, CursorMode, PortalSession, ScreencastSource, StreamMetadata,
 };
-use crate::protocols::screencopy::{Screencopy, ScreencopyManagerState};
+use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::shell::cursor::CursorThemeManager;
 use crate::shell::KeyboardFocusTarget;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::dbus::DBUS_CONNECTION;
-use crate::utils::output::OutputExt;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::RectCenterExt;
@@ -140,9 +140,10 @@ impl State {
         {
             profiling::scope!("redraw_and_update_outputs");
             let mut outputs_to_redraw = vec![];
+            let locked = self.fht.is_locked();
             for output in self.fht.space.outputs() {
-                let mut output_state = OutputState::get(output);
-                if !self.fht.is_locked() {
+                let output_state = self.fht.output_state.get_mut(output).unwrap();
+                if locked {
                     // Take away the lock surface
                     output_state.has_lock_backdrop = false;
                     output_state.lock_surface = None;
@@ -152,7 +153,7 @@ impl State {
                         .take_if(|surface| !surface.alive());
                 }
 
-                if output_state.render_state.is_queued() {
+                if output_state.redraw_state.is_queued() {
                     outputs_to_redraw.push(output.clone());
                 }
             }
@@ -161,20 +162,19 @@ impl State {
                 self.redraw(output);
             }
         };
-        self.fht.lock_state = match std::mem::take(&mut self.fht.lock_state) {
-            // Switch from pending to locked when we finished drawing a backdrop at least once.
-            LockState::Pending(locker)
-                if self
-                    .fht
-                    .space
-                    .outputs()
-                    .all(|output| OutputState::get(output).has_lock_backdrop) =>
-            {
-                locker.lock();
-                LockState::Locked
-            }
-            state => state,
-        };
+        self.fht.lock_state =
+            match std::mem::take(&mut self.fht.lock_state) {
+                // Switch from pending to locked when we finished drawing a backdrop at least once.
+                LockState::Pending(locker)
+                    if self.fht.space.outputs().all(|output| {
+                        self.fht.output_state.get(output).unwrap().has_lock_backdrop
+                    }) =>
+                {
+                    locker.lock();
+                    LockState::Locked
+                }
+                state => state,
+            };
 
         {
             profiling::scope!("refresh_focus");
@@ -186,7 +186,7 @@ impl State {
                 //
                 // For example, the prompt of your lock screen might need keyboard input.
                 let active_output = self.fht.space.active_output().clone();
-                let output_state = OutputState::get(&active_output);
+                let output_state = self.fht.output_state.get(&active_output).unwrap();
                 if let Some(lock_surface) = output_state.lock_surface.clone() {
                     // Focus new surface if its different to avoid spamming wl_keyboard::enter event
                     let new_focus = KeyboardFocusTarget::LockSurface(lock_surface);
@@ -235,35 +235,53 @@ impl State {
     #[profiling::function]
     pub fn redraw(&mut self, output: Output) {
         // Verify our invariant.
-        let mut output_state = OutputState::get(&output);
-        assert!(output_state.render_state.is_queued());
+        let output_state = self.fht.output_state.get_mut(&output).unwrap();
+        assert!(output_state.redraw_state.is_queued());
 
         // Advance animations.
-        let current_time = self.fht.clock.now();
-        output_state.animations_running = self.fht.advance_animations(&output, current_time.into());
-        drop(output_state);
+        let target_presentation_time = output_state.frame_clock.next_presentation_time();
+        dbg!(target_presentation_time);
+        let animations_running = {
+            let mut ongoing = self.fht.config_ui.advance_animations(
+                target_presentation_time,
+                !self.fht.config.animations.disable,
+            );
+
+            let monitor = self
+                .fht
+                .space
+                .monitor_mut_for_output(&output)
+                .expect("all outputs should be tracked by Space");
+            ongoing |= monitor.advance_animations(target_presentation_time);
+
+            ongoing
+        };
+
+        let output_state = self.fht.output_state.get_mut(&output).unwrap();
+        output_state.animations_running = animations_running;
 
         // Then ask the backend to render.
         // if res.is_err() == something wrong happened and we didnt render anything.
         // if res == Ok(true) we rendered and submitted a new buffer
         // if res == Ok(false) we rendered but had no damage to submit
-        let res = self.backend.render(&mut self.fht, &output, current_time);
+        let res = self
+            .backend
+            .render(&mut self.fht, &output, target_presentation_time);
 
         {
-            let mut output_state = OutputState::get(&output);
-
+            let output_state = self.fht.output_state.get_mut(&output).unwrap();
             if res.is_err() {
                 // Update the redraw state on failed render.
-                output_state.render_state =
-                    if let RenderState::WaitingForVblankTimer { token, .. } =
-                        output_state.render_state
+                output_state.redraw_state =
+                    if let RedrawState::WaitingForEstimatedVblankTimer { token, .. } =
+                        output_state.redraw_state
                     {
-                        RenderState::WaitingForVblankTimer {
+                        RedrawState::WaitingForEstimatedVblankTimer {
                             token,
                             queued: false,
                         }
                     } else {
-                        RenderState::Idle
+                        RedrawState::Idle
                     };
             }
         }
@@ -442,7 +460,7 @@ impl State {
                         PwToCompositor::Redraw { id, source } => match source {
                             CastSource::Output(weak) => {
                                 if let Some(output) = weak.upgrade() {
-                                    OutputState::get(&output).render_state.queue();
+                                    state.fht.queue_redraw(&output);
                                 } else {
                                     warn!(?id, "Received a redraw request for a non-existing output, stopping cast");
                                     state.fht.stop_cast(id);
@@ -501,6 +519,8 @@ pub struct Fht {
     pub popups: PopupManager,
     pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
     pub lock_state: LockState,
+
+    pub output_state: HashMap<Output, output::OutputState>,
 
     pub config: Arc<fht_compositor_config::Config>,
     pub cli_config_path: Option<std::path::PathBuf>,
@@ -681,6 +701,8 @@ impl Fht {
             interactive_grab_active: false,
             root_surfaces: FxHashMap::default(),
 
+            output_state: HashMap::new(),
+
             config: Arc::new(config),
             cli_config_path: config_path,
             config_ui,
@@ -708,7 +730,7 @@ impl Fht {
         }
     }
 
-    pub fn add_output(&mut self, output: Output) {
+    pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>) {
         assert!(
             !self.space.has_output(&output),
             "Tried to add an output twice!"
@@ -716,15 +738,24 @@ impl Fht {
 
         info!(name = output.name(), "Adding new output");
 
-        // Current default behaviour:
-        //
-        // When adding an output, put it to the right of every other output.
-        // Right now this assumption can be false for alot of users, but this is just as a
-        // fallback.
+        // TODO: Output config and better auto-placement
         let x = self.space.outputs().map(|o| o.geometry().loc.x).sum();
         debug!(?x, y = 0, "Using fallback output location");
         output.change_current_state(None, None, None, Some((x, 0).into()));
         self.space.add_output(output.clone());
+
+        let state = output::OutputState {
+            redraw_state: output::RedrawState::Idle,
+            frame_clock: FrameClock::new(refresh_interval),
+            animations_running: false,
+            current_frame_sequence: 0u32,
+            pending_screencopy: None,
+            debug_damage_tracker: None,
+            lock_surface: None,
+            // We did not render anything yet, so there's nothing to worry about
+            has_lock_backdrop: self.is_locked(),
+        };
+        self.output_state.insert(output.clone(), state);
 
         // Focus output now.
         if self.config.general.cursor_warps {
@@ -769,6 +800,8 @@ impl Fht {
                     });
             }
         }
+
+        self.queue_redraw(output);
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
@@ -779,11 +812,25 @@ impl Fht {
         }
     }
 
+    pub fn queue_redraw(&mut self, output: &Output) {
+        let state = self.output_state.get_mut(output).unwrap();
+        state.redraw_state.queue();
+    }
+
+    pub fn queue_redraw_all(&mut self) {
+        let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
+        for output in &outputs {
+            let state = self.output_state.get_mut(output).unwrap();
+            state.redraw_state.queue();
+        }
+    }
+
     #[profiling::function]
     pub fn send_frames(&self, output: &Output) {
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
-        let sequence = OutputState::get(output).current_frame_sequence;
+        let output_state = self.output_state.get(output).unwrap();
+        let sequence = output_state.current_frame_sequence;
 
         let should_send_frames = |surface: &WlSurface, states: &SurfaceData| {
             // Use smithay's surface_primary_scanout_output helper to avoid sending frames to
@@ -813,7 +860,7 @@ impl Fht {
             }
         };
 
-        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             send_frames_surface_tree(
                 lock_surface.wl_surface(),
                 output,
@@ -846,7 +893,8 @@ impl Fht {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
-        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+        let output_state = self.output_state.get(output).unwrap();
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             with_surface_tree_downward(
                 lock_surface.wl_surface(),
                 (),
@@ -962,7 +1010,8 @@ impl Fht {
         feedback: &SurfaceDmabufFeedback,
         render_element_states: &RenderElementStates,
     ) {
-        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+        let output_state = self.output_state.get(output).unwrap();
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             send_dmabuf_feedback_surface_tree(
                 lock_surface.wl_surface(),
                 output,
@@ -1048,8 +1097,9 @@ impl Fht {
         render_element_states: &RenderElementStates,
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+        let output_state = self.output_state.get(output).unwrap();
 
-        if let Some(lock_surface) = OutputState::get(output).lock_surface.as_ref() {
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             take_presentation_feedback_surface_tree(
                 lock_surface.wl_surface(),
                 &mut output_presentation_feedback,
@@ -1359,88 +1409,6 @@ impl ClientData for ClientState {
 #[derive(Default, Debug)]
 pub struct FocusState {
     pub keyboard_focus: Option<KeyboardFocusTarget>,
-}
-
-#[derive(Debug)]
-pub struct OutputState {
-    pub render_state: RenderState,
-    pub animations_running: bool,
-    pub current_frame_sequence: u32,
-    pub pending_screencopy: Option<Screencopy>,
-    pub damage_tracker: OutputDamageTracker,
-    pub lock_surface: Option<LockSurface>,
-    // For a proper session lock implementation, we draw on all outputs for at least ONE frame
-    // a black backdrop before receiving a lock surface (that will be set above)
-    pub has_lock_backdrop: bool,
-}
-
-impl OutputState {
-    pub fn get(output: &Output) -> RefMut<'_, Self> {
-        output.user_data().insert_if_missing(|| Self::new(output));
-        output
-            .user_data()
-            .get::<RefCell<Self>>()
-            .unwrap()
-            .borrow_mut()
-    }
-
-    pub fn new(output: &Output) {
-        output.user_data().insert_if_missing(|| {
-            RefCell::new(Self {
-                render_state: RenderState::Idle,
-                animations_running: false,
-                current_frame_sequence: 0,
-                pending_screencopy: None,
-                damage_tracker: OutputDamageTracker::from_output(output),
-                lock_surface: None,
-                has_lock_backdrop: false,
-            })
-        });
-    }
-}
-
-#[derive(Debug, Default)]
-pub enum RenderState {
-    #[default]
-    Idle,
-    Queued,
-    WaitingForVblank {
-        redraw_needed: bool,
-    },
-    WaitingForVblankTimer {
-        token: RegistrationToken,
-        queued: bool,
-    },
-}
-
-impl RenderState {
-    #[inline(always)]
-    pub fn is_queued(&self) -> bool {
-        matches!(
-            self,
-            RenderState::Queued | RenderState::WaitingForVblankTimer { queued: true, .. }
-        )
-    }
-
-    pub fn queue(&mut self) {
-        *self = match std::mem::take(self) {
-            Self::Idle => Self::Queued,
-            Self::WaitingForVblank {
-                redraw_needed: false,
-            } => Self::WaitingForVblank {
-                redraw_needed: true,
-            },
-            Self::WaitingForVblankTimer {
-                token,
-                queued: false,
-            } => Self::WaitingForVblankTimer {
-                token,
-                queued: true,
-            },
-            // We are already queued
-            value => value,
-        }
-    }
 }
 
 // We track ourselves window configure state since some clients may set initial_configure_sent to

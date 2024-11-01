@@ -14,8 +14,8 @@ use smithay::utils::Point;
 use super::workspace::{Workspace, WorkspaceRenderElement};
 use super::Config;
 use crate::fht_render_elements;
+use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
-use crate::utils::output::OutputExt;
 use crate::window::Window;
 
 const WORKSPACE_COUNT: usize = 9;
@@ -197,10 +197,10 @@ impl Monitor {
     }
 
     /// Advance animations for this [`Monitor`].
-    pub fn advance_animations(&mut self, now: Duration) -> bool {
-        self.workspaces
-            .iter_mut()
-            .fold(false, |acc, ws| ws.advance_animations(now) || acc)
+    pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
+        self.workspaces.iter_mut().fold(false, |acc, ws| {
+            ws.advance_animations(target_presentation_time) || acc
+        })
     }
 
     /// Create the render elements for this [`Monitor`]
