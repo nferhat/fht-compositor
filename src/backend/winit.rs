@@ -26,9 +26,7 @@ pub struct WinitData {
     _backend_token: RegistrationToken,
     output: Output,
     damage_tracker: OutputDamageTracker,
-    dmabuf_global: DmabufGlobal,
-    dmabuf_feedback: Option<DmabufFeedback>,
-    full_redraw: u8,
+    _dmabuf_state: (DmabufGlobal, Option<DmabufFeedback>),
 }
 
 impl WinitData {
@@ -157,9 +155,7 @@ impl WinitData {
             _backend_token: token,
             damage_tracker,
             output,
-            dmabuf_global,
-            dmabuf_feedback,
-            full_redraw: 0,
+            _dmabuf_state: (dmabuf_global, dmabuf_feedback),
         })
     }
 
