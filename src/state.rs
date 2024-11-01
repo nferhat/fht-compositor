@@ -240,7 +240,6 @@ impl State {
 
         // Advance animations.
         let target_presentation_time = output_state.frame_clock.next_presentation_time();
-        dbg!(target_presentation_time);
         let animations_running = {
             let mut ongoing = self.fht.config_ui.advance_animations(
                 target_presentation_time,
