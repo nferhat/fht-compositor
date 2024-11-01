@@ -801,6 +801,9 @@ impl Fht {
             }
         }
 
+        let output_state = self.output_state.get_mut(output).unwrap();
+        let _ = output_state.debug_damage_tracker.take();
+
         self.queue_redraw(output);
     }
 
