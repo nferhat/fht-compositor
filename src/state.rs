@@ -780,7 +780,8 @@ impl Fht {
 
     pub fn output_resized(&mut self, output: &Output) {
         layer_map_for_output(output).arrange();
-        // self.space.output_resized(output);
+        self.space
+            .output_resized(output, !self.config.animations.disable);
 
         #[cfg(feature = "xdg-screencast-portal")]
         {

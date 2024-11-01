@@ -149,6 +149,21 @@ impl Space {
         self.monitors[self.primary_idx].merge_with(removed);
     }
 
+    /// Arrange the [`Monitor`] of this [`Output`].
+    ///
+    /// You should call this when [`Output`]'s geometry changes.
+    pub fn output_resized(&mut self, output: &Output, animate: bool) {
+        let Some(monitor) = self.monitors.iter_mut().find(|mon| mon.output() == output) else {
+            warn!("Tried to call output_resized on invalid output");
+            return;
+        };
+
+        for workspace in monitor.workspaces_mut() {
+            workspace.arrange_tiles(animate);
+            workspace.refresh();
+        }
+    }
+
     /// Return whether this [`Space`] has this [`Output`].
     pub fn has_output(&self, output: &Output) -> bool {
         self.monitors.iter().any(|mon| mon.output() == output)
