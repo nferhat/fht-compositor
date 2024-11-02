@@ -175,9 +175,9 @@ impl State {
 
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
+                    window.set_rules(rules); // NOTE: apply window rules here since we need them
+                                             // for the right border config to be considered
                     if !floating {
-                        window.set_rules(rules); // NOTE: apply window rules here since we need them
-                                                 // for the right border config to be considered
                         self.fht
                             .space
                             .prepare_unconfigured_window(&window, workspace_id);
