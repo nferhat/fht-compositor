@@ -77,7 +77,10 @@ impl ConfigUi {
     pub fn show(&mut self, content: Content, animate: bool) {
         // HACK: To make egui forget the last used Area size by the previous content
         // Waiting for emilk to add a way to reset the pre-computed size
-        self.egui.reset_ctx();
+        self.egui
+            .ctx()
+            .memory_mut(|mem| *mem.areas_mut() = Default::default());
+
         if animate {
             self.state = match std::mem::take(&mut self.state) {
                 State::Hidden => State::Sliding {
