@@ -160,13 +160,21 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, toplevel: ToplevelSurface) {
-        if let Some((window, workspace)) = self
-            .fht
-            .space
-            .find_window_and_workspace_mut(toplevel.wl_surface())
+        if toplevel
+            .current_state()
+            .capabilities
+            .contains(WmCapabilities::Maximize)
         {
-            window.request_maximized(true);
-            workspace.arrange_tiles(true);
+            let wl_surface = toplevel.wl_surface();
+            if let Some(window) = self.fht.space.find_window(wl_surface) {
+                if self.fht.space.maximize_window(
+                    &window,
+                    true,
+                    !self.fht.config.animations.disable,
+                ) {
+                    window.request_maximized(true);
+                }
+            }
         }
 
         toplevel.send_configure();
@@ -203,7 +211,9 @@ impl XdgShellHandler for State {
                         .move_window_to_output(&window, &requested, true);
                 }
 
-                self.fht.space.fullscreen_window(&window, true);
+                if self.fht.space.fullscreen_window(&window, true) {
+                    window.request_fullscreen(true);
+                }
             }
         }
 

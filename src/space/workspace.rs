@@ -1083,7 +1083,10 @@ impl Workspace {
         let (maximized, tiles) = self
             .tiles
             .iter_mut()
-            .filter(|tile| tile.window().tiled())
+            .enumerate()
+            // We do not want to affect the fullscreened tile
+            .filter(|(idx, tile)| Some(*idx) != self.fullscreened_tile_idx && tile.window().tiled())
+            .map(|(_, tile)| tile)
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
         let work_area = {
             let mut work_area = output_geometry;

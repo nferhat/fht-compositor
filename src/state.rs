@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use fht_compositor_config::{BorderOverrides, DecorationMode};
-use rustc_hash::FxHashMap;
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -516,7 +515,7 @@ pub struct Fht {
     pub unmapped_windows: Vec<UnmappedWindow>,
     pub focus_state: FocusState,
     pub popups: PopupManager,
-    pub root_surfaces: FxHashMap<WlSurface, WlSurface>,
+    pub root_surfaces: HashMap<WlSurface, WlSurface>,
     pub lock_state: LockState,
 
     pub output_state: HashMap<Output, output::OutputState>,
@@ -698,7 +697,7 @@ impl Fht {
             popups: PopupManager::default(),
             resize_grab_active: false,
             interactive_grab_active: false,
-            root_surfaces: FxHashMap::default(),
+            root_surfaces: HashMap::default(),
 
             output_state: HashMap::new(),
 

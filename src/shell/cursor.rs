@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefCell};
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Read;
@@ -7,7 +8,6 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use fht_compositor_config::Cursor;
-use rustc_hash::FxHashMap;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
@@ -27,7 +27,7 @@ use crate::renderer::FhtRenderer;
 pub struct CursorThemeManager {
     // Image cache is keyed by icon type and cursor scale.
     // TODO: Fractional scaling when possible? (needs rewrite of MemoryRenderElement)
-    cursor_image_cache: RefCell<FxHashMap<(i32, CursorIcon), Image>>,
+    cursor_image_cache: RefCell<HashMap<(i32, CursorIcon), Image>>,
     image_status: CursorImageStatus,
     cursor_theme: CursorTheme,
     config: Cursor,
@@ -38,7 +38,7 @@ impl CursorThemeManager {
         let cursor_theme = CursorTheme::load(&config.name);
 
         Self {
-            cursor_image_cache: RefCell::new(FxHashMap::default()),
+            cursor_image_cache: RefCell::new(HashMap::default()),
             image_status: CursorImageStatus::default_named(),
             cursor_theme,
             config,

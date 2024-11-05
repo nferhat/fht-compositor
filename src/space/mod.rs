@@ -427,7 +427,7 @@ impl Space {
     }
 
     /// Maximize the [`Tile`] associated with this [`Window`].
-    pub fn maximize_window(&mut self, window: &Window, maximize: bool, animate: bool) {
+    pub fn maximize_window(&mut self, window: &Window, maximize: bool, animate: bool) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
                 let mut arrange = false;
@@ -441,21 +441,25 @@ impl Space {
 
                 if arrange {
                     workspace.arrange_tiles(animate);
-                    return;
+                    return true;
                 }
             }
         }
+
+        false
     }
 
     /// Fullscreen the [`Tile`] associated with this [`Window`].
-    pub fn fullscreen_window(&mut self, window: &Window, animate: bool) {
+    pub fn fullscreen_window(&mut self, window: &Window, animate: bool) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
                 if workspace.fullscreen_window(window, animate) {
-                    return;
+                    return true;
                 }
             }
         }
+
+        false
     }
 
     /// Prepare the [`Window`] geometry for insertion inside a [`Workspace`].
