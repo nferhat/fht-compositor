@@ -36,6 +36,13 @@ mod utils;
 mod window;
 
 fn main() -> anyhow::Result<(), Box<dyn Error>> {
+    // Do not allow the user to build a useless compositor.
+    //
+    // We must have at least one backend, otherwise unmatched branches will occur.
+    // This also must be at the very top of the crate so that it pops ups before anything.
+    #[cfg(all(not(feature = "udev-backend"), not(feature = "winit-backend")))]
+    compile_error!("You must enable at least one backend: 'udev-backend' or 'winit-backend");
+
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // Allow fatal errors from every crate, compositor can log anything
         tracing_subscriber::EnvFilter::from_str("error,fht_compositor=info").unwrap()
@@ -210,10 +217,3 @@ mod profiling_scopes {
 
 #[allow(unused_imports)]
 pub(crate) use profiling_scopes::{profile_function, profile_scope};
-
-// Do not allow the user to build a useless compositor.
-//
-// We must have at least one backend, otherwise unmatched branches will occur.
-// This also must be at the very top of the crate so that it pops ups before anything.
-#[cfg(all(not(feature = "udev-backend"), not(feature = "winit-backend")))]
-compile_error!("You must enable at least one backend: 'udev-backend' or 'winit-backend");
