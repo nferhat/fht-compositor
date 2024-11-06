@@ -3,7 +3,6 @@ use std::time::Duration;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::output::Output;
 
-use crate::renderer::AsGlowRenderer;
 use crate::state::Fht;
 
 #[cfg(feature = "udev-backend")]
@@ -53,9 +52,9 @@ impl Backend {
 
     pub fn render(
         &mut self,
-        fht: &mut Fht,
-        output: &Output,
-        target_presentation_time: Duration,
+        #[allow(unused)] fht: &mut Fht,
+        #[allow(unused)] output: &Output,
+        #[allow(unused)] target_presentation_time: Duration,
     ) -> anyhow::Result<bool> {
         match self {
             #[cfg(feature = "winit-backend")]
@@ -64,10 +63,15 @@ impl Backend {
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.render(fht, output, target_presentation_time),
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
         }
     }
 
-    pub fn with_renderer<T>(&mut self, f: impl FnOnce(&mut GlowRenderer) -> T) -> T {
+    pub fn with_renderer<T>(
+        &mut self,
+        #[allow(unused)] f: impl FnOnce(&mut GlowRenderer) -> T,
+    ) -> T {
         match self {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
@@ -79,8 +83,11 @@ impl Backend {
                     .gpu_manager
                     .single_renderer(&data.primary_gpu)
                     .expect("No primary gpu");
+                use crate::renderer::AsGlowRenderer;
                 f(renderer.glow_renderer_mut())
             }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
         }
     }
 }

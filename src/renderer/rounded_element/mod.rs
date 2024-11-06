@@ -8,7 +8,6 @@ use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions}
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::shaders::Shaders;
-use super::AsGlowFrame;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
@@ -258,6 +257,7 @@ where
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError<'a>> {
+        use super::AsGlowFrame;
         if self.corner_radius == 0.0 {
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {

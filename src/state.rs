@@ -93,7 +93,9 @@ impl State {
         cli: cli::Cli,
         _socket_name: String,
     ) -> Self {
+        #[allow(unused)]
         let mut fht = Fht::new(dh, loop_handle, loop_signal, cli.config_path);
+        #[allow(unused)]
         let backend: crate::backend::Backend = if let Some(backend_type) = cli.backend {
             match backend_type {
                 #[cfg(feature = "winit-backend")]
@@ -127,6 +129,7 @@ impl State {
             panic!("Udev backend not enabled on this build! Enable the 'udev-backend' feature when building")
         };
 
+        #[allow(unreachable_code)]
         Self { fht, backend }
     }
 

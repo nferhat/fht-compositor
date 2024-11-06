@@ -1,7 +1,6 @@
 use smithay::delegate_dmabuf;
 use smithay::wayland::dmabuf::DmabufHandler;
 
-use crate::backend::Backend;
 use crate::state::State;
 
 impl DmabufHandler for State {
@@ -9,19 +8,21 @@ impl DmabufHandler for State {
         &mut self.fht.dmabuf_state
     }
 
+    #[allow(unused_mut, unreachable_code, unreachable_patterns)]
     fn dmabuf_imported(
         &mut self,
         _global: &smithay::wayland::dmabuf::DmabufGlobal,
-        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
-        notifier: smithay::wayland::dmabuf::ImportNotifier,
+        #[allow(unused)] dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        #[allow(unused)] notifier: smithay::wayland::dmabuf::ImportNotifier,
     ) {
         match self.backend {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Backend::Winit(ref mut data) => data.dmabuf_imported(&dmabuf, notifier),
+            crate::backend::Backend::Winit(ref mut data) => data.dmabuf_imported(&dmabuf, notifier),
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
-            Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
+            crate::backend::Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
+            _ => unreachable!(),
         };
     }
 }
