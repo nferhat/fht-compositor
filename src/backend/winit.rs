@@ -160,6 +160,7 @@ impl WinitData {
     }
 
     pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
+        crate::profile_function!();
         let renderer = self.backend.renderer();
         let OutputElementsResult { elements, .. } = fht.output_elements(renderer, &self.output);
 
@@ -213,6 +214,7 @@ impl WinitData {
     }
 
     pub fn dmabuf_imported(&mut self, dmabuf: &Dmabuf, notifier: ImportNotifier) {
+        crate::profile_function!();
         if self.backend.renderer().import_dmabuf(dmabuf, None).is_ok() {
             let _ = notifier.successful::<State>();
         } else {

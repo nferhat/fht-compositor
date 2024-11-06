@@ -345,6 +345,7 @@ impl Tile {
 
     /// Advance animations for this [`Tile`].
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
+        crate::profile_function!();
         let mut animations_ongoing = false;
 
         let _ = self.location_animation.take_if(|a| a.is_finished());
@@ -407,6 +408,7 @@ impl Tile {
         scale: Scale<f64>,
         active: bool,
     ) -> Vec<TileRenderElement<R>> {
+        crate::profile_function!();
         let mut elements = vec![];
         let rules = self.window.rules();
         let is_fullscreen = self.window.fullscreen();
@@ -513,6 +515,7 @@ impl Tile {
         scale: f64,
         active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
+        crate::profile_function!();
         let scale = Scale::from(scale);
         let mut opening_element = None;
         let mut normal_elements = vec![];

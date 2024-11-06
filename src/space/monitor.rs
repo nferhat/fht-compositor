@@ -73,6 +73,7 @@ impl Monitor {
 
     /// Run periodic update/clean-up tasks
     pub fn refresh(&mut self, is_active: bool) {
+        crate::profile_function!();
         self.is_active = is_active;
         for workspace in &mut self.workspaces {
             workspace.refresh();
@@ -198,6 +199,7 @@ impl Monitor {
 
     /// Advance animations for this [`Monitor`].
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
+        crate::profile_function!();
         self.workspaces.iter_mut().fold(false, |acc, ws| {
             ws.advance_animations(target_presentation_time) || acc
         })
@@ -205,6 +207,7 @@ impl Monitor {
 
     /// Create the render elements for this [`Monitor`]
     pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: f64) -> MonitorRenderResult<R> {
+        crate::profile_function!();
         // We want to render workspaces that currently have a render offset animation
         // as they could be displayed on the monitor (well this depends, but most of the time, yes)
         let mut elements = vec![];

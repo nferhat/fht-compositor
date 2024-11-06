@@ -373,8 +373,8 @@ impl CompositorHandler for State {
         });
     }
 
-    #[profiling::function]
     fn commit(&mut self, surface: &WlSurface) {
+        crate::profile_function!();
         // Allow smithay to manage internally wl_surfaces and wl_buffers
         //
         // Have to call this at the top of here before handling anything otherwise it'll mess

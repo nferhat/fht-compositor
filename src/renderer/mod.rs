@@ -99,6 +99,7 @@ impl Fht {
         renderer: &mut R,
         output: &Output,
     ) -> OutputElementsResult<R> {
+        crate::profile_function!();
         let active_output = self.space.active_output();
         let monitor = self.space.active_monitor();
         // TODO: Fractional scale support.
@@ -232,7 +233,6 @@ impl Fht {
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
-    #[profiling::function]
     pub fn render_screencast<R: FhtRenderer>(
         &mut self,
         output: &Output,
@@ -241,6 +241,7 @@ impl Fht {
     ) where
         FhtRenderElement<R>: element::RenderElement<R>,
     {
+        crate::profile_function!();
         use crate::utils::pipewire::CastSource;
 
         let size = output.current_mode().unwrap().size;
@@ -261,6 +262,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
+            crate::profile_scope!("render_cast", cast.id().to_string());
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
                 continue;
@@ -376,6 +378,7 @@ pub fn layer_elements<R: FhtRenderer>(
     output: &Output,
     layer: Layer,
 ) -> Vec<FhtRenderElement<R>> {
+    crate::profile_function!();
     let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
     let layer_map = layer_map_for_output(output);
     let output_loc = output.current_location();
@@ -391,7 +394,6 @@ pub fn layer_elements<R: FhtRenderer>(
         .collect()
 }
 
-#[profiling::function]
 pub fn render_to_texture(
     renderer: &mut GlowRenderer,
     size: Size<i32, Physical>,
@@ -400,6 +402,7 @@ pub fn render_to_texture(
     fourcc: Fourcc,
     elements: impl Iterator<Item = impl RenderElement<GlowRenderer>>,
 ) -> anyhow::Result<(GlesTexture, SyncPoint)> {
+    crate::profile_function!();
     let scale = scale.into();
     let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
 

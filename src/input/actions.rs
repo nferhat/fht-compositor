@@ -190,8 +190,8 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
 }
 
 impl State {
-    #[profiling::function]
     pub fn process_key_action(&mut self, action: KeyAction) {
+        crate::profile_function!();
         if self.fht.is_locked() && !action.allow_while_locked {
             return;
         }
@@ -372,8 +372,8 @@ impl State {
 }
 
 impl State {
-    #[profiling::function]
     pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
+        crate::profile_function!();
         // TODO: Handle mouse actions again.
         // Currently needs re-implementation from the space side
         match action {

@@ -51,17 +51,25 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         check_configuration(cli);
     }
 
+    // Only start puffin client when needed.
+    #[cfg(feature = "profile-with-puffin")]
+    {
+        let bind_addr = format!("127.0.0.1:{}", puffin_http::DEFAULT_PORT);
+        match puffin_http::Server::new(&bind_addr) {
+            Ok(server) => {
+                info!("Started puffin server on {bind_addr}",);
+                puffin::set_scopes_on(true);
+                std::mem::forget(server); // do not run the drop callback to not close.
+            }
+            Err(err) => error!("Failed to start puffin server, profiling disabled: {err}"),
+        }
+    }
+
     info!(
         version = std::env!("CARGO_PKG_VERSION"),
         git_hash = std::option_env!("GIT_HASH").unwrap_or("Unknown"),
         "Starting fht-compositor."
     );
-
-    #[cfg(feature = "profile-with-tracy")]
-    {
-        profiling::register_thread!("Main Thread");
-        profiling::tracy_client::Client::start();
-    }
 
     // EventLoop + Wayland UNIX socket source so we can listen to clients
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
@@ -173,3 +181,34 @@ fn check_configuration(cli: cli::Cli) -> ! {
         },
     }
 }
+
+// If we do not nuse puffin, disable it entierly to avoid any overhead without profiling.
+// (this is the same approach as egui does)
+//
+// The said overhead is around ~1-2ns, but I'd rather keep that off as we can be profiling scopes
+// and functions tens of thousands of times.
+mod profiling_scopes {
+    #![allow(unused_macros)]
+    #![allow(unused_imports)]
+
+    /// Profiling macro for feature "profile-with-puffin"
+    macro_rules! profile_function {
+        ($($arg: tt)*) => {
+            #[cfg(feature = "profile-with-puffin")]
+            puffin::profile_function!($($arg)*);
+        };
+    }
+    pub(crate) use profile_function;
+
+    /// Profiling macro for feature "profile-with-puffin"
+    macro_rules! profile_scope {
+        ($($arg: tt)*) => {
+            #[cfg(feature = "profile-with-puffin")]
+            puffin::profile_scope!($($arg)*);
+        };
+    }
+    pub(crate) use profile_scope;
+}
+
+#[allow(unused_imports)]
+pub(crate) use profiling_scopes::{profile_function, profile_scope};

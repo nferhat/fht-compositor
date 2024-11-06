@@ -194,6 +194,7 @@ impl Workspace {
 
     /// Reload the configuration of this [`Workspace`].
     pub fn reload_config(&mut self, config: &Rc<Config>) {
+        crate::profile_function!();
         // Reload the shared Rcs with workspace system config.
         self.config = Rc::clone(config);
         for tile in &mut self.tiles {
@@ -220,6 +221,7 @@ impl Workspace {
 
     /// Run periodic clean-up tasks.
     pub fn refresh(&mut self) {
+        crate::profile_function!();
         let mut arrange = false;
 
         // FIXME: This causes to always re-arrange???
@@ -328,6 +330,7 @@ impl Workspace {
         tile: &mut Tile,
         active: bool,
     ) {
+        crate::profile_function!();
         let window = tile.window();
         window.request_activated(active);
 
@@ -776,6 +779,7 @@ impl Workspace {
     /// This function runs the same algorithms that are used inside [`Self::arrange_tiles`] but
     /// without affecting the already inserted tiles inside the workspace.
     pub fn prepare_unconfigured_window(&self, unconfigured_window: &Window) {
+        crate::profile_function!();
         let mut output_geometry = self.output.geometry();
         output_geometry.loc = Point::default(); // tile locations are all relative to output
 
@@ -1067,6 +1071,7 @@ impl Workspace {
 
     /// Arrange all the [`Tile`]s in this [`Workspace`]
     pub fn arrange_tiles(&mut self, animate: bool) {
+        crate::profile_function!();
         let mut output_geometry = self.output.geometry();
         output_geometry.loc = Point::default(); // tile locations are all relative to output
 
@@ -1426,6 +1431,7 @@ impl Workspace {
 
     /// Advance animations for this [`Workspace`]
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
+        crate::profile_function!();
         let mut running = false;
 
         let _ = self.render_offset.take_if(|a| a.is_finished());
@@ -1452,6 +1458,7 @@ impl Workspace {
         renderer: &mut R,
         scale: f64,
     ) -> Vec<WorkspaceRenderElement<R>> {
+        crate::profile_function!();
         let mut elements = vec![];
 
         let render_offset = self

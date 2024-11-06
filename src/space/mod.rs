@@ -65,6 +65,7 @@ impl Space {
 
     /// Run periodic clean-up tasks.
     pub fn refresh(&mut self) {
+        crate::profile_function!();
         for (idx, monitor) in self.monitors.iter_mut().enumerate() {
             monitor.refresh(idx == self.active_idx)
         }
@@ -72,6 +73,7 @@ impl Space {
 
     /// Reload the [`Config`] of the [`Space`].
     pub fn reload_config(&mut self, config: &fht_compositor_config::Config) {
+        crate::profile_function!();
         let config = Config::new(config).expect("Space configuration invariants");
         self.config = Rc::new(config);
 
@@ -153,6 +155,7 @@ impl Space {
     ///
     /// You should call this when [`Output`]'s geometry changes.
     pub fn output_resized(&mut self, output: &Output, animate: bool) {
+        crate::profile_function!();
         let Some(monitor) = self.monitors.iter_mut().find(|mon| mon.output() == output) else {
             warn!("Tried to call output_resized on invalid output");
             return;

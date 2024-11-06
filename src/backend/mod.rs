@@ -51,7 +51,6 @@ impl Backend {
         unreachable!("Tried to get udev backend data on non-udev backend")
     }
 
-    #[profiling::function]
     pub fn render(
         &mut self,
         fht: &mut Fht,

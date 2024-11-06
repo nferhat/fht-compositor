@@ -14,7 +14,6 @@ repository = "https://github.com/nferhat/fht-compositor"
 
 [workspace.dependencies]
 anyhow = "1.0.79"
-profiling = "1.0.14"
 # Basic logging setup
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
@@ -67,7 +66,6 @@ smithay-drm-extras = { workspace = true, optional = true }
 bitflags = "2.6.0"
 thiserror = "1.0.61"
 libc = "0.2.155"
-profiling.workspace = true
 zbus = { version = "4.3.1", optional = true }
 zvariant = { version = "4.1.2", features = ["option-as-array"], optional = true }
 pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = ["v0_3_33"] }
@@ -83,6 +81,8 @@ owning_ref = "0.4.1"
 clap = { version = "4.5.18", features = ["derive"] }
 async-channel = "2.3.1"
 async-io = "2.3.4"
+puffin = { version = "0.19.1", optional = true }
+puffin_http = { version = "0.16.1", optional = true }
 
 [features]
 default = ["winit-backend", "udev-backend", "all-portals"]
@@ -103,7 +103,7 @@ udev-backend = [
     "smithay/backend_session_libseat",
     "smithay/renderer_multi",
 ]
-profile-with-tracy = ["profiling/profile-with-tracy"]
+profile-with-puffin = ["dep:puffin", "dep:puffin_http"]
 all-portals = ["xdg-screencast-portal"]
 xdg-screencast-portal = ["pipewire", "dbus"]
 

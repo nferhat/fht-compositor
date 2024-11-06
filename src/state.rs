@@ -130,14 +130,14 @@ impl State {
         Self { fht, backend }
     }
 
-    #[profiling::function]
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
+        crate::profile_function!();
         self.fht.space.refresh();
         self.fht.popups.cleanup();
         self.fht.resolve_rules_for_all_windows_if_needed();
 
         {
-            profiling::scope!("redraw_and_update_outputs");
+            crate::profile_scope!("refresh_and_redraw_outputs");
             let mut outputs_to_redraw = vec![];
             let locked = self.fht.is_locked();
             for output in self.fht.space.outputs() {
@@ -176,7 +176,7 @@ impl State {
             };
 
         {
-            profiling::scope!("refresh_focus");
+            crate::profile_scope!("refresh_focus");
             // Make sure the surface is not dead (otherwise wayland wont be happy)
             // NOTE: focus_target from state is always guaranteed to be the same as keyboard focus.
             if self.fht.is_locked() {
@@ -214,7 +214,7 @@ impl State {
         }
 
         {
-            profiling::scope!("DislpayHandle::flush_clients");
+            crate::profile_scope!("flush_clients");
             self.fht
                 .display_handle
                 .flush_clients()
@@ -231,8 +231,8 @@ impl State {
         }
     }
 
-    #[profiling::function]
     pub fn redraw(&mut self, output: Output) {
+        crate::profile_function!();
         // Verify our invariant.
         let output_state = self.fht.output_state.get_mut(&output).unwrap();
         assert!(output_state.redraw_state.is_queued());
@@ -240,6 +240,7 @@ impl State {
         // Advance animations.
         let target_presentation_time = output_state.frame_clock.next_presentation_time();
         let animations_running = {
+            crate::profile_scope!("advance_animations");
             let mut ongoing = self.fht.config_ui.advance_animations(
                 target_presentation_time,
                 !self.fht.config.animations.disable,
@@ -289,6 +290,8 @@ impl State {
     }
 
     pub fn reload_config(&mut self) {
+        crate::profile_function!();
+
         let (new_config, paths) =
             match fht_compositor_config::load(self.fht.cli_config_path.clone()) {
                 Ok((config, paths)) => {
@@ -367,7 +370,7 @@ impl State {
                 source,
                 cursor_mode,
             } => {
-                if let Err(err) = self.start_cast_inner(
+                if let Err(err) = self.start_cast(
                     session_handle.clone(),
                     metadata_sender.clone(),
                     source,
@@ -390,13 +393,14 @@ impl State {
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
-    fn start_cast_inner(
+    fn start_cast(
         &mut self,
         session_handle: zvariant::OwnedObjectPath,
         metadata_sender: async_channel::Sender<Option<StreamMetadata>>,
         mut source: ScreencastSource,
         cursor_mode: CursorMode,
     ) -> anyhow::Result<()> {
+        crate::profile_function!();
         // We don't support screencasting on X11 since eh, you prob dont need it.
 
         use smithay::reexports::calloop;
@@ -777,6 +781,8 @@ impl Fht {
     }
 
     pub fn output_resized(&mut self, output: &Output) {
+        crate::profile_function!();
+
         layer_map_for_output(output).arrange();
         self.space
             .output_resized(output, !self.config.animations.disable);
@@ -827,8 +833,8 @@ impl Fht {
         }
     }
 
-    #[profiling::function]
     pub fn send_frames(&self, output: &Output) {
+        crate::profile_function!();
         let time = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
         let output_state = self.output_state.get(output).unwrap();
@@ -895,6 +901,7 @@ impl Fht {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        crate::profile_function!();
         let output_state = self.output_state.get(output).unwrap();
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             with_surface_tree_downward(
@@ -1012,6 +1019,7 @@ impl Fht {
         feedback: &SurfaceDmabufFeedback,
         render_element_states: &RenderElementStates,
     ) {
+        crate::profile_function!();
         let output_state = self.output_state.get(output).unwrap();
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             send_dmabuf_feedback_surface_tree(
@@ -1092,12 +1100,12 @@ impl Fht {
         }
     }
 
-    #[profiling::function]
     pub fn take_presentation_feedback(
         &self,
         output: &Output,
         render_element_states: &RenderElementStates,
     ) -> OutputPresentationFeedback {
+        crate::profile_function!();
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
         let output_state = self.output_state.get(output).unwrap();
 
@@ -1159,6 +1167,7 @@ impl Fht {
     }
 
     pub fn resolve_rules_for_window(&self, window: &Window) {
+        crate::profile_function!();
         for monitor in self.space.monitors() {
             let output_name = monitor.output().name();
             for (ws_idx, workspace) in monitor.workspaces().enumerate() {
@@ -1182,6 +1191,7 @@ impl Fht {
     }
 
     pub fn resolve_rules_for_all_windows_if_needed(&self) {
+        crate::profile_function!();
         for monitor in self.space.monitors() {
             let output_name = monitor.output().name();
             for (ws_idx, workspace) in monitor.workspaces().enumerate() {
@@ -1352,8 +1362,8 @@ impl Fht {
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
-    #[profiling::function]
     pub fn stop_cast(&mut self, id: CastId) {
+        crate::profile_function!();
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
         };
@@ -1468,6 +1478,7 @@ impl ResolvedWindowRules {
         current_workspace_idx: usize,
         is_focused: bool,
     ) -> Self {
+        crate::profile_function!();
         let mut resolved_rules = ResolvedWindowRules::default();
 
         for rule in rules.iter().filter(|rule| {

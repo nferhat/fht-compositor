@@ -805,13 +805,14 @@ impl UdevData {
         Ok(())
     }
 
-    #[profiling::function]
     pub fn render(
         &mut self,
         fht: &mut Fht,
         output: &Output,
         target_presentation_time: Duration,
     ) -> anyhow::Result<bool> {
+        crate::profile_function!();
+
         let Some((device_node, crtc)) =
             self.devices.iter_mut().find_map(|(device_node, device)| {
                 let crtc = device
@@ -887,7 +888,7 @@ impl UdevData {
             Ok(res) => {
                 if res.needs_sync() {
                     if let PrimaryPlaneElement::Swapchain(element) = &res.primary_element {
-                        profiling::scope!("SyncPoint::wait");
+                        crate::profile_scope!("SyncPoint::wait");
                         if let Err(err) = element.sync.wait() {
                             error!(?err, "Failed to wait for SyncPoint")
                         };
@@ -927,8 +928,9 @@ impl UdevData {
                             // frame events to them so they start building the next buffer
                             output_state.current_frame_sequence =
                                 output_state.current_frame_sequence.wrapping_add(1);
-                            // Also notify profiling or our sucess.
-                            profiling::finish_frame!();
+                            // Also notify puffin of a new frame.
+                            #[cfg(feature = "profile-with-puffin")]
+                            puffin::GlobalProfiler::lock().new_frame();
 
                             // Damage also means screencast.
                             #[cfg(feature = "xdg-screencast-portal")]
@@ -984,7 +986,7 @@ impl UdevData {
         let token = fht
             .loop_handle
             .insert_source(timer, move |_, _, state| {
-                profiling::scope!("estimated vblank timer");
+                crate::profile_scope!("vblank-{name}");
                 let output_state = state.fht.output_state.get_mut(&output).unwrap();
                 output_state.current_frame_sequence =
                     output_state.current_frame_sequence.wrapping_add(1);
@@ -1015,14 +1017,9 @@ impl UdevData {
             queued: false,
         };
 
-        // We did not render anything, but still we queued a next render and so this frame should
-        // be considered finished, so profiling should be informed.
-        profiling::finish_frame!();
-
         Ok(false)
     }
 
-    #[profiling::function]
     fn on_vblank(
         &mut self,
         device_node: DrmNode,
@@ -1030,6 +1027,8 @@ impl UdevData {
         metadata: &mut DrmEventMetadata,
         fht: &mut Fht,
     ) {
+        crate::profile_function!();
+
         let Some(device) = self.devices.get_mut(&device_node) else {
             warn!(
                 ?device_node,
@@ -1196,7 +1195,8 @@ fn get_surface_dmabuf_feedback(
     })
 }
 
-#[profiling::function]
+// FIXME: For now this implementation is udev-specific since it uses primary planes.
+// Maybe a OutputDamageTracker apprach would be better?
 fn render_screencopy<'a>(
     renderer: &mut UdevRenderer<'a>,
     surface: &mut Surface,
@@ -1208,6 +1208,8 @@ fn render_screencopy<'a>(
     >,
     fht: &mut Fht,
 ) {
+    crate::profile_function!();
+
     let output_state = fht.output_state.get_mut(&surface.output).unwrap();
     let Some(mut screencopy) = output_state.pending_screencopy.take() else {
         return;

@@ -106,7 +106,7 @@ impl PipeWire {
         let source = Generic::new(main_loop, Interest::READ, Mode::Level);
         loop_handle
             .insert_source(source, |_, main_loop, _| {
-                profiling::scope!("pw_loop");
+                crate::profile_scope!("pipewire_loop_dispatch");
                 main_loop.0.loop_().iterate(Duration::ZERO);
                 Ok(PostAction::Continue)
             })
@@ -119,7 +119,6 @@ impl PipeWire {
         })
     }
 
-    #[profiling::function]
     pub fn start_cast(
         &mut self,
         // Information about the screencast request
@@ -137,6 +136,7 @@ impl PipeWire {
         size: smithay::utils::Size<i32, Physical>,
         refresh: u32,
     ) -> anyhow::Result<()> {
+        crate::profile_function!();
         let size = smithay::utils::Size::from((size.w as u32, size.h as u32));
         let cast_id = CastId::unique();
         let inner = Rc::new(RefCell::new(CastInner {
@@ -174,6 +174,11 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let redraw = redraw.clone();
                 move |stream, inner, old, new| {
+                    crate::profile_scope!(
+                        "pw_stream::state_changed",
+                        stream.node_id().to_string()
+                    );
+
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
                     let _guard = span.enter();
@@ -219,6 +224,11 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let gbm = gbm.clone();
                 move |stream, inner, id, pod| {
+                    crate::profile_scope!(
+                        "pw_stream::param_changed",
+                        stream.node_id().to_string()
+                    );
+
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
                     let _guard = span.enter();
@@ -479,6 +489,8 @@ impl PipeWire {
             .add_buffer({
                 let stop_cast = stop_cast.clone();
                 move |stream, inner, buffer| {
+                    crate::profile_scope!("pw_stream::add_buffer", stream.node_id().to_string());
+
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
                     let _guard = span.enter();
@@ -557,6 +569,11 @@ impl PipeWire {
             })
             .remove_buffer({
                 move |stream, inner, buffer| {
+                    crate::profile_scope!(
+                        "pw_stream::remove_buffer",
+                        stream.node_id().to_string()
+                    );
+
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
                     let _guard = span.enter();
@@ -620,6 +637,12 @@ impl CastId {
 impl std::fmt::Debug for CastId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "cast-{}", self.0)
+    }
+}
+impl std::ops::Deref for CastId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -745,8 +768,8 @@ impl Cast {
     /// If the cast size is already at `size`, return `Ok(true)`.
     /// If a change is needed/pending, this will return `Ok(false)`.
     /// If any error occured while updating stream, return Err(_)
-    #[profiling::function]
     pub fn ensure_size(&mut self, size: Size<i32, Physical>) -> anyhow::Result<bool> {
+        crate::profile_function!();
         let new_size = Size::from((size.w as u32, size.h as u32));
 
         let mut guard = self.inner.borrow_mut();
@@ -783,7 +806,6 @@ impl Cast {
     ///
     /// Returns `Ok(true)` if we rendered and there was damage.
     /// Returns `Ok(false)` if we rendered and there was NO damage.
-    #[profiling::function]
     pub fn render<R: FhtRenderer>(
         &mut self,
         renderer: &mut R,
@@ -794,6 +816,8 @@ impl Cast {
     where
         FhtRenderElement<R>: RenderElement<R>,
     {
+        crate::profile_function!();
+
         let mut guard = self.inner.borrow_mut();
         let CastState::Ready { damage_tracker, .. } = &mut guard.state else {
             anyhow::bail!("cast not ready")
@@ -950,13 +974,13 @@ fn make_pod(buffer: &mut Vec<u8>, object: pod::Object) -> &Pod {
 
 // As per pipewire docs, we try to allocate buffers with the given modifier list until we hit a
 // successful allocation, in which case that modifier is the correct one to use.
-#[profiling::function]
 fn find_preferred_modifier(
     gbm: &GbmDevice<DrmDeviceFd>,
     size: Size<u32, Physical>,
     fourcc: Fourcc,
     modifiers: Vec<i64>,
 ) -> anyhow::Result<(Modifier, usize)> {
+    crate::profile_function!();
     debug!(
         ?size,
         ?fourcc,
@@ -976,13 +1000,13 @@ fn find_preferred_modifier(
     Ok((modifier, plane_count))
 }
 
-#[profiling::function]
 fn allocate_buffer(
     gbm: &GbmDevice<DrmDeviceFd>,
     size: Size<u32, Physical>,
     fourcc: Fourcc,
     modifiers: &[i64],
 ) -> anyhow::Result<(GbmBuffer, Modifier)> {
+    crate::profile_function!();
     let (w, h) = (size.w, size.h);
 
     if modifiers == &[u64::from(Modifier::Invalid) as i64] {
@@ -1016,13 +1040,13 @@ fn allocate_buffer(
     }
 }
 
-#[profiling::function]
 fn allocate_dmabuf(
     gbm: &GbmDevice<DrmDeviceFd>,
     size: Size<u32, Physical>,
     fourcc: Fourcc,
     modifier: Modifier,
 ) -> anyhow::Result<Dmabuf> {
+    crate::profile_function!();
     let (buffer, _modifier) = allocate_buffer(gbm, size, fourcc, &[u64::from(modifier) as i64])?;
     let dmabuf = buffer
         .export()

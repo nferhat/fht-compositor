@@ -45,8 +45,8 @@ impl CursorThemeManager {
         }
     }
 
-    #[profiling::function]
     pub fn reload_config(&mut self, new_config: Cursor) {
+        crate::profile_function!();
         if self.config != new_config {
             self.config = new_config;
             self.cursor_theme = CursorTheme::load(&self.config.name);
@@ -62,12 +62,12 @@ impl CursorThemeManager {
         self.image_status = image_status
     }
 
-    #[profiling::function]
     fn load_cursor_image<'a>(
         &'a self,
         cursor_icon: CursorIcon,
         cursor_scale: i32,
     ) -> Result<Ref<'a, Image>, Error> {
+        crate::profile_function!();
         if let Entry::Vacant(entry) = self
             .cursor_image_cache
             .borrow_mut()
@@ -135,7 +135,6 @@ impl CursorThemeManager {
         }))
     }
 
-    #[profiling::function]
     pub fn render<R>(
         &self,
         renderer: &mut R,
@@ -148,6 +147,7 @@ impl CursorThemeManager {
     where
         R: FhtRenderer,
     {
+        crate::profile_function!();
         match self.image_status {
             CursorImageStatus::Hidden => Ok(vec![]),
             CursorImageStatus::Surface(ref wl_surface) => {
@@ -231,8 +231,8 @@ struct Image {
 }
 
 impl Image {
-    #[profiling::function]
     fn get_frame(&self, now: Duration) -> &Frame {
+        crate::profile_function!();
         if self.animation_duration.is_zero() {
             return &self.frames[0];
         }

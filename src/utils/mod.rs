@@ -21,8 +21,8 @@ pub fn get_monotonic_time() -> Duration {
     Duration::new(timespec.tv_sec as u64, timespec.tv_nsec as u32)
 }
 
-#[profiling::function]
 pub fn spawn(cmd: String) {
+    crate::profile_function!();
     let res = std::thread::Builder::new()
         .name("Command spawner".to_string())
         .spawn(move || {

@@ -30,8 +30,8 @@ use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 
 impl State {
-    #[profiling::function]
     fn update_keyboard_focus(&mut self) {
+        crate::profile_function!();
         let keyboard = self.fht.keyboard.clone();
         let pointer = self.fht.pointer.clone();
         let input_method = self.fht.seat.input_method();
@@ -185,8 +185,8 @@ impl State {
         }
     }
 
-    #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        crate::profile_function!();
         match event {
             InputEvent::DeviceAdded { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {

@@ -195,6 +195,7 @@ impl ConfigUi {
         output: &smithay::output::Output,
         scale: f64,
     ) -> Option<ConfigUiRenderElement> {
+        crate::profile_function!();
         if matches!(self.state, State::Hidden) {
             return None;
         }
@@ -238,6 +239,7 @@ impl ConfigUi {
 }
 
 fn ui(ctx: &egui::Context, state: &State) {
+    crate::profile_function!();
     egui::Area::new(egui::Id::NULL).show(ctx, |ui| {
         let content = match state {
             State::Sliding { content, .. } | State::Shown { content, .. } => content,
