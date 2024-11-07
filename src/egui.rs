@@ -151,11 +151,17 @@ impl EguiElement {
             };
 
             renderer.unbind()?;
-            // TODO: Better damage tracking?
-            // Without this it leaves weird artifacts from previous frames
-            Result::<_, GlesError>::Ok(vec![Rectangle::<i32, Buffer>::from_loc_and_size(
-                (0, 0),
-                (buffer_size.w, buffer_size.h),
+
+            let egui::Rect { min, max } = self.ctx().used_rect();
+            let used_rect = Rectangle::<i32, Logical>::from_extemities(
+                (min.x.round() as i32, min.y.round() as i32),
+                (max.x.round() as i32, max.y.round() as i32),
+            );
+
+            Result::<_, GlesError>::Ok(vec![used_rect.to_buffer(
+                scale,
+                Transform::Flipped180,
+                &self.size,
             )])
         })?;
 
