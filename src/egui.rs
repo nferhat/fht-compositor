@@ -152,6 +152,10 @@ impl EguiElement {
 
             renderer.unbind()?;
 
+            // FIXME: This is not "optimal" per-se, but works fine.
+            //
+            // If we want the best way I would bee to access egui::Memory::visible_windows, but its
+            // gated behind a pub(crate), and all the funtions needed to reproduce it are too...
             let egui::Rect { min, max } = self.ctx().used_rect();
             let used_rect = Rectangle::<i32, Logical>::from_extemities(
                 (min.x.round() as i32, min.y.round() as i32),
