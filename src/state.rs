@@ -1234,13 +1234,9 @@ impl Fht {
         let disable = per_device_config.map_or(false, |c| c.disable);
         // The device is disabled, no need to apply any configuration
         if disable {
-            if let Err(err) = device.config_send_events_set_mode(SendEventsMode::DISABLED) {
-                error!(?err, device = device.sysname(), "Failed to disable device");
-            }
+            let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
         } else {
-            if let Err(err) = device.config_tap_set_enabled(true) {
-                error!(?err, device = device.sysname(), "Failed to enable device");
-            }
+            let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
 
             // Aquamarine (hyprland's input backend) determines a libinput device is a mouse by
             // the pointer capability:
