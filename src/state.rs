@@ -1236,7 +1236,7 @@ impl Fht {
         if disable {
             let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
         } else {
-            let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
+            let _ = device.config_send_events_set_mode(SendEventsMode::ENABLED);
 
             // Aquamarine (hyprland's input backend) determines a libinput device is a mouse by
             // the pointer capability:
