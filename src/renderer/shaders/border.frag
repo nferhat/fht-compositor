@@ -3,16 +3,30 @@ precision mediump float;
 uniform vec4 v_start_color;
 uniform vec4 v_end_color;
 uniform float v_gradient_angle;
-uniform float radius;
-uniform float half_thickness;
+uniform float corner_radius;
+uniform float thickness;
 
 uniform vec2 size;
 uniform float alpha;
 varying vec2 v_coords;
 
-float roundedBoxSDF(vec2 center, vec2 size, float radius) {
-    vec2 q = abs(center) - size + radius;
-    return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - radius;
+float rounding_alpha(vec2 coords, vec2 size, float radius) {
+    vec2 center;
+
+    if (coords.x < corner_radius && coords.y < corner_radius) {
+        center = vec2(radius);
+    } else if (size.x - corner_radius < coords.x && coords.y < corner_radius) {
+        center = vec2(size.x - radius, radius);
+    } else if (size.x - corner_radius < coords.x && size.y - corner_radius < coords.y) {
+        center = size - vec2(radius);
+    } else if (coords.x < corner_radius && size.y - corner_radius < coords.y) {
+        center = vec2(radius, size.y - radius);
+    } else {
+        return 1.0;
+    }
+
+    float dist = distance(coords, center);
+    return 1.0 - smoothstep(radius - 0.5, radius + 0.5, dist);
 }
 
 // Gradient color calculation from here
@@ -31,18 +45,24 @@ vec4 get_pixel_color() {
 }
 
 void main() {
-    vec2 half_size = size / 2.0;
-    vec2 coords = v_coords * size;
-    vec2 center = coords - half_size;
+    vec2 loc = v_coords * size;
+    // First rounding pass is for outside radius
+    vec4 color = get_pixel_color();
+    color *= rounding_alpha(loc, size, corner_radius);
 
-    float distance = roundedBoxSDF(center, half_size - vec2(half_thickness), radius - half_thickness);
-    float smoothedAlphaOuter = 1.0 - smoothstep(-0.5, .5, distance - half_thickness);
-    // Create an inner circle that isn't as anti-aliased as the outer ring
-    float smoothedAlphaInner = 1.0 - smoothstep(-0.5, 0.25, distance + half_thickness);
+    if (thickness > 0.0) {
+        // Second pass: inner rounding
+        loc -= vec2(thickness);
+        vec2 inner_size = size - vec2(thickness * 2.0);
 
-    vec4 v_color = get_pixel_color();
-    v_color.a = alpha;
-    gl_FragColor = mix(vec4(0), v_color, smoothedAlphaOuter - smoothedAlphaInner);
+        // Only apply rounding when we are inside
+        if (0.0 <= loc.x && loc.x <= inner_size.x && 0.0 <= loc.y && loc.y <= inner_size.y) {
+            float inner_radius = max(corner_radius - thickness, 0.0);
+            color = color * (1.0 - rounding_alpha(loc, inner_size, inner_radius));
+        }
+    }
+
+    gl_FragColor = color * alpha;
 }
 
 // vim: ft=glsl

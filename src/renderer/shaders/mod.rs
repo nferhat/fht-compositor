@@ -38,8 +38,8 @@ impl Shaders {
                     UniformName::new("v_start_color", UniformType::_4f),
                     UniformName::new("v_end_color", UniformType::_4f),
                     UniformName::new("v_gradient_angle", UniformType::_1f),
-                    UniformName::new("radius", UniformType::_1f),
-                    UniformName::new("half_thickness", UniformType::_1f),
+                    UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("thickness", UniformType::_1f),
                 ],
             )
             .expect("Shader source should always compile!");
