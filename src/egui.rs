@@ -14,7 +14,7 @@ use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Color32F, Frame, Offscreen, Renderer, Unbind};
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
 
 use crate::renderer::texture_element::FhtTextureElement;
 

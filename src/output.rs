@@ -4,7 +4,7 @@ use smithay::reexports::calloop::RegistrationToken;
 use smithay::wayland::session_lock::LockSurface;
 
 use crate::frame_clock::FrameClock;
-use crate::protocols::screencopy::Screencopy;
+use crate::protocols::screencopy::ScreencopyFrame;
 
 #[derive(Debug)]
 pub struct OutputState {
@@ -30,11 +30,19 @@ pub struct OutputState {
     /// value.
     pub current_frame_sequence: u32,
 
-    /// Pending wlr_screencopy.
+    /// Pending wlr_screencopy frames.
     ///
-    /// How the protocol works is that a client requests a screencopy frame, and then its up to the
-    /// compositor to fullfill the frame request ASAP. We keep this around until we do a redraw.
-    pub pending_screencopy: Option<Screencopy>,
+    /// How we handle wlr_screencopy is as follows:
+    ///
+    /// - If the client requested a screencopy **with damage**, we push the frame here and wait
+    ///   until the backend draws and submits damage, by which time we render and submit the
+    ///   pending screencopies.
+    ///
+    /// - If the client requested a screencopy **without damage**, we queue rendering of the output
+    ///   to fullfill the request as soon as possible.
+    pub pending_screencopies: Vec<ScreencopyFrame>,
+    /// Damage tracker for [`Self::pending_screencopies`].
+    pub screencopy_damage_tracker: Option<OutputDamageTracker>,
 
     /// Damage tracker used to draw debug damage.
     ///

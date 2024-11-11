@@ -162,7 +162,8 @@ impl WinitData {
     pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
         crate::profile_function!();
         let renderer = self.backend.renderer();
-        let OutputElementsResult { elements, .. } = fht.output_elements(renderer, &self.output);
+        let ref output_elements_result @ OutputElementsResult { ref elements, .. } =
+            fht.output_elements(renderer, &self.output);
 
         self.backend.bind().context("Failed to bind backend")?;
         let age = self.backend.buffer_age().unwrap();
@@ -178,8 +179,19 @@ impl WinitData {
 
         fht.update_primary_scanout_output(&self.output, &res.states);
         let has_damage = res.damage.is_some();
+        fht.render_screencopy_without_damage(
+            &self.output,
+            self.backend.renderer(),
+            output_elements_result,
+        );
+
         if let Some(damage) = res.damage {
             self.backend.submit(Some(damage)).unwrap();
+            fht.render_screencopy_with_damage(
+                &self.output,
+                self.backend.renderer(),
+                output_elements_result,
+            );
 
             let mut presentation_feedbacks =
                 fht.take_presentation_feedback(&self.output, &res.states);

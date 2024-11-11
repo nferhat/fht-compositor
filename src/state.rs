@@ -754,7 +754,8 @@ impl Fht {
             frame_clock: FrameClock::new(refresh_interval),
             animations_running: false,
             current_frame_sequence: 0u32,
-            pending_screencopy: None,
+            pending_screencopies: vec![],
+            screencopy_damage_tracker: None,
             debug_damage_tracker: None,
             lock_surface: None,
             // We did not render anything yet, so there's nothing to worry about
