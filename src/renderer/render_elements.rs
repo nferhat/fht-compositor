@@ -132,7 +132,7 @@ macro_rules! fht_render_elements {
                 dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
                 damage: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
                 opaque_regions: &[smithay::utils::Rectangle<i32, smithay::utils::Physical>],
-            ) -> Result<(), $crate::backend::udev::UdevRenderError<'render>> {
+            ) -> Result<(), $crate::backend::udev::UdevRenderError> {
                 match self {
                     $($name::$variant(elem) => {
                         smithay::backend::renderer::element::RenderElement::<$crate::backend::udev::UdevRenderer<'render>>::draw(elem, frame, src, dst, damage, opaque_regions)

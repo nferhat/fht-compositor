@@ -102,7 +102,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError<'a>> {
+    ) -> Result<(), UdevRenderError> {
         <TextureRenderElement<MultiTexture> as RenderElement<UdevRenderer<'a>>>::draw(
             &self.0,
             frame,
@@ -130,7 +130,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError<'a>> {
+    ) -> Result<(), UdevRenderError> {
         let frame = frame.glow_frame_mut();
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
             &self.0,

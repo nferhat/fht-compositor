@@ -256,7 +256,7 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError<'a>> {
+    ) -> Result<(), UdevRenderError> {
         use super::AsGlowFrame;
         if self.corner_radius == 0.0 {
             self.element.draw(frame, src, dst, damage, opaque_regions)

@@ -115,7 +115,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError<'a>> {
+    ) -> Result<(), UdevRenderError> {
         let frame = frame.glow_frame_mut();
         <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,

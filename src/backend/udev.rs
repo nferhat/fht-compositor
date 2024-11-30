@@ -91,7 +91,7 @@ pub type UdevFrame<'a, 'frame> = MultiFrame<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
 
-pub type UdevRenderError<'a> = MultiError<
+pub type UdevRenderError = MultiError<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
@@ -103,7 +103,7 @@ pub type UdevTextureMapping = MultiTextureMapping<
 
 impl<'a> FhtRenderer for UdevRenderer<'a> {
     type FhtTextureId = MultiTexture;
-    type FhtError = UdevRenderError<'a>;
+    type FhtError = UdevRenderError;
     type FhtTextureMapping = UdevTextureMapping;
 }
 
