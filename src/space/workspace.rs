@@ -1393,6 +1393,9 @@ impl Workspace {
                 .cloned()
             {
                 self.swap_tiles(window, &other_window, true);
+                if let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) {
+                    self.set_active_tile_idx(idx);
+                }
             } else {
                 // We still run the arrange tiles function in order to get the swapped/grabbed
                 // window back to its original place.
