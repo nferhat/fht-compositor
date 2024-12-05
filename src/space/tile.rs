@@ -1,3 +1,4 @@
+use std::borrow::BorrowMut;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -6,8 +7,9 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
-use smithay::backend::renderer::element::{Element as _, Id, Kind};
-use smithay::backend::renderer::glow::GlowRenderer;
+use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
+use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -17,12 +19,14 @@ use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
 use super::Config;
+use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::egui::EguiRenderElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
+use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::renderer::{render_to_texture, FhtRenderer};
+use crate::renderer::{render_to_texture, AsGlowFrame, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -52,6 +56,11 @@ pub struct Tile {
     /// location where to render the tile.
     location_animation: Option<Animation<[i32; 2]>>,
 
+    /// The current size animation of this tile.
+    ///
+    /// The animation value's (if any) is the visual size we should display the [`Tile`] with.
+    size_animation: Option<Animation<[i32; 2]>>,
+
     /// Extra damage bag to apply when the tile corners are being rounded.
     /// This is due to an implementation detail of [`RoundedCornerElement`]
     extra_damage: ExtraDamage,
@@ -76,6 +85,7 @@ crate::fht_render_elements! {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
         RoundedSurfaceDamage = ExtraDamage,
+        ResizingSurface = ResizingSurfaceRenderElement,
         Border = FhtPixelShaderElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
@@ -92,6 +102,7 @@ impl Tile {
             location: Point::default(),
             proportion,
             location_animation: None,
+            size_animation: None,
             opening_animation: None,
             extra_damage: ExtraDamage::default(),
             close_animation_snapshot: None,
@@ -195,27 +206,6 @@ impl Tile {
         Rectangle::from_loc_and_size(self.location, self.size())
     }
 
-    /// Get this [`Tile`]'s size, in other words its effective [`Size`].
-    ///
-    /// The returned [`Size`] is the size of the whole [`Tile`], including its border.
-    pub fn size(&self) -> Size<i32, Logical> {
-        let window_size = self.window.size();
-        let border_thickness = if self.window.fullscreen() {
-            0 // No border is drawn when the window is fullscreened.
-        } else {
-            let rules = self.window.rules();
-            // TODO: Use the actual border thickness when we reach fractional layout.
-            self.config
-                .border
-                .with_overrides(&rules.border_overrides)
-                .thickness as i32
-        };
-        Size::from((
-            window_size.w + 2 * border_thickness,
-            window_size.h + 2 * border_thickness,
-        ))
-    }
-
     /// Get this [`Tile`]'s visual geometry, in other words where the [`Tile`]'s [`Rectangle`] will
     /// end up at when rendering.
     ///
@@ -223,29 +213,7 @@ impl Tile {
     ///
     /// This accounts for any ongoing location animation.
     pub fn visual_geometry(&self) -> Rectangle<i32, Logical> {
-        let window_size = self.window.size();
-        let border_thickness = if self.window.fullscreen() {
-            0 // No border is drawn when the window is fullscreened.
-        } else {
-            let rules = self.window.rules();
-            // TODO: Use the actual border thickness when we reach fractional layout.
-            self.config
-                .border
-                .with_overrides(&rules.border_overrides)
-                .thickness as i32
-        };
-        let mut tile_location = self.location;
-        if let Some(animation) = &self.location_animation {
-            let [x, y] = *animation.value();
-            tile_location += Point::from((x, y));
-        }
-        // WARN: Do NOT use self.size() since it will cause a DEADLOCK!
-        let tile_size = Size::from((
-            window_size.w + 2 * border_thickness,
-            window_size.h + 2 * border_thickness,
-        ));
-
-        Rectangle::from_loc_and_size(tile_location, tile_size)
+        Rectangle::from_loc_and_size(self.visual_location(), self.visual_size())
     }
 
     /// Set this [`Tile`]'s location.
@@ -291,9 +259,38 @@ impl Tile {
 
     /// Get this [`Tile`]'s location, in other words its effective location in compositor space.
     ///
-    /// The returned value will the location of the whole [`Tile`], including its border.
+    /// The returned value will the size of the whole [`Tile`], including its border.
     pub fn location(&self) -> Point<i32, Logical> {
         self.location
+    }
+
+    /// Get this [`Tile`]'s visual size, in other words the size that its going to **render** with.
+    ///
+    /// The returned value will the size of the whole [`Tile`], including its border.
+    pub fn visual_size(&self) -> Size<i32, Logical> {
+        self.size_animation
+            .as_ref()
+            .map(|animation| array_to_size(*animation.value()))
+            .unwrap_or_else(|| self.size())
+    }
+
+    /// Get this [`Tile`]'s size, in other words its effective size in compositor space.
+    ///
+    /// The returned value will the size of the whole [`Tile`], including its border.
+    pub fn size(&self) -> Size<i32, Logical> {
+        let Size { w: ww, h: wh, .. } = self.window.size();
+        let border_thickness = if self.window.fullscreen() {
+            0 // No border is drawn when the window is fullscreened.
+        } else {
+            let rules = self.window.rules();
+            // TODO: Use the actual border thickness when we reach fractional layout.
+            self.config
+                .border
+                .with_overrides(&rules.border_overrides)
+                .thickness as i32
+        };
+
+        Size::from((ww + 2 * border_thickness, wh + 2 * border_thickness))
     }
 
     /// Get the [`Window`]'s location relative to this [`Tile`].
@@ -322,8 +319,17 @@ impl Tile {
     /// The `new_size` argument will the size of the whole [`Tile`], including its border.
     ///
     /// This does not call [`Window::send_configure`]!
-    pub fn set_size(&mut self, new_size: Size<i32, Logical>, _animate: bool) {
-        // TODO: window resize animations
+    pub fn set_size(&mut self, new_size: Size<i32, Logical>, animate: bool) {
+        let previous_size = self.visual_size(); // we need visual for animation
+        if previous_size == new_size
+            || self.size_animation.as_ref().is_some_and(|anim| {
+                // dont reanimate if we are resizing to the same target.
+                array_to_size(anim.end) == new_size
+            })
+        {
+            return;
+        }
+
         self.extra_damage.set_size(new_size);
         let rules = self.window.rules();
         // TODO: Use the actual border thickness when we reach fractional layout.
@@ -336,11 +342,30 @@ impl Tile {
             // When we have a fullscreen window, no border is drawn
             border_thickness = 0;
         }
-        let window_size = Size::from((
+        self.window.request_size(Size::from((
             new_size.w - 2 * border_thickness,
             new_size.h - 2 * border_thickness,
-        ));
-        self.window.request_size(window_size);
+        )));
+
+        if animate {
+            // When we request a size change, we wait till the window buffers are resized and the window
+            // has drawn at least one frame with the new size (generally on the next commit cycle).
+            //
+            // When we start rendering with that frame, we use a custom texture shader in order to draw
+            // it, instead of the included smithay one, in order to stretch/crop the window contents
+            // and apply proper corner rounding.
+            let prev = self
+                .size_animation
+                .take()
+                .map(|animation| array_to_size(*animation.value()))
+                .unwrap_or(previous_size);
+            if let Some(config) = self.config.window_geometry_animation.as_ref() {
+                self.size_animation = Some(
+                    Animation::new([prev.w, prev.h], [new_size.w, new_size.h], config.duration)
+                        .with_curve(config.curve),
+                );
+            }
+        }
     }
 
     /// Advance animations for this [`Tile`].
@@ -350,6 +375,12 @@ impl Tile {
 
         let _ = self.location_animation.take_if(|a| a.is_finished());
         if let Some(animation) = &mut self.location_animation {
+            animations_ongoing = true;
+            animation.tick(target_presentation_time);
+        }
+
+        let _ = self.size_animation.take_if(|a| a.is_finished());
+        if let Some(animation) = &mut self.size_animation {
             animations_ongoing = true;
             animation.tick(target_presentation_time);
         }
@@ -423,21 +454,20 @@ impl Tile {
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
-            (
-                border.thickness.round() as i32,
-                border.radius - (border.thickness / 2.0),
-            )
+            (border.thickness.round() as i32, border.radius)
         };
+        let inner_radius = (border_radius - border_thickness as f32).max(0.0);
 
         drop(rules); // Avoid deadlock :skull:
 
+        let has_size_animation = self.size_animation.is_some();
+        let tile_geometry = Rectangle::from_loc_and_size(location, self.visual_size());
         let window_geometry = Rectangle::from_loc_and_size(
             location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
-            self.window.size(),
-        );
-        let tile_geometry = Rectangle::from_loc_and_size(
-            location,
-            window_geometry.size + Size::from((border_thickness * 2, border_thickness * 2)),
+            (
+                tile_geometry.size.w - 2 * border_thickness,
+                tile_geometry.size.h - 2 * border_thickness,
+            ),
         );
 
         if border_radius != 0.0 {
@@ -457,33 +487,98 @@ impl Tile {
             .map(TileRenderElement::Surface);
         elements.extend(popup_elements);
 
-        let window_elements = self
-            .window
-            .render_toplevel_elements(
+        if has_size_animation {
+            // Render inside GlesTexture, and render
+            let renderer = renderer.glow_renderer_mut();
+            let window_elements =
+                self.window
+                    .render_toplevel_elements(renderer, (0, 0).into(), scale, alpha);
+            let size_animation = self.size_animation.as_ref().unwrap();
+
+            // dont forget to subtract 2 * border since its for the window
+            let curr_size = Size::from((
+                size_animation.value()[0] - 2 * border_thickness,
+                size_animation.value()[1] - 2 * border_thickness,
+            ));
+
+            // NOTE: We render the elements inside a texture thats the actual window size
+            // Cropping and stretching is done inside the texture shader.
+            let win_size = self.window.size();
+            if let Ok((tex, _)) = render_to_texture(
                 renderer,
-                window_geometry.loc.to_physical_precise_round(scale),
+                win_size.to_physical_precise_round(scale),
                 scale,
-                alpha,
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                window_elements.iter(),
             )
-            .into_iter()
-            .map(move |e| {
-                // Rounding off windows is a little tricky.
-                //
-                // Not every surface of the window means its "the window", not at all.
-                // Some clients (like OBS-studio) use subsurfaces (not popups) to display different
-                // parts of their interface (for example OBs does this with the preview window)
-                //
-                // To counter this, we check here if the surface is going to clip.
-                if RoundedCornerElement::will_clip(&e, scale.into(), window_geometry, border_radius)
-                {
-                    let rounded =
-                        RoundedCornerElement::new(e, border_radius, window_geometry, scale.into());
-                    TileRenderElement::RoundedSurface(rounded)
-                } else {
-                    TileRenderElement::Surface(e)
-                }
-            });
-        elements.extend(window_elements);
+            .inspect_err(|err| warn!("Failed to render to texture for size animation: {err:?}"))
+            {
+                let element_id = Id::new();
+                let tex: FhtTextureElement = TextureRenderElement::from_static_texture(
+                    element_id.clone(),
+                    renderer.id(),
+                    window_geometry.loc.to_f64().to_physical(scale),
+                    tex,
+                    // FIXME: This is garbage, "fractional scaling"
+                    scale.x.max(scale.y).round() as i32,
+                    Transform::Normal,
+                    None,
+                    None,
+                    // NOTE: we changed the size to curr_size by now
+                    Some(window_geometry.size),
+                    None,
+                    Kind::Unspecified,
+                )
+                .into();
+                self.window.set_offscreen_element_id(Some(element_id));
+
+                let element = ResizingSurfaceRenderElement {
+                    tex,
+                    corner_radius: inner_radius,
+                    win_size,
+                    curr_size,
+                };
+
+                elements.push(TileRenderElement::<R>::ResizingSurface(element));
+            }
+        } else {
+            let window_elements = self
+                .window
+                .render_toplevel_elements(
+                    renderer,
+                    window_geometry.loc.to_physical_precise_round(scale),
+                    scale,
+                    alpha,
+                )
+                .into_iter()
+                .map(move |e| {
+                    // Rounding off windows is a little tricky.
+                    //
+                    // Not every surface of the window means its "the window", not at all.
+                    // Some clients (like OBS-studio) use subsurfaces (not popups) to display different
+                    // parts of their interface (for example OBs does this with the preview window)
+                    //
+                    // To counter this, we check here if the surface is going to clip.
+                    if RoundedCornerElement::will_clip(
+                        &e,
+                        scale.into(),
+                        window_geometry,
+                        inner_radius,
+                    ) {
+                        let rounded = RoundedCornerElement::new(
+                            e,
+                            inner_radius,
+                            window_geometry,
+                            scale.into(),
+                        );
+                        TileRenderElement::RoundedSurface(rounded)
+                    } else {
+                        TileRenderElement::Surface(e)
+                    }
+                });
+            elements.extend(window_elements);
+        };
 
         if border_thickness != 0 {
             let element = super::border::draw_border(
@@ -591,4 +686,128 @@ impl Tile {
 fn opening_animation_progress_to_scale(progress: f64) -> f64 {
     const OPEN_SCALE_THRESHOLD: f64 = 0.5;
     progress * (1.0 - OPEN_SCALE_THRESHOLD) + OPEN_SCALE_THRESHOLD
+}
+
+fn array_to_size<N: smithay::utils::Coordinate, Kind>(array: [N; 2]) -> Size<N, Kind> {
+    Size::from((array[0], array[1]))
+}
+
+#[derive(Debug)]
+pub struct ResizingSurfaceRenderElement {
+    // We render all the toplevel surfaces into a GlesTexture and use that with a custom texture
+    // shader in order to apply the resize/crop effects needed, with proper rounded corner support
+    //
+    // The texture is big enough to fit the merged size of prev_size and next_size
+    tex: FhtTextureElement,
+    corner_radius: f32,
+    win_size: Size<i32, Logical>,
+    curr_size: Size<i32, Logical>,
+}
+
+impl Element for ResizingSurfaceRenderElement {
+    fn id(&self) -> &Id {
+        self.tex.id()
+    }
+
+    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+        self.tex.current_commit()
+    }
+
+    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
+        self.tex.src()
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
+        self.tex.geometry(scale)
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
+        self.tex.location(scale)
+    }
+
+    fn transform(&self) -> Transform {
+        Transform::Normal
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
+    ) -> smithay::backend::renderer::utils::DamageSet<i32, smithay::utils::Physical> {
+        if commit != Some(self.current_commit()) {
+            smithay::backend::renderer::utils::DamageSet::from_slice(&[
+                Rectangle::from_loc_and_size((0, 0), self.geometry(scale).size),
+            ])
+        } else {
+            smithay::backend::renderer::utils::DamageSet::default()
+        }
+    }
+
+    fn opaque_regions(
+        &self,
+        _scale: Scale<f64>,
+    ) -> smithay::backend::renderer::utils::OpaqueRegions<i32, smithay::utils::Physical> {
+        smithay::backend::renderer::utils::OpaqueRegions::default()
+    }
+
+    fn alpha(&self) -> f32 {
+        1.0
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::default()
+    }
+}
+
+impl RenderElement<GlowRenderer> for ResizingSurfaceRenderElement {
+    fn draw(
+        &self,
+        frame: &mut GlowFrame,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, smithay::utils::Physical>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+        opaque_regions: &[Rectangle<i32, smithay::utils::Physical>],
+    ) -> Result<(), GlesError> {
+        let program = Shaders::get_from_frame(frame).resizing_texture.clone();
+        let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
+        let additional_uniforms = vec![
+            Uniform::new("corner_radius", self.corner_radius),
+            Uniform::new("win_size", [self.win_size.w as f32, self.win_size.h as f32]),
+            Uniform::new(
+                "curr_size",
+                [self.curr_size.w as f32, self.curr_size.h as f32],
+            ),
+        ];
+
+        gles_frame.override_default_tex_program(program, additional_uniforms);
+
+        let res = <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
+            &self.tex,
+            frame,
+            src,
+            dst,
+            damage,
+            opaque_regions,
+        );
+
+        // Never forget to reset since its not our responsibility to manage texture shaders.
+        BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();
+
+        res
+    }
+}
+
+impl<'a> RenderElement<UdevRenderer<'a>> for ResizingSurfaceRenderElement {
+    fn draw(
+        &self,
+        frame: &mut UdevFrame<'a, '_>,
+        src: Rectangle<f64, smithay::utils::Buffer>,
+        dst: Rectangle<i32, smithay::utils::Physical>,
+        damage: &[Rectangle<i32, smithay::utils::Physical>],
+        opaque_regions: &[Rectangle<i32, smithay::utils::Physical>],
+    ) -> Result<(), UdevRenderError> {
+        let frame = frame.glow_frame_mut();
+        <Self as RenderElement<GlowRenderer>>::draw(self, frame, src, dst, damage, opaque_regions)
+            .map_err(UdevRenderError::Render)
+    }
 }

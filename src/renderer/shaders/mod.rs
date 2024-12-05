@@ -9,18 +9,18 @@ use super::{AsGlowFrame, AsGlowRenderer};
 
 const BORDER_SRC: &str = include_str!("./border.frag");
 const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
+const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
 
 pub struct Shaders {
     pub border: GlesPixelProgram,
     pub rounded_quad: GlesTexProgram,
+    pub resizing_texture: GlesTexProgram,
 }
 
 impl Shaders {
     pub fn init(renderer: &mut GlowRenderer) {
         let renderer: &mut GlesRenderer = renderer.borrow_mut();
 
-        // Rounded outline and rounded quad are included with the compositor, no issues should
-        // arise here. (hopefully)
         let rounded_quad = renderer
             .compile_custom_texture_shader(
                 ROUNDED_QUAD_SRC,
@@ -28,6 +28,17 @@ impl Shaders {
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
                     UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                ],
+            )
+            .expect("Shader source should always compile!");
+        let resizing_surface = renderer
+            .compile_custom_texture_shader(
+                RESIZING_TEXTURE_SRC,
+                &[
+                    UniformName::new("corner_radius", UniformType::_1f),
+                    // the size of the window texture we sampled from
+                    UniformName::new("win_size", UniformType::_2f),
+                    UniformName::new("curr_size", UniformType::_2f),
                 ],
             )
             .expect("Shader source should always compile!");
@@ -47,6 +58,7 @@ impl Shaders {
         let shaders = Self {
             border: rounded_outline,
             rounded_quad,
+            resizing_texture: resizing_surface,
         };
 
         renderer
