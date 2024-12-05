@@ -788,7 +788,6 @@ impl Workspace {
             return;
         }
 
-        // TODO: Use actual value of border width
         let rules = unconfigured_window.rules();
         let border_width = self
             .config

@@ -374,8 +374,6 @@ impl State {
 impl State {
     pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
         crate::profile_function!();
-        // TODO: Handle mouse actions again.
-        // Currently needs re-implementation from the space side
         match action {
             MouseAction::SwapTile => {
                 let pointer_loc = self.fht.pointer.current_location();

@@ -837,7 +837,6 @@ impl Cast {
             &output_elements_result.elements[output_elements_result.cursor_elements_len..]
         };
 
-        // TODO: Fix funny borrow checker
         let damage_tracker = match &mut guard.state {
             CastState::Ready { damage_tracker, .. } => damage_tracker.as_mut().unwrap(),
             _ => unreachable!(),

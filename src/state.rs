@@ -29,7 +29,7 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Monotonic};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::{
-    with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
+    with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
 };
 use smithay::wayland::content_type::ContentTypeState;
@@ -37,6 +37,8 @@ use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
+use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
+use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
@@ -137,6 +139,7 @@ impl State {
         crate::profile_function!();
         self.fht.space.refresh();
         self.fht.popups.cleanup();
+        self.fht.refresh_idle_inhibit();
         self.fht.resolve_rules_for_all_windows_if_needed();
 
         {
@@ -523,6 +526,7 @@ pub struct Fht {
     pub focus_state: FocusState,
     pub popups: PopupManager,
     pub root_surfaces: HashMap<WlSurface, WlSurface>,
+    pub idle_inhibiting_surfaces: Vec<WlSurface>,
     pub lock_state: LockState,
 
     pub output_state: HashMap<Output, output::OutputState>,
@@ -556,6 +560,7 @@ pub struct Fht {
     pub dmabuf_state: DmabufState,
     pub foreign_toplevel_list_state: ForeignToplevelListState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
+    pub idle_notifier_state: IdleNotifierState<State>,
     pub layer_shell_state: WlrLayerShellState,
     pub primary_selection_state: PrimarySelectionState,
     pub session_lock_manager_state: SessionLockManagerState,
@@ -604,6 +609,7 @@ impl Fht {
         let data_control_state =
             DataControlState::new::<State, _>(dh, Some(&primary_selection_state), |_| true);
         let data_device_state = DataDeviceState::new::<State>(dh);
+        let idle_notifier_state = IdleNotifierState::new(dh, loop_handle.clone());
         let foreign_toplevel_list_state = ForeignToplevelListState::new::<State>(dh);
         let dmabuf_state = DmabufState::new();
         let layer_shell_state = WlrLayerShellState::new::<State>(dh);
@@ -623,6 +629,7 @@ impl Fht {
         CursorShapeManagerState::new::<State>(&dh);
         TextInputManagerState::new::<State>(&dh);
         InputMethodManagerState::new::<State, _>(&dh, |_| true);
+        IdleInhibitManagerState::new::<State>(dh);
         VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
         PointerConstraintsState::new::<State>(&dh);
         TabletManagerState::new::<State>(&dh);
@@ -705,6 +712,7 @@ impl Fht {
             resize_grab_active: false,
             interactive_grab_active: false,
             root_surfaces: HashMap::default(),
+            idle_inhibiting_surfaces: Vec::new(),
 
             output_state: HashMap::new(),
 
@@ -725,6 +733,7 @@ impl Fht {
             dmabuf_state,
             foreign_toplevel_list_state,
             keyboard_shortcuts_inhibit_state,
+            idle_notifier_state,
             layer_shell_state,
             primary_selection_state,
             shm_state,
@@ -1192,6 +1201,17 @@ impl Fht {
                 }
             }
         }
+    }
+
+    pub fn refresh_idle_inhibit(&mut self) {
+        self.idle_inhibiting_surfaces.retain(|s| s.alive());
+        let is_inhibited = self.idle_inhibiting_surfaces.iter().any(|surface| {
+            with_states(surface, |states| {
+                // only inhibit if its scanned out
+                surface_primary_scanout_output(surface, states).is_some()
+            })
+        });
+        self.idle_notifier_state.set_is_inhibited(is_inhibited);
     }
 
     pub fn resolve_rules_for_all_windows_if_needed(&self) {

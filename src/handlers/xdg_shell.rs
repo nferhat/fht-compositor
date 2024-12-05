@@ -77,7 +77,6 @@ impl XdgShellHandler for State {
     fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
         let pointer = self.fht.pointer.clone();
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
-            // TODO: Handle grabs
             if !pointer.has_grab(serial) {
                 return;
             }
