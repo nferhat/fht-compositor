@@ -794,7 +794,7 @@ impl Workspace {
             .config
             .border
             .with_overrides(&rules.border_overrides)
-            .thickness as i32;
+            .thickness;
         let prepared_proportion = rules.proportion.unwrap_or(1.0);
 
         if unconfigured_window.fullscreen() {

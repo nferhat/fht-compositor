@@ -607,8 +607,8 @@ impl Default for Decorations {
     }
 }
 
-const fn default_thickness() -> f32 {
-    2.0
+const fn default_thickness() -> i32 {
+    2
 }
 
 const fn default_radius() -> f32 {
@@ -621,7 +621,7 @@ pub struct Border {
     pub focused_color: Color,
     pub normal_color: Color,
     #[serde(default = "default_thickness")]
-    pub thickness: f32,
+    pub thickness: i32,
     #[serde(default = "default_radius")]
     pub radius: f32,
 }
@@ -891,7 +891,7 @@ pub struct WindowRule {
 pub struct BorderOverrides {
     pub focused_color: Option<Color>,
     pub normal_color: Option<Color>,
-    pub thickness: Option<f32>,
+    pub thickness: Option<i32>,
     pub radius: Option<f32>,
 }
 

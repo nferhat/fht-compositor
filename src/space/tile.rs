@@ -283,11 +283,10 @@ impl Tile {
             0 // No border is drawn when the window is fullscreened.
         } else {
             let rules = self.window.rules();
-            // TODO: Use the actual border thickness when we reach fractional layout.
             self.config
                 .border
                 .with_overrides(&rules.border_overrides)
-                .thickness as i32
+                .thickness
         };
 
         Size::from((ww + 2 * border_thickness, wh + 2 * border_thickness))
@@ -298,20 +297,15 @@ impl Tile {
     /// A [`Tile`] can have a border around it, so the actual window will get rendered inside the
     /// border, and not at `self.location`.
     pub fn window_loc(&self) -> Point<i32, Logical> {
-        let mut loc = Point::default();
         if self.window.fullscreen() {
             // When we are fullscreened, we do not render the border
-            return loc;
+            Point::default()
+        } else {
+            let rules = self.window.rules();
+            let fht_compositor_config::Border { thickness, .. } =
+                self.config.border.with_overrides(&rules.border_overrides);
+            Point::from((thickness, thickness))
         }
-
-        let rules = self.window.rules();
-        let border = self.config.border.with_overrides(&rules.border_overrides);
-        // TODO: Use the actual fractional value
-        let thickness = border.thickness.round() as i32;
-        loc.x += thickness;
-        loc.y += thickness;
-
-        loc
     }
 
     /// Set this [`Tile`]'s size.
@@ -332,12 +326,11 @@ impl Tile {
 
         self.extra_damage.set_size(new_size);
         let rules = self.window.rules();
-        // TODO: Use the actual border thickness when we reach fractional layout.
         let mut border_thickness = self
             .config
             .border
             .with_overrides(&rules.border_overrides)
-            .thickness as i32;
+            .thickness;
         if self.window.fullscreen() {
             // When we have a fullscreen window, no border is drawn
             border_thickness = 0;
@@ -454,7 +447,7 @@ impl Tile {
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
-            (border.thickness.round() as i32, border.radius)
+            (border.thickness, border.radius)
         };
         let inner_radius = (border_radius - border_thickness as f32).max(0.0);
 
