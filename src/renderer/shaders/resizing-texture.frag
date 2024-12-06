@@ -48,15 +48,14 @@ float rounding_alpha(vec2 coords, vec2 size, float radius) {
 }
 
 void main() {
-    vec4 color;
 
     vec2 tex_coords = (v_coords * win_size) / curr_size;
     if (win_size.x > curr_size.x)
         tex_coords.x = v_coords.x;
     if (win_size.y > curr_size.y)
         tex_coords.y = v_coords.y;
+    vec4 color = texture2D(tex, tex_coords);
 
-    color = texture2D(tex, tex_coords);
     if (corner_radius > 0.0)
         color *= rounding_alpha(v_coords * curr_size, curr_size, corner_radius);
     

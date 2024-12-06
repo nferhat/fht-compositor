@@ -10,10 +10,11 @@ use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
@@ -499,7 +500,7 @@ impl Tile {
             let win_size = self.window.size();
             if let Ok((tex, _)) = render_to_texture(
                 renderer,
-                win_size.to_physical_precise_round(scale),
+                window_geometry.size.to_physical_precise_round(scale),
                 scale,
                 Transform::Normal,
                 Fourcc::Abgr8888,
@@ -702,7 +703,7 @@ impl Element for ResizingSurfaceRenderElement {
         self.tex.id()
     }
 
-    fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+    fn current_commit(&self) -> CommitCounter {
         self.tex.current_commit()
     }
 
@@ -710,45 +711,36 @@ impl Element for ResizingSurfaceRenderElement {
         self.tex.src()
     }
 
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         self.tex.geometry(scale)
     }
 
-    fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
         self.tex.location(scale)
     }
 
     fn transform(&self) -> Transform {
-        Transform::Normal
+        self.tex.transform()
     }
 
     fn damage_since(
         &self,
         scale: Scale<f64>,
-        commit: Option<smithay::backend::renderer::utils::CommitCounter>,
-    ) -> smithay::backend::renderer::utils::DamageSet<i32, smithay::utils::Physical> {
-        if commit != Some(self.current_commit()) {
-            smithay::backend::renderer::utils::DamageSet::from_slice(&[
-                Rectangle::from_loc_and_size((0, 0), self.geometry(scale).size),
-            ])
-        } else {
-            smithay::backend::renderer::utils::DamageSet::default()
-        }
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        self.tex.damage_since(scale, commit)
     }
 
-    fn opaque_regions(
-        &self,
-        _scale: Scale<f64>,
-    ) -> smithay::backend::renderer::utils::OpaqueRegions<i32, smithay::utils::Physical> {
-        smithay::backend::renderer::utils::OpaqueRegions::default()
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        self.tex.opaque_regions(scale)
     }
 
     fn alpha(&self) -> f32 {
-        1.0
+        self.tex.alpha()
     }
 
     fn kind(&self) -> Kind {
-        Kind::default()
+        self.tex.kind()
     }
 }
 
@@ -757,9 +749,9 @@ impl RenderElement<GlowRenderer> for ResizingSurfaceRenderElement {
         &self,
         frame: &mut GlowFrame,
         src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, smithay::utils::Physical>,
-        damage: &[Rectangle<i32, smithay::utils::Physical>],
-        opaque_regions: &[Rectangle<i32, smithay::utils::Physical>],
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         let program = Shaders::get_from_frame(frame).resizing_texture.clone();
         let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
@@ -795,9 +787,9 @@ impl<'a> RenderElement<UdevRenderer<'a>> for ResizingSurfaceRenderElement {
         &self,
         frame: &mut UdevFrame<'a, '_>,
         src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, smithay::utils::Physical>,
-        damage: &[Rectangle<i32, smithay::utils::Physical>],
-        opaque_regions: &[Rectangle<i32, smithay::utils::Physical>],
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
         let frame = frame.glow_frame_mut();
         <Self as RenderElement<GlowRenderer>>::draw(self, frame, src, dst, damage, opaque_regions)
