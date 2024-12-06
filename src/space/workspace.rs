@@ -225,17 +225,16 @@ impl Workspace {
         let mut arrange = false;
 
         // FIXME: This causes to always re-arrange???
-        // if self
-        //     .fullscreened_tile_idx
-        //     .as_ref()
-        //     .is_some_and(|&idx| self.tiles.get(idx).is_none())
-        // {
-        //     dbg!("arrange cause not fullscreen");
-        //     // Fullscreen tile idx points to non-existent tile!?
-        //     // This should never happen in practice but still handle this edge case.
-        //     let _ = self.fullscreened_tile_idx.take();
-        //     arrange = true;
-        // }
+        if self
+            .fullscreened_tile_idx
+            .as_ref()
+            .is_some_and(|&idx| self.tiles.get(idx).is_none())
+        {
+            // Fullscreen tile idx points to non-existent tile!?
+            // This should never happen in practice but still handle this edge case.
+            let _ = self.fullscreened_tile_idx.take();
+            arrange = true;
+        }
 
         if self
             .fullscreened_tile_idx
@@ -260,8 +259,8 @@ impl Workspace {
 
         if self
             .fullscreened_tile_idx
-            .as_ref()
-            .is_some_and(|&idx| !self.tiles[idx].window().fullscreen())
+            .take_if(|idx| !self.tiles[*idx].window().fullscreen())
+            .is_some()
         {
             // The current fullscreened tile window is not fullscreened anymore.
             //
@@ -1087,10 +1086,8 @@ impl Workspace {
         let (maximized, tiles) = self
             .tiles
             .iter_mut()
-            .enumerate()
             // We do not want to affect the fullscreened tile
-            .filter(|(idx, tile)| Some(*idx) != self.fullscreened_tile_idx && tile.window().tiled())
-            .map(|(_, tile)| tile)
+            .filter(|tile| tile.window().tiled() && !tile.window().fullscreen())
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
         let work_area = {
             let mut work_area = output_geometry;
@@ -1144,6 +1141,14 @@ impl Workspace {
                 };
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        // Don't affect the fullscreened tile.
+                        //
+                        // This code does have a side effect of leaving a "hole" inside the layout,
+                        // where the fullscreened tile was previously. it's fine, especailly when
+                        // it will be paired with a fade-out animation for other tiles.
+                        continue;
+                    }
                     if (idx as i32) < nmaster {
                         let master_height = master_heights[idx];
                         let geo = Rectangle::from_loc_and_size(

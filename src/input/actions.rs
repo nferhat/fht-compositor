@@ -239,6 +239,7 @@ impl State {
                         // Workspace will take care of removing fullscreen
                         window.request_fullscreen(false);
                     } else {
+                        window.request_fullscreen(true);
                         self.fht.space.fullscreen_window(&window, true);
                     }
                 }
