@@ -121,6 +121,15 @@ pub struct Workspace {
     /// render elements from [`Workspace::render`].
     render_offset: Option<Animation<[i32; 2]>>,
 
+    /// Fade out animations for non-fullscreen windows.
+    ///
+    /// When fullscreening a window, we run a fade-out animations on all other windows in the
+    /// workspace to make a seamless transition in and out of fullscreen.
+    ///
+    /// We keep track of the tile that was fullscreened to avoid fading it out when we remove it
+    /// from the fullscreen state.
+    fullscreen_fade_animation: Option<(usize, Animation<f32>)>,
+
     /// An interactive tile "swap".
     ///
     /// It can
@@ -150,6 +159,7 @@ impl Workspace {
             gaps: config.gaps,
             has_transient_layout_changes: false,
             render_offset: None,
+            fullscreen_fade_animation: None,
             interactive_swap: None,
             config: Rc::clone(config),
         }
@@ -232,7 +242,8 @@ impl Workspace {
         {
             // Fullscreen tile idx points to non-existent tile!?
             // This should never happen in practice but still handle this edge case.
-            let _ = self.fullscreened_tile_idx.take();
+            let idx = self.fullscreened_tile_idx.take().unwrap();
+            self.start_fullscreen_fade_in(idx);
             arrange = true;
         }
 
@@ -245,22 +256,23 @@ impl Workspace {
             // - We changed focus while there's a fullscreen tile
             // - The tile order changed.
             // Both of these warrant a layout arrange.
+            let idx = self.fullscreened_tile_idx.take().unwrap();
+            self.start_fullscreen_fade_in(idx);
             arrange = true;
         }
 
-        if self
+        if let Some(idx) = self
             .fullscreened_tile_idx
             .take_if(|&mut idx| !self.tiles[idx].window().alive())
-            .is_some()
         {
             // The previous fullscreen is dead, arrange as a heuristic move
+            self.start_fullscreen_fade_in(idx);
             arrange = true;
         }
 
-        if self
+        if let Some(idx) = self
             .fullscreened_tile_idx
             .take_if(|idx| !self.tiles[*idx].window().fullscreen())
-            .is_some()
         {
             // The current fullscreened tile window is not fullscreened anymore.
             //
@@ -269,6 +281,7 @@ impl Workspace {
             //
             // This can also be triggered by other parts of the compositor logic, assuming that we
             // (the workspace) will take care of unfullscreening the window.
+            self.start_fullscreen_fade_in(idx);
             arrange = true;
         }
 
@@ -687,6 +700,9 @@ impl Workspace {
         self.remove_current_fullscreen();
         self.fullscreened_tile_idx = Some(idx);
         self.arrange_tiles(animate);
+        if animate {
+            self.start_fullscreen_fade_out(idx);
+        }
 
         true
     }
@@ -1447,6 +1463,14 @@ impl Workspace {
             running = true;
         }
 
+        let _ = self
+            .fullscreen_fade_animation
+            .take_if(|(_, a)| a.is_finished());
+        if let Some((_, animation)) = &mut self.fullscreen_fade_animation {
+            animation.tick(target_presentation_time);
+            running = true;
+        }
+
         for tile in &mut self.tiles {
             running |= tile.advance_animations(target_presentation_time);
         }
@@ -1459,6 +1483,38 @@ impl Workspace {
         running
     }
 
+    /// Start the fullscreen fade out animation.
+    fn start_fullscreen_fade_out(&mut self, idx: usize) {
+        if let Some(animation_config) = self.config.window_geometry_animation.as_ref() {
+            let duration = animation_config.duration / 2;
+            let start = self
+                .fullscreen_fade_animation
+                .take()
+                .map(|(_, anim)| *anim.value())
+                .unwrap_or(1.0);
+            self.fullscreen_fade_animation = Some((
+                idx,
+                Animation::new(start, 0.0, duration).with_curve(animation_config.curve),
+            ));
+        }
+    }
+
+    /// Start the fullscreen fade in animation.
+    fn start_fullscreen_fade_in(&mut self, idx: usize) {
+        if let Some(animation_config) = self.config.window_geometry_animation.as_ref() {
+            let duration = animation_config.duration / 2;
+            let start = self
+                .fullscreen_fade_animation
+                .take()
+                .map(|(_, anim)| *anim.value())
+                .unwrap_or(0.0);
+            self.fullscreen_fade_animation = Some((
+                idx,
+                Animation::new(start, 1., duration).with_curve(animation_config.curve),
+            ));
+        }
+    }
+
     /// Render all the needed elements of this [`Workspace`].
     pub fn render<R: FhtRenderer>(
         &self,
@@ -1467,6 +1523,13 @@ impl Workspace {
     ) -> Vec<WorkspaceRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
+        // when fullscreening a window, we apply a decreasing alpha to other tiles in order to make
+        // the transition seamless when entering/closing fullscreen
+        let (skip_alpha_animation_idx, alpha) = self
+            .fullscreen_fade_animation
+            .as_ref()
+            .map(|(idx, anim)| (Some(*idx), *anim.value()))
+            .unwrap_or((None, 1.0));
 
         let render_offset = self
             .render_offset
@@ -1484,18 +1547,20 @@ impl Workspace {
             // TODO: Maybe fade out the other tiles when fullscreen is resizing? Would be better
             // than just removing them right away.
             let tile = &self.tiles[fullscreen_idx];
-            return tile
-                .render(renderer, scale, true)
-                .map(|element| {
-                    RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                        .into()
-                })
-                .collect();
+
+            let fullscreen_elements = tile.render(renderer, scale, 1.0, true).map(|element| {
+                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                    .into()
+            });
+
+            if skip_alpha_animation_idx.is_none() {
+                return fullscreen_elements.collect();
+            }
         }
 
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
-            let element = closing_tile.render(scale, 1.0);
+            let element = closing_tile.render(scale, alpha);
             let element =
                 RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
                     .into();
@@ -1503,8 +1568,14 @@ impl Workspace {
         }
 
         if let Some(tile) = self.active_tile() {
+            let alpha = if self.active_tile_idx == skip_alpha_animation_idx {
+                1.0
+            } else {
+                alpha
+            };
+
             // Active gets rendered above others.
-            elements.extend(tile.render(renderer, scale, true).map(|element| {
+            elements.extend(tile.render(renderer, scale, alpha, true).map(|element| {
                 RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
                     .into()
             }));
@@ -1512,11 +1583,19 @@ impl Workspace {
 
         // Now render others, just fine.
         for (idx, tile) in self.tiles.iter().enumerate() {
+            // NOTE: active_tile_idx is always fullscreen_tile_idx, ensured by Workspace::refresh
             if Some(idx) == self.active_tile_idx {
                 continue; // active tile has already been rendered.
             }
 
-            elements.extend(tile.render(renderer, scale, false).map(|element| {
+            let alpha = if Some(idx) == skip_alpha_animation_idx {
+                1.0
+            } else {
+                dbg!(idx);
+                alpha
+            };
+
+            elements.extend(tile.render(renderer, scale, alpha, false).map(|element| {
                 RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
                     .into()
             }));

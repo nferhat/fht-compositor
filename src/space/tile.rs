@@ -409,7 +409,7 @@ impl Tile {
             return;
         }
 
-        let elements = self.render_inner(renderer, (0, 0).into(), scale, false);
+        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0, false);
         self.close_animation_snapshot = Some(elements);
     }
 
@@ -431,6 +431,7 @@ impl Tile {
         renderer: &mut R,
         location: Point<i32, Logical>,
         scale: Scale<f64>,
+        alpha: f32,
         active: bool,
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
@@ -439,9 +440,9 @@ impl Tile {
         let is_fullscreen = self.window.fullscreen();
 
         let alpha = if is_fullscreen {
-            1.0
+            alpha
         } else {
-            rules.opacity.unwrap_or(1.0)
+            alpha * rules.opacity.unwrap_or(1.0)
         };
 
         let border = self.config.border.with_overrides(&rules.border_overrides);
@@ -517,7 +518,7 @@ impl Tile {
                     // FIXME: This is garbage, "fractional scaling"
                     scale.x.max(scale.y).round() as i32,
                     Transform::Normal,
-                    None,
+                    Some(alpha),
                     None,
                     // NOTE: we changed the size to curr_size by now
                     Some(window_geometry.size),
@@ -602,6 +603,7 @@ impl Tile {
         &self,
         renderer: &mut R,
         scale: f64,
+        alpha: f32,
         active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
@@ -616,7 +618,7 @@ impl Tile {
             let glow_renderer = renderer.glow_renderer_mut();
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
-            let elements = self.render_inner(glow_renderer, (0, 0).into(), scale, active);
+            let elements = self.render_inner(glow_renderer, (0, 0).into(), scale, alpha, active);
             let rec = elements
                 .iter()
                 .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
@@ -648,7 +650,7 @@ impl Tile {
                     // FIXME: This is garbage, "fractional scaling"
                     scale.x.max(scale.y).round() as i32,
                     Transform::Normal,
-                    Some(progress.clamp(0., 1.) as f32),
+                    Some(alpha * progress.clamp(0., 1.) as f32),
                     None,
                     None,
                     None,
@@ -670,7 +672,8 @@ impl Tile {
 
         if opening_element.is_none() {
             self.window.set_offscreen_element_id(None);
-            normal_elements = self.render_inner(renderer, self.visual_location(), scale, active)
+            normal_elements =
+                self.render_inner(renderer, self.visual_location(), scale, alpha, active)
         }
 
         opening_element.into_iter().chain(normal_elements)
