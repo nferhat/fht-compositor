@@ -342,12 +342,13 @@ impl Tile {
         )));
 
         if animate {
-            // When we request a size change, we wait till the window buffers are resized and the window
-            // has drawn at least one frame with the new size (generally on the next commit cycle).
+            // When we request a size change, we wait till the window buffers are resized and the
+            // window has drawn at least one frame with the new size (generally on the
+            // next commit cycle).
             //
-            // When we start rendering with that frame, we use a custom texture shader in order to draw
-            // it, instead of the included smithay one, in order to stretch/crop the window contents
-            // and apply proper corner rounding.
+            // When we start rendering with that frame, we use a custom texture shader in order to
+            // draw it, instead of the included smithay one, in order to stretch/crop
+            // the window contents and apply proper corner rounding.
             let prev = self
                 .size_animation
                 .take()
@@ -551,8 +552,9 @@ impl Tile {
                     // Rounding off windows is a little tricky.
                     //
                     // Not every surface of the window means its "the window", not at all.
-                    // Some clients (like OBS-studio) use subsurfaces (not popups) to display different
-                    // parts of their interface (for example OBs does this with the preview window)
+                    // Some clients (like OBS-studio) use subsurfaces (not popups) to display
+                    // different parts of their interface (for example OBs does
+                    // this with the preview window)
                     //
                     // To counter this, we check here if the surface is going to clip.
                     if RoundedCornerElement::will_clip(

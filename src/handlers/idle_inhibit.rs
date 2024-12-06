@@ -1,11 +1,7 @@
-use smithay::{
-    delegate_idle_inhibit, delegate_idle_notify,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    wayland::{
-        idle_inhibit::IdleInhibitHandler,
-        idle_notify::{IdleNotifierHandler, IdleNotifierState},
-    },
-};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::wayland::idle_inhibit::IdleInhibitHandler;
+use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
+use smithay::{delegate_idle_inhibit, delegate_idle_notify};
 
 use crate::state::State;
 
