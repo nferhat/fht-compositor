@@ -36,6 +36,8 @@ pub enum KeyActionType {
     CloseFocusedWindow,
     FocusWorkspace(usize),
     SendFocusedWindowToWorkspace(usize),
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
     None,
 }
 
@@ -110,6 +112,12 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     fht_compositor_config::SimpleKeyAction::CloseFocusedWindow => {
                         KeyActionType::CloseFocusedWindow
                     }
+                    fht_compositor_config::SimpleKeyAction::FocusNextWorkspace => {
+                        KeyActionType::FocusNextWorkspace
+                    }
+                    fht_compositor_config::SimpleKeyAction::FocusPreviousWorkspace => {
+                        KeyActionType::FocusPreviousWorkspace
+                    }
                     fht_compositor_config::SimpleKeyAction::None => KeyActionType::None,
                 };
             }
@@ -155,6 +163,12 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     }
                     fht_compositor_config::ComplexKeyAction::FocusPreviousOutput => {
                         KeyActionType::FocusPreviousOutput
+                    }
+                    fht_compositor_config::ComplexKeyAction::FocusNextWorkspace => {
+                        KeyActionType::FocusNextWorkspace
+                    }
+                    fht_compositor_config::ComplexKeyAction::FocusPreviousWorkspace => {
+                        KeyActionType::FocusPreviousWorkspace
                     }
                     fht_compositor_config::ComplexKeyAction::CloseFocusedWindow => {
                         KeyActionType::CloseFocusedWindow
@@ -350,6 +364,20 @@ impl State {
                     self.set_keyboard_focus(Some(window));
                 }
             }
+            KeyActionType::FocusNextWorkspace => {
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            KeyActionType::FocusPreviousWorkspace => {
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = mon.active_workspace_idx().saturating_sub(1);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
             KeyActionType::SendFocusedWindowToWorkspace(idx) => {
                 let active = self.fht.space.active_workspace_mut();
                 let Some(window) = active.active_window() else {
@@ -366,7 +394,7 @@ impl State {
                     mon.workspace_mut_by_index(idx).insert_window(window, true);
                 }
             }
-            _ => {}
+            KeyActionType::None => (), // disabled the key combo
         }
     }
 }

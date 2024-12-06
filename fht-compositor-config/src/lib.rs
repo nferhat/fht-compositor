@@ -211,6 +211,8 @@ pub enum SimpleKeyAction {
     SwapWithPreviousWindow,
     FocusNextOutput,
     FocusPreviousOutput,
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
     CloseFocusedWindow,
     None,
 }
@@ -234,6 +236,8 @@ pub enum ComplexKeyAction {
     SwapWithPreviousWindow,
     FocusNextOutput,
     FocusPreviousOutput,
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
     CloseFocusedWindow,
     None,
     RunCommand(String),

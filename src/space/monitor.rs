@@ -192,6 +192,11 @@ impl Monitor {
         &self.workspaces[self.active_idx]
     }
 
+    /// Get a the the active [`Workspace`] index.
+    pub fn active_workspace_idx(&self) -> usize {
+        self.active_idx
+    }
+
     /// Get a reference to the active [`Workspace`].
     pub fn active_workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspaces[self.active_idx]
