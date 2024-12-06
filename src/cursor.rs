@@ -203,7 +203,7 @@ impl CursorThemeManager {
     ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError> {
         static RENDER_BUFFER: LazyLock<MemoryRenderBuffer> = LazyLock::new(|| {
             MemoryRenderBuffer::from_slice(
-                include_bytes!("../../res/cursor.rgba"),
+                include_bytes!("../res/cursor.rgba"),
                 Fourcc::Argb8888,
                 Size::from((64, 64)),
                 1,

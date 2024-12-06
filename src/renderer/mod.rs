@@ -45,9 +45,9 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use crate::config::ui::ConfigUiRenderElement;
+use crate::cursor::CursorRenderElement;
 use crate::output::OutputExt;
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
-use crate::shell::cursor::CursorRenderElement;
 use crate::space::{MonitorRenderElement, MonitorRenderResult};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;

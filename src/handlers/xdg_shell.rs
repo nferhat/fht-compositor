@@ -1,7 +1,7 @@
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
-    find_popup_root_surface, layer_map_for_output, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-    PopupUngrabStrategy, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
+    PopupKind, PopupPointerGrab, PopupUngrabStrategy, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
@@ -19,9 +19,10 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
+use crate::focus_target::KeyboardFocusTarget;
 use crate::input::swap_tile_grab::SwapTileGrab;
-use crate::shell::KeyboardFocusTarget;
-use crate::state::{State, UnmappedWindow};
+use crate::output::OutputExt;
+use crate::state::{Fht, State, UnmappedWindow};
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -290,6 +291,27 @@ fn add_window_pre_commit_hook(window: &Window) {
     });
 
     window.set_pre_commit_hook_id(hook_id);
+}
+
+impl Fht {
+    pub fn unconstrain_popup(&self, popup: &PopupSurface) {
+        let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
+            return;
+        };
+        let Some((window, workspace)) = self.space.find_window_and_workspace(&root) else {
+            return;
+        };
+
+        // The target (aka the popup) geometry should be relative to the parent (aka the window's)
+        // geometry, based on the xdg_shell protocol requirements.
+        let mut target = workspace.output().geometry();
+        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+        target.loc -= workspace.window_location(&window).unwrap();
+
+        popup.with_pending_state(|state| {
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
+        });
+    }
 }
 
 delegate_xdg_shell!(State);

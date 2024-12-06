@@ -25,8 +25,8 @@ use smithay::wayland::session_lock::LockSurface;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
+use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::output::OutputExt;
-use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 
 impl State {

@@ -6,7 +6,7 @@ use smithay::input::pointer::{
 };
 use smithay::utils::{Logical, Point};
 
-use crate::shell::PointerFocusTarget;
+use crate::focus_target::PointerFocusTarget;
 use crate::state::State;
 use crate::window::Window;
 

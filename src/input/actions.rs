@@ -5,8 +5,8 @@ use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
+use crate::focus_target::PointerFocusTarget;
 use crate::output::OutputExt;
-use crate::shell::PointerFocusTarget;
 use crate::state::State;
 use crate::utils::RectCenterExt;
 

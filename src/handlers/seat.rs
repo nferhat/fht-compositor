@@ -8,7 +8,7 @@ use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::{delegate_seat, delegate_tablet_manager, delegate_text_input_manager};
 
-use crate::shell::{KeyboardFocusTarget, PointerFocusTarget};
+use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 
 impl TabletSeatHandler for State {
