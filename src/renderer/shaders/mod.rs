@@ -8,11 +8,13 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use super::{AsGlowFrame, AsGlowRenderer};
 
 const BORDER_SRC: &str = include_str!("./border.frag");
+const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
 
 pub struct Shaders {
     pub border: GlesPixelProgram,
+    pub box_shadow: GlesPixelProgram,
     pub rounded_quad: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
 }
@@ -54,9 +56,20 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
+        let box_shadow = renderer
+            .compile_custom_pixel_shader(
+                BOX_SHADOW_SRC,
+                &[
+                    UniformName::new("shadow_color", UniformType::_4f),
+                    UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("blur_sigma", UniformType::_1f),
+                ],
+            )
+            .expect("Shader source should always compile!");
 
         let shaders = Self {
             border: rounded_outline,
+            box_shadow,
             rounded_quad,
             resizing_texture: resizing_surface,
         };

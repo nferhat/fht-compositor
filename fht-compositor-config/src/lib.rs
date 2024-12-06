@@ -599,6 +599,7 @@ impl Default for Cursor {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Decorations {
     pub border: Border,
+    pub shadow: Shadow,
     pub decoration_mode: DecorationMode,
 }
 
@@ -606,6 +607,7 @@ impl Default for Decorations {
     fn default() -> Self {
         Self {
             border: Default::default(),
+            shadow: Default::default(),
             decoration_mode: DecorationMode::default(),
         }
     }
@@ -637,6 +639,39 @@ impl Default for Border {
             normal_color: Color::Solid([0.5, 0.5, 0.5, 0.5]),
             thickness: default_thickness(),
             radius: default_radius(),
+        }
+    }
+}
+
+const fn default_shadow_sigma() -> f32 {
+    10.
+}
+
+const fn default_shadow_color() -> [f32; 4] {
+    [0.0, 0.0, 0.0, 0.75]
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Shadow {
+    pub disable: bool,
+    pub floating_only: bool,
+    #[serde(
+        deserialize_with = "deserialize_color",
+        default = "default_shadow_color"
+    )]
+    pub color: [f32; 4],
+    #[serde(default = "default_shadow_sigma")]
+    pub sigma: f32,
+}
+
+impl Default for Shadow {
+    fn default() -> Self {
+        Self {
+            disable: false,
+            floating_only: true,
+            color: default_shadow_color(),
+            sigma: default_shadow_sigma(),
         }
     }
 }
@@ -881,6 +916,7 @@ pub struct WindowRule {
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub border_overrides: BorderOverrides,
+    pub draw_shadow: Option<bool>,
     pub proportion: Option<f64>,
     pub opacity: Option<f32>,
     pub decoration_mode: Option<DecorationMode>,

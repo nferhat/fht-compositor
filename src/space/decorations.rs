@@ -1,10 +1,10 @@
-//! Border rendering.
+//! Decorations rendering.
 //!
 //! This is achieved using a GlesPixelShader, nothing special otherwise.
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::Uniform;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::shaders::Shaders;
@@ -36,6 +36,34 @@ pub fn draw_border(
             // NOTE: For some reasons we cant use f64s, we shall cast
             Uniform::new("thickness", scaled_thickness as f32),
             Uniform::new("corner_radius", radius as f32),
+        ],
+        Kind::Unspecified,
+    )
+}
+
+// Shadow drawing shader using the following article code:
+// https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/
+pub fn draw_shadow(
+    renderer: &mut impl AsGlowRenderer,
+    alpha: f32,
+    mut geometry: Rectangle<i32, Logical>,
+    blur_sigma: f32,
+    corner_radius: f32,
+    color: [f32; 4],
+) -> FhtPixelShaderElement {
+    let r_blur_sigma = blur_sigma.round() as i32;
+    geometry.loc -= Point::from((r_blur_sigma, r_blur_sigma));
+    geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
+
+    FhtPixelShaderElement::new(
+        Shaders::get(renderer).box_shadow.clone(),
+        geometry,
+        alpha,
+        vec![
+            // NOTE: For some reasons we cant use f64s, we shall cast
+            Uniform::new("shadow_color", color),
+            Uniform::new("blur_sigma", blur_sigma),
+            Uniform::new("corner_radius", corner_radius),
         ],
         Kind::Unspecified,
     )

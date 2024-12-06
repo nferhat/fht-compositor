@@ -87,7 +87,7 @@ crate::fht_render_elements! {
         RoundedSurface = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = ResizingSurfaceRenderElement,
-        Border = FhtPixelShaderElement,
+        Decoration = FhtPixelShaderElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
     }
@@ -438,6 +438,7 @@ impl Tile {
         crate::profile_function!();
         let mut elements = vec![];
         let rules = self.window.rules();
+        let is_floating = !self.window.tiled();
         let is_fullscreen = self.window.fullscreen();
 
         let alpha = if is_fullscreen {
@@ -453,6 +454,7 @@ impl Tile {
             (border.thickness, border.radius)
         };
         let inner_radius = (border_radius - border_thickness as f32).max(0.0);
+        let draw_shadow = rules.draw_shadow;
 
         drop(rules); // Avoid deadlock :skull:
 
@@ -578,21 +580,46 @@ impl Tile {
         };
 
         if border_thickness != 0 {
-            let element = super::border::draw_border(
-                renderer,
-                // FIXME: Fractional scale woohoo
-                scale.x.max(scale.y),
-                alpha,
-                tile_geometry,
-                border_thickness as f64,
-                border_radius as f64,
-                if active {
-                    border.focused_color
-                } else {
-                    border.normal_color
-                },
+            elements.push(
+                super::decorations::draw_border(
+                    renderer,
+                    // FIXME: Fractional scale woohoo
+                    scale.x.max(scale.y),
+                    alpha,
+                    tile_geometry,
+                    border_thickness as f64,
+                    border_radius as f64,
+                    if active {
+                        border.focused_color
+                    } else {
+                        border.normal_color
+                    },
+                )
+                .into(),
             );
-            elements.push(element.into());
+        }
+
+        if let Some(shadow_config) = &self.config.shadow {
+            let should_draw = match shadow_config.floating_only {
+                true => is_floating,
+                // NOTE: For now we draw shadows by default.
+                // Maybe reconsider this?
+                false => draw_shadow.unwrap_or(true),
+            };
+
+            if true {
+                elements.push(
+                    super::decorations::draw_shadow(
+                        renderer,
+                        alpha,
+                        tile_geometry,
+                        shadow_config.sigma,
+                        border_radius,
+                        shadow_config.color,
+                    )
+                    .into(),
+                );
+            }
         }
 
         elements

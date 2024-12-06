@@ -1634,6 +1634,7 @@ pub struct ResolvedWindowRules {
     // Border overrides gets applied to the border config when we need the window-specific border
     // config with rules applied (for example when rendering)
     pub border_overrides: BorderOverrides,
+    pub draw_shadow: Option<bool>,
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub opacity: Option<f32>,
@@ -1669,6 +1670,11 @@ impl ResolvedWindowRules {
             resolved_rules.border_overrides = resolved_rules
                 .border_overrides
                 .merge_with(rule.border_overrides);
+
+            if let Some(draw_shadow) = rule.draw_shadow {
+                resolved_rules.draw_shadow = Some(draw_shadow);
+            }
+
             if let Some(open_on_output) = &rule.open_on_output {
                 resolved_rules.open_on_output = Some(open_on_output.clone())
             }

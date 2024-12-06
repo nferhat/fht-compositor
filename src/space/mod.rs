@@ -25,8 +25,8 @@ pub use workspace::{Workspace, WorkspaceId};
 use crate::output::OutputExt;
 use crate::window::Window;
 
-mod border;
 mod closing_tile;
+mod decorations;
 mod monitor;
 mod tile;
 mod workspace;
@@ -685,6 +685,7 @@ pub struct Config {
     )>,
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
+    pub shadow: Option<fht_compositor_config::Shadow>,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
     pub border: fht_compositor_config::Border,
     pub layouts: Vec<fht_compositor_config::WorkspaceLayout>,
@@ -727,6 +728,7 @@ impl Config {
                 config.animations.window_open_close.curve,
                 config.animations.window_open_close.disable,
             ),
+            shadow: (!config.decorations.shadow.disable).then(|| config.decorations.shadow),
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),
