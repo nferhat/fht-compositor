@@ -607,7 +607,7 @@ impl Tile {
                 false => draw_shadow.unwrap_or(true),
             };
 
-            if true {
+            if should_draw {
                 elements.push(
                     super::decorations::draw_shadow(
                         renderer,
