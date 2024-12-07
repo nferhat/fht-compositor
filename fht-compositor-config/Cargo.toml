@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-colors-transform = "0.2.11"
+csscolorparser = { version = "0.7.0", features = ["serde"] }
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0", features = ["serde"] }
 regex = "1.10.6"
 serde = { version = "1.0.203", features = ["derive"] }

@@ -92,7 +92,7 @@ void main()
     frag_alpha *= rounded_box_shadow(rect.xy, rect.xy + rect.zw, v_coords * size, blur_sigma / 2., corner_radius);
     frag_alpha += (random() - 0.5) / 128.0;
 
-    gl_FragColor = vec4(shadow_color.xyz, frag_alpha);
+    gl_FragColor = vec4(shadow_color.xyz * frag_alpha, frag_alpha) * alpha;
 }
 
 // vim: ft=glsl

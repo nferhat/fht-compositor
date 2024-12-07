@@ -1635,6 +1635,7 @@ pub struct ResolvedWindowRules {
     // config with rules applied (for example when rendering)
     pub border_overrides: BorderOverrides,
     pub draw_shadow: Option<bool>,
+    pub shadow_color: Option<[f32; 4]>,
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub opacity: Option<f32>,
@@ -1673,6 +1674,10 @@ impl ResolvedWindowRules {
 
             if let Some(draw_shadow) = rule.draw_shadow {
                 resolved_rules.draw_shadow = Some(draw_shadow);
+            }
+
+            if let Some(shadow_color) = rule.shadow_color {
+                resolved_rules.shadow_color = Some(shadow_color);
             }
 
             if let Some(open_on_output) = &rule.open_on_output {

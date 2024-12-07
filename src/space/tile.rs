@@ -454,6 +454,7 @@ impl Tile {
             (border.thickness, border.radius)
         };
         let draw_shadow = rules.draw_shadow;
+        let shadow_color = rules.shadow_color;
 
         drop(rules); // Avoid deadlock :skull:
 
@@ -607,6 +608,7 @@ impl Tile {
         }
 
         if let Some(shadow_config) = &self.config.shadow {
+            let color = shadow_color.unwrap_or(shadow_config.color);
             let should_draw = match shadow_config.floating_only {
                 true => is_floating,
                 // NOTE: For now we draw shadows by default.
@@ -622,7 +624,7 @@ impl Tile {
                         tile_geometry,
                         shadow_config.sigma,
                         border_radius,
-                        shadow_config.color,
+                        color,
                     )
                     .into(),
                 );

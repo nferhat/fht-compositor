@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, path};
 
-use colors_transform::{AlphaColor as _, Color as _, Hsl, Rgb};
 use fht_animation::AnimationCurve;
 use regex::Regex;
 use serde::de::Unexpected;
@@ -708,42 +707,14 @@ impl Border {
 }
 
 fn deserialize_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 4], D::Error> {
-    // We don't internally expose the BorderConfig type, but you can use a valid css color
-    // string.
-    let color = String::deserialize(deserializer)?;
+    csscolorparser::Color::deserialize(deserializer).map(|c| c.to_array())
+}
 
-    if let Ok(rgb) = Rgb::from_hex_str(&color) {
-        return Ok([
-            rgb.get_red() / 255.0,
-            rgb.get_green() / 255.0,
-            rgb.get_blue() / 255.0,
-            rgb.get_alpha(), // alpha is already normalized
-        ]);
-    }
-
-    if let Ok(rgb) = color.trim().parse::<Rgb>() {
-        return Ok([
-            rgb.get_red() / 255.0,
-            rgb.get_green() / 255.0,
-            rgb.get_blue() / 255.0,
-            rgb.get_alpha(), // alpha is already normalized
-        ]);
-    }
-
-    if let Ok(hsl) = color.trim().parse::<Hsl>() {
-        let rgb = hsl.to_rgb(); // this is lossy but eh
-        return Ok([
-            rgb.get_red() / 255.0,
-            rgb.get_green() / 255.0,
-            rgb.get_blue() / 255.0,
-            rgb.get_alpha(), // alpha is already normalized
-        ]);
-    }
-
-    Err(<D::Error as serde::de::Error>::invalid_value(
-        serde::de::Unexpected::Str(&color),
-        &"Invalid color input!",
-    ))
+fn deserialize_color_maybe<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<[f32; 4]>, D::Error> {
+    let color = Option::<csscolorparser::Color>::deserialize(deserializer)?;
+    Ok(color.map(|c| c.to_array()))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -917,6 +888,8 @@ pub struct WindowRule {
     pub open_on_workspace: Option<usize>,
     pub border_overrides: BorderOverrides,
     pub draw_shadow: Option<bool>,
+    #[serde(deserialize_with = "deserialize_color_maybe")]
+    pub shadow_color: Option<[f32; 4]>,
     pub proportion: Option<f64>,
     pub opacity: Option<f32>,
     pub decoration_mode: Option<DecorationMode>,
