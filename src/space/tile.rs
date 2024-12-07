@@ -615,8 +615,7 @@ impl Tile {
                 // Maybe reconsider this?
                 false => draw_shadow.unwrap_or(true),
             };
-
-            if should_draw {
+            if !is_fullscreen && color[3] > 0.0 && should_draw {
                 elements.push(
                     super::decorations::draw_shadow(
                         renderer,
