@@ -28,18 +28,28 @@ uniform float corner_radius;
 uniform float tint;
 #endif
 
-float rounding_alpha(vec2 coords, vec2 size, float radius) {
+float rounding_alpha(vec2 coords, vec2 size, float radius)
+{
     vec2 center;
 
-    if (coords.x < corner_radius && coords.y < corner_radius) {
+    if (coords.x < corner_radius && coords.y < corner_radius)
+    {
         center = vec2(radius);
-    } else if (size.x - corner_radius < coords.x && coords.y < corner_radius) {
+    }
+    else if (size.x - corner_radius < coords.x && coords.y < corner_radius)
+    {
         center = vec2(size.x - radius, radius);
-    } else if (size.x - corner_radius < coords.x && size.y - corner_radius < coords.y) {
+    }
+    else if (size.x - corner_radius < coords.x && size.y - corner_radius < coords.y)
+    {
         center = size - vec2(radius);
-    } else if (coords.x < corner_radius && size.y - corner_radius < coords.y) {
+    }
+    else if (coords.x < corner_radius && size.y - corner_radius < coords.y)
+    {
         center = vec2(radius, size.y - radius);
-    } else {
+    }
+    else
+    {
         return 1.0;
     }
 
@@ -47,8 +57,8 @@ float rounding_alpha(vec2 coords, vec2 size, float radius) {
     return 1.0 - smoothstep(radius - 0.5, radius + 0.5, dist);
 }
 
-void main() {
-
+void main()
+{
     vec2 tex_coords = (v_coords * win_size) / curr_size;
     if (win_size.x > curr_size.x)
         tex_coords.x = v_coords.x;
@@ -58,7 +68,7 @@ void main() {
 
     if (corner_radius > 0.0)
         color *= rounding_alpha(v_coords * curr_size, curr_size, corner_radius);
-    
+
 #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);
 #endif
