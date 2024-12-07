@@ -22,6 +22,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size};
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
 use smithay::wayland::dmabuf::DmabufFeedback;
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
@@ -80,6 +81,7 @@ pub struct WindowData {
     // Rules need to be re-resolved when window state change
     rules: ResolvedWindowRules,
     need_to_resolve_rules: bool,
+    foreign_toplevel_handle: Option<ForeignToplevelHandle>,
 }
 
 impl Window {
@@ -95,9 +97,14 @@ impl Window {
                     pre_commit_hook_id: None,
                     rules: ResolvedWindowRules::default(),
                     need_to_resolve_rules: false,
+                    foreign_toplevel_handle: None,
                 }),
             }),
         }
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.inner.id
     }
 
     pub fn toplevel(&self) -> &ToplevelSurface {
@@ -131,6 +138,27 @@ impl Window {
 
     pub fn need_to_resolve_rules(&self) -> bool {
         self.inner.data.lock().unwrap().need_to_resolve_rules
+    }
+
+    /// Set the foreign toplevel handle of this toplevel.
+    ///
+    /// NOTE: It is up to **you** to ensure that this handle is unique.
+    pub fn set_foreign_toplevel_handle(&self, handle: ForeignToplevelHandle) {
+        let mut guard = self.inner.data.lock().unwrap();
+        // NOTE: Maybe using Weak<...> would be better here?
+        guard.foreign_toplevel_handle = Some(handle);
+    }
+
+    /// Get a reference to the foreign toplevel handle of this toplevel.
+    pub fn foreign_toplevel_handle(&self) -> Option<ForeignToplevelHandle> {
+        let guard = self.inner.data.lock().unwrap();
+        guard.foreign_toplevel_handle.clone()
+    }
+
+    /// Take the foreign toplevel handle of this toplevel.
+    pub fn take_foreign_toplevel_handle(&self) -> Option<ForeignToplevelHandle> {
+        let mut guard = self.inner.data.lock().unwrap();
+        guard.foreign_toplevel_handle.take()
     }
 
     pub fn request_size(&self, new_size: Size<i32, Logical>) {

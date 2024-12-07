@@ -66,6 +66,12 @@ impl XdgShellHandler for State {
 
         let output = workspace.output().clone();
         self.fht.queue_redraw(&output);
+
+        // dont forget to remove the foreign toplevel handle.
+        //
+        // NOTE: I am not sure but this should always be emitted, regardless of whether we or the
+        // toplevel closes (since we use send_close request)
+        self.fht.close_foreign_handle(&window);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -231,12 +237,14 @@ impl XdgShellHandler for State {
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
+            self.fht.send_foreign_window_details(&window);
             self.fht.resolve_rules_for_window(&window);
         }
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
+            self.fht.send_foreign_window_details(&window);
             self.fht.resolve_rules_for_window(&window);
         }
     }

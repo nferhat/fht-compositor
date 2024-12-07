@@ -227,6 +227,7 @@ impl State {
                 unreachable!("Tried to map an unconfigured window!");
             };
 
+            self.fht.adversite_new_foreign_window(&window);
             window.on_commit();
             window.refresh();
 
