@@ -453,7 +453,6 @@ impl Tile {
         } else {
             (border.thickness, border.radius)
         };
-        let inner_radius = (border_radius - border_thickness as f32).max(0.0);
         let draw_shadow = rules.draw_shadow;
 
         drop(rules); // Avoid deadlock :skull:
@@ -467,6 +466,14 @@ impl Tile {
                 tile_geometry.size.h - 2 * border_thickness,
             ),
         );
+
+        // https://drafts.csswg.org/css-backgrounds/#corner-overlap
+        let reduction = f32::min(
+            tile_geometry.size.w as f32 / (2. * border_radius),
+            tile_geometry.size.h as f32 / (2. * border_radius),
+        );
+        let border_radius = border_radius * f32::min(1., reduction);
+        let inner_radius = (border_radius - border_thickness as f32).max(0.0);
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
