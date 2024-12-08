@@ -120,6 +120,14 @@ impl EguiElement {
         };
 
         let input = egui::RawInput {
+            viewport_id: egui::ViewportId::ROOT,
+            viewports: egui::ViewportIdMap::from_iter([(
+                egui::ViewportId::ROOT,
+                egui::ViewportInfo {
+                    native_pixels_per_point: Some(scale as f32),
+                    ..Default::default()
+                },
+            )]),
             screen_rect: Some(egui::Rect {
                 min: egui::pos2(0.0, 0.0),
                 max: egui::pos2(size.w as f32, size.h as f32),
