@@ -46,12 +46,13 @@ pub fn draw_border(
 pub fn draw_shadow(
     renderer: &mut impl AsGlowRenderer,
     alpha: f32,
+    scale: f64,
     mut geometry: Rectangle<i32, Logical>,
     blur_sigma: f32,
     corner_radius: f32,
     color: [f32; 4],
 ) -> FhtPixelShaderElement {
-    let r_blur_sigma = blur_sigma.round() as i32;
+    let r_blur_sigma = (blur_sigma as f64 / scale).round() as i32;
     geometry.loc -= Point::from((r_blur_sigma, r_blur_sigma));
     geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
 

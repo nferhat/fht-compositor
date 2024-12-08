@@ -620,6 +620,8 @@ impl Tile {
                     super::decorations::draw_shadow(
                         renderer,
                         alpha,
+                        // FIXME: fractional scale
+                        scale.x.max(scale.y),
                         tile_geometry,
                         shadow_config.sigma,
                         border_radius,
