@@ -1,4 +1,7 @@
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::IsAlive;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListHandler;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::{
     delegate_foreign_toplevel_list, wayland::foreign_toplevel_list::ForeignToplevelListState,
 };
@@ -25,14 +28,13 @@ impl Fht {
         }
 
         // NOTE: smithay handles the identifier part for us.
+        let app_id = window.app_id().unwrap();
+        let title = window.title().unwrap_or_else(|| app_id.clone());
         let handle = self
             .foreign_toplevel_list_state
-            .new_toplevel::<State>(window.title().unwrap(), window.app_id().unwrap_or_default());
+            .new_toplevel::<State>(title.clone(), app_id.clone());
 
         // send all initial data.
-        handle.send_title(window.title().as_ref().unwrap());
-        handle.send_app_id(window.app_id().as_ref().unwrap());
-        handle.send_done();
 
         window.set_foreign_toplevel_handle(handle);
     }
@@ -50,8 +52,12 @@ impl Fht {
     /// Send new window details for all ext-toplevel-foreign-list instances.
     pub fn send_foreign_window_details(&mut self, window: &Window) {
         if let Some(handle) = window.foreign_toplevel_handle() {
-            handle.send_title(window.title().as_ref().unwrap());
-            handle.send_app_id(window.app_id().as_ref().unwrap());
+            let app_id = window.app_id().unwrap();
+            let title = window.title().unwrap_or_else(|| app_id.clone());
+
+            handle.send_title(&title);
+            handle.send_app_id(&app_id);
+            handle.send_done();
         } else {
             // it was not adversited before, this should be done on-map
             // this shoud not happen though.
