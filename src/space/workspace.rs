@@ -1591,7 +1591,6 @@ impl Workspace {
             let alpha = if Some(idx) == skip_alpha_animation_idx {
                 1.0
             } else {
-                dbg!(idx);
                 alpha
             };
 
