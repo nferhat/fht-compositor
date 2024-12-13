@@ -83,6 +83,7 @@ async-channel = "2.3.1"
 async-io = "2.3.4"
 puffin = { version = "0.19.1", optional = true }
 puffin_http = { version = "0.16.1", optional = true }
+clap_complete = "4.5.38"
 
 [features]
 default = ["winit-backend", "udev-backend", "all-portals"]

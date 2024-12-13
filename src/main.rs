@@ -10,7 +10,7 @@ use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
@@ -54,8 +54,15 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         .init();
 
     let cli = cli::Cli::parse();
-    if let Some(cli::Command::CheckConfiguration) = cli.command {
-        check_configuration(cli);
+    match cli.command {
+        Some(cli::Command::CheckConfiguration) => check_configuration(cli),
+        Some(cli::Command::GenerateCompletions { shell }) => {
+            let mut command = cli::Cli::command();
+            let name = command.get_name().to_string();
+            clap_complete::generate(shell, &mut command, name, &mut std::io::stdout());
+            std::process::exit(0); // we just want to generate completions, nothing much
+        }
+        _ => (),
     }
 
     #[cfg(feature = "profile-with-puffin")]

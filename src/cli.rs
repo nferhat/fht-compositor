@@ -1,6 +1,19 @@
 use std::path::PathBuf;
 
+use clap::builder::styling::{AnsiColor, Effects};
+use clap::builder::Styles;
+
+pub const CLAP_STYLING: Styles = Styles::styled()
+    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+    .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
+
 #[derive(Debug, clap::Parser)]
+#[command(version, about, long_about = None, styles = CLAP_STYLING)]
 pub struct Cli {
     /// What backend should the compositor start with?
     #[arg(short, long, value_name = "BACKEND")]
@@ -16,6 +29,8 @@ pub struct Cli {
 pub enum Command {
     /// Check the compositor configuration for any errors.
     CheckConfiguration,
+    /// Generate shell completions for shell
+    GenerateCompletions { shell: clap_complete::Shell },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

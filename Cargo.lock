@@ -559,6 +559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.5.38"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9647a559c112175f17cf724dc72d3645680a883c58481332779192b0d8e7a01"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,6 +959,7 @@ dependencies = [
  "async-io",
  "bitflags 2.6.0",
  "clap",
+ "clap_complete",
  "egui",
  "egui_glow",
  "fht-animation",
