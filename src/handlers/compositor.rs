@@ -231,6 +231,10 @@ impl State {
             window.on_commit();
             window.refresh();
 
+            // NOTE: The pre-commit-hook assumes we only add it when we are about to map the window.
+            // we also remove it when unmapping.
+            super::xdg_shell::add_window_pre_commit_hook(&window);
+
             let workspace = match self.fht.space.workspace_mut_for_id(workspace_id) {
                 Some(ws) => ws,
                 None => {

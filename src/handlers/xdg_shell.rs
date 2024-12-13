@@ -32,7 +32,6 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         let window = Window::new(toplevel);
-        add_window_pre_commit_hook(&window);
         self.fht
             .unmapped_windows
             .push(UnmappedWindow::Unconfigured(window));
@@ -265,7 +264,7 @@ impl XdgShellHandler for State {
     }
 }
 
-fn add_window_pre_commit_hook(window: &Window) {
+pub(super) fn add_window_pre_commit_hook(window: &Window) {
     // The workspace tile api is not responsible for actually starting the close animations, we are
     // the ones that should do this.
     let wl_surface = window.wl_surface().unwrap();
