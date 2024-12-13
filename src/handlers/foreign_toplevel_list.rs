@@ -1,15 +1,10 @@
-use smithay::reexports::wayland_server::Resource;
-use smithay::utils::IsAlive;
-use smithay::wayland::foreign_toplevel_list::ForeignToplevelListHandler;
-use smithay::wayland::seat::WaylandFocus;
-use smithay::{
-    delegate_foreign_toplevel_list, wayland::foreign_toplevel_list::ForeignToplevelListState,
+use smithay::delegate_foreign_toplevel_list;
+use smithay::wayland::foreign_toplevel_list::{
+    ForeignToplevelListHandler, ForeignToplevelListState,
 };
 
-use crate::{
-    state::{Fht, State},
-    window::Window,
-};
+use crate::state::{Fht, State};
+use crate::window::Window;
 
 impl ForeignToplevelListHandler for State {
     fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
@@ -27,8 +22,12 @@ impl Fht {
             return;
         }
 
-        // NOTE: smithay handles the identifier part for us.
-        let app_id = window.app_id().unwrap();
+        // FIXME: This can result in empty title/app-id, but that's how cosmic-comp handles it,
+        // apparently. Protocol spec does not say anything about this
+        let app_id = window.app_id().unwrap_or_else(|| {
+            warn!(window = ?window.id(), "Window without app_id");
+            Default::default()
+        });
         let title = window.title().unwrap_or_else(|| app_id.clone());
         let handle = self
             .foreign_toplevel_list_state
@@ -52,11 +51,16 @@ impl Fht {
     /// Send new window details for all ext-toplevel-foreign-list instances.
     pub fn send_foreign_window_details(&mut self, window: &Window) {
         if let Some(handle) = window.foreign_toplevel_handle() {
-            let app_id = window.app_id().unwrap();
-            let title = window.title().unwrap_or_else(|| app_id.clone());
+            match window.title() {
+                Some(title) => handle.send_title(&title),
+                None => error!(window = ?window.id(), "Window changed title to None?"),
+            }
 
-            handle.send_title(&title);
-            handle.send_app_id(&app_id);
+            match window.app_id() {
+                Some(app_id) => handle.send_app_id(&app_id),
+                None => error!(window = ?window.id(), "Window changed app_id to None?"),
+            }
+
             handle.send_done();
         } else {
             // it was not adversited before, this should be done on-map
