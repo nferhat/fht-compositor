@@ -20,6 +20,7 @@ use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
 use super::Config;
+#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::egui::EguiRenderElement;
 use crate::renderer::extra_damage::ExtraDamage;
@@ -824,6 +825,7 @@ impl RenderElement<GlowRenderer> for ResizingSurfaceRenderElement {
     }
 }
 
+#[cfg(feature = "udev-backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for ResizingSurfaceRenderElement {
     fn draw(
         &self,
