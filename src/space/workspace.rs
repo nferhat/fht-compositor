@@ -712,6 +712,7 @@ impl Workspace {
     /// You must call [`Workspace::arrange_tiles`]
     fn remove_current_fullscreen(&mut self) {
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx.take() {
+            self.start_fullscreen_fade_in(fullscreen_idx);
             self.tiles[fullscreen_idx]
                 .window()
                 .request_fullscreen(false);
