@@ -634,8 +634,12 @@ pub struct Border {
 impl Default for Border {
     fn default() -> Self {
         Self {
-            focused_color: Color::Solid([1.0, 0.0, 0.0, 1.0]),
-            normal_color: Color::Solid([0.5, 0.5, 0.5, 0.5]),
+            focused_color: Color::Gradient {
+                start: csscolorparser::parse("#5781b9").unwrap().to_array(),
+                end: csscolorparser::parse("#7fc8db").unwrap().to_array(),
+                angle: 0.0,
+            },
+            normal_color: Color::Solid(csscolorparser::parse("#222230").unwrap().to_array()),
             thickness: default_thickness(),
             radius: default_radius(),
         }
