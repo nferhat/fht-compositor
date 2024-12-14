@@ -13,7 +13,7 @@ pub const CLAP_STYLING: Styles = Styles::styled()
     .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD));
 
 #[derive(Debug, clap::Parser)]
-#[command(version, about, long_about = None, styles = CLAP_STYLING)]
+#[command(author, version = get_version_string(), about, long_about = None, styles = CLAP_STYLING)]
 pub struct Cli {
     /// What backend should the compositor start with?
     #[arg(short, long, value_name = "BACKEND")]
@@ -41,4 +41,12 @@ pub enum BackendType {
     #[cfg(feature = "udev-backend")]
     /// Use the Udev backend, using a libseat session.
     Udev,
+}
+
+fn get_version_string() -> String {
+    format!(
+        "{} ({})",
+        std::env!("CARGO_PKG_VERSION"),
+        std::option_env!("GIT_HASH").unwrap_or("unknown git revision")
+    )
 }

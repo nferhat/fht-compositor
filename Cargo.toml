@@ -78,7 +78,7 @@ fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0
 # TODO: We use this instead of std::sync::MappedMutexGuard
 # See tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
 owning_ref = "0.4.1"
-clap = { version = "4.5.18", features = ["derive"] }
+clap = { version = "4.5.18", features = ["derive", "string"] }
 async-channel = "2.3.1"
 async-io = "2.3.4"
 puffin = { version = "0.19.1", optional = true }
