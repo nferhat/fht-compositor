@@ -27,6 +27,7 @@ pub enum KeyActionType {
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FloatFocusedWindow,
+    CenterFloatingWindow,
     MoveFloatingWindow([i32; 2]),
     ResizeFloatingWindow([i32; 2]),
     FocusNextWindow,
@@ -96,6 +97,9 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     fht_compositor_config::SimpleKeyAction::FocusNextWindow => {
                         KeyActionType::FocusNextWindow
                     }
+                    fht_compositor_config::SimpleKeyAction::CenterFloatingWindow => {
+                        KeyActionType::CenterFloatingWindow
+                    }
                     fht_compositor_config::SimpleKeyAction::FocusPreviousWindow => {
                         KeyActionType::FocusPreviousWindow
                     }
@@ -147,6 +151,9 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     }
                     fht_compositor_config::ComplexKeyAction::FloatFocusedWindow => {
                         KeyActionType::FloatFocusedWindow
+                    }
+                    fht_compositor_config::ComplexKeyAction::CenterFloatingWindow => {
+                        KeyActionType::CenterFloatingWindow
                     }
                     fht_compositor_config::ComplexKeyAction::MoveFloatingWindow(change) => {
                         KeyActionType::MoveFloatingWindow(change)
@@ -259,6 +266,16 @@ impl State {
                     tile.window().request_tiled(!prev);
                 }
                 active.arrange_tiles(true);
+            }
+            KeyActionType::CenterFloatingWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                let output_geometry = active.output().geometry();
+                if let Some(tile) = active.active_tile_mut() {
+                    if !tile.window().tiled() {
+                        let loc = tile.location();
+                        tile.set_location(output_geometry.center() - loc.downscale(2), true);
+                    }
+                }
             }
             KeyActionType::MoveFloatingWindow([dx, dy]) => {
                 let active = self.fht.space.active_workspace_mut();
