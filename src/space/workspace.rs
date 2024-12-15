@@ -897,7 +897,6 @@ impl Workspace {
             tiles_len,
         );
 
-        // TODO: Maybe be a little smarter about how we proceed?
         let mut master_geo @ mut stack_geo = work_area;
         match self.layouts[self.active_layout_idx] {
             WorkspaceLayout::Tile => {
@@ -1549,9 +1548,6 @@ impl Workspace {
 
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
-            //
-            // TODO: Maybe fade out the other tiles when fullscreen is resizing? Would be better
-            // than just removing them right away.
             let tile = &self.tiles[fullscreen_idx];
 
             let fullscreen_elements = tile.render(renderer, scale, 1.0, true).map(|element| {

@@ -386,7 +386,6 @@ impl Drop for ScreencopyFrame {
     }
 }
 
-#[allow(unused)] // TODO: Make overlay cursor work.
 impl ScreencopyFrame {
     /// The output to screencopy from.
     pub fn output(&self) -> &Output {
