@@ -37,10 +37,14 @@ impl XdgActivationHandler for State {
         surface: wl_surface::WlSurface,
     ) {
         if token_data.timestamp.elapsed() < ACTIVATION_TIMEOUT {
-            if let Some(window) = self.fht.space.find_window(&surface) {
-                if self.fht.space.activate_window(&window, true) {
-                    // TODO: Move the cursor to the right place
-                }
+            let mut output = None;
+            if let Some((window, workspace)) = self.fht.space.find_window_and_workspace(&surface) {
+                output = Some(workspace.output().clone());
+                self.fht.space.activate_window(&window, true);
+            }
+
+            if let Some(ref output) = output {
+                self.fht.queue_redraw(output);
             }
         }
     }
