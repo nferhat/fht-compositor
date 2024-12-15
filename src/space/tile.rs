@@ -198,7 +198,7 @@ impl Tile {
         self.set_size(new_geometry.size, animate);
     }
 
-    /// Get this [`Tile`]'s geometry, in other words its effective [`Rectangle`] in compositor
+    /// Get this [`Tile`]'s geometry, in other words its effective [`Rectangle`] in [`Workspace`]
     /// space.
     ///
     /// The returned [`Rectangle`] is the geometry of the whole [`Tile`], including its border.
@@ -259,7 +259,7 @@ impl Tile {
         tile_location
     }
 
-    /// Get this [`Tile`]'s location, in other words its effective location in compositor space.
+    /// Get this [`Tile`]'s location, in other words its effective location in [`Workspace`] space.
     ///
     /// The returned value will the size of the whole [`Tile`], including its border.
     pub fn location(&self) -> Point<i32, Logical> {
@@ -276,7 +276,7 @@ impl Tile {
             .unwrap_or_else(|| self.size())
     }
 
-    /// Get this [`Tile`]'s size, in other words its effective size in compositor space.
+    /// Get this [`Tile`]'s size, in other words its effective size in [`Workspace`] space.
     ///
     /// The returned value will the size of the whole [`Tile`], including its border.
     pub fn size(&self) -> Size<i32, Logical> {
