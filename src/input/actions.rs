@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use fht_compositor_config::MouseAction;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
-use smithay::utils::{Rectangle, Serial};
+use smithay::utils::{Point, Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
 use crate::focus_target::PointerFocusTarget;
@@ -27,6 +27,8 @@ pub enum KeyActionType {
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FloatFocusedWindow,
+    MoveFloatingWindow([i32; 2]),
+    ResizeFloatingWindow([i32; 2]),
     FocusNextWindow,
     FocusPreviousWindow,
     SwapWithNextWindow,
@@ -146,6 +148,12 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     fht_compositor_config::ComplexKeyAction::FloatFocusedWindow => {
                         KeyActionType::FloatFocusedWindow
                     }
+                    fht_compositor_config::ComplexKeyAction::MoveFloatingWindow(change) => {
+                        KeyActionType::MoveFloatingWindow(change)
+                    }
+                    fht_compositor_config::ComplexKeyAction::ResizeFloatingWindow(change) => {
+                        KeyActionType::ResizeFloatingWindow(change)
+                    }
                     fht_compositor_config::ComplexKeyAction::FocusNextWindow => {
                         KeyActionType::FocusNextWindow
                     }
@@ -251,6 +259,28 @@ impl State {
                     tile.window().request_tiled(!prev);
                 }
                 active.arrange_tiles(true);
+            }
+            KeyActionType::MoveFloatingWindow([dx, dy]) => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(tile) = active.active_tile_mut() {
+                    if !tile.window().tiled() {
+                        let new_loc = tile.location() + Point::from((dx, dy));
+                        tile.set_location(new_loc, true);
+                    }
+                }
+            }
+            KeyActionType::ResizeFloatingWindow([dx, dy]) => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(tile) = active.active_tile_mut() {
+                    if !tile.window().tiled() {
+                        let mut new_size = tile.size();
+                        // Clamp at 25 minimum to avoid making the tile useless as well as avoiding
+                        // to crash smithay code
+                        new_size.w = (new_size.w + dx).max(25);
+                        new_size.h = (new_size.h + dy).max(25);
+                        tile.set_size(new_size, true);
+                    }
+                }
             }
             KeyActionType::FocusNextWindow => {
                 let active = self.fht.space.active_workspace_mut();

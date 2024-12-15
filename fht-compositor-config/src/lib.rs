@@ -229,6 +229,8 @@ pub enum ComplexKeyAction {
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FloatFocusedWindow,
+    MoveFloatingWindow([i32; 2]),
+    ResizeFloatingWindow([i32; 2]),
     FocusNextWindow,
     FocusPreviousWindow,
     SwapWithNextWindow,

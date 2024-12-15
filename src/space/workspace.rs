@@ -477,6 +477,11 @@ impl Workspace {
         self.tiles.get(self.active_tile_idx?)
     }
 
+    /// Get a mutable reference to the the [`Workspace`]'s active [`Tile`].
+    pub fn active_tile_mut(&mut self) -> Option<&mut Tile> {
+        self.tiles.get_mut(self.active_tile_idx?)
+    }
+
     /// Get an iterator of the [`Workspace`]'s [`Window`]s
     ///
     /// This includes the fullscreened [`Window`], if any.
