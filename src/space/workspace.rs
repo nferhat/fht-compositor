@@ -128,7 +128,9 @@ pub struct Workspace {
     ///
     /// We keep track of the tile that was fullscreened to avoid fading it out when we remove it
     /// from the fullscreen state.
-    fullscreen_fade_animation: Option<(usize, Animation<f32>)>,
+    ///
+    /// If the specified index is [`None`], all [`Tile`]s should fade.
+    fullscreen_fade_animation: Option<(Option<usize>, Animation<f32>)>,
 
     /// An interactive tile "swap".
     ///
@@ -243,7 +245,7 @@ impl Workspace {
             // Fullscreen tile idx points to non-existent tile!?
             // This should never happen in practice but still handle this edge case.
             let idx = self.fullscreened_tile_idx.take().unwrap();
-            self.start_fullscreen_fade_in(idx);
+            self.start_fullscreen_fade_in(Some(idx));
             arrange = true;
         }
 
@@ -257,7 +259,7 @@ impl Workspace {
             // - The tile order changed.
             // Both of these warrant a layout arrange.
             let idx = self.fullscreened_tile_idx.take().unwrap();
-            self.start_fullscreen_fade_in(idx);
+            self.start_fullscreen_fade_in(Some(idx));
             arrange = true;
         }
 
@@ -266,7 +268,7 @@ impl Workspace {
             .take_if(|&mut idx| !self.tiles[idx].window().alive())
         {
             // The previous fullscreen is dead, arrange as a heuristic move
-            self.start_fullscreen_fade_in(idx);
+            self.start_fullscreen_fade_in(Some(idx));
             arrange = true;
         }
 
@@ -281,7 +283,7 @@ impl Workspace {
             //
             // This can also be triggered by other parts of the compositor logic, assuming that we
             // (the workspace) will take care of unfullscreening the window.
-            self.start_fullscreen_fade_in(idx);
+            self.start_fullscreen_fade_in(Some(idx));
             arrange = true;
         }
 
@@ -616,6 +618,19 @@ impl Workspace {
         let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
             return false;
         };
+        if self
+            .fullscreened_tile_idx
+            .take_if(|&mut fs_idx| fs_idx == idx)
+            .is_some()
+        {
+            // if we remomved the fullscreen tile, we run the animation ourselves.
+            if animate {
+                self.start_fullscreen_fade_in(None);
+            }
+        } else {
+            // Otherwise, use remove_current_fullscreen (removed something else)
+            self.remove_current_fullscreen();
+        }
 
         let window = self.tiles.remove(idx).into_window();
         window.request_bounds(None);
@@ -717,7 +732,7 @@ impl Workspace {
     /// You must call [`Workspace::arrange_tiles`]
     fn remove_current_fullscreen(&mut self) {
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx.take() {
-            self.start_fullscreen_fade_in(fullscreen_idx);
+            self.start_fullscreen_fade_in(Some(fullscreen_idx));
             self.tiles[fullscreen_idx]
                 .window()
                 .request_fullscreen(false);
@@ -1498,14 +1513,14 @@ impl Workspace {
                 .map(|(_, anim)| *anim.value())
                 .unwrap_or(1.0);
             self.fullscreen_fade_animation = Some((
-                idx,
+                Some(idx),
                 Animation::new(start, 0.0, duration).with_curve(animation_config.curve),
             ));
         }
     }
 
     /// Start the fullscreen fade in animation.
-    fn start_fullscreen_fade_in(&mut self, idx: usize) {
+    fn start_fullscreen_fade_in(&mut self, idx: Option<usize>) {
         if let Some(animation_config) = self.config.window_geometry_animation.as_ref() {
             let duration = animation_config.duration / 2;
             let start = self
@@ -1533,7 +1548,7 @@ impl Workspace {
         let (skip_alpha_animation_idx, alpha) = self
             .fullscreen_fade_animation
             .as_ref()
-            .map(|(idx, anim)| (Some(*idx), *anim.value()))
+            .map(|(idx, anim)| (*idx, *anim.value()))
             .unwrap_or((None, 1.0));
 
         let render_offset = self
