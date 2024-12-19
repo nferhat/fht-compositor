@@ -37,7 +37,7 @@ use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
-use smithay::reexports::drm::control::{ModeTypeFlags, ResourceHandle};
+use smithay::reexports::drm::control::{ModeFlags, ModeTypeFlags, ResourceHandle};
 use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
@@ -654,13 +654,49 @@ impl UdevData {
             return Ok(());
         }
 
-        // Get the first preferred mode from the connector mode list, falling back to the first
-        // available mode if nothing is preferred (for some obscure reason)
-        let drm_mode = *connector
-            .modes()
-            .iter()
-            .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .unwrap_or_else(|| connector.modes().first().unwrap());
+        let output_config = fht.config.outputs.get(&output_name);
+        let mut new_scale = None;
+        let drm_mode;
+        fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
+            modes
+                .iter()
+                .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+                .copied()
+                .unwrap_or_else(|| *modes.first().unwrap())
+        }
+
+        let mut new_transform = None;
+
+        let modes = connector.modes();
+        if let Some(output_config) = fht.config.outputs.get(&output_name) {
+            if let Some((w, h, refresh)) = output_config.mode {
+                drm_mode = match get_matching_mode(modes, w, h, refresh) {
+                    // We found a mode specified by the user, best case scenario
+                    Some((mode, false)) => mode,
+                    Some((mode, true)) => {
+                        warn!("Unable to find matching mode for output {output_name}! Using preferred");
+                        mode
+                    }
+                    None => {
+                        warn!("Unable to find matching/preferred mode for {output_name}! Using first available mode");
+                        *modes.first().unwrap()
+                    }
+                }
+            } else {
+                drm_mode = get_default_mode(modes);
+            }
+
+            if let Some(transform) = output_config.transform {
+                new_transform = Some(transform.into());
+            }
+
+            if let Some(scale) = output_config.scale {
+                new_scale = Some(smithay::output::Scale::Integer(scale));
+            }
+        } else {
+            drm_mode = get_default_mode(modes);
+        }
+
         let mode = OutputMode::from(drm_mode);
 
         // Create the DRM surface to be associated with the compositor for this surface.
@@ -688,11 +724,16 @@ impl UdevData {
             make,
             model,
         };
+
         let output = Output::new(output_name, physical_properties);
+        for mode in modes {
+            output.add_mode(OutputMode::from(*mode)); // adversite all the modes
+        }
+        output.set_preferred(mode);
+        output.change_current_state(Some(mode), new_transform, new_scale, None);
+
         let output_global = output.create_global::<State>(&fht.display_handle);
 
-        output.set_preferred(mode);
-        output.change_current_state(Some(mode), None, None, None);
         let refresh_interval =
             Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
         fht.add_output(output.clone(), Some(refresh_interval));
@@ -1290,4 +1331,74 @@ fn calculate_refresh_rate(mode: &drm::control::Mode) -> f64 {
     let denominator = vtotal * htotal * (if vscan > 1 { vscan } else { 1 });
 
     (numerator / denominator) as f64
+}
+
+/// Gets the mode that matches the given description the closest.
+///
+/// - If there's a match, this returns `Ok((mode, false))`
+/// - If nothing matches, this returns `Ok((preferred_mode, true))`
+/// - If there's no match/preferred mode, this returns None
+fn get_matching_mode(
+    modes: &[drm::control::Mode],
+    width: u16,
+    height: u16,
+    refresh: Option<f64>,
+) -> Option<(drm::control::Mode, bool)> {
+    if modes.is_empty() {
+        return None;
+    }
+
+    if let Some(refresh) = refresh {
+        let refresh_milli_hz = (refresh * 1000.).round() as i32;
+        if let Some(mode) = modes
+            .iter()
+            .find(|mode| {
+                mode.size() == (width, height) && refresh_milli_hz == get_refresh_milli_hz(mode)
+            })
+            .copied()
+        {
+            return Some((mode, true));
+        }
+    } else {
+        // User just wants highest refresh rate
+        let mut matching_modes = modes
+            .iter()
+            .filter(|mode| mode.size() == (width, height))
+            .copied()
+            .collect::<Vec<_>>();
+        matching_modes.sort_by_key(|mode| mode.vrefresh());
+
+        if let Some(mode) = matching_modes.first() {
+            return Some((*mode, true));
+        }
+    }
+
+    // Last try: find a preferred mode.
+    modes
+        .iter()
+        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .map(|pref| (*pref, true))
+}
+
+/// Get a [`Mode`](drm::control::Mode)'s refresh rate in millihertz
+fn get_refresh_milli_hz(mode: &drm::control::Mode) -> i32 {
+    let clock = mode.clock() as u64;
+    let htotal = mode.hsync().2 as u64;
+    let vtotal = mode.vsync().2 as u64;
+
+    let mut refresh = (clock * 1_000_000 / htotal + vtotal / 2) / vtotal;
+
+    if mode.flags().contains(ModeFlags::INTERLACE) {
+        refresh *= 2;
+    }
+
+    if mode.flags().contains(ModeFlags::DBLSCAN) {
+        refresh /= 2;
+    }
+
+    if mode.vscan() > 1 {
+        refresh /= mode.vscan() as u64;
+    }
+
+    refresh as i32
 }

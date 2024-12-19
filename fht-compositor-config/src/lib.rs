@@ -18,6 +18,7 @@ use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
 use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
+use smithay::utils::Transform as SmithayTransform;
 use toml::{Table, Value};
 
 static DEFAULT_CONFIG_CONTENTS: &'static str = include_str!("../../res/compositor.toml");
@@ -68,6 +69,7 @@ pub struct Config {
     pub decorations: Decorations,
     pub animations: Animations,
     pub rules: Vec<WindowRule>,
+    pub outputs: HashMap<String, Output>,
     pub debug: Debug,
 }
 
@@ -86,6 +88,7 @@ impl Default for Config {
             decorations: Default::default(),
             animations: Default::default(),
             rules: Default::default(),
+            outputs: HashMap::new(),
             debug: Default::default(),
         }
     }
@@ -933,6 +936,83 @@ impl BorderOverrides {
 
         self
     }
+}
+
+fn deserialize_output_mode<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<(u16, u16, Option<f64>)>, D::Error> {
+    use sscanf::sscanf;
+    let Some(raw) = Option::<String>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+
+    let res = sscanf!(&raw, "{u16}x{u16}")
+        .map(|(w, h)| (w, h, None))
+        .map_err(|_| {
+            <D::Error as serde::de::Error>::invalid_value(
+                Unexpected::Str(&raw),
+                &"{width}x{height}",
+            )
+        })
+        .or_else(|_| {
+            sscanf!(&raw, "{u16}x{u16}@{f64}")
+                .map(|(w, h, refresh)| (w, h, Some(refresh)))
+                .map_err(|_| {
+                    <D::Error as serde::de::Error>::invalid_value(
+                        Unexpected::Str(&raw),
+                        &"{width}x{height}@{refresh}",
+                    )
+                })
+        })?;
+    Ok(Some(res))
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum OutputTransform {
+    #[default]
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "90")]
+    _90,
+    #[serde(rename = "180")]
+    _180,
+    #[serde(rename = "270")]
+    _270,
+    #[serde(rename = "flipped")]
+    Flipped,
+    #[serde(rename = "flipped-90")]
+    Flipped90,
+    #[serde(rename = "flipped-180")]
+    Flipped180,
+    #[serde(rename = "flipped-270")]
+    Flipped270,
+}
+
+impl Into<SmithayTransform> for OutputTransform {
+    fn into(self) -> SmithayTransform {
+        match self {
+            Self::Normal => SmithayTransform::Normal,
+            Self::_90 => SmithayTransform::_90,
+            Self::_180 => SmithayTransform::_180,
+            Self::_270 => SmithayTransform::_270,
+            Self::Flipped => SmithayTransform::Flipped,
+            Self::Flipped90 => SmithayTransform::Flipped90,
+            Self::Flipped180 => SmithayTransform::Flipped180,
+            Self::Flipped270 => SmithayTransform::Flipped270,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Output {
+    // Configured output mode, takes the form of (width, height, refresh (in hz))
+    // If refresh rate is not specified, use the highest available.
+    #[serde(deserialize_with = "deserialize_output_mode")]
+    pub mode: Option<(u16, u16, Option<f64>)>,
+    pub transform: Option<OutputTransform>,
+    pub scale: Option<i32>,
 }
 
 fn default_disable_10bit() -> bool {

@@ -11,6 +11,7 @@ fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0
 regex = "1.10.6"
 serde = { version = "1.0.203", features = ["derive"] }
 smithay = { workspace = true, features = ["backend_libinput"] }
+sscanf = "0.4.2"
 thiserror = "1.0.56"
 toml = { version = "0.8.19", default-features = false, features = ["parse", "display"] }
 tracing.workspace = true

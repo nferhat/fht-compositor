@@ -12,7 +12,7 @@ use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::winit::window::WindowAttributes;
-use smithay::utils::Transform;
+use smithay::utils::{Size, Transform};
 use smithay::wayland::dmabuf::{
     DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier,
 };
@@ -84,17 +84,29 @@ impl WinitData {
             },
         );
 
-        let mode = Mode {
+        let mut mode = Mode {
             size,
             refresh: 60_000,
         };
+        let mut new_scale = None;
 
-        output.change_current_state(
-            Some(mode),
-            Some(Transform::Flipped180),
-            Some(smithay::output::Scale::Integer(1)),
-            None,
-        );
+        if let Some(output_config) = fht.config.outputs.get("winit-0") {
+            if let Some((w, h, refresh)) = output_config.mode {
+                mode.size = Size::from((w as i32, h as i32));
+                if let Some(refresh) = refresh {
+                    mode.refresh = (refresh * 1000.).round() as i32;
+                }
+            }
+
+            if let Some(scale) = output_config.scale {
+                new_scale = Some(smithay::output::Scale::Integer(scale));
+            }
+
+            // NOTE: We don't check transform since we need to use Flipped180 for winit to work
+            // properly. :clueless:
+        }
+
+        output.change_current_state(Some(mode), Some(Transform::Flipped180), new_scale, None);
         output.set_preferred(mode);
         fht.add_output(output.clone(), None);
 
