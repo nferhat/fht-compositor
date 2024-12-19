@@ -366,6 +366,9 @@ impl State {
         for device in devices {
             self.fht.add_libinput_device(device);
         }
+
+        // Queue a redraw to ensure everything is up-to-date visually.
+        self.fht.queue_redraw_all();
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
@@ -840,8 +843,7 @@ impl Fht {
     }
 
     pub fn queue_redraw_all(&mut self) {
-        let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
-        for output in &outputs {
+        for output in self.space.outputs() {
             let state = self.output_state.get_mut(output).unwrap();
             state.redraw_state.queue();
         }
