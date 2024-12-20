@@ -299,13 +299,11 @@ impl State {
                             {
                                 #[allow(irrefutable_let_patterns)]
                                 if let crate::backend::Backend::Udev(data) = &mut state.backend {
-                                    if let Err(err) = data.session.change_vt(
+                                    data.switch_vt(
                                         (handle.modified_sym().raw()
                                             - Keysym::XF86_Switch_VT_1.raw()
                                             + 1) as i32,
-                                    ) {
-                                        error!(?err, "Failed switching virtual terminal");
-                                    }
+                                    );
                                     suppressed_keys.insert(keysym);
                                     return FilterResult::Intercept(KeyAction::none());
                                 }

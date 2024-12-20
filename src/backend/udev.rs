@@ -1177,6 +1177,18 @@ impl UdevData {
             fht.send_frames(&surface.output);
         }
     }
+
+    pub fn switch_vt(&mut self, vt_num: i32) {
+        self.devices.values_mut().for_each(|device| {
+            // FIX: Reset overlay planes when changing VTs since some compositors
+            // don't use then and as a result don't clean them.
+            let _ = device.drm.reset_state();
+        });
+
+        if let Err(err) = self.session.change_vt(vt_num) {
+            error!(?err, "Failed to switch virtual terminals")
+        }
+    }
 }
 
 pub struct Device {
