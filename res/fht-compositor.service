@@ -14,4 +14,4 @@ Before=xdg-desktop-autostart.target
 [Service]
 Slice=session.slice
 Type=notify
-ExecStart=/usr/bin/fht-compositor
+ExecStart=/usr/bin/fht-compositor --session

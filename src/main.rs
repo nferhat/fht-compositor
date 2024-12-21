@@ -7,8 +7,12 @@
 extern crate tracing;
 
 use std::error::Error;
+use std::fmt::Write as _;
+use std::io::Write as _;
+use std::os::fd::FromRawFd as _;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{env, fs};
 
 use clap::{CommandFactory, Parser};
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
@@ -133,6 +137,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         error!(?err, "Failed to start XDG portals")
     }
 
+    let session = cli.session;
     let mut state = State::new(
         &dh,
         event_loop.handle(),
@@ -149,6 +154,25 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
         std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
         std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
+    }
+
+    if session {
+        // Session setup:
+        // - Import the environment values we set into systemd/dbus
+        // - Notify systemd service that we are ready.
+        // - Handle NOTIFY_FD if any.
+        //
+        // This is needed otherwise systemd will kill our service (IE. the compositor session) since
+        // it times out at 1 minute 30 seconds for ready notification.
+        import_environment();
+
+        if let Err(err) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
+            warn!("Error notifying systemd: {err:?}")
+        }
+
+        if let Err(err) = notify_fd() {
+            warn!("Error notifying fd: {err:?}")
+        }
     }
 
     for cmd in &state.fht.config.autostart {
@@ -193,6 +217,57 @@ fn check_configuration(cli: cli::Cli) -> ! {
             }
         },
     }
+}
+
+fn import_environment() {
+    let variables = ["WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"].join(" ");
+
+    let mut init_system_import = String::new();
+    write!(
+        init_system_import,
+        "systemctl --user import-environment {variables};"
+    )
+    .unwrap();
+
+    let rv = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            &format!(
+                "{init_system_import}\
+                 hash dbus-update-activation-environment 2>/dev/null && \
+                 dbus-update-activation-environment {variables}"
+            ),
+        ])
+        .spawn();
+    // Wait for the import process to complete, otherwise services will start too fast without
+    // environment variables available.
+    match rv {
+        Ok(mut child) => match child.wait() {
+            Ok(status) => {
+                if !status.success() {
+                    warn!("import environment shell exited with {status}");
+                }
+            }
+            Err(err) => {
+                warn!("error waiting for import environment shell: {err:?}");
+            }
+        },
+        Err(err) => {
+            warn!("error spawning shell to import environment: {err:?}");
+        }
+    }
+}
+
+fn notify_fd() -> anyhow::Result<()> {
+    let fd = match env::var("NOTIFY_FD") {
+        Ok(notify_fd) => notify_fd.parse()?,
+        Err(env::VarError::NotPresent) => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    env::remove_var("NOTIFY_FD");
+    let mut notif = unsafe { fs::File::from_raw_fd(fd) };
+    notif.write_all(b"READY=1\n")?;
+    Ok(())
 }
 
 // If we do not nuse puffin, disable it entierly to avoid any overhead without profiling.
