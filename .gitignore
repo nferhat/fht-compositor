@@ -3,3 +3,5 @@
 std*
 # mdbook generated files for serving into HTML
 docs/book
+# when building with nix
+/result
