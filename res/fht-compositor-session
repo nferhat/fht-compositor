@@ -1,0 +1,45 @@
+#!/bin/bash
+# 
+# fht-compositor-session -*- Custom bash script to run fht-compositor under a systemd session.
+# It uses the supporting .service files that you can find in this directory. Make sure you install
+# them!
+
+if [ -n "$SHELL" ] &&
+   grep -q "$SHELL" /etc/shells &&
+   ! (echo "$SHELL" | grep -q "false") &&
+   ! (echo "$SHELL" | grep -q "nologin"); then
+  if [ "$1" != '-l' ]; then
+    exec bash -c "exec -l '$SHELL' -c '$0 -l $*'"
+  else
+    shift
+  fi
+fi
+
+
+# Make sure there's no already running session.
+if systemctl --user -q is-active fht-compositor.service; then
+  echo "A fht-compositor session is already running."
+  exit 1
+fi
+
+# Reset the user service environment.
+# 
+# This ensures that services such as xdg-autostart or pipewire get started/prepared when the
+# graphical-target starts (which is bound with fht-compositor.service)
+systemctl --user reset-failed
+systemctl --user import-environment
+
+# While `systemctl --user import-environment` imports the env from the login manager, we still have
+# to load the DBus activation environment ourselves since some services don't use the SystemdService
+# directive.
+#
+# Thank you Niri for figuring this out.
+if hash dbus-update-activation-environment 2>/dev/null; then
+    dbus-update-activation-environment --all
+fi
+
+# Then, we can start the compositor and wait for it to quit.
+# We then force the exit of the graphial session, and remove any "leaked" environment variables
+systemctl --user --wait start fht-compositor.service
+systemctl --user start --job-mode=replace-irreversibly fht-compositor-shutdown.target
+systemctl --user unset-environment WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
