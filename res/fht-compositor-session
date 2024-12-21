@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # 
 # fht-compositor-session -*- Custom bash script to run fht-compositor under a systemd session.
 # It uses the supporting .service files that you can find in this directory. Make sure you install
