@@ -26,7 +26,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point};
+use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
@@ -331,7 +331,7 @@ impl State {
             // the channel does not exist anymore) So there's nothing todo with the
             // join_handle!
         }
-        // let old_config = Arc::clone(&self.fht.config);
+        let old_config = Arc::clone(&self.fht.config);
         let config = Arc::new(new_config);
 
         // Some invariants must be upheld when reloading the configuration
@@ -358,6 +358,10 @@ impl State {
 
         // If we made it up to here, the configuration must be valid
         self.fht.config = config;
+
+        if old_config.outputs != self.fht.config.outputs {
+            self.fht.reload_output_config();
+        }
 
         // These devices are just handles, so cleaning the devices vector and adding them all
         // back should not be an issue. (input device configuration code in inside
@@ -784,11 +788,14 @@ impl Fht {
             });
         }
         self.space.set_active_output(&output);
+
+        self.arrange_outputs(Some(output));
     }
 
     pub fn remove_output(&mut self, output: &Output) {
         info!(name = output.name(), "Removing output");
         self.space.remove_output(output);
+        self.arrange_outputs(None);
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
@@ -827,6 +834,119 @@ impl Fht {
         let _ = output_state.debug_damage_tracker.take();
 
         self.queue_redraw(output);
+    }
+
+    pub fn reload_output_config(&mut self) {
+        // We only care about the outputs that have associated configuration
+        //
+        // NOTE: Maybe we should 'undo' the configuration of outputs that had a configuration set
+        // but got their config removed after? If so, to **what** should we revert it?
+        for (output, config) in self
+            .space
+            .outputs()
+            .map(|output| (output, self.config.outputs.get(&output.name())))
+        {
+            // NOTE: for winit backend the transform must stay on Flipped180.
+            let new_transform = (output.name().as_str() != "winit")
+                .then(|| config.as_ref().and_then(|cfg| cfg.transform))
+                .flatten()
+                .map(Into::into)
+                .unwrap_or(smithay::utils::Transform::Normal);
+            let new_scale = config
+                .as_ref()
+                .and_then(|cfg| Some(smithay::output::Scale::Integer(cfg.scale?.clamp(1, 10))))
+                .unwrap_or(smithay::output::Scale::Integer(1));
+
+            output.change_current_state(None, Some(new_transform), Some(new_scale), None);
+        }
+
+        let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
+        outputs.iter().for_each(|o| self.output_resized(o));
+        self.arrange_outputs(None);
+
+        // We don't have todo this since it should be done with State::reload_config
+        // self.queue_redraw_all();
+    }
+
+    pub fn arrange_outputs(&mut self, new_output: Option<Output>) {
+        crate::profile_function!();
+        let mut outputs = self
+            .space
+            .outputs()
+            .cloned()
+            .map(|o| {
+                let current_pos = Some(o.current_location());
+                let config_pos = self
+                    .config
+                    .outputs
+                    .get(&o.name())
+                    .and_then(|c| c.position)
+                    .map(|[x, y]| Point::<i32, Logical>::from((x, y)));
+                (o, current_pos, config_pos)
+            })
+            .collect::<Vec<_>>();
+        if let Some(new_output) = &new_output {
+            // new output has no initial position!
+            if let Some((_, pos, _)) = outputs.iter_mut().find(|(o, _, _)| o == new_output) {
+                *pos = None;
+            }
+        }
+        // When we arrange outputs, we must take into consideration the fact that the backend (udev)
+        // might make them appear differently since nothing ensures connector order, this is why
+        // we order the outputs by their name.
+        outputs.sort_unstable_by_key(|(o, _, _)| o.name());
+        // First arrange the outputs with an explicit config.
+        outputs.sort_unstable_by_key(|(_, _, pos)| pos.is_none());
+
+        let mut arranged_outputs = vec![];
+        for (output, current_pos, config_pos) in outputs {
+            let size = output.geometry().size;
+            let new_pos = config_pos
+                .filter(|&target_pos| {
+                    let target_geo = Rectangle::from_loc_and_size(target_pos, size);
+                    // if we have overlap, this position is not good, simple as that.
+                    if let Some(overlap) = self
+                        .space
+                        .outputs()
+                        .map(OutputExt::geometry)
+                        .find(|geo| geo.overlaps(target_geo))
+                    {
+                        warn!(
+                            "Output {} at {:?} with size {:?} \
+                        overlaps an existing output at {:?} with size {:?}! \
+                        Using fallback location",
+                            output.name(),
+                            (target_geo.loc.x, target_geo.loc.y),
+                            (target_geo.size.w, target_geo.size.h),
+                            (overlap.loc.x, overlap.loc.y),
+                            (overlap.size.w, overlap.size.h),
+                        );
+
+                        dbg!(overlap);
+
+                        false
+                    } else {
+                        dbg!("good");
+                        true
+                    }
+                })
+                .unwrap_or_else(|| {
+                    let x_loc = arranged_outputs
+                        .iter()
+                        .map(OutputExt::geometry)
+                        .map(|geo| geo.loc.x + geo.size.w)
+                        .max()
+                        .unwrap_or(0);
+                    Point::from((x_loc, 0))
+                });
+
+            if Some(new_pos) != current_pos {
+                output.change_current_state(None, None, None, Some(new_pos));
+                self.queue_redraw(&output);
+            }
+
+            arranged_outputs.push(output);
+        }
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
@@ -905,13 +1025,12 @@ impl Fht {
                         // State::process_mouse_action).
                         (
                             PointerFocusTarget::Window(fullscreen.clone()),
-                            fullscreen_loc.to_f64(), // window loc is already global
+                            (fullscreen_loc + output_loc).to_f64(),
                         )
                     } else {
                         (
                             PointerFocusTarget::from(surface),
-                            (surface_loc + fullscreen_loc).to_f64(), /* window loc is already
-                                                                      * global */
+                            (surface_loc + fullscreen_loc + output_loc).to_f64(),
                         )
                     }
                 })
@@ -948,12 +1067,12 @@ impl Fht {
                         // State::process_mouse_action).
                         (
                             PointerFocusTarget::Window(window.clone()),
-                            window_loc.to_f64(), // window loc is already global
+                            (window_loc + output_loc).to_f64(),
                         )
                     } else {
                         (
                             PointerFocusTarget::from(surface),
-                            (surface_loc + window_loc).to_f64(), /* window loc is already global */
+                            (surface_loc + window_loc + output_loc).to_f64(),
                         )
                     }
                 })

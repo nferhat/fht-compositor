@@ -967,7 +967,7 @@ fn deserialize_output_mode<'de, D: Deserializer<'de>>(
     Ok(Some(res))
 }
 
-#[derive(Default, Debug, Clone, Copy, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum OutputTransform {
     #[default]
@@ -1004,7 +1004,7 @@ impl Into<SmithayTransform> for OutputTransform {
     }
 }
 
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Output {
     // Configured output mode, takes the form of (width, height, refresh (in hz))
@@ -1013,6 +1013,7 @@ pub struct Output {
     pub mode: Option<(u16, u16, Option<f64>)>,
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
+    pub position: Option<[i32; 2]>,
 }
 
 fn default_disable_10bit() -> bool {
