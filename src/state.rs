@@ -922,11 +922,8 @@ impl Fht {
                             (overlap.size.w, overlap.size.h),
                         );
 
-                        dbg!(overlap);
-
                         false
                     } else {
-                        dbg!("good");
                         true
                     }
                 })
