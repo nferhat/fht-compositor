@@ -9,8 +9,6 @@ use smithay::backend::input::{
     ProximityState, TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent,
     TabletToolTipEvent, TabletToolTipState,
 };
-#[cfg(feature = "udev-backend")]
-use smithay::backend::session::Session;
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};

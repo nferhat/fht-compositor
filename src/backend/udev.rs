@@ -654,7 +654,6 @@ impl UdevData {
             return Ok(());
         }
 
-        let output_config = fht.config.outputs.get(&output_name);
         let mut new_scale = None;
         let drm_mode;
         fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
