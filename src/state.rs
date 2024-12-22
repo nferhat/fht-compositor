@@ -759,11 +759,6 @@ impl Fht {
         );
 
         info!(name = output.name(), "Adding new output");
-
-        // TODO: Output config and better auto-placement
-        let x = self.space.outputs().map(|o| o.geometry().loc.x).sum();
-        debug!(?x, y = 0, "Using fallback output location");
-        output.change_current_state(None, None, None, Some((x, 0).into()));
         self.space.add_output(output.clone());
 
         let state = output::OutputState {
