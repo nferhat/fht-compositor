@@ -402,11 +402,7 @@ impl Tile {
     }
 
     /// Take a snapshot for running a [`ClosingTile`].
-    pub fn prepare_close_animation_if_needed(
-        &mut self,
-        renderer: &mut GlowRenderer,
-        scale: Scale<f64>,
-    ) {
+    pub fn prepare_close_animation_if_needed(&mut self, renderer: &mut GlowRenderer, scale: i32) {
         if self.close_animation_snapshot.is_some() {
             return;
         }
@@ -432,7 +428,7 @@ impl Tile {
         &self,
         renderer: &mut R,
         location: Point<i32, Logical>,
-        scale: Scale<f64>,
+        scale: i32,
         alpha: f32,
         active: bool,
     ) -> Vec<TileRenderElement<R>> {
@@ -487,7 +483,7 @@ impl Tile {
             .render_popup_elements(
                 renderer,
                 window_geometry.loc.to_physical_precise_round(scale),
-                scale,
+                scale as f64,
                 alpha,
             )
             .into_iter()
@@ -499,7 +495,7 @@ impl Tile {
             let renderer = renderer.glow_renderer_mut();
             let window_elements =
                 self.window
-                    .render_toplevel_elements(renderer, (0, 0).into(), scale, alpha);
+                    .render_toplevel_elements(renderer, (0, 0).into(), scale as f64, alpha);
             let size_animation = self.size_animation.as_ref().unwrap();
 
             // dont forget to subtract 2 * border since its for the window
@@ -514,7 +510,7 @@ impl Tile {
             if let Ok((tex, _)) = render_to_texture(
                 renderer,
                 window_geometry.size.to_physical_precise_round(scale),
-                scale,
+                scale as f64,
                 Transform::Normal,
                 Fourcc::Abgr8888,
                 window_elements.iter(),
@@ -525,10 +521,9 @@ impl Tile {
                 let tex: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     renderer.id(),
-                    window_geometry.loc.to_f64().to_physical(scale),
+                    window_geometry.loc.to_physical(scale).to_f64(),
                     tex,
-                    // FIXME: This is garbage, "fractional scaling"
-                    scale.x.max(scale.y).round() as i32,
+                    scale,
                     Transform::Normal,
                     Some(alpha),
                     None,
@@ -555,7 +550,7 @@ impl Tile {
                 .render_toplevel_elements(
                     renderer,
                     window_geometry.loc.to_physical_precise_round(scale),
-                    scale,
+                    scale as f64,
                     alpha,
                 )
                 .into_iter()
@@ -570,7 +565,7 @@ impl Tile {
                     // To counter this, we check here if the surface is going to clip.
                     if RoundedCornerElement::will_clip(
                         &e,
-                        scale.into(),
+                        scale as f64,
                         window_geometry,
                         inner_radius,
                     ) {
@@ -578,7 +573,7 @@ impl Tile {
                             e,
                             inner_radius,
                             window_geometry,
-                            scale.into(),
+                            scale as f64,
                         );
                         TileRenderElement::RoundedSurface(rounded)
                     } else {
@@ -592,8 +587,7 @@ impl Tile {
             elements.push(
                 super::decorations::draw_border(
                     renderer,
-                    // FIXME: Fractional scale woohoo
-                    scale.x.max(scale.y),
+                    scale,
                     alpha,
                     tile_geometry,
                     border_thickness as f64,
@@ -621,8 +615,7 @@ impl Tile {
                     super::decorations::draw_shadow(
                         renderer,
                         alpha,
-                        // FIXME: fractional scale
-                        scale.x.max(scale.y),
+                        scale,
                         tile_geometry,
                         shadow_config.sigma,
                         border_radius,
@@ -642,12 +635,12 @@ impl Tile {
     pub fn render<R: FhtRenderer>(
         &self,
         renderer: &mut R,
-        scale: f64,
+        scale: i32,
         alpha: f32,
         active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
-        let scale = Scale::from(scale);
+        let fractional_scale = Scale::from(scale as f64);
         let mut opening_element = None;
         let mut normal_elements = vec![];
 
@@ -659,14 +652,14 @@ impl Tile {
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
             let elements = self.render_inner(glow_renderer, (0, 0).into(), scale, alpha, active);
-            let rec = elements
-                .iter()
-                .fold(Rectangle::default(), |acc, e| acc.merge(e.geometry(scale)));
+            let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
+                acc.merge(e.geometry(fractional_scale))
+            });
 
             opening_element = render_to_texture(
                 glow_renderer,
                 rec.size,
-                scale,
+                fractional_scale,
                 Transform::Normal,
                 Fourcc::Abgr8888,
                 elements.into_iter(),
@@ -687,8 +680,7 @@ impl Tile {
                     glow_renderer.id(),
                     render_geo.loc.to_f64(),
                     texture,
-                    // FIXME: This is garbage, "fractional scaling"
-                    scale.x.max(scale.y).round() as i32,
+                    scale,
                     Transform::Normal,
                     Some(alpha * progress.clamp(0., 1.) as f32),
                     None,

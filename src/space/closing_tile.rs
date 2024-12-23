@@ -105,7 +105,7 @@ impl ClosingTile {
     ///
     /// NOTE: It is up to YOU to assure that the rendered that will draw the
     /// [`ClosingTileRenderElement`] is the same one used to create the [`ClosingTile`].
-    pub fn render(&self, scale: f64, alpha: f32) -> ClosingTileRenderElement {
+    pub fn render(&self, scale: i32, alpha: f32) -> ClosingTileRenderElement {
         let Some((texture, offset)) = &self.texture else {
             return SolidColorRenderElement::new(
                 Id::new(),

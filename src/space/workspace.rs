@@ -236,7 +236,6 @@ impl Workspace {
         crate::profile_function!();
         let mut arrange = false;
 
-        // FIXME: This causes to always re-arrange???
         if self
             .fullscreened_tile_idx
             .as_ref()
@@ -687,7 +686,7 @@ impl Workspace {
             return false;
         };
 
-        let scale = self.output.current_scale().fractional_scale().into();
+        let scale = self.output.current_scale().integer_scale();
         tile.prepare_close_animation_if_needed(renderer, scale);
 
         true
@@ -1539,7 +1538,7 @@ impl Workspace {
     pub fn render<R: FhtRenderer>(
         &self,
         renderer: &mut R,
-        scale: f64,
+        scale: i32,
     ) -> Vec<WorkspaceRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];

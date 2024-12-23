@@ -193,7 +193,7 @@ impl ConfigUi {
         &mut self,
         renderer: &mut impl FhtRenderer,
         output: &smithay::output::Output,
-        scale: f64,
+        scale: i32,
     ) -> Option<ConfigUiRenderElement> {
         crate::profile_function!();
         if matches!(self.state, State::Hidden) {
@@ -206,7 +206,7 @@ impl ConfigUi {
             .egui
             .render(
                 renderer.glow_renderer_mut(),
-                scale.round() as i32, // FIXME: fractional scale
+                scale,
                 1.0,
                 Point::default(),
                 |ctx| ui(ctx, &self.state),

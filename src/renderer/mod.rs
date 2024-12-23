@@ -104,9 +104,15 @@ impl Fht {
         crate::profile_function!();
         let active_output = self.space.active_output();
         let monitor = self.space.active_monitor();
-        // TODO: Fractional scale support.
-        let output_scale = output.current_scale();
-        let scale = output_scale.integer_scale() as f64;
+        // Yes, we do not support fractional scale.
+        //
+        // For now, the ecosystem in wayland has all the required protocols and stuff to support it
+        // properly, but still, to this day, client support is very lacking, ranging from works
+        // very fine to absolute garbage.
+        //
+        // When the Wayland space will see evolutions regarding fractional scaling, I'll reconsider
+        // this choice and support it. But as far as I can see, this isn't happening.
+        let scale = output.current_scale().integer_scale();
 
         let mut rv = OutputElementsResult::default();
 
@@ -132,7 +138,6 @@ impl Fht {
                 renderer,
                 cursor_element_pos,
                 scale,
-                output_scale.integer_scale(), // TODO: Fractional scale support
                 1.0,
                 self.clock.now().into(),
             ) {
@@ -146,7 +151,7 @@ impl Fht {
                     &SurfaceTree::from_surface(surface),
                     renderer,
                     cursor_element_pos,
-                    scale.into(),
+                    Scale::from(scale as f64),
                     1.0,
                 );
                 rv.cursor_elements_len += elements.len();
@@ -174,7 +179,7 @@ impl Fht {
                     renderer,
                     lock_surface.wl_surface(),
                     Point::default(),
-                    scale,
+                    Scale::from(scale as f64),
                     1.0,
                     Kind::Unspecified,
                 ));
@@ -549,7 +554,8 @@ where
 {
     let output = screencopy.output();
     let transform = output.current_transform();
-    let scale = Scale::from(output.current_scale().integer_scale() as f64); // TODO: Fractional scale support
+    // See note in Fht::output_elements about fractional scale
+    let scale = Scale::from(output.current_scale().integer_scale() as f64);
     let output_region =
         Rectangle::from_loc_and_size(Point::default(), output.current_mode().unwrap().size);
     let region = screencopy.physical_region();

@@ -47,7 +47,6 @@ impl PointerConstraintsHandler for State {
                 return;
             }
 
-            // TODO: cursor_position_hint for layer surfaces?
             let Some(window) = self.fht.space.find_window(surface) else {
                 return;
             };

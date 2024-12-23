@@ -211,7 +211,7 @@ impl Monitor {
     }
 
     /// Create the render elements for this [`Monitor`]
-    pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: f64) -> MonitorRenderResult<R> {
+    pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: i32) -> MonitorRenderResult<R> {
         crate::profile_function!();
         // We want to render workspaces that currently have a render offset animation
         // as they could be displayed on the monitor (well this depends, but most of the time, yes)

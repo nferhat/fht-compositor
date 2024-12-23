@@ -11,6 +11,8 @@ use super::shaders::Shaders;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
+// NOTE: While no, we do not support fractional scaling in the compositor, to comply with Smithay's
+// (Render)Element traits, the functions exposed here use f64 scales
 #[derive(Debug)]
 pub struct RoundedCornerElement<E: Element> {
     element: E,
@@ -25,8 +27,9 @@ impl<E: Element> RoundedCornerElement<E> {
         element: E,
         corner_radius: f32,
         geometry: Rectangle<i32, Logical>,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
     ) -> Self {
+        let scale = scale.into();
         // Cool trick for subsurfaces geometry by niri. (I am sometimes too stupid todo stuff)
         // We transform the coordinates normalized in the shader to our global coordinates.
         let elem_geo = element.geometry(scale);
@@ -64,10 +67,11 @@ impl<E: Element> RoundedCornerElement<E> {
 
     pub fn will_clip(
         elem: &E,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
         geometry: Rectangle<i32, Logical>,
         corner_radius: f32,
     ) -> bool {
+        let scale = scale.into();
         let elem_geo = elem.geometry(scale);
         let geo = geometry.to_physical_precise_round(scale);
 

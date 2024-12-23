@@ -12,14 +12,14 @@ use crate::renderer::AsGlowRenderer;
 
 pub fn draw_border(
     renderer: &mut impl AsGlowRenderer,
-    scale: f64,
+    scale: i32,
     alpha: f32,
     geometry: Rectangle<i32, Logical>,
     thickness: f64,
     radius: f64,
     color: fht_compositor_config::Color,
 ) -> FhtPixelShaderElement {
-    let scaled_thickness = thickness * scale;
+    let scaled_thickness = thickness * scale as f64;
     let (start_color, end_color, angle) = match color {
         fht_compositor_config::Color::Solid(color) => (color, color, 0.0),
         fht_compositor_config::Color::Gradient { start, end, angle } => (start, end, angle),
@@ -46,13 +46,13 @@ pub fn draw_border(
 pub fn draw_shadow(
     renderer: &mut impl AsGlowRenderer,
     alpha: f32,
-    scale: f64,
+    scale: i32,
     mut geometry: Rectangle<i32, Logical>,
     blur_sigma: f32,
     corner_radius: f32,
     color: [f32; 4],
 ) -> FhtPixelShaderElement {
-    let r_blur_sigma = (blur_sigma as f64 / scale).round() as i32;
+    let r_blur_sigma = (blur_sigma / scale as f32).round() as i32;
     geometry.loc -= Point::from((r_blur_sigma, r_blur_sigma));
     geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
 

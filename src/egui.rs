@@ -111,7 +111,7 @@ impl EguiElement {
                     render_texture,
                     scale,
                     Transform::Flipped180, // egui glow painter wants this.
-                    None,                  // TODO: Calc opaque regions?
+                    None,
                 );
 
                 let render_buffer = render_buffer.insert((scale, texture_buffer));

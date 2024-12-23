@@ -81,7 +81,6 @@ float rounded_box_sdf(vec2 pos, vec4 rect, float corner_radius)
 void main()
 {
     // the shader's element size will always fit the blur sigma / 2
-    // FIXME: Avoid excess size??? This works fine but some pixels are unused.
     vec4 rect = vec4(vec2(blur_sigma), size.x - (2. * blur_sigma), size.y - (2. * blur_sigma));
     vec2 pos = v_coords * size;
     if (rounded_box_sdf(pos, rect, corner_radius) < 0.0)

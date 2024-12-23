@@ -26,7 +26,6 @@ use crate::renderer::FhtRenderer;
 
 pub struct CursorThemeManager {
     // Image cache is keyed by icon type and cursor scale.
-    // TODO: Fractional scaling when possible? (needs rewrite of MemoryRenderElement)
     cursor_image_cache: RefCell<HashMap<(i32, CursorIcon), Image>>,
     image_status: CursorImageStatus,
     cursor_theme: CursorTheme,
@@ -139,8 +138,7 @@ impl CursorThemeManager {
         &self,
         renderer: &mut R,
         mut location: Point<i32, Physical>,
-        scale: f64,
-        cursor_scale: i32,
+        scale: i32,
         alpha: f32,
         time: Duration,
     ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError>
@@ -168,14 +166,14 @@ impl CursorThemeManager {
                         renderer,
                         wl_surface,
                         location,
-                        scale,
+                        scale as f64,
                         alpha,
                         Kind::Cursor,
                     ),
                 )
             }
             CursorImageStatus::Named(cursor_icon) => {
-                let Ok(cursor_image) = self.load_cursor_image(cursor_icon, cursor_scale) else {
+                let Ok(cursor_image) = self.load_cursor_image(cursor_icon, scale) else {
                     return self.render_with_fallback_cursor_data(renderer, location, alpha);
                 };
                 let frame = cursor_image.get_frame(time);
