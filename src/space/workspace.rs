@@ -641,6 +641,7 @@ impl Workspace {
             self.active_tile_idx = Some(idx.clamp(0, self.tiles.len() - 1));
         }
 
+        self.refresh();
         self.arrange_tiles(animate);
 
         true
@@ -668,6 +669,14 @@ impl Workspace {
             }
         }
 
+        if self.tiles.is_empty() {
+            self.active_tile_idx = None;
+        } else {
+            let idx = self.active_tile_idx.unwrap();
+            self.active_tile_idx = Some(idx.clamp(0, self.tiles.len() - 1));
+        }
+
+        self.refresh();
         self.arrange_tiles(animate);
 
         true
