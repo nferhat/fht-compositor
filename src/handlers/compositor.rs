@@ -143,7 +143,11 @@ impl State {
                 // - If the window requests a size with limits (min/max)
                 // - The toplevel has specified a content type
                 // - Default to tiled
-                let has_parent = window.toplevel().parent().is_some();
+                let parent = window
+                    .toplevel()
+                    .parent()
+                    .and_then(|parent_surface| self.fht.space.find_window(&parent_surface));
+                let has_parent = parent.is_some();
                 let (min_size, max_size) = with_states(surface, |data| {
                     let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
                     let surface_data = cached_state.current();
@@ -168,10 +172,13 @@ impl State {
                     )
                 });
 
+                // If the parent is floating, the child shall be too.
+                let parent_floating = parent.as_ref().is_some_and(|w| !w.tiled());
+
                 // We only honor our floating heuristics if we dont have a fullscreen/maximized
                 // state from client/rules, to avoid jankiness
                 let default_floating = !(is_maximized || is_fullscreened)
-                    && (has_parent || has_fixed_size || has_content_type);
+                    && (has_parent || has_fixed_size || has_content_type || parent_floating);
 
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
