@@ -1401,6 +1401,11 @@ impl Workspace {
             return false;
         }
 
+        let active_window = self.active_window();
+        if Some(window) != active_window.as_ref() {
+            return false;
+        }
+
         let new_location = interactive_swap.initial_window_location + delta;
         let Some(tile) = self.tiles.iter_mut().find(|tile| tile.window() == window) else {
             // Can't find the adequate tile
