@@ -1214,7 +1214,7 @@ impl Workspace {
             }
             WorkspaceLayout::BottomStack => {
                 master_geo.size.w -= (nmaster - 1).max(0) * inner_gaps;
-                stack_geo.size.w -= (tiles_len - nmaster).max(0) * inner_gaps;
+                stack_geo.size.w -= (tiles_len - nmaster - 1).max(0) * inner_gaps;
 
                 if tiles_len > nmaster {
                     stack_geo.size.h =
