@@ -22,6 +22,7 @@ use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
 pub use workspace::{Workspace, WorkspaceId};
 
+use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
 use crate::window::Window;
 
@@ -395,6 +396,24 @@ impl Space {
         None
     }
 
+    /// Get the location of the window in the global compositor [`Space`]
+    pub fn window_visual_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
+        for monitor in &self.monitors {
+            for workspace in monitor.workspaces() {
+                for tile in workspace.tiles() {
+                    if tile.window() == window {
+                        return Some(
+                            tile.visual_location()
+                                + tile.window_loc()
+                                + workspace.output().current_location(),
+                        );
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Select the next [`WorkspaceLayout`](fht_compositor_config::WorkspaceLayout) on the active
     /// [`Monitor`]'s active [`Workspace`].
     ///
@@ -667,6 +686,59 @@ impl Space {
                 let position_in_workspace =
                     position - workspace.output().current_location().to_f64();
                 if workspace.handle_interactive_swap_end(window, position_in_workspace) {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Start an interactive resize in the [`Workspace`] of this [`Window`].
+    ///
+    /// Returns [`true`] if the grab got started inside the [`Workspace`].
+    pub fn start_interactive_resize(&mut self, window: &Window, edges: ResizeEdge) -> bool {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                if workspace.start_interactive_resize(window, edges) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Handle the iteractive resize motion for this window.
+    ///
+    /// Returns [`true`] if the grab should continue.
+    pub fn handle_interactive_resize_motion(
+        &mut self,
+        window: &Window,
+        delta: Point<i32, Logical>,
+    ) -> bool {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                if workspace.handle_interactive_resize_motion(window, delta) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Handle the iteractive resize motion for this window.
+    ///
+    /// Returns [`true`] if the grab should continue.
+    pub fn handle_interactive_resize_end(
+        &mut self,
+        window: &Window,
+        position: Point<f64, Logical>,
+    ) {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                let position_in_workspace =
+                    position - workspace.output().current_location().to_f64();
+                if workspace.handle_interactive_resize_end(window, position_in_workspace) {
                     return;
                 }
             }

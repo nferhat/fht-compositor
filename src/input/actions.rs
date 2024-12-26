@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use fht_compositor_config::MouseAction;
+use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Point, Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
 use crate::focus_target::PointerFocusTarget;
+use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::output::OutputExt;
 use crate::state::State;
 use crate::utils::RectCenterExt;
@@ -479,39 +481,63 @@ impl State {
                     });
                 }
             }
-            _ => (),
-            // MouseAction::ResizeTile => {
-            //     if let Some((PointerFocusTarget::Window(window), _)) =
-            //         self.fht.focus_target_under(pointer_loc)
-            //     {
-            //         let pointer_loc = self.fht.pointer.current_location();
-            //         let Rectangle { loc, size } =
-            //             self.fht.window_visual_geometry(&window).unwrap().to_f64();
-            //
-            //         let pointer_loc_in_window = pointer_loc - loc;
-            //         if window.surface_under(pointer_loc_in_window,
-            // WindowSurfaceType::ALL).is_none() {             return;
-            //         }
-            //
-            //         // We divide the window into 9 sections, so that if you grab for example
-            //         // somewhere in the middle of the bottom edge, you can only resize
-            // vertically.         let mut edges = ResizeEdge::empty();
-            //         if pointer_loc_in_window.x < size.w / 3. {
-            //             edges |= ResizeEdge::LEFT;
-            //         } else if 2. * size.w / 3. < pointer_loc_in_window.x {
-            //             edges |= ResizeEdge::RIGHT;
-            //         }
-            //         if pointer_loc_in_window.y < size.h / 3. {
-            //             edges |= ResizeEdge::TOP;
-            //         } else if 2. * size.h / 3. < pointer_loc_in_window.y {
-            //             edges |= ResizeEdge::BOTTOM;
-            //         }
-            //
-            //         self.fht.loop_handle.insert_idle(move |state| {
-            //             state.handle_resize_request(window, serial, edges)
-            //         });
-            //     }
-            // }
+            MouseAction::ResizeTile => {
+                let pointer_loc = self.fht.pointer.current_location();
+                if let Some((PointerFocusTarget::Window(window), _)) =
+                    self.fht.focus_target_under(pointer_loc)
+                {
+                    let pointer_loc = self.fht.pointer.current_location();
+                    let loc = self.fht.space.window_location(&window).unwrap().to_f64();
+                    let size = window.size();
+
+                    let pointer_loc_in_window = pointer_loc - loc;
+                    if window
+                        .surface_under(pointer_loc_in_window, WindowSurfaceType::ALL)
+                        .is_none()
+                    {
+                        return;
+                    }
+
+                    let size = size.to_f64();
+                    let pointer_loc_in_window = pointer_loc_in_window.to_f64();
+                    // We divide the window into 9 sections, so that if you grab for example
+                    // somewhere in the middle of the bottom edge, you can only resize vertically.
+                    let mut edges = ResizeEdge::empty();
+                    if pointer_loc_in_window.x < size.w / 3. {
+                        edges |= ResizeEdge::LEFT;
+                    } else if 2. * size.w / 3. < pointer_loc_in_window.x {
+                        edges |= ResizeEdge::RIGHT;
+                    }
+                    if pointer_loc_in_window.y < size.h / 3. {
+                        edges |= ResizeEdge::TOP;
+                    } else if 2. * size.h / 3. < pointer_loc_in_window.y {
+                        edges |= ResizeEdge::BOTTOM;
+                    }
+
+                    self.fht.loop_handle.insert_idle(move |state| {
+                        let pointer = state.fht.pointer.clone();
+                        if !pointer.has_grab(serial) {
+                            return;
+                        }
+                        let Some(start_data) = pointer.grab_start_data() else {
+                            return;
+                        };
+
+                        if state.fht.space.start_interactive_resize(&window, edges) {
+                            window.request_resizing(true);
+                            state.fht.loop_handle.insert_idle(|state| {
+                                // TODO: Figure out why I have todo this inside a idle
+                                state.fht.interactive_grab_active = true;
+                                state.fht.cursor_theme_manager.set_image_status(
+                                    CursorImageStatus::Named(CursorIcon::Grabbing),
+                                );
+                            });
+                            let grab = ResizeTileGrab { window, start_data };
+                            pointer.set_grab(state, grab, serial, Focus::Clear);
+                        }
+                    });
+                }
+            }
         }
     }
 }

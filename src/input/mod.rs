@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
 pub use actions::*;

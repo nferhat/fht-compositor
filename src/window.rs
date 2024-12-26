@@ -285,6 +285,16 @@ impl Window {
         });
     }
 
+    pub fn request_resizing(&self, resizing: bool) {
+        self.toplevel().with_pending_state(|state| {
+            if resizing {
+                state.states.set(State::Resizing);
+            } else {
+                state.states.unset(State::Resizing);
+            }
+        })
+    }
+
     pub fn tiled(&self) -> bool {
         self.toplevel().with_pending_state(|state| {
             state.states.contains(State::TiledLeft)
