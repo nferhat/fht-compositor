@@ -13,11 +13,11 @@ pub struct ExtraDamage {
 }
 
 impl ExtraDamage {
-    pub fn new() -> Self {
+    pub fn new(size: Size<i32, Logical>) -> Self {
         Self {
             id: Id::new(),
             commit: Default::default(),
-            geometry: Default::default(),
+            geometry: Rectangle::from_loc_and_size((0, 0), size),
         }
     }
 
@@ -38,7 +38,7 @@ impl ExtraDamage {
 
 impl Default for ExtraDamage {
     fn default() -> Self {
-        Self::new()
+        Self::new(Size::default())
     }
 }
 

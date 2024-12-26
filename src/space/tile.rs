@@ -98,6 +98,7 @@ impl Tile {
     /// Create a new [`Tile`] from this window.
     pub fn new(window: Window, config: Rc<Config>) -> Self {
         let proportion = window.rules().proportion.unwrap_or(1.0);
+        let size = window.size();
 
         Self {
             window,
@@ -106,7 +107,7 @@ impl Tile {
             location_animation: None,
             size_animation: None,
             opening_animation: None,
-            extra_damage: ExtraDamage::default(),
+            extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             config,
         }
