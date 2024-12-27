@@ -8,6 +8,7 @@ use fht_animation::Animation;
 use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::glow::GlowRenderer;
+use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
@@ -864,7 +865,7 @@ impl Workspace {
         }
 
         let (outer_gaps, inner_gaps) = self.gaps;
-        let work_area = calculate_work_area(self.output.geometry(), outer_gaps);
+        let work_area = calculate_work_area(&self.output, outer_gaps);
 
         if self.tiles.is_empty() || unconfigured_window.maximized() {
             let maximized_size = Size::<_, Logical>::from((
@@ -1141,12 +1142,7 @@ impl Workspace {
             // We do not want to affect the fullscreened tile
             .filter(|tile| tile.window().tiled() && !tile.window().fullscreen())
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
-        let work_area = {
-            let mut work_area = output_geometry;
-            work_area.loc += Point::from((outer_gaps, outer_gaps));
-            work_area.size -= Size::from((outer_gaps, outer_gaps)).upscale(2);
-            work_area
-        };
+        let work_area = calculate_work_area(&self.output, outer_gaps);
 
         for tile in maximized {
             // Maximized tiles get all the work area, while the tiled abide to layout algo.
@@ -1522,7 +1518,7 @@ impl Workspace {
         let mut new_mwfact = None;
 
         let (outer_gaps, inner_gaps) = self.gaps;
-        let work_area = calculate_work_area(self.output.geometry(), outer_gaps);
+        let work_area = calculate_work_area(&self.output, outer_gaps);
 
         let mut new_size = interactive_resize.initial_window_geometry.size;
         let nmaster = self.nmaster;
@@ -2118,13 +2114,11 @@ fht_render_elements! {
     }
 }
 
-fn calculate_work_area(
-    mut output_geometry: Rectangle<i32, Logical>,
-    outer_gaps: i32,
-) -> Rectangle<i32, Logical> {
-    output_geometry.loc += Point::from((outer_gaps, outer_gaps));
-    output_geometry.size -= Size::from((outer_gaps, outer_gaps)).upscale(2);
-    output_geometry
+fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logical> {
+    let mut work_area = layer_map_for_output(output).non_exclusive_zone();
+    work_area.loc += Point::from((outer_gaps, outer_gaps));
+    work_area.size -= Size::from((outer_gaps, outer_gaps)).upscale(2);
+    work_area
 }
 
 fn round_to_n_decimals(value: f64, decimals: i32) -> f64 {
