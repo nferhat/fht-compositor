@@ -42,6 +42,7 @@ use zvariant::OwnedObjectPath;
 use crate::portals::screencast::{CursorMode, StreamMetadata};
 use crate::renderer::{FhtRenderElement, FhtRenderer, OutputElementsResult};
 use crate::state::State;
+use crate::window::WeakWindow;
 
 pub struct PipeWire {
     _context: pipewire::context::Context,
@@ -690,10 +691,14 @@ struct CastInner {
     state: CastState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CastSource {
     /// The cast is streaming from a downgraded [`Output`].
     Output(WeakOutput),
+    /// The cast is streaming from a [`Workspace`].
+    Workspace { output: WeakOutput, index: usize },
+    /// The cast is streaming from a [`Window`].
+    Window(WeakWindow),
 }
 
 enum CastState {
@@ -795,9 +800,11 @@ impl Cast {
 
     /// Dequeue the latest stream buffer and render inside of it.
     ///
+    /// **NOTE**: This is only meant to be used for an `Output` [`CastSource`]
+    ///
     /// Returns `Ok(true)` if we rendered and there was damage.
     /// Returns `Ok(false)` if we rendered and there was NO damage.
-    pub fn render<R: FhtRenderer>(
+    pub fn render_for_output<R: FhtRenderer>(
         &mut self,
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
@@ -807,6 +814,30 @@ impl Cast {
     where
         FhtRenderElement<R>: RenderElement<R>,
     {
+        crate::profile_function!();
+
+        let elements = if self.cursor_mode.contains(CursorMode::EMBEDDED) {
+            &output_elements_result.elements
+        } else {
+            &output_elements_result.elements[output_elements_result.cursor_elements_len..]
+        };
+
+        self.render(renderer, elements, size, scale)
+    }
+
+    /// Dequeue the latest stream buffer and render inside of it.
+    ///
+    /// **NOTE**: This is only meant to be used for an `Output` [`CastSource`]
+    ///
+    /// Returns `Ok(true)` if we rendered and there was damage.
+    /// Returns `Ok(false)` if we rendered and there was NO damage.
+    pub fn render<R: FhtRenderer>(
+        &mut self,
+        renderer: &mut R,
+        render_elements: &[impl RenderElement<R>],
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> anyhow::Result<bool> {
         crate::profile_function!();
 
         let mut guard = self.inner.borrow_mut();
@@ -831,11 +862,6 @@ impl Cast {
 
         let fd = buffer.datas_mut()[0].as_raw().fd;
         let dmabuf = &guard.dmabufs[&fd].clone();
-        let elements = if self.cursor_mode.contains(CursorMode::EMBEDDED) {
-            &output_elements_result.elements
-        } else {
-            &output_elements_result.elements[output_elements_result.cursor_elements_len..]
-        };
 
         let damage_tracker = match &mut guard.state {
             CastState::Ready { damage_tracker, .. } => damage_tracker.as_mut().unwrap(),
@@ -847,7 +873,7 @@ impl Cast {
                 renderer,
                 dmabuf.clone(),
                 0,
-                elements,
+                render_elements,
                 smithay::backend::renderer::Color32F::TRANSPARENT,
             )
             .map_err(|err| anyhow::anyhow!("Failed to render inside dmabuf: {err:?}"))?;

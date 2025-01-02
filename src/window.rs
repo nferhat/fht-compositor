@@ -9,6 +9,7 @@ use smithay::backend::renderer::element;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
+// use smithay::desktop::Window;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
     send_frames_surface_tree, take_presentation_feedback_surface_tree, under_from_surface_tree,
@@ -103,6 +104,12 @@ impl Window {
         }
     }
 
+    pub fn downgrade(&self) -> WeakWindow {
+        WeakWindow {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     pub fn id(&self) -> WindowId {
         self.inner.id
     }
@@ -169,6 +176,19 @@ impl Window {
 
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
         self.inner.data.lock().unwrap().bbox
+    }
+
+    pub fn bbox_with_popups(&self) -> Rectangle<i32, Logical> {
+        let mut bounding_box = self.bbox();
+        if let Some(surface) = self.wl_surface() {
+            for (popup, location) in PopupManager::popups_for_surface(&surface) {
+                let surface = popup.wl_surface();
+                let offset = self.render_offset() + location - popup.geometry().loc;
+                bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
+            }
+        }
+
+        bounding_box
     }
 
     pub fn size(&self) -> Size<i32, Logical> {
@@ -559,5 +579,25 @@ impl Window {
                 )
             })
             .collect()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct WeakWindow {
+    inner: std::sync::Weak<WindowInner>,
+}
+
+impl PartialEq for WeakWindow {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Weak::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for WeakWindow {}
+
+impl WeakWindow {
+    pub fn upgrade(&self) -> Option<Window> {
+        self.inner.upgrade().map(|inner| Window { inner })
     }
 }

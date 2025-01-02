@@ -105,9 +105,27 @@ impl Space {
             .flat_map(|mon| mon.visible_windows())
     }
 
+    /// Get the [`Window`]s on the associated [`Output`].
+    pub fn windows_on_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
+        self.monitors
+            .iter()
+            .find(|mon| mon.output() == output)
+            .into_iter()
+            .flat_map(Monitor::workspaces)
+            .flat_map(Workspace::windows)
+    }
+
     /// Get an iterator of all the [`Output`]s managed by this [`Space`].
     pub fn outputs(&self) -> impl Iterator<Item = &Output> + ExactSizeIterator {
         self.monitors.iter().map(Monitor::output)
+    }
+
+    /// Get an iterator of all the [`Windows`]s managed by this [`Space`].
+    pub fn windows(&self) -> impl Iterator<Item = &Window> {
+        self.monitors
+            .iter()
+            .flat_map(Monitor::workspaces)
+            .flat_map(Workspace::windows)
     }
 
     /// Add an [`Output`] to this [`Space`].

@@ -448,6 +448,42 @@ impl State {
                     let refresh = mode.refresh as u32;
                     (CastSource::Output(output.downgrade()), size, refresh, false)
                 }
+                ScreencastSource::Window {
+                    foreign_toplevel_handle,
+                } => {
+                    let mut cast_window = None;
+                    for window in self.fht.space.windows() {
+                        if window
+                            .foreign_toplevel_handle()
+                            .is_some_and(|handle| handle.identifier() == *foreign_toplevel_handle)
+                        {
+                            cast_window = Some(window.clone());
+                            break;
+                        }
+                    }
+
+                    let Some(window) = cast_window else {
+                        anyhow::bail!("invalid window from screencast source");
+                    };
+
+                    // SAFETY: If a window has a foreign toplevel handle, it is mapped. We remove it
+                    // on unmap <=> The window has a WlSurface
+                    let output = self
+                        .fht
+                        .space
+                        .output_for_surface(&*window.wl_surface().unwrap())
+                        .unwrap();
+                    let mode = output.current_mode().unwrap();
+                    let scale = output.current_scale().integer_scale() as f64;
+                    let size = window
+                        .bbox_with_popups()
+                        .to_physical_precise_round(scale)
+                        .size;
+                    let refresh = mode.refresh as u32;
+
+                    (CastSource::Window(window.downgrade()), size, refresh, true)
+                }
+                _ => todo!(),
             };
 
             self.fht.pipewire_initialised.call_once(|| {
@@ -482,6 +518,22 @@ impl State {
                                     state.fht.stop_cast(id);
                                 }
                             }
+                            CastSource::Window(window) => {
+                                if let Some(window) = window.upgrade() {
+                                    // TODO: Handle window unmapping
+                                    let output = state
+                                        .fht
+                                        .space
+                                        .output_for_surface(&*window.wl_surface().unwrap())
+                                        .cloned()
+                                        .unwrap();
+                                    state.fht.queue_redraw(&output);
+                                } else {
+                                    warn!(?id, "Received a redraw request for a closed window, stopping cast");
+                                    state.fht.stop_cast(id);
+                                }
+                            }
+                            _ => todo!(),
                         },
                         PwToCompositor::StopCast { id } => {
                             state.fht.stop_cast(id);

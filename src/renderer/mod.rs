@@ -291,7 +291,82 @@ impl Fht {
                 }
             }
 
-            if let Err(err) = cast.render(renderer, output_elements_result, size, scale) {
+            if let Err(err) = cast.render_for_output(renderer, output_elements_result, size, scale)
+            {
+                error!(id = ?cast.id(), ?err, "Failed to render cast");
+            }
+        }
+        pipewire.casts = casts;
+
+        for id in casts_to_stop {
+            self.stop_cast(id);
+        }
+    }
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub fn render_screencast_windows<R: FhtRenderer>(&mut self, output: &Output, renderer: &mut R)
+    where
+        FhtRenderElement<R>: element::RenderElement<R>,
+    {
+        crate::profile_function!();
+        use crate::utils::pipewire::CastSource;
+
+        let scale = output.current_scale().fractional_scale().into();
+
+        let Some(pipewire) = self.pipewire.as_mut() else {
+            return;
+        };
+
+        if pipewire.casts.is_empty() {
+            return;
+        }
+
+        // TODO: Maybe use the window's entered output, though its a Weak reference.
+        let windows = self.space.windows_on_output(output).collect::<Vec<_>>();
+        let mut casts = std::mem::take(&mut pipewire.casts);
+        let mut casts_to_stop = vec![];
+
+        for cast in &mut casts {
+            crate::profile_scope!("render_cast", cast.id().to_string());
+
+            if !cast.active() {
+                trace!(id = ?cast.id(), "Cast is not active, skipping");
+                continue;
+            }
+
+            let CastSource::Window(weak_window) = cast.source() else {
+                continue;
+            };
+            let Some(window) = weak_window.upgrade() else {
+                continue;
+            };
+
+            if !windows.iter().any(|w| **w == window) {
+                continue;
+            }
+
+            let bbox = window.bbox_with_popups().to_physical_precise_up(scale);
+            match cast.ensure_size(bbox.size) {
+                Ok(true) => (),
+                Ok(false) => {
+                    dbg!("pending size");
+                    trace!(id = ?cast.id(), "Cast is resizing, skipping");
+                    continue;
+                }
+                Err(err) => {
+                    dbg!("error size");
+                    warn!("error updating stream size, stopping screencast: {err:?}");
+                    casts_to_stop.push(cast.id());
+                }
+            }
+
+            let mut elements = vec![];
+
+            let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
+            elements.extend(window.render_toplevel_elements(renderer, loc, scale, 1.));
+            elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
+
+            if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
                 error!(id = ?cast.id(), ?err, "Failed to render cast");
             }
         }

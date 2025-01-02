@@ -1008,6 +1008,11 @@ impl UdevData {
                                     &mut renderer,
                                     &output_elements_result,
                                 );
+
+                                // FIXME: We are currently not sending frame callbacks to windows,
+                                // even if they are on a workspace that is not being drawn by the
+                                // output
+                                fht.render_screencast_windows(output, &mut renderer);
                             }
                             // And also screencopy.
                             fht.render_screencopy_with_damage(

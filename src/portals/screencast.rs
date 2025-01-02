@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::io::Read;
 use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
@@ -60,7 +61,7 @@ pub enum Request {
 impl Portal {
     #[zbus(property)]
     pub fn available_source_types(&self) -> u32 {
-        SourceType::MONITOR.bits()
+        (SourceType::MONITOR | SourceType::WINDOW).bits()
     }
 
     #[zbus(property)]
@@ -120,7 +121,7 @@ impl Portal {
         &self,
         request_handle: zvariant::ObjectPath<'_>,
         session_handle: zvariant::ObjectPath<'_>,
-        app_id: String,
+        _app_id: String,
         options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
@@ -142,41 +143,51 @@ impl Portal {
                 CursorMode::HIDDEN
             });
 
-        // TODO: Support more source types.
-        // Currently we dont take in consideration for the passed in value
+        let base_directories = xdg::BaseDirectories::new().unwrap();
+        let output_path = base_directories
+            .place_runtime_file("fht-compositor/screencast-output.json")
+            .unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&output_path)
+            .unwrap();
 
-        let Ok(output) = std::process::Command::new("fht-share-picker")
-            .stdout(std::process::Stdio::null())
-            .arg(app_id)
-            .output()
-        else {
-            warn!("failed to spawn fht-share-picker");
-            let _ = session.closed(&signal_ctx, HashMap::new()).await;
-            return (2, HashMap::new());
-        };
+        let exit_status = std::process::Command::new("fht-share-picker")
+            .arg(&output_path)
+            .spawn()
+            .and_then(|mut child| child.wait());
+        match exit_status {
+            Ok(status) if status.success() => (),
+            Ok(status) => {
+                warn!(
+                    code = status.code(),
+                    "fht-share-picker exited unsuccessfully"
+                );
 
-        if !output.status.success() {
-            warn!("fht-share-picker exited unsuccessfully");
-            let _ = session.closed(&signal_ctx, HashMap::new()).await;
-            return (2, HashMap::new());
-        }
-        // TODO: Maybe to a better job at parsing this?
-        // Maybe use serde_json and HashMap to store different values
-        let stderr = std::str::from_utf8(&output.stderr).expect("stderr contained invalid bytes!");
-        let source = if let Some(output_name) = stderr
-            .lines()
-            .find(|line| line.contains("[select-output]"))
-            .and_then(|line| line.split('/').skip(1).next())
-        {
-            ScreencastSource::Output {
-                name: output_name.to_string(),
+                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                return (2, HashMap::new());
             }
-        } else {
-            warn!("Unable to select source for screencopy");
-            let _ = session.closed(&signal_ctx, HashMap::new()).await;
-            return (2, HashMap::new());
-        };
+            Err(err) => {
+                warn!(?err, "Failed to spawn fht-share-picker");
+                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                return (2, HashMap::new());
+            }
+        }
 
+        let mut buf = String::new();
+        match file.read_to_string(&mut buf) {
+            Ok(_) => (),
+            Err(err) => {
+                warn!(?err, "Failed to read fht-share-picker results");
+                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                return (2, HashMap::new());
+            }
+        }
+
+        let source =
+            serde_json::de::from_str(&buf).expect("fht-share-picker should give valid JSON!");
         session.source = Some(source);
         session.cursor_mode = Some(cursor_mode);
 
@@ -262,6 +273,8 @@ impl Portal {
                     "source_type",
                     zvariant::Value::new(match &source {
                         ScreencastSource::Output { .. } => SourceType::MONITOR.bits(),
+                        ScreencastSource::Window { .. } => SourceType::WINDOW.bits(),
+                        ScreencastSource::Workspace { .. } => SourceType::VIRTUAL.bits(),
                     }),
                 );
 
@@ -350,10 +363,13 @@ impl PortalRequest {
     ) -> zbus::Result<()>;
 }
 
-#[derive(Clone, PartialEq)]
+// This enum is taken straight from fht-share-picker
+// SEE: https://github.com/nferhat/fht-share-picker
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScreencastSource {
+    Window { foreign_toplevel_handle: String },
+    Workspace { output: String, idx: usize },
     Output { name: String },
-    // TODO: Add workspace and window sources
 }
 
 impl State {}

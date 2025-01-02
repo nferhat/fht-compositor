@@ -11,6 +11,13 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    fht-share-picker = {
+      url = "github:nferhat/fht-share-picker/gtk-rewrite";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.rust-overlay.follows = "";
+    };
   };
 
   outputs = inputs @ {self, ...}: let
@@ -79,7 +86,8 @@
             install -Dm644 res/fht-compositor{.service,-shutdown.target} -t $out/share/systemd/user
           ''
           + lib.optionalString withXdgScreenCast ''
-            install -Dm644 res/fht-compositor.portal -t $out/share/xdg-desktop-portal
+            install -Dm644 res/fht-compositor.portal -t $out/share/xdg-desktop-portal/portals
+            install -Dm644 res/fht-compositor-portals.conf -t $out/share/xdg-desktop-portal
           '';
 
         env.RUSTFLAGS = toString (
@@ -169,6 +177,7 @@
           ...
         }: let
           cfg = config.programs.fht-compositor;
+          fht-share-picker-pkg = inputs.fht-share-picker.packages."${pkgs.system}".default;
         in {
           options.programs.fht-compositor = {
             enable = lib.mkEnableOption "fht-compositor";
@@ -189,6 +198,11 @@
                 icons.enable = lib.mkDefault true;
               };
             }
+
+            (lib.mkIf (builtins.elem "xdg-screencast-portal" cfg.package.buildFeatures) {
+              # Install the share-picker application in order to select what to screencast.
+              environment.systemPackages = [fht-share-picker-pkg];
+            })
 
             (lib.mkIf cfg.enable {
               # Install the fht-compositor package to display servers in order to make the .desktop
