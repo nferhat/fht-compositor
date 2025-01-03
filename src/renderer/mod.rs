@@ -376,10 +376,8 @@ impl Fht {
                 }
             }
 
-            let mut elements = vec![];
-
             let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
-            elements.extend(window.render_toplevel_elements(renderer, loc, scale, 1.));
+            let mut elements = window.render_toplevel_elements(renderer, loc, scale, 1.);
             elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
 
             if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
