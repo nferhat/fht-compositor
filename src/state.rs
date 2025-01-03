@@ -1175,31 +1175,7 @@ impl Fht {
         let sequence = output_state.current_frame_sequence;
 
         let should_send_frames = |surface: &WlSurface, states: &SurfaceData| {
-            // Use smithay's surface_primary_scanout_output helper to avoid sending frames to
-            // invisible surfaces of the output, at the cost of sending more frames for the cursor.
-            let current_primary_output = surface_primary_scanout_output(surface, states);
-            if current_primary_output.as_ref() != Some(output) {
-                return None;
-            }
-
-            let last_callback_output: &RefCell<Option<(Output, u32)>> =
-                states.data_map.get_or_insert(RefCell::default);
-            let mut last_callback_output = last_callback_output.borrow_mut();
-
-            let mut send = true;
-            if let Some((last_output, last_sequence)) = last_callback_output.as_ref() {
-                // We already sent a frame callback to this surface, do not waste time sending
-                if last_output == output && *last_sequence == sequence {
-                    send = false;
-                }
-            }
-
-            if send {
-                *last_callback_output = Some((output.clone(), sequence));
-                Some(output.clone())
-            } else {
-                None
-            }
+            should_send_frames(output, sequence, surface, states)
         };
 
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
@@ -1734,6 +1710,77 @@ impl Fht {
                 warn!(?err, "Failed to send closed signal to screencast session");
             };
         });
+    }
+}
+
+/// Function to send frame callbacks for a single [`Window`] on the [`Output`].
+///
+/// This is used in the case of screencasting windows that are not visible on the active
+/// workspace. Let's say you are screencasting a window from workspace 3 but you are currently
+/// on workspace 1, the only result you will get is the last displayed frame since the window
+/// didn't receive frame callbacks.
+///
+/// In [`Fht::render_screencast_windows`] we make use of this function to avoid such behaviour
+pub fn send_frame_for_screencast_window(
+    output: &Output,
+    output_state: &HashMap<Output, output::OutputState>,
+    window: &Window,
+    target_presentation_time: Duration,
+) {
+    crate::profile_function!();
+    let throttle = Some(Duration::from_secs(1));
+    let output_state = output_state.get(output).unwrap();
+    let sequence = output_state.current_frame_sequence;
+
+    // TODO: Maybe using a dummy output here would be better?
+    let should_send_frames = |surface: &WlSurface, states: &SurfaceData| {
+        should_send_frames(output, sequence, surface, states)
+    };
+
+    window.send_frame(
+        output,
+        target_presentation_time,
+        throttle,
+        should_send_frames,
+    );
+}
+
+/// Check whether we should send frame callbacks to [`surface`] that is displayed on [`Output`].
+///
+/// This function ensures that the sequencing of frame callbacks that is maintained by the backend
+/// is respected, avoiding sending two frame callbacks on a single frame.
+///
+/// Read [`OutputState::current_frame_sequence`](output::OutputState::current_frame_sequence)
+fn should_send_frames(
+    output: &Output,
+    sequence: u32,
+    surface: &WlSurface,
+    states: &SurfaceData,
+) -> Option<Output> {
+    // Use smithay's surface_primary_scanout_output helper to avoid sending frames to
+    // invisible surfaces of the output, at the cost of sending more frames for the cursor.
+    let current_primary_output = surface_primary_scanout_output(surface, states);
+    if current_primary_output.as_ref() != Some(output) {
+        return None;
+    }
+
+    let last_callback_output: &RefCell<Option<(Output, u32)>> =
+        states.data_map.get_or_insert(RefCell::default);
+    let mut last_callback_output = last_callback_output.borrow_mut();
+
+    let mut send = true;
+    if let Some((last_output, last_sequence)) = last_callback_output.as_ref() {
+        // We already sent a frame callback to this surface, do not waste time sending
+        if last_output == output && *last_sequence == sequence {
+            send = false;
+        }
+    }
+
+    if send {
+        *last_callback_output = Some((output.clone(), sequence));
+        Some(output.clone())
+    } else {
+        None
     }
 }
 

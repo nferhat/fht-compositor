@@ -304,11 +304,17 @@ impl Fht {
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
-    pub fn render_screencast_windows<R: FhtRenderer>(&mut self, output: &Output, renderer: &mut R)
-    where
+    pub fn render_screencast_windows<R: FhtRenderer>(
+        &mut self,
+        output: &Output,
+        renderer: &mut R,
+        target_presentation_time: std::time::Duration,
+    ) where
         FhtRenderElement<R>: element::RenderElement<R>,
     {
         crate::profile_function!();
+
+        use crate::state::send_frame_for_screencast_window;
         use crate::utils::pipewire::CastSource;
 
         let scale = output.current_scale().fractional_scale().into();
@@ -323,6 +329,10 @@ impl Fht {
 
         // TODO: Maybe use the window's entered output, though its a Weak reference.
         let windows = self.space.windows_on_output(output).collect::<Vec<_>>();
+        let visible_windows = self
+            .space
+            .visible_windows_for_output(output)
+            .collect::<Vec<_>>();
         let mut casts = std::mem::take(&mut pipewire.casts);
         let mut casts_to_stop = vec![];
 
@@ -344,17 +354,23 @@ impl Fht {
             if !windows.iter().any(|w| **w == window) {
                 continue;
             }
+            if !visible_windows.iter().any(|w| **w == window) {
+                send_frame_for_screencast_window(
+                    output,
+                    &self.output_state,
+                    &window,
+                    target_presentation_time,
+                );
+            }
 
             let bbox = window.bbox_with_popups().to_physical_precise_up(scale);
             match cast.ensure_size(bbox.size) {
                 Ok(true) => (),
                 Ok(false) => {
-                    dbg!("pending size");
                     trace!(id = ?cast.id(), "Cast is resizing, skipping");
                     continue;
                 }
                 Err(err) => {
-                    dbg!("error size");
                     warn!("error updating stream size, stopping screencast: {err:?}");
                     casts_to_stop.push(cast.id());
                 }
