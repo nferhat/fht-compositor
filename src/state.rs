@@ -1871,6 +1871,15 @@ impl ResolvedWindowRules {
         crate::profile_function!();
         let mut resolved_rules = ResolvedWindowRules::default();
 
+        // NOTE: Bypass for fht-share-picker since it's better when floating centered.
+        if window.app_id().as_ref().map(String::as_str) == Some("fht.desktop.SharePicker") {
+            return Self {
+                floating: Some(true),
+                centered: Some(true),
+                ..resolved_rules
+            };
+        }
+
         for rule in rules.iter().filter(|rule| {
             rule_matches(
                 rule,
