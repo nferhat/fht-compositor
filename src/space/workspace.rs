@@ -1127,6 +1127,11 @@ impl Workspace {
         }
     }
 
+    /// Get the current [`WorkspaceLayout` this [`Workspace`] is using.
+    pub fn current_layout(&self) -> WorkspaceLayout {
+        self.layouts[self.active_layout_idx]
+    }
+
     /// Arrange all the [`Tile`]s in this [`Workspace`]
     pub fn arrange_tiles(&mut self, animate: bool) {
         crate::profile_function!();

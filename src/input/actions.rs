@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fht_compositor_config::MouseAction;
+use fht_compositor_config::{MouseAction, WorkspaceLayout};
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Point, Rectangle, Serial};
@@ -281,8 +281,9 @@ impl State {
             }
             KeyActionType::MoveFloatingWindow([dx, dy]) => {
                 let active = self.fht.space.active_workspace_mut();
+                let is_floating_layout = active.current_layout() == WorkspaceLayout::Floating;
                 if let Some(tile) = active.active_tile_mut() {
-                    if !tile.window().tiled() {
+                    if is_floating_layout || !tile.window().tiled() {
                         let new_loc = tile.location() + Point::from((dx, dy));
                         tile.set_location(new_loc, true);
                     }
@@ -290,8 +291,9 @@ impl State {
             }
             KeyActionType::ResizeFloatingWindow([dx, dy]) => {
                 let active = self.fht.space.active_workspace_mut();
+                let is_floating_layout = active.current_layout() == WorkspaceLayout::Floating;
                 if let Some(tile) = active.active_tile_mut() {
-                    if !tile.window().tiled() {
+                    if is_floating_layout || !tile.window().tiled() {
                         let mut new_size = tile.size();
                         // Clamp at 25 minimum to avoid making the tile useless as well as avoiding
                         // to crash smithay code
