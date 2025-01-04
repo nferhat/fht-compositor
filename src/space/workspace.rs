@@ -314,6 +314,13 @@ impl Workspace {
             );
         }
 
+        let _ = self.interactive_swap.take_if(|swap| {
+            !swap.window.alive() || !self.tiles.iter().any(|tile| *tile.window() == swap.window)
+        });
+        let _ = self.interactive_resize.take_if(|swap| {
+            !swap.window.alive() || !self.tiles.iter().any(|tile| *tile.window() == swap.window)
+        });
+
         // Clean zombies.
         // Cleaning fullscreen zombie case has been handled above.
         self.tiles.retain(|tile| {
