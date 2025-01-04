@@ -48,7 +48,7 @@ use crate::config::ui::ConfigUiRenderElement;
 use crate::cursor::CursorRenderElement;
 use crate::output::OutputExt;
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
-use crate::space::{MonitorRenderElement, MonitorRenderResult};
+use crate::space::{MonitorRenderElement, MonitorRenderResult, WorkspaceRenderElement};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
 
@@ -248,13 +248,15 @@ impl Fht {
     ) where
         FhtRenderElement<R>: element::RenderElement<R>,
     {
+        // NOTE: For output screencasts there's no need to send frame callbacks since this is called
+        // right before [`Fht::send_frames`]
         crate::profile_function!();
         use crate::utils::pipewire::CastSource;
 
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
-        let scale = output.current_scale().fractional_scale().into();
+        let scale = output.current_scale().integer_scale();
         let source = CastSource::Output(output.downgrade());
 
         let Some(pipewire) = self.pipewire.as_mut() else {
@@ -291,7 +293,8 @@ impl Fht {
                 }
             }
 
-            if let Err(err) = cast.render_for_output(renderer, output_elements_result, size, scale)
+            if let Err(err) =
+                cast.render_for_output(renderer, output_elements_result, size, scale as f64)
             {
                 error!(id = ?cast.id(), ?err, "Failed to render cast");
             }
@@ -310,14 +313,14 @@ impl Fht {
         renderer: &mut R,
         target_presentation_time: std::time::Duration,
     ) where
-        FhtRenderElement<R>: element::RenderElement<R>,
+        WaylandSurfaceRenderElement<R>: element::RenderElement<R>,
     {
         crate::profile_function!();
 
         use crate::state::send_frame_for_screencast_window;
         use crate::utils::pipewire::CastSource;
 
-        let scale = output.current_scale().fractional_scale().into();
+        let scale: Scale<f64> = (output.current_scale().integer_scale() as f64).into();
 
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
@@ -381,6 +384,109 @@ impl Fht {
             elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
 
             if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
+                error!(id = ?cast.id(), ?err, "Failed to render cast");
+            }
+        }
+        pipewire.casts = casts;
+
+        for id in casts_to_stop {
+            self.stop_cast(id);
+        }
+    }
+
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub fn render_screencast_workspaces<R: FhtRenderer>(
+        &mut self,
+        output: &Output,
+        renderer: &mut R,
+        target_presentation_time: std::time::Duration,
+    ) where
+        WorkspaceRenderElement<R>: element::RenderElement<R>,
+    {
+        crate::profile_function!();
+
+        use crate::state::send_frame_for_screencast_window;
+        use crate::utils::pipewire::CastSource;
+
+        let scale = output.current_scale().integer_scale();
+        let size = output.current_mode().unwrap().size;
+        let transform = output.current_transform();
+        let size = transform.transform_size(size);
+        let mon = self.space.monitor_mut_for_output(output).unwrap();
+
+        let Some(pipewire) = self.pipewire.as_mut() else {
+            return;
+        };
+
+        if pipewire.casts.is_empty() {
+            return;
+        }
+
+        let mut casts = std::mem::take(&mut pipewire.casts);
+        let mut casts_to_stop = vec![];
+
+        for cast in &mut casts {
+            crate::profile_scope!("render_cast", cast.id().to_string());
+
+            if !cast.active() {
+                trace!(id = ?cast.id(), "Cast is not active, skipping");
+                continue;
+            }
+
+            let CastSource::Workspace {
+                output: weak_output,
+                index,
+            } = cast.source()
+            else {
+                continue;
+            };
+            let index = *index;
+            let Some(ws_output) = weak_output.upgrade() else {
+                continue;
+            };
+            if ws_output != *output {
+                return;
+            }
+
+            let ws = mon.workspace_by_index(index);
+            if index != mon.active_workspace_idx() {
+                let windows = ws.windows();
+
+                if windows.len() == 0 {
+                    // no need to bother
+                    continue;
+                }
+
+                for window in ws.windows() {
+                    send_frame_for_screencast_window(
+                        &ws_output,
+                        &self.output_state,
+                        window,
+                        target_presentation_time,
+                    );
+                }
+            }
+
+            match cast.ensure_size(size) {
+                Ok(true) => (),
+                Ok(false) => {
+                    trace!(id = ?cast.id(), "Cast is resizing, skipping");
+                    continue;
+                }
+                Err(err) => {
+                    warn!("error updating stream size, stopping screencast: {err:?}");
+                    casts_to_stop.push(cast.id());
+                }
+            }
+
+            // NOTE: The workspace already renders to the origin (0, 0), so no need to relocate
+            // anything.
+
+            let elements =
+                mon.workspace_mut_by_index(index)
+                    .render(renderer, scale, Some(Point::default()));
+
+            if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
                 error!(id = ?cast.id(), ?err, "Failed to render cast");
             }
         }

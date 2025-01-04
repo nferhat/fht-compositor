@@ -448,6 +448,32 @@ impl State {
                     let refresh = mode.refresh as u32;
                     (CastSource::Output(output.downgrade()), size, refresh, false)
                 }
+                ScreencastSource::Workspace {
+                    output: output_name,
+                    idx,
+                } => {
+                    let idx = *idx;
+                    let Some(output) = self.fht.output_named(output_name.as_str()) else {
+                        anyhow::bail!("invalid output from screencast source");
+                    };
+                    if idx > 8 {
+                        anyhow::bail!("invalid workspace index from screencast source");
+                    }
+
+                    let mode = output.current_mode().unwrap();
+                    let transform = output.current_transform();
+                    let size = transform.transform_size(mode.size);
+                    let refresh = mode.refresh as u32;
+                    (
+                        CastSource::Workspace {
+                            output: output.downgrade(),
+                            index: idx,
+                        },
+                        size,
+                        refresh,
+                        false,
+                    )
+                }
                 ScreencastSource::Window {
                     foreign_toplevel_handle,
                 } => {
@@ -483,7 +509,6 @@ impl State {
 
                     (CastSource::Window(window.downgrade()), size, refresh, true)
                 }
-                _ => todo!(),
             };
 
             self.fht.pipewire_initialised.call_once(|| {
@@ -518,22 +543,21 @@ impl State {
                                     state.fht.stop_cast(id);
                                 }
                             }
+
+                            // NOTE: For window and workspace screencasts, we don't redraw the output
+                            // since they may not forcibly be visible.
                             CastSource::Window(window) => {
-                                if let Some(window) = window.upgrade() {
-                                    // TODO: Handle window unmapping
-                                    let output = state
-                                        .fht
-                                        .space
-                                        .output_for_surface(&*window.wl_surface().unwrap())
-                                        .cloned()
-                                        .unwrap();
-                                    state.fht.queue_redraw(&output);
-                                } else {
+                                if window.upgrade().is_none() {
                                     warn!(?id, "Received a redraw request for a closed window, stopping cast");
                                     state.fht.stop_cast(id);
                                 }
                             }
-                            _ => todo!(),
+                            CastSource::Workspace { output, .. } => {
+                                if output.upgrade().is_none() {
+                                    warn!(?id, "Received a redraw request for a closed window, stopping cast");
+                                    state.fht.stop_cast(id);
+                                }
+                            }
                         },
                         PwToCompositor::StopCast { id } => {
                             state.fht.stop_cast(id);

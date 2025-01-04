@@ -809,7 +809,7 @@ impl Cast {
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
         size: Size<i32, Physical>,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
     ) -> anyhow::Result<bool>
     where
         FhtRenderElement<R>: RenderElement<R>,
@@ -827,8 +827,6 @@ impl Cast {
 
     /// Dequeue the latest stream buffer and render inside of it.
     ///
-    /// **NOTE**: This is only meant to be used for an `Output` [`CastSource`]
-    ///
     /// Returns `Ok(true)` if we rendered and there was damage.
     /// Returns `Ok(false)` if we rendered and there was NO damage.
     pub fn render<R: FhtRenderer>(
@@ -836,10 +834,11 @@ impl Cast {
         renderer: &mut R,
         render_elements: &[impl RenderElement<R>],
         size: Size<i32, Physical>,
-        scale: Scale<f64>,
+        scale: impl Into<Scale<f64>>,
     ) -> anyhow::Result<bool> {
         crate::profile_function!();
 
+        let scale = scale.into();
         let mut guard = self.inner.borrow_mut();
         let CastState::Ready { damage_tracker, .. } = &mut guard.state else {
             anyhow::bail!("cast not ready")

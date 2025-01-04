@@ -1014,6 +1014,12 @@ impl UdevData {
                                     &mut renderer,
                                     target_presentation_time,
                                 );
+
+                                fht.render_screencast_workspaces(
+                                    output,
+                                    &mut renderer,
+                                    target_presentation_time,
+                                );
                             }
                             // And also screencopy.
                             fht.render_screencopy_with_damage(

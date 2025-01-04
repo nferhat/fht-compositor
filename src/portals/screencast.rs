@@ -61,7 +61,7 @@ pub enum Request {
 impl Portal {
     #[zbus(property)]
     pub fn available_source_types(&self) -> u32 {
-        (SourceType::MONITOR | SourceType::WINDOW).bits()
+        (SourceType::MONITOR | SourceType::WINDOW | SourceType::VIRTUAL).bits()
     }
 
     #[zbus(property)]

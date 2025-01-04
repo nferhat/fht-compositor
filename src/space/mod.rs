@@ -20,7 +20,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
 use smithay::wayland::seat::WaylandFocus;
-pub use workspace::{Workspace, WorkspaceId};
+pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
 use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
@@ -89,6 +89,11 @@ impl Space {
     /// Get an iterator over the [`Space`]'s tracked [`Monitor`](s)
     pub fn monitors(&self) -> impl Iterator<Item = &Monitor> + ExactSizeIterator {
         self.monitors.iter()
+    }
+
+    /// Get the [`Monitor`] associated with this [`Output`].
+    pub fn monitor_for_output(&self, output: &Output) -> Option<&Monitor> {
+        self.monitors.iter().find(|mon| mon.output() == output)
     }
 
     /// Get the [`Monitor`] associated with this [`Output`].

@@ -2022,10 +2022,14 @@ impl Workspace {
     }
 
     /// Render all the needed elements of this [`Workspace`].
+    ///
+    /// If `render_offset` is `Some`, the workspace will use this value instead of the one it's
+    /// currently animated with. The current purpose of this is just for screencasting purposes.
     pub fn render<R: FhtRenderer>(
         &self,
         renderer: &mut R,
         scale: i32,
+        render_offset: Option<Point<i32, Logical>>,
     ) -> Vec<WorkspaceRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
@@ -2037,12 +2041,12 @@ impl Workspace {
             .map(|(idx, anim)| (*idx, *anim.value()))
             .unwrap_or((None, 1.0));
 
-        let render_offset = self
-            .render_offset
-            .as_ref()
-            .map(|animation| {
-                let [x, y] = *animation.value();
-                Point::<i32, Logical>::from((x, y))
+        let render_offset = render_offset
+            .or_else(|| {
+                self.render_offset.as_ref().map(|animation| {
+                    let [x, y] = *animation.value();
+                    Point::<i32, Logical>::from((x, y))
+                })
             })
             .unwrap_or_default()
             .to_physical_precise_round(scale);

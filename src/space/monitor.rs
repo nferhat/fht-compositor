@@ -107,6 +107,11 @@ impl Monitor {
         self.workspaces.iter_mut()
     }
 
+    /// Get a reference to a workspace [`Workspace`] from this [`Monitor`] by index.
+    pub fn workspace_by_index(&self, index: usize) -> &Workspace {
+        &self.workspaces[index]
+    }
+
     /// Get a mutable reference to a workspace [`Workspace`] from this [`Monitor`] by index.
     pub fn workspace_mut_by_index(&mut self, index: usize) -> &mut Workspace {
         &mut self.workspaces[index]
@@ -223,7 +228,7 @@ impl Monitor {
                 has_fullscreen |= workspace.fullscreened_tile().is_some();
                 elements.extend(
                     workspace
-                        .render(renderer, scale)
+                        .render(renderer, scale, None)
                         .into_iter()
                         .map(Into::into),
                 );
