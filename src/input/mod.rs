@@ -495,7 +495,7 @@ impl State {
                 let state = wl_pointer::ButtonState::from(event.state());
                 let pointer = self.fht.pointer.clone();
 
-                if state == wl_pointer::ButtonState::Pressed {
+                if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
                     self.update_keyboard_focus();
 
                     if let Some(button) = event.button() {
@@ -506,7 +506,7 @@ impl State {
                         if let Some(action) =
                             self.fht.config.mousebinds.get(&mouse_pattern).cloned()
                         {
-                            self.process_mouse_action(action, serial);
+                            self.process_mouse_action(event.button_code(), action, serial);
                         }
                     }
                 }

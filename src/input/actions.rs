@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use fht_compositor_config::{MouseAction, WorkspaceLayout};
 use smithay::desktop::WindowSurfaceType;
-use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
+use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
 use smithay::utils::{Point, Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
@@ -452,35 +452,29 @@ impl State {
 }
 
 impl State {
-    pub fn process_mouse_action(&mut self, action: MouseAction, serial: Serial) {
+    pub fn process_mouse_action(&mut self, button: u32, action: MouseAction, serial: Serial) {
         crate::profile_function!();
+
         match action {
             MouseAction::SwapTile => {
                 let pointer_loc = self.fht.pointer.current_location();
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        let pointer = state.fht.pointer.clone();
-                        if !pointer.has_grab(serial) {
-                            return;
-                        }
-                        let Some(start_data) = pointer.grab_start_data() else {
-                            return;
-                        };
+                    let pointer = self.fht.pointer.clone();
+                    let start_data = pointer::GrabStartData {
+                        focus: None,
+                        button,
+                        location: pointer_loc,
+                    };
 
-                        if state.fht.space.start_interactive_swap(&window) {
-                            state.fht.loop_handle.insert_idle(|state| {
-                                // TODO: Figure out why I have todo this inside a idle
-                                state.fht.interactive_grab_active = true;
-                                state.fht.cursor_theme_manager.set_image_status(
-                                    CursorImageStatus::Named(CursorIcon::Grabbing),
-                                );
-                            });
-                            let grab = SwapTileGrab { window, start_data };
-                            pointer.set_grab(state, grab, serial, Focus::Clear);
-                        }
-                    });
+                    if self.fht.space.start_interactive_swap(&window) {
+                        let grab = SwapTileGrab { window, start_data };
+                        pointer.set_grab(self, grab, serial, Focus::Clear);
+                        self.fht
+                            .cursor_theme_manager
+                            .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
+                    }
                 }
             }
             MouseAction::ResizeTile => {
@@ -516,28 +510,24 @@ impl State {
                         edges |= ResizeEdge::BOTTOM;
                     }
 
-                    self.fht.loop_handle.insert_idle(move |state| {
-                        let pointer = state.fht.pointer.clone();
-                        if !pointer.has_grab(serial) {
-                            return;
-                        }
-                        let Some(start_data) = pointer.grab_start_data() else {
-                            return;
-                        };
-
-                        if state.fht.space.start_interactive_resize(&window, edges) {
-                            window.request_resizing(true);
-                            state.fht.loop_handle.insert_idle(|state| {
-                                // TODO: Figure out why I have todo this inside a idle
-                                state.fht.interactive_grab_active = true;
-                                state.fht.cursor_theme_manager.set_image_status(
-                                    CursorImageStatus::Named(CursorIcon::Grabbing),
-                                );
-                            });
-                            let grab = ResizeTileGrab { window, start_data };
-                            pointer.set_grab(state, grab, serial, Focus::Clear);
-                        }
-                    });
+                    let pointer = self.fht.pointer.clone();
+                    // let start_data = pointer::GrabStartData {
+                    //     focus: None,
+                    //     button,
+                    //     location: pointer_loc,
+                    // };
+                    // if self.fht.space.start_interactive_resize(&window, edges) {
+                    // window.request_resizing(true);
+                    // self.fht.loop_handle.insert_idle(|state| {
+                    //     // TODO: Figure out why I have todo this inside a idle
+                    //     state.fht.interactive_grab_active = true;
+                    // });
+                    // let grab = ResizeTileGrab { window, start_data };
+                    // pointer.set_grab(self, grab, serial, Focus::Clear);
+                    // self.fht
+                    //     .cursor_theme_manager
+                    // .set_image_status(CursorImageStatus::Named(edges.cursor_icon()));
+                    // }
                 }
             }
         }
