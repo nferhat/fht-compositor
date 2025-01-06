@@ -1450,7 +1450,7 @@ impl Workspace {
             return false;
         }
 
-        if window.tiled() && self.layouts[self.active_layout_idx] != WorkspaceLayout::Floating {
+        if window.tiled() && self.current_layout() != WorkspaceLayout::Floating {
             // We only do the swap part if the window is tiled.
             // Otherwise for floating windows just let them move
             if let Some(other_window) = self
@@ -1545,7 +1545,7 @@ impl Workspace {
             dy = -dy;
         }
 
-        if !window.tiled() || self.layouts[self.active_layout_idx] == WorkspaceLayout::Floating {
+        if !window.tiled() || self.current_layout() == WorkspaceLayout::Floating {
             // Floating windows are easy
             // Since they are free-form, we can just change the size.
             if interactive_resize
@@ -1617,7 +1617,7 @@ impl Workspace {
 
         let mut arrange = false;
 
-        match self.layouts[self.active_layout_idx] {
+        match self.current_layout() {
             WorkspaceLayout::Tile => {
                 let is_master = resized_idx < self.nmaster;
 

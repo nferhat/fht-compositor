@@ -111,7 +111,7 @@
       };
   in
     inputs.flake-parts.lib.mkFlake {inherit inputs;} {
-      systems = ["x86_64-linux"]; # TODO: aarch64? though I don't use it.
+      systems = ["x86_64-linux"];
       perSystem = {
         self',
         pkgs,
@@ -265,8 +265,6 @@
         default = fht-compositor;
         # NOTE: This module implementation is directly ripped from home-manager's helix module
         #   home-manager/modules/programs/helix.nix
-        # TODO: Maybe add a validation/test? I dont know how I can do it but we have the
-        # check-configuration subcommand, so maybe thats possible.
         fht-compositor = {
           lib,
           config,

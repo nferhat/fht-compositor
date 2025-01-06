@@ -330,7 +330,6 @@ impl Fht {
             return;
         }
 
-        // TODO: Maybe use the window's entered output, though its a Weak reference.
         let windows = self.space.windows_on_output(output).collect::<Vec<_>>();
         let visible_windows = self
             .space

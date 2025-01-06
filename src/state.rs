@@ -1583,8 +1583,6 @@ impl Fht {
             // Aquamarine (hyprland's input backend) determines a libinput device is a mouse by
             // the pointer capability:
             // https://github.com/hyprwm/aquamarine/blob/752d0fbd141fabb5a1e7f865199b80e6e76f8d8e/src/backend/Session.cpp#L826
-            //
-            // TODO: Separate touchpad config
             if device.has_capability(DeviceCapability::Pointer) {
                 let mouse_config = per_device_config.map_or(&input_config.mouse, |c| &c.mouse);
 
@@ -1674,7 +1672,6 @@ impl Fht {
                 }
 
                 if let Some(profile) = mouse_config.acceleration_profile {
-                    // TODO: Custom profile when input.rs updates libinput bindings
                     let _ = device.config_accel_set_profile(profile.into());
                 } else if let Some(default) = device.config_accel_default_profile() {
                     let _ = device.config_accel_set_profile(default);
@@ -1756,7 +1753,6 @@ pub fn send_frame_for_screencast_window(
     let output_state = output_state.get(output).unwrap();
     let sequence = output_state.current_frame_sequence;
 
-    // TODO: Maybe using a dummy output here would be better?
     let should_send_frames = |surface: &WlSurface, states: &SurfaceData| {
         should_send_frames(output, sequence, surface, states)
     };

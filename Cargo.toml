@@ -75,8 +75,8 @@ glam = "0.28.0"
 egui = "0.29"
 egui_glow = "0.29"
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0" }
-# TODO: We use this instead of std::sync::MappedMutexGuard
-# See tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
+# FIXME: We use this instead of std::sync::MappedMutexGuard
+# SEE: tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
 owning_ref = "0.4.1"
 clap = { version = "4.5.18", features = ["derive", "string"] }
 async-channel = "2.3.1"
