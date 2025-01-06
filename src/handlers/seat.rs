@@ -1,4 +1,5 @@
 use smithay::input::keyboard::LedState;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::input::DeviceCapability;
 use smithay::reexports::wayland_server::Resource;
@@ -15,14 +16,8 @@ impl TabletSeatHandler for State {
     fn tablet_tool_image(
         &mut self,
         _tool: &smithay::backend::input::TabletToolDescriptor,
-        image_status: smithay::input::pointer::CursorImageStatus,
+        image_status: CursorImageStatus,
     ) {
-        if self.fht.resize_grab_active || self.fht.interactive_grab_active {
-            // These interactive grabs set themselves a cursor icon.
-            // Do not override it
-            return;
-        }
-
         self.fht.cursor_theme_manager.set_image_status(image_status);
     }
 }
@@ -57,11 +52,7 @@ impl SeatHandler for State {
         }
     }
 
-    fn cursor_image(
-        &mut self,
-        _seat: &Seat<Self>,
-        image: smithay::input::pointer::CursorImageStatus,
-    ) {
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
         self.fht.cursor_theme_manager.set_image_status(image);
     }
 }

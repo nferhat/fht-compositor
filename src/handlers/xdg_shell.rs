@@ -3,13 +3,14 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, WindowSurfaceType,
 };
-use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
+use smithay::input::pointer::Focus;
 use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, WmCapabilities,
 };
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::Serial;
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
@@ -20,6 +21,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::focus_target::KeyboardFocusTarget;
+use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
 use crate::state::{Fht, State, UnmappedWindow};
@@ -82,36 +84,87 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, _: wl_seat::WlSeat, serial: Serial) {
         let pointer = self.fht.pointer.clone();
-        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
-            if !pointer.has_grab(serial) {
-                return;
+        let mut grab_start_data = None;
+
+        pointer.with_grab(|grab_serial, grab| {
+            if grab_serial == serial {
+                let start_data = grab.start_data();
+                if start_data
+                    .focus
+                    .as_ref()
+                    .is_some_and(|(focus, _)| focus.same_client_as(&surface.wl_surface().id()))
+                {
+                    grab_start_data = Some(start_data.clone());
+                }
             }
-            let Some(start_data) = pointer.grab_start_data() else {
-                return;
-            };
-            if self.fht.space.start_interactive_swap(&window) {
-                self.fht.loop_handle.insert_idle(|state| {
-                    // TODO: Figure out why I have todo this inside a idle
-                    state.fht.interactive_grab_active = true;
-                    state
-                        .fht
-                        .cursor_theme_manager
-                        .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
-                });
+        });
+
+        let Some(start_data) = grab_start_data else {
+            return;
+        };
+
+        let mut output = None;
+        if let Some((window, workspace)) = self
+            .fht
+            .space
+            .find_window_and_workspace_mut(surface.wl_surface())
+        {
+            if workspace.start_interactive_swap(&window) {
+                output = Some(workspace.output().clone()); // augh, the borrow checker
                 let grab = SwapTileGrab { window, start_data };
                 pointer.set_grab(self, grab, serial, Focus::Clear);
             }
+        }
+
+        if let Some(ref output) = output {
+            self.fht.queue_redraw(output);
         }
     }
 
     fn resize_request(
         &mut self,
-        _: ToplevelSurface,
+        surface: ToplevelSurface,
         _seat: wl_seat::WlSeat,
-        _: Serial,
-        _: xdg_toplevel::ResizeEdge,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
     ) {
-        // TODO: Handle resize requests
+        let pointer = self.fht.pointer.clone();
+        let mut grab_start_data = None;
+
+        pointer.with_grab(|grab_serial, grab| {
+            if grab_serial == serial {
+                let start_data = grab.start_data();
+                if start_data
+                    .focus
+                    .as_ref()
+                    .is_some_and(|(focus, _)| focus.same_client_as(&surface.wl_surface().id()))
+                {
+                    grab_start_data = Some(start_data.clone());
+                }
+            }
+        });
+
+        let Some(start_data) = grab_start_data else {
+            return;
+        };
+
+        let mut output = None;
+        if let Some((window, workspace)) = self
+            .fht
+            .space
+            .find_window_and_workspace_mut(surface.wl_surface())
+        {
+            let edges = ResizeEdge::from(edges);
+            if workspace.start_interactive_resize(&window, edges) {
+                output = Some(workspace.output().clone()); // augh, the borrow checker
+                let grab = ResizeTileGrab { window, start_data };
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
+        }
+
+        if let Some(ref output) = output {
+            self.fht.queue_redraw(output);
+        }
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {

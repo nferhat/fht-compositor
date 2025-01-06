@@ -600,8 +600,6 @@ pub struct Fht {
     pub clock: Clock<Monotonic>,
     pub suppressed_keys: HashSet<Keysym>,
     pub devices: Vec<input::Device>,
-    pub interactive_grab_active: bool,
-    pub resize_grab_active: bool,
 
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
@@ -793,8 +791,6 @@ impl Fht {
             space,
             unmapped_windows: vec![],
             popups: PopupManager::default(),
-            resize_grab_active: false,
-            interactive_grab_active: false,
             root_surfaces: HashMap::default(),
             idle_inhibiting_surfaces: Vec::new(),
 

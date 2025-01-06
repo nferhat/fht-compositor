@@ -251,6 +251,14 @@ impl Space {
             .find_map(|mon| mon.workspaces_mut().find(|ws| ws.id() == workspace_id))
     }
 
+    /// Get the workspace that has this [`Window`].
+    pub fn workspace_for_window(&self, window: &Window) -> Option<&Workspace> {
+        self.monitors.iter().find_map(|mon| {
+            mon.workspaces()
+                .find(|ws| ws.tiles().any(|tile| tile.window() == window))
+        })
+    }
+
     /// Get the workspace that has a [`Window`] with this toplevel [`WlSurface`].
     pub fn workspace_for_window_surface(&self, surface: &WlSurface) -> Option<&Workspace> {
         self.monitors.iter().find_map(|mon| {

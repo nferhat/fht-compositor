@@ -1,8 +1,8 @@
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-    GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
-    GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab,
-    PointerInnerHandle, RelativeMotionEvent,
+    AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+    GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+    GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+    RelativeMotionEvent,
 };
 use smithay::utils::{Logical, Point};
 
@@ -155,10 +155,5 @@ impl PointerGrab<State> for SwapTileGrab {
         &self.start_data
     }
 
-    fn unset(&mut self, data: &mut State) {
-        data.fht.interactive_grab_active = false;
-        data.fht
-            .cursor_theme_manager
-            .set_image_status(CursorImageStatus::default_named());
-    }
+    fn unset(&mut self, _: &mut State) {}
 }

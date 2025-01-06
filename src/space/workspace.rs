@@ -1,5 +1,4 @@
 use std::cmp::min;
-use std::ops::Mul;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -1148,6 +1147,24 @@ impl Workspace {
         }
 
         let (outer_gaps, inner_gaps) = self.gaps;
+
+        // We distinguish between tiled, maximized, and floating since a floating tile can be
+        // maximized.
+        let mut maximized_tiles = vec![];
+        let mut tiled = vec![];
+
+        for tile in self.tiles.iter_mut() {
+            let window = tile.window();
+            match (window.tiled(), window.maximized()) {
+                (true, false) => tiled.push(tile),
+                // Maximized gets maximized regardless of floating status.
+                (_, true) => maximized_tiles.push(tile),
+                // Otherwise we don't touch floating tiles
+                _ => (),
+            }
+        }
+
+        let layout = self.current_layout();
         let (maximized, tiles) = self
             .tiles
             .iter_mut()
@@ -1170,7 +1187,7 @@ impl Workspace {
             tiles_len,
         );
         let mut master_geo @ mut stack_geo = work_area;
-        match self.layouts[self.active_layout_idx] {
+        match layout {
             WorkspaceLayout::Tile => {
                 master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
                 stack_geo.size.h -= (tiles_len - nmaster - 1).max(0) * inner_gaps;
@@ -1488,6 +1505,12 @@ impl Workspace {
             return false;
         };
 
+        match (window.tiled(), self.current_layout()) {
+            (_, WorkspaceLayout::Floating) | (false, _) => (),
+            // We only do interactive resizes on floating windows
+            (true, _) => return false,
+        }
+
         let loc = tile.visual_location();
         let size = window.size();
         self.interactive_resize = Some(InteractiveResize {
@@ -1522,18 +1545,14 @@ impl Workspace {
             return false;
         }
 
-        // Depending on the layout, we want to change some variable accordingly.
-        // What we want to change is either:
-        // - The layout's nmaster, if we are resizing a master window
-        // - The tile's proportion, if we are resizing a tile on the non-primary axis.
-
-        let mut new_mwfact = None;
-
-        let (outer_gaps, inner_gaps) = self.gaps;
-        let work_area = calculate_work_area(&self.output, outer_gaps);
+        match (window.tiled(), self.current_layout()) {
+            (_, WorkspaceLayout::Floating) | (false, _) => (),
+            // We switched from floating to tiled between the motion events
+            // Can happen if the user uses a key action bound to toggle-window-floating
+            (true, _) => return false,
+        }
 
         let mut new_size = interactive_resize.initial_window_geometry.size;
-        let nmaster = self.nmaster;
         let (mut dx, mut dy) = (delta.x, delta.y);
         if interactive_resize.edges.intersects(ResizeEdge::LEFT) {
             // If we are grabbing from the left edge, we are expanding the window from the left.
@@ -1545,379 +1564,21 @@ impl Workspace {
             dy = -dy;
         }
 
-        if !window.tiled() || self.current_layout() == WorkspaceLayout::Floating {
-            // Floating windows are easy
-            // Since they are free-form, we can just change the size.
-            if interactive_resize
-                .edges
-                .intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT)
-            {
-                new_size.w += dx;
-            }
-
-            if interactive_resize
-                .edges
-                .intersects(ResizeEdge::TOP | ResizeEdge::BOTTOM)
-            {
-                new_size.h += dy;
-            }
-
-            window.request_size(new_size);
-
-            return true;
+        if interactive_resize
+            .edges
+            .intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT)
+        {
+            new_size.w += dx;
         }
 
-        let resized_idx = self
-            .tiles
-            .iter()
-            .position(|tile| tile.window() == window)
-            .unwrap();
-
-        // Code to adjust proprtions on a specific line.
-        //
-        // This algorithm keeps the changed segment proportion the same, and instead scales up/down
-        // the other segments to adjust for the required size change.
-        fn adjust_proportions(
-            proportions: &mut [f64],
-            proportion_to_change: (usize, f64),
-            axis_length: f64,
-        ) {
-            let (idx, length) = proportion_to_change;
-            let current_length: f64 = proportions.iter().sum();
-
-            // Scale factor to maintain total length.
-            let scale_factor = (axis_length - length) / (current_length - proportions[idx]);
-
-            // Adjust each segment proportionally, except the target one.
-            for (i, segment) in proportions.iter_mut().enumerate() {
-                if i == idx {
-                    *segment = length;
-                } else {
-                    *segment *= scale_factor;
-                }
-            }
-
-            // Normalize the proportion to sensible values.
-            //
-            // Proportions are the same if they are all multiplied (its just ratios/fractions), so
-            // a 4:5:1 proportion list is the same as 8:10:2
-            //
-            // This calculation is done using the median, but this could be a better value?
-            let mut sorted = proportions.to_vec();
-            sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-            let median = sorted[sorted.len() / 2];
-
-            proportions.iter_mut().for_each(|p| {
-                // We also round the values since anything below 0.001 is really insignificant
-                // and will just cause weird gaps in the layout.
-                let result = (*p) / median;
-                *p = round_to_n_decimals(result, 3);
-            });
+        if interactive_resize
+            .edges
+            .intersects(ResizeEdge::TOP | ResizeEdge::BOTTOM)
+        {
+            new_size.h += dy;
         }
 
-        let mut arrange = false;
-
-        match self.current_layout() {
-            WorkspaceLayout::Tile => {
-                let is_master = resized_idx < self.nmaster;
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT)
-                {
-                    arrange = true;
-
-                    new_size.w += dx;
-                    new_mwfact = Some(if is_master {
-                        new_size.w as f64 / (work_area.size.w - inner_gaps) as f64
-                    } else {
-                        1.0 - (new_size.w as f64 / (work_area.size.w - inner_gaps) as f64)
-                    });
-                }
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::TOP | ResizeEdge::BOTTOM)
-                {
-                    new_size.h += dy;
-
-                    if is_master {
-                        if nmaster > 1 {
-                            arrange = true;
-
-                            let mut master_proportions = self
-                                .tiles
-                                .get(0..nmaster)
-                                .unwrap()
-                                .iter()
-                                .map(Tile::proportion)
-                                .collect::<Vec<_>>();
-                            // SAFETY: We know we have more than one master tile, so the
-                            // substraction will never underflow
-                            let axis_length = (work_area.size.h
-                                - ((master_proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut master_proportions,
-                                (resized_idx, new_size.h as f64),
-                                axis_length,
-                            );
-
-                            master_proportions.iter_mut().for_each(|p| *p = p.max(0.1));
-
-                            for (tile, new_proportion) in
-                                std::iter::zip(&mut self.tiles[0..nmaster], master_proportions)
-                            {
-                                tile.set_proportion(new_proportion);
-                            }
-                        }
-                    } else {
-                        if self.tiles.len().saturating_sub(nmaster) > 1 {
-                            arrange = true;
-
-                            let mut slave_proportions = self
-                                .tiles
-                                .get(nmaster..)
-                                .unwrap()
-                                .iter()
-                                .map(Tile::proportion)
-                                .collect::<Vec<_>>();
-                            // SAFETY: We know we have more than one master tile, so the
-                            // substraction will never underflow
-                            let axis_length = (work_area.size.h
-                                - ((slave_proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut slave_proportions,
-                                (resized_idx - nmaster, new_size.h as f64),
-                                axis_length,
-                            );
-
-                            slave_proportions.iter_mut().for_each(|p| *p = p.max(0.1));
-
-                            for (tile, new_proportion) in
-                                std::iter::zip(&mut self.tiles[nmaster..], slave_proportions)
-                            {
-                                tile.set_proportion(new_proportion);
-                            }
-                        }
-                    }
-                }
-            }
-            WorkspaceLayout::BottomStack => {
-                let is_master = resized_idx < self.nmaster;
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::TOP | ResizeEdge::BOTTOM)
-                {
-                    arrange = true;
-
-                    new_size.h += dy;
-                    new_mwfact = Some(if is_master {
-                        new_size.h as f64 / (work_area.size.h - inner_gaps) as f64
-                    } else {
-                        1.0 - (new_size.h as f64 / (work_area.size.h - inner_gaps) as f64)
-                    });
-                }
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT)
-                {
-                    new_size.w += dx;
-
-                    if is_master {
-                        if nmaster > 1 {
-                            arrange = true;
-
-                            let mut master_proportions = self
-                                .tiles
-                                .get(0..nmaster)
-                                .unwrap()
-                                .iter()
-                                .map(Tile::proportion)
-                                .collect::<Vec<_>>();
-                            // SAFETY: We know we have more than one master tile, so the
-                            // substraction will never underflow
-                            let axis_length = (work_area.size.w
-                                - ((master_proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut master_proportions,
-                                (resized_idx, new_size.w as f64),
-                                axis_length,
-                            );
-
-                            master_proportions.iter_mut().for_each(|p| *p = p.max(0.1));
-
-                            for (tile, new_proportion) in
-                                std::iter::zip(&mut self.tiles[0..nmaster], master_proportions)
-                            {
-                                tile.set_proportion(new_proportion);
-                            }
-                        }
-                    } else {
-                        if self.tiles.len().saturating_sub(nmaster) > 1 {
-                            arrange = true;
-
-                            let mut slave_proportions = self
-                                .tiles
-                                .get(nmaster..)
-                                .unwrap()
-                                .iter()
-                                .map(Tile::proportion)
-                                .collect::<Vec<_>>();
-                            // SAFETY: We know we have more than one master tile, so the
-                            // substraction will never underflow
-                            let axis_length = (work_area.size.w
-                                - ((slave_proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut slave_proportions,
-                                (resized_idx - nmaster, new_size.w as f64),
-                                axis_length,
-                            );
-
-                            slave_proportions.iter_mut().for_each(|p| *p = p.max(0.1));
-
-                            for (tile, new_proportion) in
-                                std::iter::zip(&mut self.tiles[nmaster..], slave_proportions)
-                            {
-                                tile.set_proportion(new_proportion);
-                            }
-                        }
-                    }
-                }
-            }
-
-            WorkspaceLayout::CenteredMaster => {
-                let is_master = resized_idx < self.nmaster;
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::LEFT | ResizeEdge::RIGHT)
-                {
-                    arrange = true;
-
-                    new_size.w += dx;
-                    new_mwfact = Some(if is_master || self.tiles.len() < 3 {
-                        new_size.h as f64 / (work_area.size.w - inner_gaps) as f64
-                    } else {
-                        // If we are the slave clients, we have to multiply by two since we share
-                        // the rest between two columns (the case where we have only one column
-                        // is covered with len < 3)
-                        1.0 - ((new_size.h as f64 / (work_area.size.w - inner_gaps) as f64) * 2.)
-                    });
-                }
-
-                if interactive_resize
-                    .edges
-                    .intersects(ResizeEdge::BOTTOM | ResizeEdge::TOP)
-                {
-                    new_size.h += dy;
-
-                    if is_master {
-                        if nmaster > 1 {
-                            arrange = true;
-
-                            let mut master_proportions = self
-                                .tiles
-                                .get(0..nmaster)
-                                .unwrap()
-                                .iter()
-                                .map(Tile::proportion)
-                                .collect::<Vec<_>>();
-                            // SAFETY: We know we have more than one master tile, so the
-                            // substraction will never underflow
-                            let axis_length = (work_area.size.h
-                                - ((master_proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut master_proportions,
-                                (resized_idx, new_size.w as f64),
-                                axis_length,
-                            );
-
-                            master_proportions.iter_mut().for_each(|p| *p = p.max(0.1));
-
-                            for (tile, new_proportion) in
-                                std::iter::zip(&mut self.tiles[0..nmaster], master_proportions)
-                            {
-                                tile.set_proportion(new_proportion);
-                            }
-                        }
-                    } else if self.tiles.len() > nmaster && resized_idx >= nmaster {
-                        let (right_tiles, left_tiles) = self.tiles[nmaster..]
-                            .iter_mut()
-                            .enumerate()
-                            .partition::<Vec<_>, _>(|(original_idx, _)| *original_idx % 2 == 0);
-                        let is_right_side = resized_idx % 2 == 0;
-
-                        if is_right_side && right_tiles.len() > 1 {
-                            arrange = true;
-
-                            let idx = right_tiles
-                                .iter()
-                                .position(|(_, tile)| tile.window() == window)
-                                .unwrap();
-                            let mut proportions = right_tiles
-                                .iter()
-                                .map(|(_, tile)| tile.proportion())
-                                .collect::<Vec<_>>();
-                            let axis_length = (work_area.size.h
-                                - ((proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut proportions,
-                                (idx, new_size.h as f64),
-                                axis_length,
-                            );
-
-                            for (tile, proportion) in
-                                right_tiles.into_iter().map(|(_, t)| t).zip(proportions)
-                            {
-                                tile.set_proportion(proportion);
-                            }
-                        } else if left_tiles.len() > 1 {
-                            arrange = true;
-
-                            let idx = left_tiles
-                                .iter()
-                                .position(|(_, tile)| tile.window() == window)
-                                .unwrap();
-                            let mut proportions = left_tiles
-                                .iter()
-                                .map(|(_, tile)| tile.proportion())
-                                .collect::<Vec<_>>();
-                            let axis_length = (work_area.size.h
-                                - ((proportions.len() - 1) as i32).mul(inner_gaps))
-                                as f64;
-                            adjust_proportions(
-                                &mut proportions,
-                                (idx, new_size.h as f64),
-                                axis_length,
-                            );
-
-                            for (tile, proportion) in
-                                left_tiles.into_iter().map(|(_, t)| t).zip(proportions)
-                            {
-                                tile.set_proportion(proportion);
-                            }
-                        }
-                    }
-                }
-            }
-            WorkspaceLayout::Floating => unreachable!(),
-        }
-
-        if let Some(mwfact) = new_mwfact {
-            self.mwfact = mwfact;
-        }
-
-        if arrange {
-            self.arrange_tiles(false);
-        }
+        window.request_size(new_size);
 
         true
     }
@@ -2135,11 +1796,6 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
     work_area.loc += Point::from((outer_gaps, outer_gaps));
     work_area.size -= Size::from((outer_gaps, outer_gaps)).upscale(2);
     work_area
-}
-
-fn round_to_n_decimals(value: f64, decimals: i32) -> f64 {
-    let round_to = 10f64.powi(decimals);
-    (value * round_to).round() / round_to
 }
 
 /// Proportion a given length with given proportions.

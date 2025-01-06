@@ -482,6 +482,13 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
+                    let workspace = self.fht.space.workspace_for_window(&window).unwrap();
+                    match (window.tiled(), workspace.current_layout()) {
+                        (_, WorkspaceLayout::Floating) | (false, _) => (),
+                        // We only do interactive resizes on floating windows
+                        (true, _) => return,
+                    }
+
                     let pointer_loc = self.fht.pointer.current_location();
                     let loc = self.fht.space.window_location(&window).unwrap().to_f64();
                     let size = window.size();
@@ -511,23 +518,19 @@ impl State {
                     }
 
                     let pointer = self.fht.pointer.clone();
-                    // let start_data = pointer::GrabStartData {
-                    //     focus: None,
-                    //     button,
-                    //     location: pointer_loc,
-                    // };
-                    // if self.fht.space.start_interactive_resize(&window, edges) {
-                    // window.request_resizing(true);
-                    // self.fht.loop_handle.insert_idle(|state| {
-                    //     // TODO: Figure out why I have todo this inside a idle
-                    //     state.fht.interactive_grab_active = true;
-                    // });
-                    // let grab = ResizeTileGrab { window, start_data };
-                    // pointer.set_grab(self, grab, serial, Focus::Clear);
-                    // self.fht
-                    //     .cursor_theme_manager
-                    // .set_image_status(CursorImageStatus::Named(edges.cursor_icon()));
-                    // }
+                    let start_data = pointer::GrabStartData {
+                        focus: None,
+                        button,
+                        location: pointer_loc,
+                    };
+                    if self.fht.space.start_interactive_resize(&window, edges) {
+                        window.request_resizing(true);
+                        let grab = ResizeTileGrab { window, start_data };
+                        pointer.set_grab(self, grab, serial, Focus::Clear);
+                        self.fht
+                            .cursor_theme_manager
+                            .set_image_status(CursorImageStatus::Named(edges.cursor_icon()));
+                    }
                 }
             }
         }

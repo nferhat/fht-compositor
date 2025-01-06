@@ -1,8 +1,8 @@
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-    GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
-    GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab,
-    PointerInnerHandle, RelativeMotionEvent,
+    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
+    GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+    GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
+    MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::{Logical, Point};
@@ -23,6 +23,22 @@ bitflags::bitflags! {
         const RIGHT = 8;
         const TOP_RIGHT = 9;
         const BOTTOM_RIGHT = 10;
+    }
+}
+
+impl ResizeEdge {
+    pub fn cursor_icon(self) -> CursorIcon {
+        match self {
+            Self::LEFT => CursorIcon::WResize,
+            Self::RIGHT => CursorIcon::EResize,
+            Self::TOP => CursorIcon::NResize,
+            Self::BOTTOM => CursorIcon::SResize,
+            Self::TOP_LEFT => CursorIcon::NwResize,
+            Self::TOP_RIGHT => CursorIcon::NeResize,
+            Self::BOTTOM_RIGHT => CursorIcon::SeResize,
+            Self::BOTTOM_LEFT => CursorIcon::SwResize,
+            _ => CursorIcon::Default,
+        }
     }
 }
 
@@ -183,7 +199,6 @@ impl PointerGrab<State> for ResizeTileGrab {
     }
 
     fn unset(&mut self, data: &mut State) {
-        data.fht.interactive_grab_active = false;
         data.fht
             .cursor_theme_manager
             .set_image_status(CursorImageStatus::default_named());
