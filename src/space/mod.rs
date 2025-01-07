@@ -158,8 +158,7 @@ impl Space {
         if self.monitors.is_empty() {
             self.primary_idx = 0;
             self.active_idx = 0;
-            // TODO: Handle empty monitors more gracefully, for example with a laptop, when the main
-            // screens gets disabled/turn off (IE entering sleep/hibernation).
+            // When we don't have any monitors left, the compositor exits out
             return;
         }
 
