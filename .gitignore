@@ -5,3 +5,5 @@ std*
 docs/book
 # when building with nix
 /result
+# direnv cache
+/.direnv
