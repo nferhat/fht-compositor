@@ -53,6 +53,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{DeviceFd, Monotonic};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
@@ -139,6 +140,7 @@ pub struct UdevData {
     pub primary_node: DrmNode,
     pub gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
     pub devices: HashMap<DrmNode, Device>,
+    pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
 }
 
@@ -301,6 +303,7 @@ impl UdevData {
             gpu_manager,
             session,
             devices: HashMap::new(),
+            syncobj_state: None,
             dmabuf_global: None,
             _registration_tokens: vec![udev_token, session_token, libinput_token],
         };
@@ -431,6 +434,31 @@ impl UdevData {
             .add_node(render_node, gbm.clone())
             .context("Failed to add GBM device to GPU manager!")?;
 
+        let color_formats = if fht.config.debug.disable_10bit {
+            SUPPORTED_FORMATS_8BIT_ONLY
+        } else {
+            SUPPORTED_FORMATS
+        };
+        let allocator = GbmAllocator::new(
+            gbm.clone(),
+            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
+        );
+        let mut renderer = self.gpu_manager.single_renderer(&render_node).unwrap();
+        let render_formats = renderer
+            .as_mut()
+            .egl_context()
+            .dmabuf_render_formats()
+            .clone();
+
+        let drm_output_manager = DrmOutputManager::new(
+            drm,
+            allocator,
+            gbm.clone(),
+            Some(gbm.clone()),
+            color_formats.iter().copied(),
+            render_formats,
+        );
+
         if device_node == self.primary_node {
             debug!("Adding primary node");
 
@@ -475,32 +503,14 @@ impl UdevData {
                     });
                 });
             });
+
+            let import_device = drm_output_manager.device().device_fd().clone();
+            if supports_syncobj_eventfd(&import_device) {
+                let syncobj_state =
+                    DrmSyncobjState::new::<State>(&fht.display_handle, import_device);
+                assert!(self.syncobj_state.replace(syncobj_state).is_none());
+            }
         }
-
-        let color_formats = if fht.config.debug.disable_10bit {
-            SUPPORTED_FORMATS_8BIT_ONLY
-        } else {
-            SUPPORTED_FORMATS
-        };
-        let allocator = GbmAllocator::new(
-            gbm.clone(),
-            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
-        );
-        let mut renderer = self.gpu_manager.single_renderer(&render_node).unwrap();
-        let render_formats = renderer
-            .as_mut()
-            .egl_context()
-            .dmabuf_render_formats()
-            .clone();
-
-        let drm_output_manager = DrmOutputManager::new(
-            drm,
-            allocator,
-            gbm.clone(),
-            Some(gbm.clone()),
-            color_formats.iter().copied(),
-            render_formats,
-        );
 
         self.devices.insert(
             device_node,
