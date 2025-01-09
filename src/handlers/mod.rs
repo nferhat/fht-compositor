@@ -9,6 +9,8 @@ mod dmabuf;
 mod dnd;
 #[cfg(feature = "udev-backend")]
 mod drm_lease;
+#[cfg(feature = "udev-backend")]
+mod drm_syncobj;
 mod fractional_scale;
 mod idle_inhibit;
 mod input_method;
