@@ -23,41 +23,37 @@ impl DrmLeaseHandler for State {
         node: DrmNode,
         request: DrmLeaseRequest,
     ) -> Result<DrmLeaseBuilder, LeaseRejected> {
-        let backend = self
+        let device = self
             .backend
             .udev()
             .devices
             .get(&node)
             .ok_or(LeaseRejected::default())?;
 
-        let mut builder = DrmLeaseBuilder::new(&backend.drm);
+        let drm_device = device.drm_output_manager.device();
+        let mut builder = DrmLeaseBuilder::new(drm_device);
         for conn in request.connectors {
-            if let Some((_, crtc)) = backend
+            if let Some((_, crtc)) = device
                 .non_desktop_connectors
                 .iter()
                 .find(|(handle, _)| *handle == conn)
             {
                 builder.add_connector(conn);
                 builder.add_crtc(*crtc);
-                let planes = backend
-                    .drm
-                    .planes(crtc)
-                    .map_err(LeaseRejected::with_cause)?;
+                let planes = drm_device.planes(crtc).map_err(LeaseRejected::with_cause)?;
 
                 let (primary_plane, primary_plane_claim) = planes
                     .primary
                     .iter()
                     .find_map(|plane| {
-                        backend
-                            .drm
+                        drm_device
                             .claim_plane(plane.handle, *crtc)
                             .map(|claim| (plane, claim))
                     })
                     .ok_or_else(LeaseRejected::default)?;
                 builder.add_plane(primary_plane.handle, primary_plane_claim);
                 if let Some((cursor, claim)) = planes.cursor.iter().find_map(|plane| {
-                    backend
-                        .drm
+                    drm_device
                         .claim_plane(plane.handle, *crtc)
                         .map(|claim| (plane, claim))
                 }) {

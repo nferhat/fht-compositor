@@ -563,9 +563,7 @@ impl Workspace {
                     .map(|tile| tile.geometry())
                 {
                     let new_location = parent_geometry.center() - size.downscale(2).to_point();
-                    if output_geometry
-                        .contains_rect(Rectangle::from_loc_and_size(new_location, size))
-                    {
+                    if output_geometry.contains_rect(Rectangle::new(new_location, size)) {
                         tile.set_location(new_location, false);
                     } else {
                         // Output geometry cannot contain centered in parent geometry.
@@ -1228,18 +1226,16 @@ impl Workspace {
                     }
                     if (idx as i32) < nmaster {
                         let master_height = master_heights[idx];
-                        let geo = Rectangle::from_loc_and_size(
+                        let geo = Rectangle::new(
                             master_geo.loc,
-                            (master_geo.size.w, master_height),
+                            (master_geo.size.w, master_height).into(),
                         );
                         tile.set_geometry(geo, animate);
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
                         let stack_height = stack_heights[idx - nmaster as usize];
-                        let new_geo = Rectangle::from_loc_and_size(
-                            stack_geo.loc,
-                            (stack_geo.size.w, stack_height),
-                        );
+                        let new_geo =
+                            Rectangle::new(stack_geo.loc, (stack_geo.size.w, stack_height).into());
                         tile.set_geometry(new_geo, animate);
                         stack_geo.loc.y += stack_height + inner_gaps;
                     }
@@ -1277,18 +1273,16 @@ impl Workspace {
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if (idx as i32) < nmaster {
                         let master_width = master_widths[idx];
-                        let geo = Rectangle::from_loc_and_size(
+                        let geo = Rectangle::new(
                             master_geo.loc,
-                            (master_width, master_geo.size.h),
+                            (master_width, master_geo.size.h).into(),
                         );
                         tile.set_geometry(geo, animate);
                         master_geo.loc.x += master_width + inner_gaps;
                     } else {
                         let stack_width = stack_widths[idx - nmaster as usize];
-                        let geo = Rectangle::from_loc_and_size(
-                            stack_geo.loc,
-                            (stack_width, stack_geo.size.h),
-                        );
+                        let geo =
+                            Rectangle::new(stack_geo.loc, (stack_width, stack_geo.size.h).into());
                         tile.set_geometry(geo, animate);
                         stack_geo.loc.x += stack_width + inner_gaps;
                     }
@@ -1348,7 +1342,7 @@ impl Workspace {
                     .map(|(_, tile)| tile)
                     .zip(left_heights)
                 {
-                    let geo = Rectangle::from_loc_and_size(left_geo.loc, (left_geo.size.w, height));
+                    let geo = Rectangle::new(left_geo.loc, (left_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     left_geo.loc.y += height + inner_gaps;
                 }
@@ -1365,8 +1359,7 @@ impl Workspace {
                     .map(|(_, tile)| tile)
                     .zip(master_heights)
                 {
-                    let geo =
-                        Rectangle::from_loc_and_size(master_geo.loc, (master_geo.size.w, height));
+                    let geo = Rectangle::new(master_geo.loc, (master_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     master_geo.loc.y += height + inner_gaps;
                 }
@@ -1383,8 +1376,7 @@ impl Workspace {
                     .map(|(_, tile)| tile)
                     .zip(right_heights)
                 {
-                    let geo =
-                        Rectangle::from_loc_and_size(right_geo.loc, (right_geo.size.w, height));
+                    let geo = Rectangle::new(right_geo.loc, (right_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
                 }
@@ -1515,7 +1507,7 @@ impl Workspace {
         let size = window.size();
         self.interactive_resize = Some(InteractiveResize {
             window: window.clone(),
-            initial_window_geometry: Rectangle::from_loc_and_size(loc, size),
+            initial_window_geometry: Rectangle::new(loc, size),
             edges,
         });
 

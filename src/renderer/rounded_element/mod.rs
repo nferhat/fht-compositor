@@ -114,26 +114,26 @@ impl<E: Element> RoundedCornerElement<E> {
         let corner_radius_size: Size<_, _> = (corner_radius, corner_radius).into();
 
         [
-            Rectangle::from_loc_and_size(geo.loc, corner_radius_size)
-                .to_physical_precise_round(scale), // top left
-            Rectangle::from_loc_and_size(
-                (geo.loc.x + geo.size.w - corner_radius, geo.loc.y),
+            Rectangle::new(geo.loc, corner_radius_size).to_physical_precise_round(scale), /* top left */
+            Rectangle::new(
+                (geo.loc.x + geo.size.w - corner_radius, geo.loc.y).into(),
                 corner_radius_size,
             )
-            .to_physical_precise_round(scale), // top right
-            Rectangle::from_loc_and_size(
+            .to_physical_precise_round(scale), /* top right */
+            Rectangle::new(
                 (
                     geo.loc.x + geo.size.w - corner_radius,
                     geo.loc.y + geo.size.h - corner_radius,
-                ),
+                )
+                    .into(),
                 corner_radius_size,
             )
-            .to_physical_precise_round(scale), // bottom right
-            Rectangle::from_loc_and_size(
-                (geo.loc.x, geo.loc.y + geo.size.h - corner_radius),
+            .to_physical_precise_round(scale), /* bottom right */
+            Rectangle::new(
+                (geo.loc.x, geo.loc.y + geo.size.h - corner_radius).into(),
                 corner_radius_size,
             )
-            .to_physical_precise_round(scale), // bottom left
+            .to_physical_precise_round(scale), /* bottom left */
         ]
     }
 }

@@ -1,15 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use libc::dev_t;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::drm::compositor::{DrmCompositor, PrimaryPlaneElement, RenderFrameError};
+use smithay::backend::drm::compositor::{FrameFlags, PrimaryPlaneElement, RenderFrameError};
+use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
-    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
+    DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
+    DrmNode, DrmSurface, NodeType,
 };
 use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
@@ -50,6 +54,7 @@ use smithay::utils::{DeviceFd, Monotonic};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
+use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
@@ -215,7 +220,7 @@ impl UdevData {
                     libinput_context.suspend();
 
                     for device in state.backend.udev().devices.values_mut() {
-                        device.drm.pause();
+                        device.drm_output_manager.pause();
                         device.active_leases.clear();
                         if let Some(leasing_state) = device.lease_state.as_mut() {
                             leasing_state.suspend();
@@ -236,14 +241,15 @@ impl UdevData {
                         // but for demonstration we choose a more optimistic path by leaving the
                         // state as is and assume it will just work. If this assumption fails
                         // we will try to reset the state when trying to queue a frame.
-                        device.drm.activate(false).expect("Failed to activate DRM!");
+                        device
+                            .drm_output_manager
+                            .activate(false)
+                            .expect("Failed to activate DRM!");
                         if let Some(leasing_state) = device.lease_state.as_mut() {
                             leasing_state.resume::<State>();
                         }
-                        for surface in device.surfaces.values_mut() {
-                            if let Err(err) = surface.compositor.reset_state() {
-                                warn!(?err, "Failed to reset drm surface state");
-                            }
+                        if let Err(err) = device.drm_output_manager.device_mut().reset_state() {
+                            warn!(?err, "Failed to reset drm surface state");
                         }
                     }
 
@@ -458,16 +464,43 @@ impl UdevData {
                 // Update the per drm surface dmabuf feedback
                 device.surfaces.values_mut().for_each(|surface| {
                     surface.dmabuf_feedback = surface.dmabuf_feedback.take().or_else(|| {
-                        get_surface_dmabuf_feedback(
-                            self.primary_gpu,
-                            surface.render_node,
-                            &mut self.gpu_manager,
-                            &surface.compositor,
-                        )
+                        surface.drm_output.with_compositor(|compositor| {
+                            get_surface_dmabuf_feedback(
+                                self.primary_gpu,
+                                surface.render_node,
+                                &mut self.gpu_manager,
+                                compositor.surface(),
+                            )
+                        })
                     });
                 });
             });
         }
+
+        let color_formats = if fht.config.debug.disable_10bit {
+            SUPPORTED_FORMATS_8BIT_ONLY
+        } else {
+            SUPPORTED_FORMATS
+        };
+        let allocator = GbmAllocator::new(
+            gbm.clone(),
+            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
+        );
+        let mut renderer = self.gpu_manager.single_renderer(&render_node).unwrap();
+        let render_formats = renderer
+            .as_mut()
+            .egl_context()
+            .dmabuf_render_formats()
+            .clone();
+
+        let drm_output_manager = DrmOutputManager::new(
+            drm,
+            allocator,
+            gbm.clone(),
+            Some(gbm.clone()),
+            color_formats.iter().copied(),
+            render_formats,
+        );
 
         self.devices.insert(
             device_node,
@@ -480,8 +513,8 @@ impl UdevData {
                     })
                     .ok(),
                 active_leases: Vec::new(),
+                drm_output_manager,
                 gbm,
-                drm,
                 drm_scanner: DrmScanner::new(),
                 render_node,
                 drm_registration_token,
@@ -510,7 +543,7 @@ impl UdevData {
 
         let Ok(result) = device
             .drm_scanner
-            .scan_connectors(&device.drm)
+            .scan_connectors(device.drm_output_manager.device())
             .inspect_err(|err| warn!(?err, ?device_node, "Failed to scan connectors for device"))
         else {
             return Ok(());
@@ -598,11 +631,6 @@ impl UdevData {
             .gpu_manager
             .single_renderer(&device.render_node)
             .unwrap();
-        let render_formats = renderer
-            .as_mut()
-            .egl_context()
-            .dmabuf_render_formats()
-            .clone();
 
         let output_name = format!(
             "{}-{}",
@@ -610,8 +638,9 @@ impl UdevData {
             connector.interface_id()
         );
         debug!(?crtc, ?output_name, "Trying to setup connector");
+        let drm_device = device.drm_output_manager.device();
 
-        let non_desktop = match get_property_val(&device.drm, connector.handle(), "non-desktop") {
+        let non_desktop = match get_property_val(drm_device, connector.handle(), "non-desktop") {
             Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
             Err(err) => {
                 warn!(
@@ -623,7 +652,7 @@ impl UdevData {
             }
         };
 
-        let info = display_info::for_connector(&device.drm, connector.handle());
+        let info = display_info::for_connector(drm_device, connector.handle());
         let make = info
             .as_ref()
             .and_then(|info| info.make())
@@ -698,12 +727,6 @@ impl UdevData {
 
         let mode = OutputMode::from(drm_mode);
 
-        // Create the DRM surface to be associated with the compositor for this surface.
-        let surface = device
-            .drm
-            .create_surface(crtc, drm_mode, &[connector.handle()])
-            .context("Failed to create DRM surface for compositor!")?;
-
         // Create the output object and expose it's wl_output global to clients
         let physical_size = connector
             .size()
@@ -737,30 +760,14 @@ impl UdevData {
             Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
         fht.add_output(output.clone(), Some(refresh_interval));
 
-        let allocator = GbmAllocator::new(
-            device.gbm.clone(),
-            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
-        );
-
-        let color_formats = if fht.config.debug.disable_10bit {
-            SUPPORTED_FORMATS_8BIT_ONLY
-        } else {
-            SUPPORTED_FORMATS
-        };
-
-        let driver = device
-            .drm
+        let driver = drm_device
             .get_driver()
-            .context("Failed to get DRM driver")?;
+            .context("failed to query drm driver")?;
+        let mut planes = drm_device
+            .planes(&crtc)
+            .context("failed to query crtc planes")?;
 
-        let mut planes = surface.planes().clone();
-
-        // Using overlay planes on nvidia GPUs break everything and cause flicker and what other
-        // side effects only god knows.
-        //
-        // I should probably read Nvidia documentation for better info.
-        //
-        // Just disable them.
+        // Using an overlay plane on a nvidia card breaks
         if driver
             .name()
             .to_string_lossy()
@@ -772,39 +779,41 @@ impl UdevData {
                 .to_lowercase()
                 .contains("nvidia")
         {
-            debug!(?crtc, "Detected nvidia device, disable overlay planes");
             planes.overlay = vec![];
         }
 
-        let compositor = DrmCompositor::new(
-            &output,
-            surface,
-            Some(planes),
-            allocator,
-            device.gbm.clone(),
-            color_formats,
-            render_formats,
-            device.drm.cursor_size(),
-            Some(device.gbm.clone()),
-        )
-        .context("Failed to create DRM compositor for surface!")?;
+        let drm_output = device
+            .drm_output_manager
+            .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
+                crtc,
+                drm_mode,
+                &[connector.handle()],
+                &output,
+                Some(planes),
+                &mut renderer,
+                &DrmOutputRenderElements::default(),
+            )
+            .context("failed to initialize drm output")?;
 
-        // We only render on one primary gpu, so we don't have to manage different feedbacks based
-        // on render nodes.
-        let dmabuf_feedback = get_surface_dmabuf_feedback(
-            self.primary_gpu,
-            device.render_node,
-            &mut self.gpu_manager,
-            &compositor,
-        );
+        let dmabuf_feedback = drm_output.with_compositor(|compositor| {
+            // We only render on one primary gpu, so we don't have to manage different feedbacks
+            // based on render nodes.
+            get_surface_dmabuf_feedback(
+                self.primary_gpu,
+                device.render_node,
+                &mut self.gpu_manager,
+                &compositor.surface(),
+            )
+        });
 
         let surface = Surface {
             render_node: device.render_node,
             output: output.clone(),
             output_global,
-            compositor,
+            drm_output,
             dmabuf_feedback,
         };
+
         fht.queue_redraw(&surface.output);
         device.surfaces.insert(crtc, surface);
 
@@ -862,6 +871,20 @@ impl UdevData {
             )
             .expect("Failed to insert output global removal timer!");
 
+        let mut renderer = self
+            .gpu_manager
+            .single_renderer(&device.render_node)
+            .unwrap();
+        let _ = device
+            .drm_output_manager
+            .try_to_restore_modifiers::<_, FhtRenderElement<UdevRenderer<'_>>>(
+                &mut renderer,
+                // FIXME: For a flicker free operation we should return the actual elements for
+                // this output.. Instead we just use black to "simulate" a modeset
+                // :)
+                &DrmOutputRenderElements::default(),
+            );
+
         Ok(())
     }
 
@@ -887,7 +910,7 @@ impl UdevData {
         };
 
         let device = self.devices.get_mut(&device_node).unwrap();
-        if !device.drm.is_active() {
+        if !device.drm_output_manager.device().is_active() {
             anyhow::bail!("Device DRM is not active")
         }
 
@@ -896,7 +919,7 @@ impl UdevData {
         let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
             self.gpu_manager.single_renderer(&surface.render_node)
         } else {
-            let format = surface.compositor.format();
+            let format = surface.drm_output.format();
             self.gpu_manager
                 .renderer(&self.primary_gpu, &surface.render_node, format)
         }) else {
@@ -927,11 +950,13 @@ impl UdevData {
 
         // Renderand check for damage.
         let res = surface
-            .compositor
+            .drm_output
             .render_frame(
                 &mut renderer,
                 &output_elements_result.elements,
                 [0.1, 0.1, 0.1, 1.0],
+                // TODO: Add debug options to allow to change this?
+                FrameFlags::DEFAULT,
             )
             .map_err(|err| match err {
                 RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
@@ -943,7 +968,36 @@ impl UdevData {
 
         match res {
             Err(err) => {
-                warn!(?err, "Rendering error")
+                warn!(?err, "Rendering error");
+                // anyhow::bail!() -> don't reschedule and exit out instead
+                match err {
+                    SwapBuffersError::AlreadySwapped => anyhow::bail!("Already swapped"),
+                    SwapBuffersError::TemporaryFailure(err) => match err.downcast_ref::<DrmError>()
+                    {
+                        Some(DrmError::DeviceInactive) => (),
+                        Some(DrmError::Access(DrmAccessError { source, .. }))
+                            if source.kind() != io::ErrorKind::PermissionDenied =>
+                        {
+                            ()
+                        }
+                        _ => anyhow::bail!("temporary render failure: {err:?}"),
+                    },
+                    SwapBuffersError::ContextLost(err) => match err.downcast_ref::<DrmError>() {
+                        Some(DrmError::TestFailed(_)) => {
+                            // reset the complete state, disabling all connectors and planes in case
+                            // we hit a test failed most likely we hit
+                            // this after a tty switch when a foreign master changed CRTC <->
+                            // connector bindings and we run in a
+                            // mismatch
+                            device
+                                .drm_output_manager
+                                .device_mut()
+                                .reset_state()
+                                .expect("failed to reset drm device");
+                        }
+                        _ => panic!("Rendering loop lost: {}", err),
+                    },
+                };
             }
             Ok(res) => {
                 if res.needs_sync() {
@@ -977,7 +1031,7 @@ impl UdevData {
                     // are displayed on the Surface's output.
                     let presentation_feedback = fht.take_presentation_feedback(output, &res.states);
 
-                    match surface.compositor.queue_frame(presentation_feedback) {
+                    match surface.drm_output.queue_frame(presentation_feedback) {
                         Ok(()) => {
                             let output_state = fht.output_state.get_mut(output).unwrap();
                             let new_state = RedrawState::WaitingForVblank { queued: false };
@@ -1146,7 +1200,7 @@ impl UdevData {
         };
 
         match surface
-            .compositor
+            .drm_output
             .frame_submitted()
             .map_err(Into::<SwapBuffersError>::into)
         {
@@ -1167,7 +1221,12 @@ impl UdevData {
                     presentation_time
                 };
 
-                presentation_feedback.presented::<_, Monotonic>(time, refresh, seq, flags);
+                presentation_feedback.presented::<_, Monotonic>(
+                    time,
+                    Refresh::fixed(refresh),
+                    seq,
+                    flags,
+                );
             }
             Ok(None) => (),
             Err(err) => {
@@ -1193,7 +1252,12 @@ impl UdevData {
         self.devices.values_mut().for_each(|device| {
             // FIX: Reset overlay planes when changing VTs since some compositors
             // don't use then and as a result don't clean them.
-            let _ = device.drm.reset_state();
+            let _ = device.drm_output_manager.device_mut().reset_state();
+            for surface in device.surfaces.values_mut() {
+                let _ = surface
+                    .drm_output
+                    .with_compositor(|compositor| compositor.reset_state());
+            }
         });
 
         if let Err(err) = self.session.change_vt(vt_num) {
@@ -1207,8 +1271,13 @@ pub struct Device {
     pub non_desktop_connectors: Vec<(ConnectorHandle, CrtcHandle)>,
     pub lease_state: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
+    pub drm_output_manager: DrmOutputManager<
+        GbmAllocator<DrmDeviceFd>,
+        GbmDevice<DrmDeviceFd>,
+        OutputPresentationFeedback,
+        DrmDeviceFd,
+    >,
     pub gbm: GbmDevice<DrmDeviceFd>,
-    pub drm: DrmDevice,
     drm_scanner: DrmScanner,
     render_node: DrmNode,
     drm_registration_token: RegistrationToken,
@@ -1218,40 +1287,30 @@ pub struct Surface {
     render_node: DrmNode,
     output: Output,
     output_global: GlobalId,
-    compositor: GbmDrmCompositor,
+    drm_output: DrmOutput<
+        GbmAllocator<DrmDeviceFd>,
+        GbmDevice<DrmDeviceFd>,
+        OutputPresentationFeedback,
+        DrmDeviceFd,
+    >,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
 }
-
-pub type GbmDrmCompositor = DrmCompositor<
-    GbmAllocator<DrmDeviceFd>,
-    GbmDevice<DrmDeviceFd>,
-    OutputPresentationFeedback,
-    DrmDeviceFd,
->;
 
 fn get_surface_dmabuf_feedback(
     primary_gpu: DrmNode,
     render_node: DrmNode,
-    gpu_manager: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
-    compositor: &GbmDrmCompositor,
+    gpus: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
+    surface: &DrmSurface,
 ) -> Option<SurfaceDmabufFeedback> {
-    let primary_formats = gpu_manager
-        .single_renderer(&primary_gpu)
-        .ok()?
-        .dmabuf_formats();
-
-    let render_formats = gpu_manager
-        .single_renderer(&render_node)
-        .ok()?
-        .dmabuf_formats();
+    let primary_formats = gpus.single_renderer(&primary_gpu).ok()?.dmabuf_formats();
+    let render_formats = gpus.single_renderer(&render_node).ok()?.dmabuf_formats();
 
     let all_render_formats = primary_formats
         .iter()
         .chain(render_formats.iter())
         .copied()
-        .collect::<HashSet<_>>();
+        .collect::<FormatSet>();
 
-    let surface = compositor.surface();
     let planes = surface.planes().clone();
 
     // We limit the scan-out tranche to formats we can also render from
@@ -1263,10 +1322,10 @@ fn get_surface_dmabuf_feedback(
         .iter()
         .copied()
         .chain(planes.overlay.into_iter().flat_map(|p| p.formats))
-        .collect::<HashSet<_>>()
+        .collect::<FormatSet>()
         .intersection(&all_render_formats)
         .copied()
-        .collect::<Vec<_>>();
+        .collect::<FormatSet>();
 
     let builder = DmabufFeedbackBuilder::new(primary_gpu.dev_id(), primary_formats);
     let render_feedback = builder

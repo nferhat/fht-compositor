@@ -206,7 +206,7 @@ impl Tile {
     ///
     /// This accounts for any ongoing location animation.
     pub fn geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.location, self.size())
+        Rectangle::new(self.location, self.size())
     }
 
     /// Get this [`Tile`]'s visual geometry, in other words where the [`Tile`]'s [`Rectangle`] will
@@ -216,7 +216,7 @@ impl Tile {
     ///
     /// This accounts for any ongoing location animation.
     pub fn visual_geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.visual_location(), self.visual_size())
+        Rectangle::new(self.visual_location(), self.visual_size())
     }
 
     /// Set this [`Tile`]'s location.
@@ -457,13 +457,14 @@ impl Tile {
         drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
-        let tile_geometry = Rectangle::from_loc_and_size(location, self.visual_size());
-        let window_geometry = Rectangle::from_loc_and_size(
+        let tile_geometry = Rectangle::new(location, self.visual_size());
+        let window_geometry = Rectangle::new(
             location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
             (
                 tile_geometry.size.w - 2 * border_thickness,
                 tile_geometry.size.h - 2 * border_thickness,
-            ),
+            )
+                .into(),
         );
 
         // https://drafts.csswg.org/css-backgrounds/#corner-overlap

@@ -146,10 +146,7 @@ impl EguiElement {
             renderer.bind(texture.clone())?;
             {
                 let mut frame = renderer.render(size, Transform::Normal)?;
-                frame.clear(
-                    Color32F::TRANSPARENT,
-                    &[Rectangle::from_loc_and_size((0, 0), size)],
-                )?;
+                frame.clear(Color32F::TRANSPARENT, &[Rectangle::from_size(size)])?;
                 painter.paint_and_update_textures(
                     [size.w as u32, size.h as u32],
                     scale as f32,

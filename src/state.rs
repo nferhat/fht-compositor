@@ -431,7 +431,10 @@ impl State {
                 anyhow::bail!("screencast is only supported on udev")
             };
 
-            let Some(gbm_device) = data.devices.get(&data.primary_node).map(|d| d.gbm.clone())
+            let Some(gbm_device) = data
+                .devices
+                .get(&data.primary_node)
+                .map(|device| device.gbm.clone())
             else {
                 anyhow::bail!("no primary GBM device")
             };
@@ -970,7 +973,7 @@ impl Fht {
             let size = output.geometry().size;
             let new_pos = config_pos
                 .filter(|&target_pos| {
-                    let target_geo = Rectangle::from_loc_and_size(target_pos, size);
+                    let target_geo = Rectangle::new(target_pos, size);
                     // if we have overlap, this position is not good, simple as that.
                     if let Some(overlap) = self
                         .space

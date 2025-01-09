@@ -112,7 +112,7 @@ where
                 (
                     frame,
                     overlay_cursor,
-                    Rectangle::from_loc_and_size(Point::default(), physical_size),
+                    Rectangle::new(Point::default(), physical_size),
                     output,
                 )
             }
@@ -149,9 +149,9 @@ where
 
                 let transform = output.current_transform();
                 let transformed_rect =
-                    Rectangle::from_loc_and_size((0, 0), transform.transform_size(physical_size));
+                    Rectangle::from_size(transform.transform_size(physical_size));
                 // Now clamp the screencopy region inside the output space
-                let screencopy_region = Rectangle::from_loc_and_size((x, y), (width, height));
+                let screencopy_region = Rectangle::new((x, y).into(), (width, height).into());
                 let output_scale = output.current_scale().fractional_scale();
                 let physical_rect = screencopy_region.to_physical_precise_round(output_scale);
                 let Some(clamped_rect) = physical_rect.intersection(transformed_rect) else {

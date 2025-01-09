@@ -307,7 +307,7 @@ impl State {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_next_tile(true) {
                     if config.general.cursor_warps {
-                        let window_geometry = Rectangle::from_loc_and_size(
+                        let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
                             window.size(),
@@ -322,7 +322,7 @@ impl State {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_previous_tile(true) {
                     if config.general.cursor_warps {
-                        let window_geometry = Rectangle::from_loc_and_size(
+                        let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
                             window.size(),

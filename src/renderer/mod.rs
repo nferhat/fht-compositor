@@ -713,7 +713,7 @@ pub fn render_elements<R: FhtRenderer>(
 ) -> anyhow::Result<SyncPoint> {
     let scale = scale.into();
     let transform = transform.invert();
-    let frame_rect = Rectangle::from_loc_and_size((0, 0), transform.transform_size(size));
+    let frame_rect = Rectangle::from_size(transform.transform_size(size));
     let mut frame = renderer
         .render(size, transform)
         .context("error starting frame")?;
@@ -750,8 +750,7 @@ where
     let transform = output.current_transform();
     // See note in Fht::output_elements about fractional scale
     let scale = Scale::from(output.current_scale().integer_scale() as f64);
-    let output_region =
-        Rectangle::from_loc_and_size(Point::default(), output.current_mode().unwrap().size);
+    let output_region = Rectangle::new(Point::default(), output.current_mode().unwrap().size);
     let region = screencopy.physical_region();
 
     let _ = damage_tracker.take_if(|dt| {
@@ -856,7 +855,7 @@ where
                 renderer.blit_to(
                     dmabuf.clone(),
                     region,
-                    Rectangle::from_loc_and_size(Point::default(), region.size),
+                    Rectangle::new(Point::default(), region.size),
                     TextureFilter::Linear,
                 )?;
 

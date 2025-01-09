@@ -1,3 +1,5 @@
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::selection::data_device::{ClientDndGrabHandler, ServerDndGrabHandler};
 
 use crate::state::State;
@@ -5,14 +7,19 @@ use crate::state::State;
 impl ClientDndGrabHandler for State {
     fn started(
         &mut self,
-        _source: Option<smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource>,
-        icon: Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
+        _source: Option<WlDataSource>,
+        icon: Option<WlSurface>,
         _seat: smithay::input::Seat<Self>,
     ) {
         self.fht.dnd_icon = icon;
     }
 
-    fn dropped(&mut self, _seat: smithay::input::Seat<Self>) {
+    fn dropped(
+        &mut self,
+        _target: Option<WlSurface>,
+        _validated: bool,
+        _seat: smithay::input::Seat<Self>,
+    ) {
         self.fht.dnd_icon = None;
     }
 }

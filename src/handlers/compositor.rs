@@ -252,7 +252,7 @@ impl State {
 
             let output = workspace.output().clone();
             workspace.insert_window(window.clone(), true);
-            let window_geometry = Rectangle::from_loc_and_size(
+            let window_geometry = Rectangle::new(
                 self.fht.space.window_location(&window).unwrap(),
                 window.size(),
             );

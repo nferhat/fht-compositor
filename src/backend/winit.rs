@@ -214,7 +214,7 @@ impl WinitData {
             let refresh = Duration::from_secs_f64(1_000f64 / mode.refresh as f64);
             presentation_feedbacks.presented::<_, smithay::utils::Monotonic>(
                 get_monotonic_time(),
-                refresh,
+                smithay::wayland::presentation::Refresh::Fixed(refresh),
                 0,
                 wp_presentation_feedback::Kind::empty(),
             );

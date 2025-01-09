@@ -25,7 +25,7 @@ impl InputMethodHandler for State {
         self.fht
             .space
             .find_window(parent)
-            .map(|w| Rectangle::from_loc_and_size(w.render_offset(), w.size()))
+            .map(|w| Rectangle::new(w.render_offset(), w.size()))
             .unwrap_or_default()
     }
 }

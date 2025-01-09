@@ -126,7 +126,7 @@ pub trait OutputExt {
 
 impl OutputExt for Output {
     fn geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size(self.current_location(), {
+        Rectangle::new(self.current_location(), {
             Transform::from(self.current_transform())
                 .transform_size(
                     self.current_mode()

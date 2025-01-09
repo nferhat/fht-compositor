@@ -17,7 +17,7 @@ impl ExtraDamage {
         Self {
             id: Id::new(),
             commit: Default::default(),
-            geometry: Rectangle::from_loc_and_size((0, 0), size),
+            geometry: Rectangle::from_size(size),
         }
     }
 
@@ -52,7 +52,7 @@ impl Element for ExtraDamage {
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        Rectangle::from_loc_and_size((0., 0.), (1., 1.))
+        Rectangle::new((0., 0.).into(), (1., 1.).into())
     }
 
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
