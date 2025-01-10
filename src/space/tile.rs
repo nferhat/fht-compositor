@@ -1,4 +1,3 @@
-use std::borrow::BorrowMut;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -7,28 +6,27 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
-use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
-use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::backend::renderer::element::{Element, Id, Kind};
+use smithay::backend::renderer::gles::element::TextureShaderElement;
+use smithay::backend::renderer::gles::Uniform;
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
 use super::Config;
-#[cfg(feature = "udev-backend")]
-use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::egui::EguiRenderElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::renderer::{render_to_texture, AsGlowFrame, FhtRenderer};
+use crate::renderer::texture_shader_element::FhtTextureShaderElement;
+use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -87,7 +85,7 @@ crate::fht_render_elements! {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
         RoundedSurfaceDamage = ExtraDamage,
-        ResizingSurface = ResizingSurfaceRenderElement,
+        ResizingSurface = FhtTextureShaderElement,
         Decoration = FhtPixelShaderElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
@@ -501,7 +499,7 @@ impl Tile {
             let size_animation = self.size_animation.as_ref().unwrap();
 
             // dont forget to subtract 2 * border since its for the window
-            let curr_size = Size::from((
+            let curr_size = Size::<_, Logical>::from((
                 size_animation.value()[0] - 2 * border_thickness,
                 size_animation.value()[1] - 2 * border_thickness,
             ));
@@ -520,7 +518,7 @@ impl Tile {
             .inspect_err(|err| warn!("Failed to render to texture for size animation: {err:?}"))
             {
                 let element_id = Id::new();
-                let tex: FhtTextureElement = TextureRenderElement::from_static_texture(
+                let tex = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     renderer.id(),
                     window_geometry.loc.to_physical(scale).to_f64(),
@@ -533,18 +531,21 @@ impl Tile {
                     Some(window_geometry.size),
                     None,
                     Kind::Unspecified,
-                )
-                .into();
+                );
                 self.window.set_offscreen_element_id(Some(element_id));
 
-                let element = ResizingSurfaceRenderElement {
+                let program = Shaders::get(&*renderer).resizing_texture.clone();
+                let element = TextureShaderElement::new(
                     tex,
-                    corner_radius: inner_radius,
-                    win_size,
-                    curr_size,
-                };
+                    program,
+                    vec![
+                        Uniform::new("corner_radius", inner_radius),
+                        Uniform::new("win_size", [win_size.w as f32, win_size.h as f32]),
+                        Uniform::new("curr_size", [curr_size.w as f32, curr_size.h as f32]),
+                    ],
+                );
 
-                elements.push(TileRenderElement::<R>::ResizingSurface(element));
+                elements.push(TileRenderElement::<R>::ResizingSurface(element.into()));
             }
         } else {
             let window_elements = self
@@ -721,116 +722,4 @@ fn opening_animation_progress_to_scale(progress: f64) -> f64 {
 
 fn array_to_size<N: smithay::utils::Coordinate, Kind>(array: [N; 2]) -> Size<N, Kind> {
     Size::from((array[0], array[1]))
-}
-
-#[derive(Debug)]
-pub struct ResizingSurfaceRenderElement {
-    // We render all the toplevel surfaces into a GlesTexture and use that with a custom texture
-    // shader in order to apply the resize/crop effects needed, with proper rounded corner support
-    //
-    // The texture is big enough to fit the merged size of prev_size and next_size
-    tex: FhtTextureElement,
-    corner_radius: f32,
-    win_size: Size<i32, Logical>,
-    curr_size: Size<i32, Logical>,
-}
-
-impl Element for ResizingSurfaceRenderElement {
-    fn id(&self) -> &Id {
-        self.tex.id()
-    }
-
-    fn current_commit(&self) -> CommitCounter {
-        self.tex.current_commit()
-    }
-
-    fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
-        self.tex.src()
-    }
-
-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
-        self.tex.geometry(scale)
-    }
-
-    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
-        self.tex.location(scale)
-    }
-
-    fn transform(&self) -> Transform {
-        self.tex.transform()
-    }
-
-    fn damage_since(
-        &self,
-        scale: Scale<f64>,
-        commit: Option<CommitCounter>,
-    ) -> DamageSet<i32, Physical> {
-        self.tex.damage_since(scale, commit)
-    }
-
-    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        self.tex.opaque_regions(scale)
-    }
-
-    fn alpha(&self) -> f32 {
-        self.tex.alpha()
-    }
-
-    fn kind(&self) -> Kind {
-        self.tex.kind()
-    }
-}
-
-impl RenderElement<GlowRenderer> for ResizingSurfaceRenderElement {
-    fn draw(
-        &self,
-        frame: &mut GlowFrame,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-        opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), GlesError> {
-        let program = Shaders::get_from_frame(frame).resizing_texture.clone();
-        let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
-        let additional_uniforms = vec![
-            Uniform::new("corner_radius", self.corner_radius),
-            Uniform::new("win_size", [self.win_size.w as f32, self.win_size.h as f32]),
-            Uniform::new(
-                "curr_size",
-                [self.curr_size.w as f32, self.curr_size.h as f32],
-            ),
-        ];
-
-        gles_frame.override_default_tex_program(program, additional_uniforms);
-
-        let res = <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
-            &self.tex,
-            frame,
-            src,
-            dst,
-            damage,
-            opaque_regions,
-        );
-
-        // Never forget to reset since its not our responsibility to manage texture shaders.
-        BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();
-
-        res
-    }
-}
-
-#[cfg(feature = "udev-backend")]
-impl<'a> RenderElement<UdevRenderer<'a>> for ResizingSurfaceRenderElement {
-    fn draw(
-        &self,
-        frame: &mut UdevFrame<'a, '_>,
-        src: Rectangle<f64, smithay::utils::Buffer>,
-        dst: Rectangle<i32, Physical>,
-        damage: &[Rectangle<i32, Physical>],
-        opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), UdevRenderError> {
-        let frame = frame.glow_frame_mut();
-        <Self as RenderElement<GlowRenderer>>::draw(self, frame, src, dst, damage, opaque_regions)
-            .map_err(UdevRenderError::Render)
-    }
 }
