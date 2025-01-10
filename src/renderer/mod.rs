@@ -12,6 +12,7 @@ pub mod render_elements;
 pub mod rounded_element;
 pub mod shaders;
 pub mod texture_element;
+pub mod texture_shader_element;
 
 use anyhow::Context;
 use glam::Mat3;
