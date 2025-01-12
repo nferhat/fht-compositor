@@ -714,7 +714,7 @@ impl Workspace {
         };
 
         let scale = self.output.current_scale().integer_scale();
-        tile.prepare_close_animation_if_needed(renderer, scale);
+        tile.prepare_close_animation_if_needed(&self.output, renderer, scale);
 
         true
     }
@@ -1720,10 +1720,16 @@ impl Workspace {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
 
-            let fullscreen_elements = tile.render(renderer, scale, 1.0, true).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into()
-            });
+            let fullscreen_elements =
+                tile.render(renderer, scale, 1.0, &self.output, true)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    });
 
             if skip_alpha_animation_idx.is_none() {
                 return fullscreen_elements.collect();
@@ -1747,10 +1753,12 @@ impl Workspace {
             };
 
             // Active gets rendered above others.
-            elements.extend(tile.render(renderer, scale, alpha, true).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into()
-            }));
+            elements.extend(tile.render(renderer, scale, alpha, &self.output, true).map(
+                |element| {
+                    RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+                        .into()
+                },
+            ));
         }
 
         // Now render others, just fine.
@@ -1766,10 +1774,17 @@ impl Workspace {
                 alpha
             };
 
-            elements.extend(tile.render(renderer, scale, alpha, false).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into()
-            }));
+            elements.extend(
+                tile.render(renderer, scale, alpha, &self.output, false)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    }),
+            );
         }
 
         elements

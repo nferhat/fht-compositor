@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
@@ -20,6 +22,7 @@ use smithay::wayland::seat::WaylandFocus;
 use super::closing_tile::ClosingTile;
 use super::Config;
 use crate::egui::EguiRenderElement;
+use crate::renderer::blur::element::BlurElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_element::RoundedCornerElement;
@@ -87,6 +90,7 @@ crate::fht_render_elements! {
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
         Decoration = FhtPixelShaderElement,
+        Blur = BlurElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
     }
@@ -401,12 +405,17 @@ impl Tile {
     }
 
     /// Take a snapshot for running a [`ClosingTile`].
-    pub fn prepare_close_animation_if_needed(&mut self, renderer: &mut GlowRenderer, scale: i32) {
+    pub fn prepare_close_animation_if_needed(
+        &mut self,
+        output: &Output,
+        renderer: &mut GlowRenderer,
+        scale: i32,
+    ) {
         if self.close_animation_snapshot.is_some() {
             return;
         }
 
-        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0, false);
+        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0, output, false);
         self.close_animation_snapshot = Some(elements);
     }
 
@@ -429,6 +438,7 @@ impl Tile {
         location: Point<i32, Logical>,
         scale: i32,
         alpha: f32,
+        output: &Output,
         active: bool,
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
@@ -534,7 +544,7 @@ impl Tile {
                 );
                 self.window.set_offscreen_element_id(Some(element_id));
 
-                let program = Shaders::get(&*renderer).resizing_texture.clone();
+                let program = Shaders::get((&*renderer).borrow()).resizing_texture.clone();
                 let element = TextureShaderElement::new(
                     tex,
                     program,
@@ -585,6 +595,9 @@ impl Tile {
                 });
             elements.extend(window_elements);
         };
+
+        // TODO: Only draw blur on transparent regions
+        elements.push(BlurElement::new(renderer, output, window_geometry, scale).into());
 
         if border_thickness != 0 {
             elements.push(
@@ -640,6 +653,7 @@ impl Tile {
         renderer: &mut R,
         scale: i32,
         alpha: f32,
+        output: &Output,
         active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
@@ -654,7 +668,8 @@ impl Tile {
             let glow_renderer = renderer.glow_renderer_mut();
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
-            let elements = self.render_inner(glow_renderer, (0, 0).into(), scale, alpha, active);
+            let elements =
+                self.render_inner(glow_renderer, (0, 0).into(), scale, alpha, output, active);
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
@@ -707,8 +722,14 @@ impl Tile {
 
         if opening_element.is_none() {
             self.window.set_offscreen_element_id(None);
-            normal_elements =
-                self.render_inner(renderer, self.visual_location(), scale, alpha, active)
+            normal_elements = self.render_inner(
+                renderer,
+                self.visual_location(),
+                scale,
+                alpha,
+                output,
+                active,
+            )
         }
 
         opening_element.into_iter().chain(normal_elements)

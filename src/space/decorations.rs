@@ -2,6 +2,8 @@
 //!
 //! This is achieved using a GlesPixelShader, nothing special otherwise.
 
+use std::borrow::Borrow;
+
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::utils::{Logical, Point, Rectangle, Size};
@@ -26,7 +28,9 @@ pub fn draw_border(
     };
 
     FhtPixelShaderElement::new(
-        Shaders::get(renderer).border.clone(),
+        Shaders::get(renderer.glow_renderer().borrow())
+            .border
+            .clone(),
         geometry,
         alpha,
         vec![
@@ -57,7 +61,9 @@ pub fn draw_shadow(
     geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
 
     FhtPixelShaderElement::new(
-        Shaders::get(renderer).box_shadow.clone(),
+        Shaders::get(renderer.glow_renderer().borrow())
+            .box_shadow
+            .clone(),
         geometry,
         alpha,
         vec![
