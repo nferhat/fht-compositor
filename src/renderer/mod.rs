@@ -15,8 +15,6 @@ pub mod shaders;
 pub mod texture_element;
 pub mod texture_shader_element;
 
-use std::borrow::BorrowMut;
-
 use anyhow::Context;
 use blur::EffectsFramebuffers;
 use glam::Mat3;
@@ -247,9 +245,18 @@ impl Fht {
         // We must do it now before we actually render the previous render elements into the final
         // composited blur buffer
         let mut fx_buffers = EffectsFramebuffers::get(output);
-        if monitor.has_blur() && fx_buffers.optimized_blur_dirty {
-            dbg!("updating blur buffer");
-            fx_buffers.update_optimized_blur_buffer(renderer.glow_renderer_mut(), output, scale);
+        if !self.config.decorations.blur.disable
+            && monitor.has_blur()
+            && fx_buffers.optimized_blur_dirty
+        {
+            let fht_compositor_config::Blur { passes, radius, .. } = self.config.decorations.blur;
+            fx_buffers.update_optimized_blur_buffer(
+                renderer.glow_renderer_mut(),
+                output,
+                scale,
+                passes,
+                radius,
+            );
             fx_buffers.optimized_blur_dirty = false;
         }
 

@@ -606,6 +606,7 @@ impl Default for Cursor {
 pub struct Decorations {
     pub border: Border,
     pub shadow: Shadow,
+    pub blur: Blur,
     pub decoration_mode: DecorationMode,
 }
 
@@ -614,6 +615,7 @@ impl Default for Decorations {
         Self {
             border: Default::default(),
             shadow: Default::default(),
+            blur: Default::default(),
             decoration_mode: DecorationMode::default(),
         }
     }
@@ -682,6 +684,24 @@ impl Default for Shadow {
             floating_only: true,
             color: default_shadow_color(),
             sigma: default_shadow_sigma(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Blur {
+    pub disable: bool,
+    pub passes: usize,
+    pub radius: f32,
+}
+
+impl Default for Blur {
+    fn default() -> Self {
+        Self {
+            disable: false,
+            passes: 2,
+            radius: 5f32,
         }
     }
 }

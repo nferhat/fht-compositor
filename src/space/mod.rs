@@ -795,6 +795,7 @@ pub struct Config {
     pub gaps: (i32, i32),
     pub mwfact: f64,
     pub focus_new_windows: bool,
+    pub blur_disabled: bool,
 }
 
 impl Config {
@@ -838,6 +839,7 @@ impl Config {
             gaps: (config.general.outer_gaps, config.general.inner_gaps),
             mwfact: config.general.mwfact,
             border: config.decorations.border,
+            blur_disabled: config.decorations.blur.disable,
         })
     }
 }
