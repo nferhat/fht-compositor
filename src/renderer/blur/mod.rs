@@ -15,9 +15,9 @@ use std::rc::Rc;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
-use smithay::backend::renderer::gles::{GlesRenderer, GlesTexProgram, GlesTexture, Uniform};
+use smithay::backend::renderer::gles::{GlesTexProgram, GlesTexture, Uniform};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Blit, Renderer, Texture, TextureFilter, Unbind};
+use smithay::backend::renderer::{Bind, Blit, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Logical, Rectangle, Size, Transform};
@@ -125,6 +125,8 @@ impl EffectsFramebuffers {
         renderer: &mut GlowRenderer,
         output: &Output,
         scale: i32,
+        passes: usize,
+        radius: f32,
     ) {
         // first render layer shell elements
         let elements = layer_elements(renderer, output, Layer::Background)
@@ -152,16 +154,16 @@ impl EffectsFramebuffers {
             0.5 / (output_rect.size.w as f32 / 2.0),
             0.5 / (output_rect.size.h as f32 / 2.0),
         ];
-        for _ in 0..N_PASSES {
-            render_blur_pass(renderer, self, blur_down.clone(), half_pixel);
+        for _ in 0..passes {
+            render_blur_pass(renderer, self, blur_down.clone(), half_pixel, radius);
         }
 
         let half_pixel = [
             0.5 / (output_rect.size.w as f32 * 2.0),
             0.5 / (output_rect.size.h as f32 * 2.0),
         ];
-        for _ in 0..N_PASSES {
-            render_blur_pass(renderer, self, blur_up.clone(), half_pixel);
+        for _ in 0..passes {
+            render_blur_pass(renderer, self, blur_up.clone(), half_pixel, radius);
         }
 
         // Now blit from the last render buffer into optimized_blur
@@ -202,6 +204,7 @@ fn render_blur_pass(
     effects_framebuffers: &mut EffectsFramebuffers,
     blur_program: GlesTexProgram,
     half_pixel: [f32; 2],
+    radius: f32,
 ) {
     // Swap buffers and bind
     //
@@ -230,7 +233,7 @@ fn render_blur_pass(
         texture,
         blur_program,
         vec![
-            Uniform::new("radius", BLUR_RADIUS as f32),
+            Uniform::new("radius", radius),
             Uniform::new("half_pixel", half_pixel),
         ],
     );
@@ -252,6 +255,3 @@ fn render_blur_pass(
 
     effects_framebuffers.current_buffer.swap();
 }
-
-const N_PASSES: u32 = 2;
-const BLUR_RADIUS: i32 = 5;

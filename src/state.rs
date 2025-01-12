@@ -75,6 +75,7 @@ use crate::portals::screencast::{
     self, CursorMode, PortalSession, ScreencastSource, StreamMetadata,
 };
 use crate::protocols::screencopy::ScreencopyManagerState;
+use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -372,6 +373,10 @@ impl State {
         }
 
         // Queue a redraw to ensure everything is up-to-date visually.
+        self.fht
+            .space
+            .outputs()
+            .for_each(|o| EffectsFramebuffers::get(o).optimized_blur_dirty = true);
         self.fht.queue_redraw_all();
     }
 

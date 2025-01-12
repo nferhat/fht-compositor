@@ -2,8 +2,6 @@
 //!
 //! This is achieved using a GlesPixelShader, nothing special otherwise.
 
-use std::borrow::Borrow;
-
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::utils::{Logical, Point, Rectangle, Size};

@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -630,7 +629,7 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        if self.has_transparent_region() {
+        if !self.config.blur_disabled && self.has_transparent_region() {
             elements.push(BlurElement::new(renderer, output, window_geometry, scale).into());
         }
 
