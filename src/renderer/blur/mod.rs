@@ -7,7 +7,9 @@
 //! - <https://github.com/wlrfx/scenefx>
 //! - <https://www.shadertoy.com/view/3td3W8>
 
-use std::borrow::BorrowMut;
+pub mod element;
+pub mod prologue;
+
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
@@ -17,7 +19,6 @@ use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::{
     GlesRenderer, GlesTarget, GlesTexProgram, GlesTexture, Uniform,
 };
-use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Renderer, Texture, TextureFilter, Unbind};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
@@ -54,8 +55,8 @@ impl CurrentBuffer {
 
 /// Effect framebuffers associated with each output.
 pub struct EffectsFramebuffers {
-    // /// Contains the main buffer blurred contents
-    // optimized_blur: GlesTexture,
+    /// Contains the main buffer blurred contents
+    pub optimized_blur: GlesTexture,
     // /// Contains the original pixels before blurring to draw with in case of artifacts.
     // blur_saved_pixels: GlesTexture,
     blit_buffer: GlesTexture,
@@ -98,12 +99,12 @@ impl EffectsFramebuffers {
         }
 
         let this = EffectsFramebuffers {
-            // optimized_blur: renderer
-            //     .create_buffer(
-            //         Format::Abgr8888,
-            //         output_size.to_buffer(1, Transform::Normal),
-            //     )
-            //     .unwrap(),
+            optimized_blur: renderer
+                .create_buffer(
+                    Format::Abgr8888,
+                    output_size.to_buffer(1, Transform::Normal),
+                )
+                .unwrap(),
             // blur_saved_pixels: renderer
             //     .create_buffer(
             //         Format::Abgr8888,
@@ -147,10 +148,9 @@ impl EffectsFramebuffers {
 /// When we want to get the main buffer blur, we have to go multiple passes in order to get
 /// something that looks good, this is up to the user to configure.
 fn render_blur_pass<'frame>(
-    renderer: &mut GlowRenderer,
+    renderer: &mut GlesRenderer,
     effects_framebuffers: &mut EffectsFramebuffers,
     blur_program: GlesTexProgram,
-    size: Size<i32, Logical>,
     half_pixel: [f32; 2],
 ) {
     // Swap buffers and bind
@@ -158,7 +158,6 @@ fn render_blur_pass<'frame>(
     // NOTE: Since we are just swapping between two buffers of the same size, we must make sure that
     // the shader code accounts for this! I'd rather not keep multiple buffers alive for different
     // passes.
-    dbg!(&effects_framebuffers.current_buffer);
     let sample_buffer = effects_framebuffers.sample_buffer();
 
     // We use a texture render element with a custom GlesTexProgram in order todo the blurring
@@ -203,17 +202,16 @@ fn render_blur_pass<'frame>(
     renderer.unbind().expect("gl should unbind");
 
     effects_framebuffers.current_buffer.swap();
-    dbg!(&effects_framebuffers.current_buffer);
 }
 
 // fn blur_settings_to_size(passes: u32, radius: i32) -> i32 {
 //     return 2i32.pow(passes + 1) * radius;
 // }
 
-const N_PASSES: u32 = 1;
-const BLUR_RADIUS: i32 = 3;
+const N_PASSES: u32 = 0;
+const BLUR_RADIUS: i32 = 10;
 
-fn get_main_buffer_blur(renderer: &mut GlowRenderer, output: &Output) -> GlesTexture {
+fn get_main_buffer_blur(renderer: &mut GlesRenderer, output: &Output) -> GlesTexture {
     let output_rect = output.geometry();
 
     let effects_framebuffers = &mut *EffectsFramebuffers::get(output);
@@ -232,8 +230,7 @@ fn get_main_buffer_blur(renderer: &mut GlowRenderer, output: &Output) -> GlesTex
         .unwrap();
     effects_framebuffers.current_buffer = CurrentBuffer::Initial;
 
-    let gles_renderer: &mut GlesRenderer = renderer.borrow_mut();
-    let previous_target = gles_renderer.target_mut().take();
+    let previous_target = renderer.target_mut().take();
 
     // NOTE: If we only do one pass its kinda ugly, there must be at least
     // n=2 passes in order to have good sampling
@@ -246,7 +243,6 @@ fn get_main_buffer_blur(renderer: &mut GlowRenderer, output: &Output) -> GlesTex
             renderer,
             effects_framebuffers,
             blur_down.clone(),
-            output_rect.size,
             half_pixel,
         );
     }
@@ -255,14 +251,8 @@ fn get_main_buffer_blur(renderer: &mut GlowRenderer, output: &Output) -> GlesTex
         0.5 / (output_rect.size.w as f32 * 2.0),
         0.5 / (output_rect.size.h as f32 * 2.0),
     ];
-    for _ in 0..(N_PASSES + 1) {
-        render_blur_pass(
-            renderer,
-            effects_framebuffers,
-            blur_up.clone(),
-            output_rect.size,
-            half_pixel,
-        );
+    for _ in 0..=(N_PASSES + 1) {
+        render_blur_pass(renderer, effects_framebuffers, blur_up.clone(), half_pixel);
     }
 
     match previous_target {

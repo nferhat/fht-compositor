@@ -5,7 +5,7 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 
-use super::{AsGlowFrame, AsGlowRenderer};
+use super::AsGlowFrame;
 
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
@@ -104,9 +104,8 @@ impl Shaders {
             .insert_if_missing(|| shaders);
     }
 
-    pub fn get<'a>(renderer: &'a impl AsGlowRenderer) -> &'a Self {
+    pub fn get<'a>(renderer: &'a GlesRenderer) -> &'a Self {
         renderer
-            .glow_renderer()
             .egl_context()
             .user_data()
             .get()

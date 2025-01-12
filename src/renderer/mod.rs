@@ -16,6 +16,7 @@ pub mod texture_element;
 pub mod texture_shader_element;
 
 use anyhow::Context;
+use blur::prologue::BlurPrologueElement;
 use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer, Fourcc};
@@ -56,6 +57,7 @@ use crate::utils::get_monotonic_time;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
+        BlurPrologue = BlurPrologueElement,
         Cursor = CursorRenderElement<R>,
         ConfigUi = ConfigUiRenderElement,
         Solid = SolidColorRenderElement,
@@ -231,6 +233,13 @@ impl Fht {
             rv.elements
                 .extend(layer_elements(renderer, output, Layer::Top));
         }
+
+        // Prepare the optimized blur buffer
+        // It contains the blurred contents of the background without windows.
+        //
+        // FIXME: Damage tracking and only redrawing it if blur buffer is dirty
+        rv.elements
+            .push(BlurPrologueElement::new(element::Id::new(), output.clone()).into());
 
         // Finally we have background and bottom elements.
         let background = layer_elements(renderer, output, Layer::Bottom)
@@ -706,20 +715,27 @@ pub fn render_to_texture<R: FhtRenderer>(
 /// Render the given `elements` inside the current bound target.
 ///
 /// It is up to **YOU** to bind and unbind the renderer before and after calling this function.
-pub fn render_elements<R: FhtRenderer>(
+pub fn render_elements<R: Renderer>(
     renderer: &mut R,
     size: Size<i32, Physical>,
     scale: impl Into<Scale<f64>>,
     transform: Transform,
     elements: impl Iterator<Item = impl RenderElement<R>>,
-) -> anyhow::Result<SyncPoint> {
+) -> anyhow::Result<SyncPoint>
+where
+    // Since we are more generic regarding what this render_elements function might take (not using
+    // FhtRenderer trait) we must specify all traits here.
+    //
+    // Why? Because this function is also used in the context of blur rendering, which is hardcoded
+    // to use GlesRenderer since I need to access internals
+    R::Error: std::error::Error + Send + Sync + From<GlesError> + 'static,
+{
     let scale = scale.into();
     let transform = transform.invert();
     let frame_rect = Rectangle::from_size(transform.transform_size(size));
     let mut frame = renderer
         .render(size, transform)
         .context("error starting frame")?;
-
     frame
         .clear(Color32F::TRANSPARENT, &[frame_rect])
         .context("error clearing")?;
