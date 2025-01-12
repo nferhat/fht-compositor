@@ -11,12 +11,16 @@ const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
+const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
+const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
 
 pub struct Shaders {
     pub border: GlesPixelProgram,
     pub box_shadow: GlesPixelProgram,
     pub rounded_quad: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
+    pub blur_down: GlesTexProgram,
+    pub blur_up: GlesTexProgram,
 }
 
 impl Shaders {
@@ -33,7 +37,7 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let resizing_surface = renderer
+        let resizing_texture = renderer
             .compile_custom_texture_shader(
                 RESIZING_TEXTURE_SRC,
                 &[
@@ -66,12 +70,32 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
+        let blur_down = renderer
+            .compile_custom_texture_shader(
+                BLUR_DOWN_SRC,
+                &[
+                    UniformName::new("radius", UniformType::_1f),
+                    UniformName::new("half_pixel", UniformType::_2f),
+                ],
+            )
+            .expect("Shader source should always compile");
+        let blur_up = renderer
+            .compile_custom_texture_shader(
+                BLUR_UP_SRC,
+                &[
+                    UniformName::new("radius", UniformType::_1f),
+                    UniformName::new("half_pixel", UniformType::_2f),
+                ],
+            )
+            .expect("Shader source should always compile");
 
         let shaders = Self {
             border: rounded_outline,
             box_shadow,
             rounded_quad,
-            resizing_texture: resizing_surface,
+            resizing_texture,
+            blur_down,
+            blur_up,
         };
 
         renderer

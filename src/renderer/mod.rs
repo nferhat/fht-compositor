@@ -6,6 +6,7 @@
 //!
 //! This module also has some helpers to create render elements.
 
+pub mod blur;
 pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;

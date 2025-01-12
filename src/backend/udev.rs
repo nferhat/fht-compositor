@@ -61,6 +61,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::output::RedrawState;
+use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::{
     AsGlowFrame, AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer,
@@ -769,6 +770,10 @@ impl UdevData {
         let refresh_interval =
             Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
         fht.add_output(output.clone(), Some(refresh_interval));
+
+        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
+        // to avoid noise and pollution from other outputs leaking into eachother
+        EffectsFramebuffers::init_for_output(&output, &mut renderer);
 
         let driver = drm_device
             .get_driver()

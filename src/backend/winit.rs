@@ -110,6 +110,8 @@ impl WinitData {
         output.set_preferred(mode);
         fht.add_output(output.clone(), None);
 
+        crate::renderer::blur::EffectsFramebuffers::init_for_output(&output, backend.renderer());
+
         let render_node = EGLDevice::device_for_display(backend.renderer().egl_context().display())
             .and_then(|device| device.try_get_render_node());
 
