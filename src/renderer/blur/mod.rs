@@ -8,7 +8,6 @@
 //! - <https://www.shadertoy.com/view/3td3W8>
 
 pub mod element;
-pub mod prologue;
 
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
@@ -16,16 +15,16 @@ use std::rc::Rc;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
-use smithay::backend::renderer::gles::{
-    GlesRenderer, GlesTarget, GlesTexProgram, GlesTexture, Uniform,
-};
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTexProgram, GlesTexture, Uniform};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Renderer, Texture, TextureFilter, Unbind};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Logical, Size, Transform};
+use smithay::utils::{Logical, Rectangle, Size, Transform};
+use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::shaders::Shaders;
-use super::{render_elements, FhtRenderer};
+use super::{layer_elements, render_elements, FhtRenderer};
 use crate::output::OutputExt;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +34,6 @@ enum CurrentBuffer {
     Normal,
     /// We are currently sampling from swapped buffer, and rendering in the normal.
     Swapped,
-    /// We are currently rendering from the initial blitted buffer, and rendering in the normal
-    /// buffer
-    Initial,
 }
 
 impl CurrentBuffer {
@@ -47,8 +43,6 @@ impl CurrentBuffer {
             Self::Normal => Self::Swapped,
             // sampled fro swapped, render to normal next
             Self::Swapped => Self::Normal,
-            // sampled from blit, render into normal next
-            Self::Initial => Self::Normal,
         }
     }
 }
@@ -57,9 +51,10 @@ impl CurrentBuffer {
 pub struct EffectsFramebuffers {
     /// Contains the main buffer blurred contents
     pub optimized_blur: GlesTexture,
+    /// Whether the optimizer blur buffer is dirty
+    pub optimized_blur_dirty: bool,
     // /// Contains the original pixels before blurring to draw with in case of artifacts.
     // blur_saved_pixels: GlesTexture,
-    blit_buffer: GlesTexture,
     // The blur algorithms (dual-kawase) swaps between these two whenever scaling the image
     effects: GlesTexture,
     effects_swapped: GlesTexture,
@@ -105,13 +100,13 @@ impl EffectsFramebuffers {
                     output_size.to_buffer(1, Transform::Normal),
                 )
                 .unwrap(),
+            optimized_blur_dirty: true,
             // blur_saved_pixels: renderer
             //     .create_buffer(
             //         Format::Abgr8888,
             //         output_size.to_buffer(1, Transform::Normal),
             //     )
             //     .unwrap(),
-            blit_buffer: create_buffer(renderer, output_size),
             effects: create_buffer(renderer, output_size),
             effects_swapped: create_buffer(renderer, output_size),
             current_buffer: CurrentBuffer::Normal,
@@ -124,12 +119,68 @@ impl EffectsFramebuffers {
         );
     }
 
+    /// Render the optimized blur buffer again
+    pub fn update_optimized_blur_buffer(
+        &mut self,
+        renderer: &mut GlowRenderer,
+        output: &Output,
+        scale: i32,
+    ) {
+        // first render layer shell elements
+        let elements = layer_elements(renderer, output, Layer::Background)
+            .into_iter()
+            .chain(layer_elements(renderer, output, Layer::Bottom));
+        renderer.bind(self.effects.clone()).unwrap();
+        let output_rect = output.geometry().to_physical(scale);
+        let _ = render_elements(
+            renderer,
+            output_rect.size,
+            scale as f64,
+            Transform::Normal,
+            elements,
+        )
+        .expect("failed to render for optimized blur buffer");
+        self.current_buffer = CurrentBuffer::Normal;
+
+        let shaders = Shaders::get(renderer);
+        let blur_down = shaders.blur_down.clone();
+        let blur_up = shaders.blur_up.clone();
+
+        // NOTE: If we only do one pass its kinda ugly, there must be at least
+        // n=2 passes in order to have good sampling
+        let half_pixel = [
+            0.5 / (output_rect.size.w as f32 / 2.0),
+            0.5 / (output_rect.size.h as f32 / 2.0),
+        ];
+        for _ in 0..N_PASSES {
+            render_blur_pass(renderer, self, blur_down.clone(), half_pixel);
+        }
+
+        let half_pixel = [
+            0.5 / (output_rect.size.w as f32 * 2.0),
+            0.5 / (output_rect.size.h as f32 * 2.0),
+        ];
+        for _ in 0..N_PASSES {
+            render_blur_pass(renderer, self, blur_up.clone(), half_pixel);
+        }
+
+        // Now blit from the last render buffer into optimized_blur
+        // We are already bound so its just a blit
+        renderer
+            .blit_to(
+                self.optimized_blur.clone(),
+                Rectangle::from_size(output_rect.size),
+                Rectangle::from_size(output_rect.size),
+                TextureFilter::Linear,
+            )
+            .unwrap();
+    }
+
     /// Get the buffer that was sampled from in the previous pass.
     pub fn sample_buffer(&self) -> GlesTexture {
         match self.current_buffer {
             CurrentBuffer::Normal => self.effects.clone(),
             CurrentBuffer::Swapped => self.effects_swapped.clone(),
-            CurrentBuffer::Initial => self.blit_buffer.clone(),
         }
     }
 
@@ -138,7 +189,6 @@ impl EffectsFramebuffers {
         match self.current_buffer {
             CurrentBuffer::Normal => self.effects_swapped.clone(),
             CurrentBuffer::Swapped => self.effects.clone(),
-            CurrentBuffer::Initial => self.effects.clone(),
         }
     }
 }
@@ -147,8 +197,8 @@ impl EffectsFramebuffers {
 ///
 /// When we want to get the main buffer blur, we have to go multiple passes in order to get
 /// something that looks good, this is up to the user to configure.
-fn render_blur_pass<'frame>(
-    renderer: &mut GlesRenderer,
+fn render_blur_pass(
+    renderer: &mut GlowRenderer,
     effects_framebuffers: &mut EffectsFramebuffers,
     blur_program: GlesTexProgram,
     half_pixel: [f32; 2],
@@ -199,72 +249,9 @@ fn render_blur_pass<'frame>(
         ([&texture]).iter(),
     )
     .unwrap();
-    renderer.unbind().expect("gl should unbind");
 
     effects_framebuffers.current_buffer.swap();
 }
 
-// fn blur_settings_to_size(passes: u32, radius: i32) -> i32 {
-//     return 2i32.pow(passes + 1) * radius;
-// }
-
-const N_PASSES: u32 = 0;
-const BLUR_RADIUS: i32 = 10;
-
-fn get_main_buffer_blur(renderer: &mut GlesRenderer, output: &Output) -> GlesTexture {
-    let output_rect = output.geometry();
-
-    let effects_framebuffers = &mut *EffectsFramebuffers::get(output);
-    let shaders = Shaders::get(renderer);
-    let blur_down = shaders.blur_down.clone();
-    let blur_up = shaders.blur_up.clone();
-
-    // Blit the current fb into our initial starting texture
-    renderer
-        .blit_to(
-            effects_framebuffers.blit_buffer.clone(),
-            output_rect.to_physical_precise_round(1),
-            output_rect.to_physical_precise_round(1),
-            TextureFilter::Linear,
-        )
-        .unwrap();
-    effects_framebuffers.current_buffer = CurrentBuffer::Initial;
-
-    let previous_target = renderer.target_mut().take();
-
-    // NOTE: If we only do one pass its kinda ugly, there must be at least
-    // n=2 passes in order to have good sampling
-    let half_pixel = [
-        0.5 / (output_rect.size.w as f32 / 2.0),
-        0.5 / (output_rect.size.h as f32 / 2.0),
-    ];
-    for _ in 0..(N_PASSES + 1) {
-        render_blur_pass(
-            renderer,
-            effects_framebuffers,
-            blur_down.clone(),
-            half_pixel,
-        );
-    }
-
-    let half_pixel = [
-        0.5 / (output_rect.size.w as f32 * 2.0),
-        0.5 / (output_rect.size.h as f32 * 2.0),
-    ];
-    for _ in 0..=(N_PASSES + 1) {
-        render_blur_pass(renderer, effects_framebuffers, blur_up.clone(), half_pixel);
-    }
-
-    match previous_target {
-        Some(ref target) => match target {
-            // NOTE: The drop impl of GlesTarget will automatically send destruction events
-            GlesTarget::Image { dmabuf, .. } => renderer.bind(dmabuf.clone()).unwrap(),
-            GlesTarget::Surface { surface } => renderer.bind(surface.clone()).unwrap(),
-            GlesTarget::Texture { texture, .. } => renderer.bind(texture.clone()).unwrap(),
-            GlesTarget::Renderbuffer { buf, .. } => renderer.bind(buf.clone()).unwrap(),
-        },
-        None => (), // we werent even bound yet!
-    }
-
-    effects_framebuffers.render_buffer()
-}
+const N_PASSES: u32 = 2;
+const BLUR_RADIUS: i32 = 5;

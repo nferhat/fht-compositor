@@ -215,6 +215,20 @@ impl Monitor {
         })
     }
 
+    /// Returns whether this monitor has any blurred regions.
+    pub fn has_blur(&self) -> bool {
+        for workspace in &self.workspaces {
+            // only check for visible workspaces
+            if workspace.index() == self.active_idx || workspace.has_render_offset_animation() {
+                if workspace.tiles().any(|tile| tile.has_transparent_region()) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Create the render elements for this [`Monitor`]
     pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: i32) -> MonitorRenderResult<R> {
         crate::profile_function!();

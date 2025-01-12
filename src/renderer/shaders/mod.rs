@@ -104,7 +104,7 @@ impl Shaders {
             .insert_if_missing(|| shaders);
     }
 
-    pub fn get<'a>(renderer: &'a GlesRenderer) -> &'a Self {
+    pub fn get<'a>(renderer: &'a GlowRenderer) -> &'a Self {
         renderer
             .egl_context()
             .user_data()

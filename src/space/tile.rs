@@ -11,12 +11,13 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
+use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
@@ -367,6 +368,39 @@ impl Tile {
         }
     }
 
+    /// Return whether this tile has a transparent region.
+    pub fn has_transparent_region(&self) -> bool {
+        let wl_surface = self
+            .window()
+            .wl_surface()
+            .expect("A mapped window should have a WlSurface");
+        // We only care about main window surface blurring, subsurfaces (for example
+        // popups) are not accoutned for and will not be rendered
+        // with blur.
+        let window_geometry = Rectangle::from_size(self.window().size());
+        if with_states(&*wl_surface, |data| {
+            let renderer_data = data
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            if let Some(opaque_regions) = renderer_data.opaque_regions() {
+                // If there's some place left after removing opaque regions, these are
+                // transparent regions and must be rendered using blur.
+                let remaining = window_geometry.subtract_rects(opaque_regions.iter().copied());
+                remaining.len() > 0
+            } else {
+                // no opaque regions == fully transparent window surface
+                true
+            }
+        }) {
+            return true;
+        }
+
+        false
+    }
+
     /// Advance animations for this [`Tile`].
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         crate::profile_function!();
@@ -544,7 +578,7 @@ impl Tile {
                 );
                 self.window.set_offscreen_element_id(Some(element_id));
 
-                let program = Shaders::get((&*renderer).borrow()).resizing_texture.clone();
+                let program = Shaders::get(renderer).resizing_texture.clone();
                 let element = TextureShaderElement::new(
                     tex,
                     program,
@@ -596,8 +630,9 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        // TODO: Only draw blur on transparent regions
-        elements.push(BlurElement::new(renderer, output, window_geometry, scale).into());
+        if self.has_transparent_region() {
+            elements.push(BlurElement::new(renderer, output, window_geometry, scale).into());
+        }
 
         if border_thickness != 0 {
             elements.push(
