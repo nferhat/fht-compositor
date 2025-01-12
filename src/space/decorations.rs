@@ -28,9 +28,7 @@ pub fn draw_border(
     };
 
     FhtPixelShaderElement::new(
-        Shaders::get(renderer.glow_renderer().borrow())
-            .border
-            .clone(),
+        Shaders::get(renderer.glow_renderer()).border.clone(),
         geometry,
         alpha,
         vec![
@@ -61,9 +59,7 @@ pub fn draw_shadow(
     geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
 
     FhtPixelShaderElement::new(
-        Shaders::get(renderer.glow_renderer().borrow())
-            .box_shadow
-            .clone(),
+        Shaders::get(renderer.glow_renderer()).box_shadow.clone(),
         geometry,
         alpha,
         vec![

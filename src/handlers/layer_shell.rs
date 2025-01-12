@@ -5,9 +5,10 @@ use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{
-    self, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
+    self, Layer, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
 };
 
+use crate::renderer::blur::EffectsFramebuffers;
 use crate::state::{Fht, State};
 
 impl WlrLayerShellHandler for State {
@@ -19,7 +20,7 @@ impl WlrLayerShellHandler for State {
         &mut self,
         surface: wlr_layer::LayerSurface,
         output: Option<wl_output::WlOutput>,
-        _layer: wlr_layer::Layer,
+        wlr_layer: wlr_layer::Layer,
         namespace: String,
     ) {
         // We don't map layer surfaces immediatly, rather, they get pushed to `pending_layers`
@@ -31,6 +32,13 @@ impl WlrLayerShellHandler for State {
             .or_else(|| self.fht.space.outputs().next().cloned())
             .expect("layer-shell requested output should not be invalid!");
         let layer_surface = LayerSurface::new(surface, namespace);
+
+        if matches!(wlr_layer, Layer::Background | Layer::Bottom) {
+            dbg!("optimized blur buffer dirty");
+            // the optimized blur buffer has been dirtied, re-render on next State::dispatch
+            EffectsFramebuffers::get(&output).optimized_blur_dirty = true;
+        }
+
         let mut map = layer_map_for_output(&output);
         if let Err(err) = map.map_layer(&layer_surface) {
             error!(?err, "Failed to map layer-shell");
@@ -50,6 +58,13 @@ impl WlrLayerShellHandler for State {
             // Otherwise, it was already mapped, unmap it then close
             layer_map.unmap_layer(&layer);
             layer.layer_surface().send_close();
+
+            if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
+                dbg!("optimized blur buffer dirty");
+                // the optimized blur buffer has been dirtied, re-render on next State::dispatch
+                EffectsFramebuffers::get(&output).optimized_blur_dirty = true;
+            }
+
             layer_output = Some(output);
         }
 
@@ -88,6 +103,11 @@ impl State {
                 let layer = map
                     .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                     .unwrap();
+                if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
+                    dbg!("optimized blur buffer dirty");
+                    // the optimized blur buffer has been dirtied, re-render on next State::dispatch
+                    EffectsFramebuffers::get(output).optimized_blur_dirty = true;
+                }
 
                 layer.layer_surface().send_configure();
             }

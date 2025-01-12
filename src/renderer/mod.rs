@@ -15,8 +15,10 @@ pub mod shaders;
 pub mod texture_element;
 pub mod texture_shader_element;
 
+use std::borrow::BorrowMut;
+
 use anyhow::Context;
-use blur::prologue::BlurPrologueElement;
+use blur::EffectsFramebuffers;
 use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer, Fourcc};
@@ -57,7 +59,6 @@ use crate::utils::get_monotonic_time;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
-        BlurPrologue = BlurPrologueElement,
         Cursor = CursorRenderElement<R>,
         ConfigUi = ConfigUiRenderElement,
         Solid = SolidColorRenderElement,
@@ -234,18 +235,23 @@ impl Fht {
                 .extend(layer_elements(renderer, output, Layer::Top));
         }
 
-        // Prepare the optimized blur buffer
-        // It contains the blurred contents of the background without windows.
-        //
-        // FIXME: Damage tracking and only redrawing it if blur buffer is dirty
-        rv.elements
-            .push(BlurPrologueElement::new(element::Id::new(), output.clone()).into());
-
         // Finally we have background and bottom elements.
         let background = layer_elements(renderer, output, Layer::Bottom)
             .into_iter()
             .chain(layer_elements(renderer, output, Layer::Background));
         rv.elements.extend(background);
+
+        // In case the optimized blur layer is dirty, re-render
+        // It only has the bottom and background layer shells drawn onto with blur applied.
+        //
+        // We must do it now before we actually render the previous render elements into the final
+        // composited blur buffer
+        let mut fx_buffers = EffectsFramebuffers::get(output);
+        if monitor.has_blur() && fx_buffers.optimized_blur_dirty {
+            dbg!("updating blur buffer");
+            fx_buffers.update_optimized_blur_buffer(renderer.glow_renderer_mut(), output, scale);
+            fx_buffers.optimized_blur_dirty = false;
+        }
 
         rv
     }
