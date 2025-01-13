@@ -22,12 +22,18 @@ use crate::renderer::{AsGlowFrame, FhtRenderer};
 pub struct BlurElement {
     // What we do at the end of the day is sample from the optimized_blur buffer that has been
     // prepared. We override the src argument in order to get only the region we need.
-    //
-    // TODO: Rounded corners
     tex: FhtTextureElement,
 }
 
 impl BlurElement {
+    /// Create a new [`BlurElement`]. You are supposed to put this **below** the translucent surface
+    /// that you want to blur. `area` is assumed to be relative to the `output` you are rendering
+    /// in.
+    ///
+    /// If you don't update the blur optimized buffer
+    /// [`EffectsFramebuffers::update_optimized_blur_buffer`] this element will either
+    /// - Display outdated/wrong contents
+    /// - Not display anything since the buffer will be empty.
     pub fn new(
         renderer: &mut impl FhtRenderer,
         output: &Output,

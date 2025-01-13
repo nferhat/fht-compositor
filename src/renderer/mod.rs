@@ -246,16 +246,15 @@ impl Fht {
         // composited blur buffer
         let mut fx_buffers = EffectsFramebuffers::get(output);
         if !self.config.decorations.blur.disable
+            && self.config.decorations.blur.passes > 0
             && monitor.has_blur()
             && fx_buffers.optimized_blur_dirty
         {
-            let fht_compositor_config::Blur { passes, radius, .. } = self.config.decorations.blur;
             fx_buffers.update_optimized_blur_buffer(
                 renderer.glow_renderer_mut(),
                 output,
                 scale,
-                passes,
-                radius,
+                &self.config.decorations.blur,
             );
             fx_buffers.optimized_blur_dirty = false;
         }

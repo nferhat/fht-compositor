@@ -839,7 +839,7 @@ impl Config {
             gaps: (config.general.outer_gaps, config.general.inner_gaps),
             mwfact: config.general.mwfact,
             border: config.decorations.border,
-            blur_disabled: config.decorations.blur.disable,
+            blur_disabled: config.decorations.blur.disable || config.decorations.blur.passes == 0,
         })
     }
 }

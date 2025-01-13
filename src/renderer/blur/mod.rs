@@ -125,8 +125,7 @@ impl EffectsFramebuffers {
         renderer: &mut GlowRenderer,
         output: &Output,
         scale: i32,
-        passes: usize,
-        radius: f32,
+        config: &fht_compositor_config::Blur,
     ) {
         // first render layer shell elements
         let elements = layer_elements(renderer, output, Layer::Background)
@@ -154,16 +153,16 @@ impl EffectsFramebuffers {
             0.5 / (output_rect.size.w as f32 / 2.0),
             0.5 / (output_rect.size.h as f32 / 2.0),
         ];
-        for _ in 0..passes {
-            render_blur_pass(renderer, self, blur_down.clone(), half_pixel, radius);
+        for _ in 0..config.passes {
+            render_blur_pass(renderer, self, blur_down.clone(), half_pixel, config);
         }
 
         let half_pixel = [
             0.5 / (output_rect.size.w as f32 * 2.0),
             0.5 / (output_rect.size.h as f32 * 2.0),
         ];
-        for _ in 0..passes {
-            render_blur_pass(renderer, self, blur_up.clone(), half_pixel, radius);
+        for _ in 0..config.passes {
+            render_blur_pass(renderer, self, blur_up.clone(), half_pixel, config);
         }
 
         // Now blit from the last render buffer into optimized_blur
@@ -204,7 +203,7 @@ fn render_blur_pass(
     effects_framebuffers: &mut EffectsFramebuffers,
     blur_program: GlesTexProgram,
     half_pixel: [f32; 2],
-    radius: f32,
+    config: &fht_compositor_config::Blur,
 ) {
     // Swap buffers and bind
     //
@@ -233,7 +232,7 @@ fn render_blur_pass(
         texture,
         blur_program,
         vec![
-            Uniform::new("radius", radius),
+            Uniform::new("radius", config.radius),
             Uniform::new("half_pixel", half_pixel),
         ],
     );
