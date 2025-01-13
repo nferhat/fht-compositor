@@ -575,7 +575,6 @@ impl Tile {
                     None,
                     Kind::Unspecified,
                 );
-                self.window.set_offscreen_element_id(Some(element_id));
 
                 let program = Shaders::get(renderer).resizing_texture.clone();
                 let element = TextureShaderElement::new(
@@ -587,6 +586,9 @@ impl Tile {
                         Uniform::new("curr_size", [curr_size.w as f32, curr_size.h as f32]),
                     ],
                 );
+
+                self.window
+                    .set_offscreen_element_id(Some(element.id().clone()));
 
                 elements.push(TileRenderElement::<R>::ResizingSurface(element.into()));
             }
