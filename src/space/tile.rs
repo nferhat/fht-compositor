@@ -630,7 +630,14 @@ impl Tile {
         };
 
         if !self.config.blur_disabled && self.has_transparent_region() {
-            elements.push(BlurElement::new(renderer, output, window_geometry, scale).into());
+            let blur_element = BlurElement::new(
+                renderer,
+                output,
+                Rectangle::new(self.location() + self.window_loc(), window_geometry.size),
+                window_geometry.loc.to_physical(scale),
+                scale,
+            );
+            elements.push(blur_element.into());
         }
 
         if border_thickness != 0 {
@@ -714,7 +721,7 @@ impl Tile {
                 fractional_scale,
                 Transform::Normal,
                 Fourcc::Abgr8888,
-                elements.into_iter(),
+                elements.into_iter().rev(),
             )
             .map_err(|err| {
                 warn!(

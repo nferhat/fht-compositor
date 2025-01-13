@@ -37,22 +37,27 @@ impl BlurElement {
     pub fn new(
         renderer: &mut impl FhtRenderer,
         output: &Output,
-        area: Rectangle<i32, Logical>,
+        sample_area: Rectangle<i32, Logical>,
+        loc: Point<i32, Physical>,
         scale: i32,
     ) -> Self {
         let fbs = &mut *EffectsFramebuffers::get(output);
         let texture = TextureRenderElement::from_static_texture(
             Id::new(),
             renderer.id(),
-            area.loc.to_physical(scale).to_f64(),
+            loc.to_f64(),
             fbs.optimized_blur.clone(),
             scale,
             Transform::Normal,
             Some(1.0),
-            Some(area.to_f64()),
-            Some(area.size),
+            Some(sample_area.to_f64()),
+            Some(sample_area.size),
             // NOTE: Since this is "optimized" blur, anything below the window will not be rendered
-            Some(vec![area.to_buffer(scale, Transform::Normal, &area.size)]),
+            Some(vec![sample_area.to_buffer(
+                scale,
+                Transform::Normal,
+                &sample_area.size,
+            )]),
             Kind::Unspecified,
         );
 
