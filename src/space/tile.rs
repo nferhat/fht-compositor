@@ -635,7 +635,10 @@ impl Tile {
             let blur_element = BlurElement::new(
                 renderer,
                 output,
-                Rectangle::new(self.location() + self.window_loc(), window_geometry.size),
+                Rectangle::new(
+                    self.visual_location() + self.window_loc(),
+                    window_geometry.size,
+                ),
                 window_geometry.loc.to_physical(scale),
                 scale,
             );
