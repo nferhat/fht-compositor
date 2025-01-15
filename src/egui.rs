@@ -13,7 +13,7 @@ use smithay::backend::renderer::element::texture::{TextureRenderBuffer, TextureR
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesError, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Color32F, Frame, Offscreen, Renderer, Unbind};
+use smithay::backend::renderer::{Bind, Color32F, Frame, Offscreen, Renderer};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
 
 use crate::renderer::texture_element::FhtTextureElement;
@@ -60,15 +60,7 @@ impl EguiElement {
             .get::<Rc<RefCell<egui_glow::Painter>>>()
             .is_none()
         {
-            let mut frame = renderer
-                .render(size, Transform::Normal)
-                .map_err(|err| {
-                    warn!(?err, "Failed to create egui glow painter for output");
-                    err
-                })
-                .expect("Failed to create frame");
-
-            let painter = frame
+            let painter = renderer
                 .with_context(|context| {
                     // SAFETY: In the context of this compositor, the glow renderer/context
                     // lives for 'static, so the pointer to it should always be valid.
@@ -78,7 +70,6 @@ impl EguiElement {
                     warn!(?err, "Failed to create egui glow painter for output");
                     GlesError::ShaderCompileError
                 })?;
-            drop(frame);
 
             renderer
                 .egl_context()
@@ -143,9 +134,10 @@ impl EguiElement {
         } = self.ctx.run(input.clone(), ui);
 
         render_buffer.render().draw(|texture| {
-            renderer.bind(texture.clone())?;
             {
-                let mut frame = renderer.render(size, Transform::Normal)?;
+                let mut tex = texture.clone();
+                let mut fb = renderer.bind(&mut tex)?;
+                let mut frame = renderer.render(&mut fb, size, Transform::Normal)?;
                 frame.clear(Color32F::TRANSPARENT, &[Rectangle::from_size(size)])?;
                 painter.paint_and_update_textures(
                     [size.w as u32, size.h as u32],
@@ -154,8 +146,6 @@ impl EguiElement {
                     &textures_delta,
                 );
             };
-
-            renderer.unbind()?;
 
             // FIXME: This is not "optimal" per-se, but works fine.
             //

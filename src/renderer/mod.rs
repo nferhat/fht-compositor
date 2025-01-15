@@ -29,12 +29,12 @@ use smithay::backend::renderer::element::{self, AsRenderElements, Kind, RenderEl
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
 };
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::{
-    Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture,
-    TextureFilter, TextureMapping,
+    Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
+    RendererSuper, Texture, TextureFilter, TextureMapping,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
@@ -247,8 +247,8 @@ impl Fht {
         let mut fx_buffers = EffectsFramebuffers::get(output);
         if !self.config.decorations.blur.disable
             && self.config.decorations.blur.passes > 0
-            && monitor.has_blur()
             && fx_buffers.optimized_blur_dirty
+            && monitor.has_blur()
         {
             fx_buffers.update_optimized_blur_buffer(
                 renderer.glow_renderer_mut(),
@@ -624,10 +624,11 @@ impl Fht {
 /// Trait to abstract away renderer requirements from function declarations.
 pub trait FhtRenderer:
     Renderer<TextureId = Self::FhtTextureId, Error = Self::FhtError>
+    + RendererSuper
     + ImportAll
     + ImportMem
     + Bind<Dmabuf>
-    + Blit<Dmabuf>
+    + Blit
     // The renderers are just wrappers around a GlowRenderer.
     // So we can create GlesTexture and Bind to them with no issues.
     + Offscreen<GlesTexture>
@@ -652,27 +653,12 @@ pub trait AsGlowRenderer: Renderer {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
 }
 
-pub trait AsGlowFrame<'frame>: Frame {
-    fn glow_frame(&self) -> &GlowFrame<'frame>;
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame>;
-}
-
 impl AsGlowRenderer for GlowRenderer {
     fn glow_renderer(&self) -> &GlowRenderer {
         self
     }
 
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
-        self
-    }
-}
-
-impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self
     }
 }
@@ -713,13 +699,14 @@ pub fn render_to_texture<R: FhtRenderer>(
     let scale = scale.into();
     let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
 
-    let texture = renderer
+    let mut texture = renderer
         .create_buffer(fourcc, buffer_size)
         .context("error creating texture")?;
-    renderer
-        .bind(texture.clone())
+    let mut fb = renderer
+        .bind(&mut texture)
         .context("error binding texture")?;
-    let sync_point = render_elements(renderer, size, scale, transform, elements)?;
+    let sync_point = render_elements(renderer, &mut fb, size, scale, transform, elements)?;
+    drop(fb);
 
     Ok((texture, sync_point))
 }
@@ -727,26 +714,19 @@ pub fn render_to_texture<R: FhtRenderer>(
 /// Render the given `elements` inside the current bound target.
 ///
 /// It is up to **YOU** to bind and unbind the renderer before and after calling this function.
-pub fn render_elements<R: Renderer>(
+pub fn render_elements<'buffer, R: FhtRenderer>(
     renderer: &mut R,
+    fb: &mut R::Framebuffer<'buffer>,
     size: Size<i32, Physical>,
     scale: impl Into<Scale<f64>>,
     transform: Transform,
     elements: impl Iterator<Item = impl RenderElement<R>>,
-) -> anyhow::Result<SyncPoint>
-where
-    // Since we are more generic regarding what this render_elements function might take (not using
-    // FhtRenderer trait) we must specify all traits here.
-    //
-    // Why? Because this function is also used in the context of blur rendering, which is hardcoded
-    // to use GlesRenderer since I need to access internals
-    R::Error: std::error::Error + Send + Sync + From<GlesError> + 'static,
-{
+) -> anyhow::Result<SyncPoint> {
     let scale = scale.into();
     let transform = transform.invert();
     let frame_rect = Rectangle::from_size(transform.transform_size(size));
     let mut frame = renderer
-        .render(size, transform)
+        .render(fb, size, transform)
         .context("error starting frame")?;
     frame
         .clear(Color32F::TRANSPARENT, &[frame_rect])
@@ -813,7 +793,7 @@ where
         ScreencopyBuffer::Shm(buffer) => {
             // We cannot render into shm buffer directly.
             // Instead we render inside a texture and export memory from framebuffer.
-            let (_, _) = render_to_texture(
+            let (mut tex, _) = render_to_texture(
                 renderer,
                 output_region.size,
                 scale,
@@ -822,7 +802,9 @@ where
                 elements,
             )?;
 
+            let mut fb = renderer.bind(&mut tex)?;
             let mapping = renderer.copy_framebuffer(
+                &mut fb,
                 region.to_logical(1).to_buffer(
                     1,
                     Transform::Normal,
@@ -865,15 +847,22 @@ where
                 // Little optimization:
                 // When our screencopy region is the same as the output region, we can render inside
                 // the dmabuf directly.
-                renderer.bind(dmabuf.clone())?;
-                let sync_point =
-                    render_elements(renderer, output_region.size, scale, transform, elements)?;
-                renderer.unbind()?;
+                let mut dmabuf = dmabuf.clone();
+                let mut fb = renderer.bind(&mut dmabuf)?;
+                let sync_point = render_elements(
+                    renderer,
+                    &mut fb,
+                    output_region.size,
+                    scale,
+                    transform,
+                    elements,
+                )?;
+                drop(fb);
 
                 Ok((Some(sync_point), damage))
             } else {
                 // Otherwise we can blit inside the dmabuf
-                let (_, _) = render_to_texture(
+                let (mut tex, _) = render_to_texture(
                     renderer,
                     output_region.size,
                     scale,
@@ -882,8 +871,13 @@ where
                     elements,
                 )?;
 
-                renderer.blit_to(
-                    dmabuf.clone(),
+                let mut dmabuf = dmabuf.clone();
+                let tex_fb = renderer.bind(&mut tex)?;
+                let mut dmabuf_fb = renderer.bind(&mut dmabuf)?;
+
+                renderer.blit(
+                    &tex_fb,
+                    &mut dmabuf_fb,
                     region,
                     Rectangle::new(Point::default(), region.size),
                     TextureFilter::Linear,

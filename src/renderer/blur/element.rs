@@ -10,7 +10,7 @@ use super::EffectsFramebuffers;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::renderer::texture_element::FhtTextureElement;
-use crate::renderer::{AsGlowFrame, FhtRenderer};
+use crate::renderer::FhtRenderer;
 
 /// A render element to render blurred area of the background of an [`Output`]
 ///
@@ -139,9 +139,9 @@ impl RenderElement<GlowRenderer> for BlurElement {
 
 #[cfg(feature = "udev-backend")]
 impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
-    fn draw(
+    fn draw<'frame>(
         &self,
-        frame: &mut UdevFrame<'a, '_>,
+        frame: &mut UdevFrame<'a, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -149,7 +149,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
     ) -> Result<(), UdevRenderError> {
         <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
             &self.tex,
-            frame.glow_frame_mut(),
+            frame.as_mut(),
             src,
             dst,
             damage,

@@ -131,16 +131,18 @@ impl EffectsFramebuffers {
         let elements = layer_elements(renderer, output, Layer::Background)
             .into_iter()
             .chain(layer_elements(renderer, output, Layer::Bottom));
-        renderer.bind(self.effects.clone()).unwrap();
+        let mut fb = renderer.bind(&mut self.effects).unwrap();
         let output_rect = output.geometry().to_physical(scale);
         let _ = render_elements(
             renderer,
+            &mut fb,
             output_rect.size,
             scale as f64,
             Transform::Normal,
             elements,
         )
         .expect("failed to render for optimized blur buffer");
+        drop(fb);
         self.current_buffer = CurrentBuffer::Normal;
 
         let shaders = Shaders::get(renderer);
@@ -154,22 +156,48 @@ impl EffectsFramebuffers {
             0.5 / (output_rect.size.h as f32 / 2.0),
         ];
         for _ in 0..config.passes {
-            render_blur_pass(renderer, self, blur_down.clone(), half_pixel, config);
+            let mut render_buffer = self.render_buffer();
+            let sample_buffer = self.sample_buffer();
+            render_blur_pass(
+                renderer,
+                sample_buffer,
+                &mut render_buffer,
+                blur_down.clone(),
+                half_pixel,
+                config,
+            );
+            self.current_buffer.swap();
         }
 
         let half_pixel = [
             0.5 / (output_rect.size.w as f32 * 2.0),
             0.5 / (output_rect.size.h as f32 * 2.0),
         ];
-        for _ in 0..config.passes {
-            render_blur_pass(renderer, self, blur_up.clone(), half_pixel, config);
+        // FIXME: Why we need inclusive here but down is exclusive?
+        for _ in 0..=config.passes {
+            let mut render_buffer = self.render_buffer();
+            let sample_buffer = self.sample_buffer();
+            render_blur_pass(
+                renderer,
+                sample_buffer,
+                &mut render_buffer,
+                blur_up.clone(),
+                half_pixel,
+                config,
+            );
+            self.current_buffer.swap();
         }
 
         // Now blit from the last render buffer into optimized_blur
         // We are already bound so its just a blit
+        let mut target_texture = self.render_buffer();
+        let tex_fb = renderer.bind(&mut target_texture).unwrap();
+        let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
+
         renderer
-            .blit_to(
-                self.optimized_blur.clone(),
+            .blit(
+                &tex_fb,
+                &mut optimized_blur_fb,
                 Rectangle::from_size(output_rect.size),
                 Rectangle::from_size(output_rect.size),
                 TextureFilter::Linear,
@@ -200,18 +228,12 @@ impl EffectsFramebuffers {
 /// something that looks good, this is up to the user to configure.
 fn render_blur_pass(
     renderer: &mut GlowRenderer,
-    effects_framebuffers: &mut EffectsFramebuffers,
+    sample_buffer: GlesTexture,
+    render_buffer: &mut GlesTexture,
     blur_program: GlesTexProgram,
     half_pixel: [f32; 2],
     config: &fht_compositor_config::Blur,
 ) {
-    // Swap buffers and bind
-    //
-    // NOTE: Since we are just swapping between two buffers of the same size, we must make sure that
-    // the shader code accounts for this! I'd rather not keep multiple buffers alive for different
-    // passes.
-    let sample_buffer = effects_framebuffers.sample_buffer();
-
     // We use a texture render element with a custom GlesTexProgram in order todo the blurring
     // At least this is what swayfx/scenefx do, but they just use gl calls directly.
     let size = sample_buffer.size().to_logical(1, Transform::Normal);
@@ -241,16 +263,14 @@ fn render_blur_pass(
     // is not current and in this case its just game over for the render state.
     //
     // I should probably confirm this
-    let target_buffer = effects_framebuffers.render_buffer();
-    renderer.bind(target_buffer).expect("gl should bind");
+    let mut fb = renderer.bind(render_buffer).expect("gl should bind");
     let _ = render_elements(
         renderer,
+        &mut fb,
         size.to_physical_precise_round(1),
         1.0,
         Transform::Normal,
         ([&texture]).iter(),
     )
     .unwrap();
-
-    effects_framebuffers.current_buffer.swap();
 }

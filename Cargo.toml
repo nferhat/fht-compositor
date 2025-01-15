@@ -20,14 +20,14 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 # Config file support
 
 [workspace.dependencies.smithay]
-path = "../smithay"
-# git = "https://github.com/smithay/Smithay"
+git = "https://github.com/smithay/Smithay"
+branch = "feature/gl_framebuffer_type"
 # rev = "e1a863b"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
-path = "../smithay/smithay-drm-extras"
-# git = "https://github.com/Smithay/Smithay"
+git = "https://github.com/Smithay/Smithay"
+branch = "feature/gl_framebuffer_type"
 # rev = "e1a863b"
 
 [profile.opt]
@@ -74,8 +74,8 @@ pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", op
 xcursor = "0.3.5"
 fht-compositor-config.path = "./fht-compositor-config"
 glam = "0.28.0"
-egui = "0.29"
-egui_glow = "0.29"
+egui = "0.30"
+egui_glow = "0.30"
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0" }
 # FIXME: We use this instead of std::sync::MappedMutexGuard
 # SEE: tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
