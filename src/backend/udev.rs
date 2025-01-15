@@ -21,7 +21,7 @@ use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface}
 use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::{Id, Kind};
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
     Error as MultiError, GpuManager, MultiFrame, MultiRenderer, MultiTexture, MultiTextureMapping,
@@ -64,8 +64,7 @@ use crate::output::RedrawState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::{
-    AsGlowFrame, AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer,
-    OutputElementsResult,
+    AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
 };
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::get_monotonic_time;
@@ -90,10 +89,11 @@ pub type UdevRenderer<'a> = MultiRenderer<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
 
-pub type UdevFrame<'a, 'frame> = MultiFrame<
+pub type UdevFrame<'a, 'frame, 'buffer> = MultiFrame<
     'a,
     'a,
     'frame,
+    'buffer,
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
@@ -120,16 +120,6 @@ impl<'a> AsGlowRenderer for UdevRenderer<'a> {
     }
 
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
-        self.as_mut()
-    }
-}
-
-impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self.as_ref()
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self.as_mut()
     }
 }

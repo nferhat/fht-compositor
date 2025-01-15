@@ -860,17 +860,18 @@ impl Cast {
         };
 
         let fd = buffer.datas_mut()[0].as_raw().fd;
-        let dmabuf = &guard.dmabufs[&fd].clone();
+        let mut dmabuf = guard.dmabufs[&fd].clone();
 
         let damage_tracker = match &mut guard.state {
             CastState::Ready { damage_tracker, .. } => damage_tracker.as_mut().unwrap(),
             _ => unreachable!(),
         };
 
+        let mut fb = renderer.bind(&mut dmabuf)?;
         let res = damage_tracker
-            .render_output_with(
+            .render_output(
                 renderer,
-                dmabuf.clone(),
+                &mut fb,
                 0,
                 render_elements,
                 smithay::backend::renderer::Color32F::TRANSPARENT,
@@ -880,6 +881,7 @@ impl Cast {
             trace!(cast = ?self.id, "No damage in frame, skipping");
             return Ok(false);
         }
+        drop(fb);
 
         for (data, (stride, offset)) in
             zip(buffer.datas_mut(), zip(dmabuf.strides(), dmabuf.offsets()))

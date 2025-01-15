@@ -213,7 +213,7 @@ where
 {
     fn draw(
         &self,
-        frame: &mut GlowFrame<'_>,
+        frame: &mut GlowFrame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -255,20 +255,19 @@ where
 {
     fn draw(
         &self,
-        frame: &mut UdevFrame<'a, '_>,
+        frame: &mut UdevFrame<'a, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
-        use super::AsGlowFrame;
         if self.corner_radius == 0.0 {
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             // Override texture shader with our uniforms
-            let glow_frame = frame.glow_frame_mut();
+            let glow_frame = frame.as_mut();
             let program = Shaders::get_from_frame(glow_frame).rounded_quad.clone();
-            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame.glow_frame_mut());
+            let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(glow_frame);
 
             let additional_uniforms = vec![
                 Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
@@ -280,7 +279,7 @@ where
             let res = self.element.draw(frame, src, dst, damage, opaque_regions);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
-            BorrowMut::<GlesFrame>::borrow_mut(frame.glow_frame_mut()).clear_tex_program_override();
+            BorrowMut::<GlesFrame>::borrow_mut(frame.as_mut()).clear_tex_program_override();
 
             res
         }

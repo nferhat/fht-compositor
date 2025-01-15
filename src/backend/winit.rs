@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use anyhow::Context;
 use fht_animation::get_monotonic_time;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::egl::EGLDevice;
-use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
 use smithay::backend::winit::{self, WinitGraphicsBackend};
@@ -175,38 +174,31 @@ impl WinitData {
 
     pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
         crate::profile_function!();
-        let renderer = self.backend.renderer();
-        let ref output_elements_result @ OutputElementsResult { ref elements, .. } =
-            fht.output_elements(renderer, &self.output);
 
-        self.backend.bind().context("Failed to bind backend")?;
         let age = self.backend.buffer_age().unwrap();
-        let res = self
-            .damage_tracker
-            .render_output(
-                self.backend.renderer(),
-                age,
-                &elements,
-                [0.1, 0.1, 0.1, 1.0],
-            )
-            .unwrap();
+        let res = self.backend.bind().and_then(|(renderer, mut fb)| {
+            let OutputElementsResult { ref elements, .. } =
+                fht.output_elements(renderer, &self.output);
+            self.damage_tracker
+                .render_output(renderer, &mut fb, age, &elements, [0.1, 0.1, 0.1, 1.0])
+                .map_err(|err| match err {
+                    OutputDamageTrackerError::Rendering(err) => err.into(),
+                    _ => unreachable!(),
+                })
+        })?;
 
         fht.update_primary_scanout_output(&self.output, &res.states);
+        // FIXME: Screencopy rendering
+        // fht.render_screencopy_without_damage(&self.output, renderer, output_elements_result);
+
         let has_damage = res.damage.is_some();
-        fht.render_screencopy_without_damage(
-            &self.output,
-            self.backend.renderer(),
-            output_elements_result,
-        );
-
         if let Some(damage) = res.damage {
+            // FIXME: Screencopy rendering
+            // fht.render_screencopy_with_damage(&self.output, renderer, output_elements_result);
             self.backend.submit(Some(damage)).unwrap();
-            fht.render_screencopy_with_damage(
-                &self.output,
-                self.backend.renderer(),
-                output_elements_result,
-            );
+        }
 
+        if has_damage {
             let mut presentation_feedbacks =
                 fht.take_presentation_feedback(&self.output, &res.states);
             let mode = self

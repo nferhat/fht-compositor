@@ -6,8 +6,6 @@ use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
-use super::AsGlowFrame;
-#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 /// NewType wrapper to impl [`TextureShaderElement`] for [`UdevRenderer`]
@@ -65,7 +63,7 @@ impl Element for FhtTextureShaderElement {
 impl RenderElement<GlowRenderer> for FhtTextureShaderElement {
     fn draw(
         &self,
-        frame: &mut GlowFrame<'_>,
+        frame: &mut GlowFrame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -93,16 +91,15 @@ impl RenderElement<GlowRenderer> for FhtTextureShaderElement {
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureShaderElement {
     fn draw(
         &self,
-        frame: &mut UdevFrame<'a, '_>,
+        frame: &mut UdevFrame<'a, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
-        let frame = frame.glow_frame_mut();
         <TextureShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,
-            frame,
+            frame.as_mut(),
             src,
             dst,
             damage,

@@ -5,8 +5,6 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 
-use super::AsGlowFrame;
-
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
@@ -32,8 +30,7 @@ impl Shaders {
                 ROUNDED_QUAD_SRC,
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
-                    UniformName::new("geo_size", UniformType::_2f),
-                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("size", UniformType::_2f),
                 ],
             )
             .expect("Shader source should always compile!");
@@ -48,7 +45,7 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let rounded_outline = renderer
+        let border = renderer
             .compile_custom_pixel_shader(
                 BORDER_SRC,
                 &[
@@ -90,7 +87,7 @@ impl Shaders {
             .expect("Shader source should always compile");
 
         let shaders = Self {
-            border: rounded_outline,
+            border,
             box_shadow,
             rounded_quad,
             resizing_texture,
@@ -112,8 +109,8 @@ impl Shaders {
             .expect("Shaders are initialized at startup!")
     }
 
-    pub fn get_from_frame<'a>(frame: &'a GlowFrame<'_>) -> &'a Self {
-        Borrow::<GlesFrame>::borrow(frame.glow_frame())
+    pub fn get_from_frame<'a>(frame: &'a GlowFrame<'_, '_>) -> &'a Self {
+        Borrow::<GlesFrame>::borrow(frame)
             .egl_context()
             .user_data()
             .get()
