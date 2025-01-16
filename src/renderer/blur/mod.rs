@@ -9,15 +9,13 @@
 
 pub mod element;
 
+use std::borrow::BorrowMut;
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
-use smithay::backend::renderer::element::texture::TextureRenderElement;
-use smithay::backend::renderer::element::{Id, Kind};
-use smithay::backend::renderer::gles::element::TextureShaderElement;
-use smithay::backend::renderer::gles::{GlesTexProgram, GlesTexture, Uniform};
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTexProgram, GlesTexture, Uniform};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Blit, Renderer, Texture, TextureFilter};
+use smithay::backend::renderer::{Bind, Blit, Color32F, Frame, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Logical, Rectangle, Size, Transform};
@@ -126,7 +124,7 @@ impl EffectsFramebuffers {
         output: &Output,
         scale: i32,
         config: &fht_compositor_config::Blur,
-    ) {
+    ) -> anyhow::Result<()> {
         // first render layer shell elements
         let elements = layer_elements(renderer, output, Layer::Background)
             .into_iter()
@@ -160,12 +158,12 @@ impl EffectsFramebuffers {
             let sample_buffer = self.sample_buffer();
             render_blur_pass(
                 renderer,
-                sample_buffer,
+                &sample_buffer,
                 &mut render_buffer,
-                blur_down.clone(),
+                &blur_down,
                 half_pixel,
                 config,
-            );
+            )?;
             self.current_buffer.swap();
         }
 
@@ -179,12 +177,12 @@ impl EffectsFramebuffers {
             let sample_buffer = self.sample_buffer();
             render_blur_pass(
                 renderer,
-                sample_buffer,
+                &sample_buffer,
                 &mut render_buffer,
-                blur_up.clone(),
+                &blur_up,
                 half_pixel,
                 config,
-            );
+            )?;
             self.current_buffer.swap();
         }
 
@@ -194,15 +192,15 @@ impl EffectsFramebuffers {
         let tex_fb = renderer.bind(&mut target_texture).unwrap();
         let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
-        renderer
-            .blit(
-                &tex_fb,
-                &mut optimized_blur_fb,
-                Rectangle::from_size(output_rect.size),
-                Rectangle::from_size(output_rect.size),
-                TextureFilter::Linear,
-            )
-            .unwrap();
+        renderer.blit(
+            &tex_fb,
+            &mut optimized_blur_fb,
+            Rectangle::from_size(output_rect.size),
+            Rectangle::from_size(output_rect.size),
+            TextureFilter::Linear,
+        )?;
+
+        Ok(())
     }
 
     /// Get the buffer that was sampled from in the previous pass.
@@ -228,49 +226,46 @@ impl EffectsFramebuffers {
 /// something that looks good, this is up to the user to configure.
 fn render_blur_pass(
     renderer: &mut GlowRenderer,
-    sample_buffer: GlesTexture,
+    sample_buffer: &GlesTexture,
     render_buffer: &mut GlesTexture,
-    blur_program: GlesTexProgram,
+    blur_program: &GlesTexProgram,
     half_pixel: [f32; 2],
     config: &fht_compositor_config::Blur,
-) {
+) -> anyhow::Result<()> {
     // We use a texture render element with a custom GlesTexProgram in order todo the blurring
     // At least this is what swayfx/scenefx do, but they just use gl calls directly.
     let size = sample_buffer.size().to_logical(1, Transform::Normal);
-    let texture = TextureRenderElement::from_static_texture(
-        Id::new(),
-        renderer.id(),
-        (0., 0.),
-        sample_buffer,
-        1,
+
+    let mut fb = renderer.bind(render_buffer)?;
+    // Using GlesFrame since I want to use a custom program
+    let renderer: &mut GlesRenderer = renderer.borrow_mut();
+    let mut frame = renderer.render(
+        &mut fb,
+        size.to_physical_precise_round(1),
         Transform::Normal,
-        None,
-        None,
-        None, // NOTE: the texture size is the same as output_rect
-        None,
-        Kind::Unspecified,
-    );
-    let texture = TextureShaderElement::new(
-        texture,
-        blur_program,
-        vec![
+    )?;
+
+    // Now render
+    frame.clear(
+        Color32F::TRANSPARENT,
+        &[Rectangle::from_size(size).to_physical(1)],
+    )?;
+    frame.render_texture_from_to(
+        &sample_buffer,
+        Rectangle::from_size(sample_buffer.size()).to_f64(),
+        Rectangle::from_size(size).to_physical(1),
+        &[Rectangle::from_size(size).to_physical(1)],
+        &[],
+        Transform::Normal,
+        1.0,
+        Some(blur_program),
+        &[
             Uniform::new("radius", config.radius),
             Uniform::new("half_pixel", half_pixel),
         ],
-    );
+    )?;
 
-    // NOTE: I think the binding/unbinding should always work since if that fails the EGL context
-    // is not current and in this case its just game over for the render state.
-    //
-    // I should probably confirm this
-    let mut fb = renderer.bind(render_buffer).expect("gl should bind");
-    let _ = render_elements(
-        renderer,
-        &mut fb,
-        size.to_physical_precise_round(1),
-        1.0,
-        Transform::Normal,
-        ([&texture]).iter(),
-    )
-    .unwrap();
+    let _sync_point = frame.finish()?;
+
+    Ok(())
 }
