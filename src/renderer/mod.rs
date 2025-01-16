@@ -250,13 +250,16 @@ impl Fht {
             && fx_buffers.optimized_blur_dirty
             && monitor.has_blur()
         {
-            fx_buffers.update_optimized_blur_buffer(
+            if let Err(err) = fx_buffers.update_optimized_blur_buffer(
                 renderer.glow_renderer_mut(),
                 output,
                 scale,
                 &self.config.decorations.blur,
-            );
-            fx_buffers.optimized_blur_dirty = false;
+            ) {
+                error!(?err, "Failed to update optimized blur buffer");
+            } else {
+                fx_buffers.optimized_blur_dirty = false;
+            }
         }
 
         rv
