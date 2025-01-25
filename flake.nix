@@ -37,6 +37,7 @@
       wayland,
       pkg-config,
       rustPlatform,
+      installShellFiles,
       # Optional stuff that can be toggled on by the user.
       # These correspond to cargo features.
       withUdevBackend ? true,
@@ -55,6 +56,17 @@
             --replace-fail '/usr/bin' "$out/bin"
         '';
 
+        preFixup = ''
+          mkdir completions
+
+          for shell in bash fish zsh ; do
+            $out/bin/fht-compositor generate-completions $shell > completions/fht-compositor.$shell
+          done
+
+          installShellCompletion completions/*
+          installShellCompletion
+        '';
+
         cargoLock = {
           # NOTE: Since dependencies such as smithay are only distributed with git,
           # we are forced to allow cargo to fetch them.
@@ -64,7 +76,7 @@
 
         strictDeps = true;
 
-        nativeBuildInputs = [rustPlatform.bindgenHook pkg-config];
+        nativeBuildInputs = [rustPlatform.bindgenHook pkg-config installShellFiles];
         buildInputs =
           [libGL libdisplay-info libinput seatd libxkbcommon mesa wayland]
           ++ lib.optional withXdgScreenCast dbus
