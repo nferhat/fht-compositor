@@ -679,7 +679,7 @@ impl Tile {
                         renderer,
                         alpha,
                         scale,
-                        tile_geometry,
+                        window_geometry,
                         shadow_config.sigma,
                         border_radius,
                         color,
