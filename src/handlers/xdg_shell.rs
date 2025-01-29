@@ -269,8 +269,9 @@ impl XdgShellHandler for State {
                         .move_window_to_output(&window, &requested, true);
                 }
 
-                if self.fht.space.fullscreen_window(&window, true) {
-                    window.request_fullscreen(true);
+                window.request_fullscreen(true);
+                if !self.fht.space.fullscreen_window(&window, true) {
+                    window.request_fullscreen(false);
                 }
             }
         }

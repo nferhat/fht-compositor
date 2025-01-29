@@ -37,6 +37,7 @@
       wayland,
       pkg-config,
       rustPlatform,
+      installShellFiles,
       # Optional stuff that can be toggled on by the user.
       # These correspond to cargo features.
       withUdevBackend ? true,
@@ -55,6 +56,17 @@
             --replace-fail '/usr/bin' "$out/bin"
         '';
 
+        preFixup = ''
+          mkdir completions
+
+          for shell in bash fish zsh ; do
+            $out/bin/fht-compositor generate-completions $shell > completions/fht-compositor.$shell
+          done
+
+          installShellCompletion completions/*
+          installShellCompletion
+        '';
+
         cargoLock = {
           # NOTE: Since dependencies such as smithay are only distributed with git,
           # we are forced to allow cargo to fetch them.
@@ -64,7 +76,7 @@
 
         strictDeps = true;
 
-        nativeBuildInputs = [rustPlatform.bindgenHook pkg-config];
+        nativeBuildInputs = [rustPlatform.bindgenHook pkg-config installShellFiles];
         buildInputs =
           [libGL libdisplay-info libinput seatd libxkbcommon mesa wayland]
           ++ lib.optional withXdgScreenCast dbus
@@ -274,6 +286,24 @@
         }: let
           cfg = config.programs.fht-compositor;
           tomlFormat = pkgs.formats.toml {};
+
+          # Custom config format that also runs checks on the final config file.
+          configFormat = {
+            inherit (tomlFormat) type;
+            generate = name: value: let
+              # First we generate the result with tomlFormat.
+              result = tomlFormat.generate name value;
+              # Then we evaluate the result
+              checkResult = pkgs.runCommand "fht-compositor-check-configuration" {} ''
+                mkdir -p $out;
+                ${cfg.package}/bin/fht-compositor --config-path ${result} check-configuration > $out/stdout
+                echo $? > $out/exit-code
+              '';
+
+              exitCode = lib.strings.toInt (builtins.readFile "${checkResult}/exit-code");
+            in if exitCode == 0 then result
+              else throw (builtins.readFile "${checkResult}/stdout");
+          };
         in {
           options.programs.fht-compositor = {
             enable = lib.mkEnableOption "fht-compositor";
@@ -284,7 +314,7 @@
             };
 
             settings = lib.mkOption {
-              type = tomlFormat.type;
+              type = configFormat.type;
               default = {};
               example = lib.literalExpression ''
                 {
@@ -322,7 +352,7 @@
             home.packages = [cfg.package];
             xdg.configFile.fht-compositor-config = lib.mkIf (cfg.settings != {}) {
               target = "fht/compositor.toml";
-              source = tomlFormat.generate "fht-compositor-config" cfg.settings;
+              source = configFormat.generate "fht-compositor-config" cfg.settings;
             };
           };
         };

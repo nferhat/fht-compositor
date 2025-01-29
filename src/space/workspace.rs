@@ -1479,7 +1479,40 @@ impl Workspace {
                 // window back to its original place.
                 self.arrange_tiles(true);
             }
+        } else {
+            // If the window is floating, avoid letting it go out of bounds.
+            // We just give it a small edge around the screen
+            const MINIMUM_VISIBLE_SIZE: i32 = 100;
+            let minimum_rect = calculate_work_area(&self.output, MINIMUM_VISIBLE_SIZE);
+            let tile = self
+                .tiles
+                .iter_mut()
+                .find(|tile| tile.window() == window)
+                .unwrap();
+            let tile_geo = tile.geometry();
+
+            let mut target = Point::<_, Logical>::from((Option::<i32>::None, None));
+
+            if tile_geo.loc.x > minimum_rect.loc.x + minimum_rect.size.w {
+                target.x = Some(minimum_rect.loc.x + minimum_rect.size.w);
+            } else if tile_geo.loc.x + tile_geo.size.w < minimum_rect.loc.x {
+                target.x = Some(-tile_geo.size.w + MINIMUM_VISIBLE_SIZE);
+            }
+
+            if tile_geo.loc.y > minimum_rect.loc.y + minimum_rect.size.h {
+                target.y = Some(minimum_rect.loc.y + minimum_rect.size.h);
+            } else if tile_geo.loc.y + tile_geo.size.h < minimum_rect.loc.y {
+                target.y = Some(-tile_geo.size.h + MINIMUM_VISIBLE_SIZE);
+            }
+
+            let new_loc = Point::from((
+                target.x.unwrap_or(tile_geo.loc.x),
+                target.y.unwrap_or(tile_geo.loc.y),
+            ));
+
+            tile.set_location(new_loc, true);
         }
+
         true
     }
 

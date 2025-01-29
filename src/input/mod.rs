@@ -552,7 +552,7 @@ impl State {
                             event.relative_direction(Axis::Vertical),
                         );
                         frame = frame.value(Axis::Vertical, vertical_amount);
-                        if let Some(discrete) = horizontal_amount_discrete {
+                        if let Some(discrete) = vertical_amount_discrete {
                             frame = frame.v120(Axis::Vertical, discrete as i32);
                         }
                     }

@@ -202,7 +202,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 fn check_configuration(cli: cli::Cli) -> ! {
     match fht_compositor_config::load(cli.config_path) {
         Ok(_) => {
-            info!("There's no issues with your configuration");
+            info!("There are no issues with your configuration");
             std::process::exit(0)
         }
         Err(err) => match err {
