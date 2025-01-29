@@ -7,7 +7,7 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
-const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
+const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
 const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
 const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
@@ -15,7 +15,7 @@ const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
 pub struct Shaders {
     pub border: GlesPixelProgram,
     pub box_shadow: GlesPixelProgram,
-    pub rounded_quad: GlesTexProgram,
+    pub rounded_window: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
     pub blur_down: GlesTexProgram,
     pub blur_up: GlesTexProgram,
@@ -25,12 +25,13 @@ impl Shaders {
     pub fn init(renderer: &mut GlowRenderer) {
         let renderer: &mut GlesRenderer = renderer.borrow_mut();
 
-        let rounded_quad = renderer
+        let rounded_window = renderer
             .compile_custom_texture_shader(
-                ROUNDED_QUAD_SRC,
+                ROUNDED_WINDOW_SRC,
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
-                    UniformName::new("size", UniformType::_2f),
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
                 ],
             )
             .expect("Shader source should always compile!");
@@ -89,7 +90,7 @@ impl Shaders {
         let shaders = Self {
             border,
             box_shadow,
-            rounded_quad,
+            rounded_window,
             resizing_texture,
             blur_down,
             blur_up,

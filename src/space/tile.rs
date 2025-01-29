@@ -25,7 +25,7 @@ use crate::egui::EguiRenderElement;
 use crate::renderer::blur::element::BlurElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
-use crate::renderer::rounded_element::RoundedCornerElement;
+use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
@@ -65,7 +65,7 @@ pub struct Tile {
     size_animation: Option<Animation<[i32; 2]>>,
 
     /// Extra damage bag to apply when the tile corners are being rounded.
-    /// This is due to an implementation detail of [`RoundedCornerElement`]
+    /// This is due to an implementation detail of [`RoundedWindowElement`]
     extra_damage: ExtraDamage,
 
     /// The current opening animation.
@@ -86,7 +86,7 @@ pub struct Tile {
 crate::fht_render_elements! {
     TileRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
-        RoundedSurface = RoundedCornerElement<WaylandSurfaceRenderElement<R>>,
+        RoundedSurface = RoundedWindowElement<R>,
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
         Decoration = FhtPixelShaderElement,
@@ -611,13 +611,13 @@ impl Tile {
                     // this with the preview window)
                     //
                     // To counter this, we check here if the surface is going to clip.
-                    if RoundedCornerElement::will_clip(
+                    if RoundedWindowElement::will_clip(
                         &e,
                         scale as f64,
                         window_geometry,
                         inner_radius,
                     ) {
-                        let rounded = RoundedCornerElement::new(
+                        let rounded = RoundedWindowElement::new(
                             e,
                             inner_radius,
                             window_geometry,

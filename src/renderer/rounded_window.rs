@@ -1,6 +1,7 @@
 use std::borrow::BorrowMut;
 
 use glam::{Mat3, Vec2};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
@@ -8,23 +9,24 @@ use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions}
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::shaders::Shaders;
+use super::FhtRenderer;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 // NOTE: While no, we do not support fractional scaling in the compositor, to comply with Smithay's
 // (Render)Element traits, the functions exposed here use f64 scales
 #[derive(Debug)]
-pub struct RoundedCornerElement<E: Element> {
-    element: E,
+pub struct RoundedWindowElement<R: FhtRenderer> {
+    element: WaylandSurfaceRenderElement<R>,
     corner_radius: f32,
     input_to_geo: Mat3,
     // where is the rounded rectangle that is going to contain everything.
     geo: Rectangle<i32, Logical>,
 }
 
-impl<E: Element> RoundedCornerElement<E> {
+impl<R: FhtRenderer> RoundedWindowElement<R> {
     pub fn new(
-        element: E,
+        element: WaylandSurfaceRenderElement<R>,
         corner_radius: f32,
         geometry: Rectangle<i32, Logical>,
         scale: impl Into<Scale<f64>>,
@@ -66,7 +68,7 @@ impl<E: Element> RoundedCornerElement<E> {
     }
 
     pub fn will_clip(
-        elem: &E,
+        elem: &WaylandSurfaceRenderElement<R>,
         scale: impl Into<Scale<f64>>,
         geometry: Rectangle<i32, Logical>,
         corner_radius: f32,
@@ -138,7 +140,7 @@ impl<E: Element> RoundedCornerElement<E> {
     }
 }
 
-impl<E: Element> Element for RoundedCornerElement<E> {
+impl<R: FhtRenderer> Element for RoundedWindowElement<R> {
     fn id(&self) -> &Id {
         self.element.id()
     }
@@ -206,11 +208,7 @@ impl<E: Element> Element for RoundedCornerElement<E> {
     }
 }
 
-impl<E> RenderElement<GlowRenderer> for RoundedCornerElement<E>
-where
-    E: Element, // base requirement for ^^^^^^^^^^^^
-    E: RenderElement<GlowRenderer>,
-{
+impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
     fn draw(
         &self,
         frame: &mut GlowFrame<'_, '_>,
@@ -223,15 +221,17 @@ where
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             // Override texture shader with our uniforms
-            let program = Shaders::get_from_frame(frame).rounded_quad.clone();
+            let program = Shaders::get_from_frame(frame).rounded_window.clone();
             let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame);
 
-            let additional_uniforms = vec![
-                Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
-                Uniform::new("corner_radius", self.corner_radius),
-                super::mat3_uniform("input_to_geo", self.input_to_geo),
-            ];
-            gles_frame.override_default_tex_program(program, additional_uniforms);
+            gles_frame.override_default_tex_program(
+                program,
+                vec![
+                    Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
+                    Uniform::new("corner_radius", self.corner_radius),
+                    super::mat3_uniform("input_to_geo", self.input_to_geo),
+                ],
+            );
 
             let res = self.element.draw(frame, src, dst, damage, opaque_regions);
 
@@ -248,11 +248,7 @@ where
 }
 
 #[cfg(feature = "udev-backend")]
-impl<'a, E> RenderElement<UdevRenderer<'a>> for RoundedCornerElement<E>
-where
-    E: Element, // base requirement for ^^^^^^^^^^^^
-    E: RenderElement<UdevRenderer<'a>>,
-{
+impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'a>> {
     fn draw(
         &self,
         frame: &mut UdevFrame<'a, '_, '_>,
@@ -264,21 +260,20 @@ where
         if self.corner_radius == 0.0 {
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
-            // Override texture shader with our uniforms
             let glow_frame = frame.as_mut();
-            let program = Shaders::get_from_frame(glow_frame).rounded_quad.clone();
+            let program = Shaders::get_from_frame(glow_frame).rounded_window.clone();
             let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(glow_frame);
 
-            let additional_uniforms = vec![
-                Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
-                Uniform::new("corner_radius", self.corner_radius),
-                super::mat3_uniform("input_to_geo", self.input_to_geo),
-            ];
-            gles_frame.override_default_tex_program(program, additional_uniforms);
+            gles_frame.override_default_tex_program(
+                program,
+                vec![
+                    Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
+                    Uniform::new("corner_radius", self.corner_radius),
+                    super::mat3_uniform("input_to_geo", self.input_to_geo),
+                ],
+            );
 
             let res = self.element.draw(frame, src, dst, damage, opaque_regions);
-
-            // Never forget to reset since its not our responsibility to manage texture shaders.
             BorrowMut::<GlesFrame>::borrow_mut(frame.as_mut()).clear_tex_program_override();
 
             res

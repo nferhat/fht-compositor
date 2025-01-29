@@ -13,11 +13,6 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::FhtRenderer;
 
 /// A render element to render blurred area of the background of an [`Output`]
-///
-/// This render element uses [`EffectsFramebuffers::optimized_blur`] to get the blurred contents
-/// to render into a texture. This will **NOT** work unless
-/// [`BlurPrologueElement`](super::prologue::BlurPrologueElement) has been added to your render
-/// element pipeline
 #[derive(Debug)]
 pub struct BlurElement {
     // What we do at the end of the day is sample from the optimized_blur buffer that has been
@@ -147,8 +142,8 @@ impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
-        <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
-            &self.tex,
+        <Self as RenderElement<GlowRenderer>>::draw(
+            &self,
             frame.as_mut(),
             src,
             dst,
