@@ -640,6 +640,7 @@ impl Tile {
                     window_geometry.size,
                 ),
                 window_geometry.loc.to_physical(scale),
+                inner_radius,
                 scale,
             );
             elements.push(blur_element.into());
