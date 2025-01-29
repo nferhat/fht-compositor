@@ -221,17 +221,14 @@ impl Fht {
             elements: monitor_elements,
             has_fullscreen,
         } = monitor.render(renderer, scale);
+
         if !has_fullscreen {
             rv.elements
                 .extend(layer_elements(renderer, output, Layer::Top));
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-        } else {
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-            rv.elements
-                .extend(layer_elements(renderer, output, Layer::Top));
         }
+
+        rv.elements
+            .extend(monitor_elements.into_iter().map(Into::into));
 
         // Finally we have background and bottom elements.
         let background = layer_elements(renderer, output, Layer::Bottom)
