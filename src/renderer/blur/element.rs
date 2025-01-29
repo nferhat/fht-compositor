@@ -1,6 +1,8 @@
+use std::borrow::BorrowMut;
+
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::GlesError;
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::output::Output;
@@ -9,6 +11,7 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transfo
 use super::EffectsFramebuffers;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
+use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::FhtRenderer;
 
@@ -18,6 +21,7 @@ pub struct BlurElement {
     // What we do at the end of the day is sample from the optimized_blur buffer that has been
     // prepared. We override the src argument in order to get only the region we need.
     tex: FhtTextureElement,
+    corner_radius: f32,
 }
 
 impl BlurElement {
@@ -34,14 +38,17 @@ impl BlurElement {
         output: &Output,
         sample_area: Rectangle<i32, Logical>,
         loc: Point<i32, Physical>,
+        corner_radius: f32,
         scale: i32,
     ) -> Self {
         let fbs = &mut *EffectsFramebuffers::get(output);
+        let texture = fbs.optimized_blur.clone();
+
         let texture = TextureRenderElement::from_static_texture(
             Id::new(),
             renderer.id(),
             loc.to_f64(),
-            fbs.optimized_blur.clone(),
+            texture,
             scale,
             Transform::Normal,
             Some(1.0),
@@ -58,6 +65,7 @@ impl BlurElement {
 
         Self {
             tex: texture.into(),
+            corner_radius,
         }
     }
 }
@@ -117,14 +125,47 @@ impl RenderElement<GlowRenderer> for BlurElement {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
-        <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
-            &self.tex,
-            frame,
-            src,
-            dst,
-            damage,
-            opaque_regions,
-        )
+        if self.corner_radius == 0.0 {
+            <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
+                &self.tex,
+                frame,
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            )
+        } else {
+            let program = Shaders::get_from_frame(frame).rounded_texture.clone();
+            let gles_frame: &mut GlesFrame = frame.borrow_mut();
+            gles_frame.override_default_tex_program(
+                program,
+                vec![
+                    Uniform::new(
+                        "geo",
+                        [
+                            dst.loc.x as f32,
+                            dst.loc.y as f32,
+                            dst.size.w as f32,
+                            dst.size.h as f32,
+                        ],
+                    ),
+                    Uniform::new("corner_radius", self.corner_radius),
+                ],
+            );
+
+            let res = <TextureRenderElement<GlesTexture> as RenderElement<GlesRenderer>>::draw(
+                &self.tex.0,
+                gles_frame,
+                src,
+                dst,
+                damage,
+                opaque_regions,
+            );
+
+            gles_frame.clear_tex_program_override();
+
+            res
+        }
     }
 
     fn underlying_storage(&self, renderer: &mut GlowRenderer) -> Option<UnderlyingStorage<'_>> {
