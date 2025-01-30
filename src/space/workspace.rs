@@ -1746,23 +1746,23 @@ impl Workspace {
                     Point::<i32, Logical>::from((x, y))
                 })
             })
-            .unwrap_or_default()
-            .to_physical_precise_round(scale);
+            .unwrap_or_default();
+        let render_offset_physical = render_offset.to_physical_precise_round(scale);
 
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
 
-            let fullscreen_elements =
-                tile.render(renderer, scale, 1.0, &self.output, true)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    });
+            let fullscreen_elements = tile
+                .render(renderer, scale, 1.0, &self.output, render_offset, true)
+                .map(|element| {
+                    RelocateRenderElement::from_element(
+                        element,
+                        render_offset_physical,
+                        Relocate::Relative,
+                    )
+                    .into()
+                });
 
             if skip_alpha_animation_idx.is_none() {
                 return fullscreen_elements.collect();
@@ -1772,9 +1772,12 @@ impl Workspace {
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
             let element = closing_tile.render(scale, alpha);
-            let element =
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into();
+            let element = RelocateRenderElement::from_element(
+                element,
+                render_offset_physical,
+                Relocate::Relative,
+            )
+            .into();
             elements.push(element);
         }
 
@@ -1786,12 +1789,17 @@ impl Workspace {
             };
 
             // Active gets rendered above others.
-            elements.extend(tile.render(renderer, scale, alpha, &self.output, true).map(
-                |element| {
-                    RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+            elements.extend(
+                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset_physical,
+                            Relocate::Relative,
+                        )
                         .into()
-                },
-            ));
+                    }),
+            );
         }
 
         // Now render others, just fine.
@@ -1808,11 +1816,11 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, false)
+                tile.render(renderer, scale, alpha, &self.output, render_offset, false)
                     .map(|element| {
                         RelocateRenderElement::from_element(
                             element,
-                            render_offset,
+                            render_offset_physical,
                             Relocate::Relative,
                         )
                         .into()
