@@ -688,11 +688,21 @@ impl Default for Shadow {
     }
 }
 
+const fn default_blur_passes() -> usize {
+    2
+}
+
+const fn default_blur_radius() -> f32 {
+    5.0
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Blur {
     pub disable: bool,
+    #[serde(default = "default_blur_passes")]
     pub passes: usize,
+    #[serde(default = "default_blur_radius")]
     pub radius: f32,
 }
 
@@ -700,8 +710,8 @@ impl Default for Blur {
     fn default() -> Self {
         Self {
             disable: false,
-            passes: 2,
-            radius: 5f32,
+            passes: default_blur_passes(),
+            radius: default_blur_radius(),
         }
     }
 }
