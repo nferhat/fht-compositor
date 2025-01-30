@@ -448,7 +448,17 @@ impl Tile {
             return;
         }
 
-        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0, output, false);
+        // FIXME: Blur with closing tiles is kinda wonky, but you shouldn't notice it unless
+        // you have a *very* slow closing animation
+        let elements = self.render_inner(
+            renderer,
+            (0, 0).into(),
+            scale,
+            1.0,
+            output,
+            (0, 0).into(),
+            false,
+        );
         self.close_animation_snapshot = Some(elements);
     }
 
@@ -472,6 +482,7 @@ impl Tile {
         scale: i32,
         alpha: f32,
         output: &Output,
+        render_offset: Point<i32, Logical>,
         active: bool,
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
@@ -636,7 +647,7 @@ impl Tile {
                 renderer,
                 output,
                 Rectangle::new(
-                    self.visual_location() + self.window_loc(),
+                    self.visual_location() + self.window_loc() + render_offset,
                     window_geometry.size,
                 ),
                 window_geometry.loc.to_physical(scale),
@@ -701,6 +712,7 @@ impl Tile {
         scale: i32,
         alpha: f32,
         output: &Output,
+        render_offset: Point<i32, Logical>,
         active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
@@ -715,8 +727,15 @@ impl Tile {
             let glow_renderer = renderer.glow_renderer_mut();
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
-            let elements =
-                self.render_inner(glow_renderer, (0, 0).into(), scale, alpha, output, active);
+            let elements = self.render_inner(
+                glow_renderer,
+                (0, 0).into(),
+                scale,
+                alpha,
+                output,
+                render_offset,
+                active,
+            );
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
@@ -775,6 +794,7 @@ impl Tile {
                 scale,
                 alpha,
                 output,
+                render_offset,
                 active,
             )
         }
