@@ -37,7 +37,7 @@ impl WinitData {
         let (mut backend, winit) = winit::init_from_attributes::<GlowRenderer>(window_attrs)
             .map_err(|err| anyhow::anyhow!("Failed to initialize winit backend: {err}"))?;
         let size = backend.window_size();
-        crate::renderer::shaders::Shaders::init(backend.renderer());
+        crate::renderer::init(backend.renderer());
 
         let token = fht
             .loop_handle
