@@ -7,6 +7,7 @@
 //! This module also has some helpers to create render elements.
 
 pub mod blur;
+mod data;
 pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;
@@ -15,11 +16,13 @@ pub mod shaders;
 pub mod texture_element;
 pub mod texture_shader_element;
 
+use std::borrow::BorrowMut;
+
 use anyhow::Context;
 use blur::EffectsFramebuffers;
-use glam::Mat3;
+use glam::{Mat3, Vec2};
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::allocator::{Buffer, Fourcc};
+use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
@@ -43,7 +46,7 @@ use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
-use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
@@ -663,6 +666,12 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
+/// Inititalize needed structs and shaders for custom rendering.
+pub fn init(renderer: &mut GlowRenderer) {
+    shaders::Shaders::init(renderer);
+    data::RendererData::init(renderer.borrow_mut());
+}
+
 pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,
@@ -897,4 +906,49 @@ pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {
             transpose: false,
         },
     )
+}
+
+// Copied from smithay, adapted to use glam structs
+fn build_texture_mat(
+    src: Rectangle<f64, Buffer>,
+    dest: Rectangle<i32, Physical>,
+    texture: Size<i32, Buffer>,
+    transform: Transform,
+) -> Mat3 {
+    let dst_src_size = transform.transform_size(src.size);
+    let scale = dst_src_size.to_f64() / dest.size.to_f64();
+
+    let mut tex_mat = Mat3::IDENTITY;
+    // first bring the damage into src scale
+    tex_mat *= Mat3::from_scale(Vec2::new(scale.x as f32, scale.y as f32));
+
+    // then compensate for the texture transform
+    let transform_mat = Mat3::from_cols_array(transform.matrix().as_ref());
+    let translation = match transform {
+        Transform::Normal => Mat3::IDENTITY,
+        Transform::_90 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.w as f32)),
+        Transform::_180 => {
+            Mat3::from_translation(Vec2::new(dst_src_size.w as f32, dst_src_size.h as f32))
+        }
+        Transform::_270 => Mat3::from_translation(Vec2::new(dst_src_size.h as f32, 0f32)),
+        Transform::Flipped => Mat3::from_translation(Vec2::new(dst_src_size.w as f32, 0f32)),
+        Transform::Flipped90 => Mat3::IDENTITY,
+        Transform::Flipped180 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.h as f32)),
+        Transform::Flipped270 => {
+            Mat3::from_translation(Vec2::new(dst_src_size.h as f32, dst_src_size.w as f32))
+        }
+    };
+    tex_mat *= transform_mat;
+    tex_mat *= translation;
+
+    // now we can add the src crop loc, the size already done implicit by the src size
+    tex_mat = Mat3::from_translation(Vec2::new(src.loc.x as f32, src.loc.y as f32)) * tex_mat;
+
+    // at last we have to normalize the values for UV space
+    tex_mat *= Mat3::from_scale(Vec2::new(
+        (1.0f64 / texture.w as f64) as f32,
+        (1.0f64 / texture.h as f64) as f32,
+    ));
+
+    tex_mat
 }
