@@ -643,6 +643,9 @@ impl Tile {
         };
 
         if !self.config.blur_disabled && self.has_transparent_region() {
+            // TODO: Explore better conditions for optimized blur?
+            let optimized = is_floating;
+
             let blur_element = BlurElement::new(
                 renderer,
                 output,
@@ -652,6 +655,7 @@ impl Tile {
                 ),
                 window_geometry.loc.to_physical(scale),
                 inner_radius,
+                optimized,
                 scale,
             );
             elements.push(blur_element.into());
