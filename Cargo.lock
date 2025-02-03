@@ -2527,7 +2527,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/smithay/Smithay?branch=feature%2Fgl_framebuffer_type#66f198ffd1d07839443bc6166cb975a117fcab24"
+source = "git+https://github.com/smithay/Smithay?branch=feature%2Fgl_framebuffer_type#29d7079a349db6af974c91609a80903e198a0f8e"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -2601,7 +2601,7 @@ dependencies = [
 [[package]]
 name = "smithay-drm-extras"
 version = "0.1.0"
-source = "git+https://github.com/smithay/Smithay?branch=feature%2Fgl_framebuffer_type#66f198ffd1d07839443bc6166cb975a117fcab24"
+source = "git+https://github.com/smithay/Smithay?branch=feature%2Fgl_framebuffer_type#29d7079a349db6af974c91609a80903e198a0f8e"
 dependencies = [
  "drm",
  "libdisplay-info",

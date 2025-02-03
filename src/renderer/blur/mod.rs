@@ -15,14 +15,14 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use anyhow::Context;
-use glam::Mat3;
+use glam::{Mat3, Vec2};
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Frame, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Logical, Rectangle, Size, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;
@@ -92,14 +92,14 @@ impl EffectsFramebuffers {
 
         fn create_buffer(renderer: &mut impl FhtRenderer, size: Size<i32, Logical>) -> GlesTexture {
             renderer
-                .create_buffer(Format::Xbgr8888, size.to_buffer(1, Transform::Normal))
+                .create_buffer(Format::Abgr8888, size.to_buffer(1, Transform::Normal))
                 .expect("gl should always be able to create buffers")
         }
 
         let this = EffectsFramebuffers {
             optimized_blur: renderer
                 .create_buffer(
-                    Format::Xbgr8888,
+                    Format::Abgr8888,
                     output_size.to_buffer(1, Transform::Normal),
                 )
                 .unwrap(),
@@ -175,7 +175,7 @@ impl EffectsFramebuffers {
             0.5 / (output_rect.size.h as f32 * 2.0),
         ];
         // FIXME: Why we need inclusive here but down is exclusive?
-        for _ in 0..=config.passes {
+        for _ in 0..config.passes {
             let mut render_buffer = self.render_buffer();
             let sample_buffer = self.sample_buffer();
             render_blur_pass_with_frame(
@@ -191,7 +191,7 @@ impl EffectsFramebuffers {
 
         // Now blit from the last render buffer into optimized_blur
         // We are already bound so its just a blit
-        let mut target_texture = self.render_buffer();
+        let mut target_texture = self.sample_buffer();
         let tex_fb = renderer.bind(&mut target_texture).unwrap();
         let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
@@ -383,6 +383,183 @@ fn render_blur_pass_with_frame(
     })??;
 
     let _sync_point = frame.finish()?;
+
+    Ok(())
+}
+
+// Renders a blur pass using gl code bypassing smithay's Frame mechanisms
+//
+// When rendering blur in real-time (for windows, for example) there should not be a wait for
+// fencing/finishing since this will be done when sending the fb to the output. Using a Frame
+// forces us to do that.
+unsafe fn render_blur_pass_with_gl(
+    gl: &ffi::Gles2,
+    vbos: &[u32; 2],
+    debug: bool,
+    supports_instancing: bool,
+    projection_matrix: Mat3,
+    // The buffers used for blurring
+    sample_buffer: &GlesTexture,
+    render_buffer: &mut GlesTexture,
+    // The current blur program + config
+    blur_program: &shader::BlurShader,
+    half_pixel: [f32; 2],
+    config: &fht_compositor_config::Blur,
+    // dst is the region that should have blur
+    _src: Rectangle<f64, Buffer>,
+    _dst: Rectangle<i32, Physical>,
+) -> Result<(), GlesError> {
+    // FIXME: I can't get things to render with the correct src/dst???
+    let dst = Rectangle::from_size(Size::from((1920, 1080)));
+    let src = Rectangle::from_size(Size::from((1920., 1080.)));
+
+    // FIXME: Should we call gl.Finish() when done rendering this pass? If yes, should we check
+    // if the gl context is shared or not? What about fencing, we don't have access to that
+
+    // PERF: Instead of taking the whole src/dst as damage, adapt the code to run with only the
+    // damaged window? This would cause us to make a custom WaylandSurfaceRenderElement to blur out
+    // stuff. Complicated.
+
+    // First bind to our render buffer
+    let mut render_buffer_fbo = 0;
+    {
+        gl.GenFramebuffers(1, &mut render_buffer_fbo as *mut _);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, render_buffer_fbo);
+        gl.FramebufferTexture2D(
+            ffi::FRAMEBUFFER,
+            ffi::COLOR_ATTACHMENT0,
+            ffi::TEXTURE_2D,
+            render_buffer.tex_id(),
+            0,
+        );
+
+        let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+        if status != ffi::FRAMEBUFFER_COMPLETE {
+            return Err(GlesError::FramebufferBindingError);
+        }
+    }
+
+    let mat =
+        Mat3::from_translation(Vec2::new(dst.loc.x as f32, dst.loc.y as f32)) * projection_matrix;
+    let tex_size = sample_buffer.size();
+    let src_size = src.size;
+
+    if tex_size.is_empty() || src_size.is_empty() {
+        return Ok(());
+    }
+
+    let mut tex_mat = super::build_texture_mat(src, dst, tex_size, Transform::Normal);
+    if sample_buffer.is_y_inverted() {
+        tex_mat *= Mat3::from_cols_array(&[1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
+    }
+
+    gl.Disable(ffi::BLEND);
+
+    let dest_size = dst.size;
+    let rect_constrained_loc = dst.loc.constrain(Rectangle::from_size(dest_size));
+    let rect_clamped_size = dst.size.clamp(
+        (0, 0),
+        (dest_size.to_point() - rect_constrained_loc).to_size(),
+    );
+
+    let rect = Rectangle::new(rect_constrained_loc, rect_clamped_size);
+    let damage = [
+        rect.loc.x as f32,
+        rect.loc.y as f32,
+        rect.size.w as f32,
+        rect.size.h as f32,
+    ];
+
+    let mut vertices = Vec::with_capacity(4);
+    let damage_len = if supports_instancing {
+        vertices.extend(damage);
+        vertices.len() / 4
+    } else {
+        for _ in 0..6 {
+            // Add the 4 f32s per damage rectangle for each of the 6 vertices.
+            vertices.extend_from_slice(&damage);
+        }
+
+        1
+    };
+
+    // SAFETY: internal texture should always have a format
+    // We also use Abgr8888 which is known and confirmed
+    let (internal_format, _, _) = fourcc_to_gl_formats(sample_buffer.format().unwrap()).unwrap();
+    let variant = blur_program.variant_for_format(Some(internal_format), false);
+
+    let program = if debug {
+        &variant.debug
+    } else {
+        &variant.normal
+    };
+
+    gl.ActiveTexture(ffi::TEXTURE0);
+    gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
+    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+    gl.UseProgram(program.program);
+
+    gl.Uniform1i(program.uniform_tex, 0);
+    gl.UniformMatrix3fv(
+        program.uniform_matrix,
+        1,
+        ffi::FALSE,
+        mat.as_ref() as *const f32,
+    );
+    gl.UniformMatrix3fv(
+        program.uniform_tex_matrix,
+        1,
+        ffi::FALSE,
+        tex_mat.as_ref() as *const f32,
+    );
+    gl.Uniform1f(program.uniform_alpha, 1.0);
+    gl.Uniform1f(program.uniform_radius, config.radius);
+    gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
+
+    gl.EnableVertexAttribArray(program.attrib_vert as u32);
+    gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
+    gl.VertexAttribPointer(
+        program.attrib_vert as u32,
+        2,
+        ffi::FLOAT,
+        ffi::FALSE,
+        0,
+        std::ptr::null(),
+    );
+
+    // vert_position
+    gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
+    gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+
+    gl.VertexAttribPointer(
+        program.attrib_vert_position as u32,
+        4,
+        ffi::FLOAT,
+        ffi::FALSE,
+        0,
+        vertices.as_ptr() as *const _,
+    );
+
+    if supports_instancing {
+        gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
+        gl.VertexAttribDivisor(program.attrib_vert_position as u32, 1);
+        gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len as i32);
+    } else {
+        let count = damage_len * 6;
+        gl.DrawArrays(ffi::TRIANGLES, 0, count as i32);
+    }
+
+    gl.BindTexture(ffi::TEXTURE_2D, 0);
+    gl.DisableVertexAttribArray(program.attrib_vert as u32);
+    gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
+
+    // Clean up
+    {
+        gl.Enable(ffi::BLEND);
+        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+    }
 
     Ok(())
 }

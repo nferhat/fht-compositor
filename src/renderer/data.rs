@@ -1,4 +1,4 @@
-use smithay::backend::renderer::gles::{ffi, Capability, GlesRenderer};
+use smithay::backend::renderer::gles::{ffi, Capability, GlesFrame, GlesRenderer};
 
 /// Extra renderer data used for custom drawing with gles FFI.
 ///
@@ -48,6 +48,10 @@ impl RendererData {
 
     pub fn get(renderer: &mut GlesRenderer) -> &Self {
         renderer.egl_context().user_data().get().unwrap()
+    }
+
+    pub fn get_from_frame<'a>(frame: &'a mut GlesFrame<'_, '_>) -> &'a Self {
+        frame.egl_context().user_data().get().unwrap()
     }
 }
 
