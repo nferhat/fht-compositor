@@ -28,6 +28,7 @@ pub enum BlurElement {
     Optimized {
         tex: FhtTextureElement,
         corner_radius: f32,
+        noise: f32,
     },
     /// Use true blur.
     ///
@@ -96,6 +97,7 @@ impl BlurElement {
             Self::Optimized {
                 tex: texture.into(),
                 corner_radius,
+                noise: blur_config.noise,
             }
         } else {
             Self::TrueBlur {
@@ -216,7 +218,11 @@ impl RenderElement<GlowRenderer> for BlurElement {
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         match self {
-            Self::Optimized { tex, corner_radius } => {
+            Self::Optimized {
+                tex,
+                corner_radius,
+                noise,
+            } => {
                 if *corner_radius == 0.0 {
                     <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
                         tex,
@@ -228,7 +234,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     )
                 } else {
                     let program = Shaders::get_from_frame(frame.borrow_mut())
-                        .rounded_texture
+                        .blur_finish
                         .clone();
                     let gles_frame: &mut GlesFrame = frame.borrow_mut();
                     gles_frame.override_default_tex_program(
@@ -244,6 +250,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                 ],
                             ),
                             Uniform::new("corner_radius", *corner_radius),
+                            Uniform::new("noise", *noise),
                         ],
                     );
 
@@ -412,7 +419,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 let (program, additional_uniforms) = if *corner_radius == 0.0 {
                     (None, vec![])
                 } else {
-                    let program = Shaders::get_from_frame(gles_frame).rounded_texture.clone();
+                    let program = Shaders::get_from_frame(gles_frame).blur_finish.clone();
                     (
                         Some(program),
                         vec![
@@ -426,6 +433,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                 ],
                             ),
                             Uniform::new("corner_radius", *corner_radius),
+                            Uniform::new("noise", blur_config.noise),
                         ],
                     )
                 };

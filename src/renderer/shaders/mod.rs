@@ -10,7 +10,7 @@ use super::blur::shader::BlurShaders;
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
-const ROUNDED_TEXTURE_SRC: &str = include_str!("./rounded-texture.frag");
+const BLUR_FINISH_SRC: &str = include_str!("./blur-finish.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
 pub(super) const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
 pub(super) const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
@@ -22,8 +22,8 @@ pub struct Shaders {
     // rounded_window => complex shader that takes into account subsurface position through
     // matrices, only used in src/space/tile.rs
     pub rounded_window: GlesTexProgram,
-    // rounded_texture => simple shader that just rounds off a passed in texture.
-    pub rounded_texture: GlesTexProgram,
+    // blur_finish => apply rounded corners and additional effects
+    pub blur_finish: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
     pub blur: BlurShaders,
 }
@@ -42,11 +42,12 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let rounded_texture = renderer
+        let blur_finish = renderer
             .compile_custom_texture_shader(
-                ROUNDED_TEXTURE_SRC,
+                BLUR_FINISH_SRC,
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("noise", UniformType::_1f),
                     UniformName::new("geo", UniformType::_4f),
                 ],
             )
@@ -91,7 +92,7 @@ impl Shaders {
             border,
             box_shadow,
             rounded_window,
-            rounded_texture,
+            blur_finish,
             resizing_texture,
             blur,
         };
