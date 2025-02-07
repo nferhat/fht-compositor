@@ -32,7 +32,7 @@ impl PointerConstraintsHandler for State {
     ) {
         // Implementation copied from anvil
         if with_pointer_constraint(surface, pointer, |constraint| {
-            constraint.map_or(false, |c| c.is_active())
+            constraint.is_some_and(|c| c.is_active())
         }) {
             let Some(focused_surface) = pointer
                 .current_focus()

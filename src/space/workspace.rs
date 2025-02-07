@@ -506,21 +506,21 @@ impl Workspace {
     /// Get an iterator of the [`Workspace`]'s [`Window`]s
     ///
     /// This includes the fullscreened [`Window`], if any.
-    pub fn windows(&self) -> impl Iterator<Item = &Window> + ExactSizeIterator {
+    pub fn windows(&self) -> impl ExactSizeIterator<Item = &Window> {
         self.tiles.iter().map(Tile::window)
     }
 
     /// Get an iterator over the [`Workspace`]'s [`Tile`]s.
     ///
     /// This includes the fullscreened [`Tile`], if any.
-    pub fn tiles(&self) -> impl Iterator<Item = &Tile> + ExactSizeIterator {
+    pub fn tiles(&self) -> impl ExactSizeIterator<Item = &Tile> {
         self.tiles.iter()
     }
 
     /// Get a mutable iterator over the [`Workspace`]'s [`Tile`]s.
     ///
     /// This includes the fullscreened [`Tile`], if any.
-    pub fn tiles_mut(&mut self) -> impl Iterator<Item = &mut Tile> + ExactSizeIterator {
+    pub fn tiles_mut(&mut self) -> impl ExactSizeIterator<Item = &mut Tile> {
         self.tiles.iter_mut()
     }
 
@@ -950,10 +950,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(0..nmaster as usize)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, master_geo.size.h);
                     // subtract border, of course.
                     let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
@@ -963,10 +960,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(nmaster as usize..)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, stack_geo.size.h);
                     // subtract border, of course.
                     let prepared_height =
@@ -990,10 +984,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(0..nmaster as usize)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, master_geo.size.w);
                     // subtract border, of course.
                     let prepared_width = lengths[unconfigured_idx] - (2 * border_width);
@@ -1003,10 +994,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(nmaster as usize..)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, stack_geo.size.w);
                     // subtract border, of course.
                     let prepared_width =

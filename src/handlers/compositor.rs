@@ -360,7 +360,7 @@ impl CompositorHandler for State {
                     .buffer
                     .as_ref()
                     .and_then(|assignment| match assignment {
-                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(&buffer).cloned().ok(),
+                        BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).cloned().ok(),
                         _ => None,
                     })
             });
@@ -417,7 +417,7 @@ impl CompositorHandler for State {
             // Try to get the output where this surface is being drawn, otherwise quit.
             if let Some(output) = self
                 .process_window_commit(surface)
-                .or_else(|| State::process_layer_shell_commit(&surface, &mut self.fht))
+                .or_else(|| State::process_layer_shell_commit(surface, &mut self.fht))
             {
                 self.fht.queue_redraw(&output);
             }

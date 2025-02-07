@@ -46,7 +46,7 @@ impl State {
             return;
         }
 
-        let ref output = self.fht.space.active_output().clone();
+        let output = &self.fht.space.active_output().clone();
         let output_loc = output.current_location();
 
         let pointer_loc = pointer.current_location();
@@ -80,7 +80,6 @@ impl State {
                     .is_some()
                 {
                     self.set_keyboard_focus(Some(layer.clone()));
-                    return;
                 }
             }
         } else if let Some(fullscreen) = monitor.active_workspace().fullscreened_window() {
@@ -145,7 +144,7 @@ impl State {
 
         pointer.motion(
             self,
-            under.map(|(ft, loc)| (ft, loc)),
+            under,
             &MotionEvent {
                 location: point,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -372,7 +371,7 @@ impl State {
                             Some(constraint) if constraint.is_active() => {
                                 // Constraint basically useless if not within region/doesn't have a
                                 // defined region
-                                if !constraint.region().map_or(true, |region| {
+                                if !constraint.region().is_none_or(|region| {
                                     region.contains((pointer_location - surface_loc).to_i32_round())
                                 }) {
                                     return;
@@ -440,7 +439,7 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.map(|(ft, loc)| (ft, loc)),
+                    under,
                     &MotionEvent {
                         location: pointer_location,
                         serial,
@@ -459,8 +458,7 @@ impl State {
                         Some(constraint) if !constraint.is_active() => {
                             let point = pointer_location.to_i32_round() - surface_location;
                             if constraint
-                                .region()
-                                .map_or(true, |region| region.contains(point.to_i32_round()))
+                                .region().is_none_or(|region| region.contains(point.to_i32_round()))
                             {
                                 constraint.activate();
                             }
@@ -480,7 +478,7 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.map(|(ft, loc)| (ft, loc)),
+                    under,
                     &MotionEvent {
                         location: pointer_location,
                         serial,
@@ -579,7 +577,6 @@ impl State {
                     .outputs()
                     .next()
                     .map(OutputExt::geometry)
-                    .map(|geo| geo)
                 else {
                     return;
                 };
@@ -594,7 +591,7 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone().map(|(ft, loc)| (ft, loc)),
+                    under.clone(),
                     &MotionEvent {
                         location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),
@@ -654,7 +651,7 @@ impl State {
 
                 pointer.motion(
                     self,
-                    under.clone().map(|(ft, loc)| (ft, loc)),
+                    under.clone(),
                     &MotionEvent {
                         location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),

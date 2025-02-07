@@ -59,7 +59,7 @@ pub fn init_watcher(
                     {
                         debug!(?new_mtime, "Config file change detected");
                         last_mtime = Some(new_mtime);
-                        if let Err(_) = tx.send(()) {
+                        if tx.send(()).is_err() {
                             // Silently error as this is a way to stop this thread.
                             // The only possible error here is that the channel got dropped, in this
                             // case a new config file watcher will be created

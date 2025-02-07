@@ -180,7 +180,7 @@ impl WinitData {
             let OutputElementsResult { ref elements, .. } =
                 fht.output_elements(renderer, &self.output);
             self.damage_tracker
-                .render_output(renderer, &mut fb, age, &elements, [0.1, 0.1, 0.1, 1.0])
+                .render_output(renderer, &mut fb, age, elements, [0.1, 0.1, 0.1, 1.0])
                 .map_err(|err| match err {
                     OutputDamageTrackerError::Rendering(err) => err.into(),
                     _ => unreachable!(),

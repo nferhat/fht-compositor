@@ -219,7 +219,6 @@ impl Portal {
             .expect("a session can only start after select_sources");
         let cursor_mode = session
             .cursor_mode
-            .clone()
             .expect("a session can only start after select_sources");
 
         // What we do now is ask the compositor to start the screencast.

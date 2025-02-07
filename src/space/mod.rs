@@ -87,13 +87,8 @@ impl Space {
     }
 
     /// Get an iterator over the [`Space`]'s tracked [`Monitor`](s)
-    pub fn monitors(&self) -> impl Iterator<Item = &Monitor> + ExactSizeIterator {
+    pub fn monitors(&self) -> impl ExactSizeIterator<Item = &Monitor> {
         self.monitors.iter()
-    }
-
-    /// Get the [`Monitor`] associated with this [`Output`].
-    pub fn monitor_for_output(&self, output: &Output) -> Option<&Monitor> {
-        self.monitors.iter().find(|mon| mon.output() == output)
     }
 
     /// Get the [`Monitor`] associated with this [`Output`].
@@ -121,7 +116,7 @@ impl Space {
     }
 
     /// Get an iterator of all the [`Output`]s managed by this [`Space`].
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> + ExactSizeIterator {
+    pub fn outputs(&self) -> impl ExactSizeIterator<Item = &Output> {
         self.monitors.iter().map(Monitor::output)
     }
 
@@ -416,24 +411,6 @@ impl Space {
                     if tile.window() == window {
                         return Some(
                             tile.location()
-                                + tile.window_loc()
-                                + workspace.output().current_location(),
-                        );
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Get the location of the window in the global compositor [`Space`]
-    pub fn window_visual_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
-        for monitor in &self.monitors {
-            for workspace in monitor.workspaces() {
-                for tile in workspace.tiles() {
-                    if tile.window() == window {
-                        return Some(
-                            tile.visual_location()
                                 + tile.window_loc()
                                 + workspace.output().current_location(),
                         );
@@ -831,7 +808,7 @@ impl Config {
                 config.animations.window_open_close.curve,
                 config.animations.window_open_close.disable,
             ),
-            shadow: (!config.decorations.shadow.disable).then(|| config.decorations.shadow),
+            shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),
@@ -852,6 +829,6 @@ pub struct AnimationConfig {
 
 impl AnimationConfig {
     pub fn new(duration: Duration, curve: AnimationCurve, disable: bool) -> Option<Self> {
-        (!disable).then(|| Self { duration, curve })
+        (!disable).then_some(Self { duration, curve })
     }
 }

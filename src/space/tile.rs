@@ -169,7 +169,7 @@ impl Tile {
             use std::cell::RefCell;
             let found = RefCell::new(false);
             with_surface_tree_downward(
-                &window_surface,
+                window_surface,
                 s,
                 |_, _, e| TraversalAction::DoChildren(e),
                 |s, _, search| {
@@ -184,7 +184,7 @@ impl Tile {
         }
 
         if surface_type.contains(WindowSurfaceType::POPUP) {
-            return PopupManager::popups_for_surface(&window_surface)
+            return PopupManager::popups_for_surface(window_surface)
                 .any(|(popup, _)| popup.wl_surface() == s);
         }
 
@@ -243,10 +243,8 @@ impl Tile {
                     .with_curve(window_geometry_animation.curve),
                 );
             }
-        } else {
-            if self.location != new_location {
-                self.location = new_location
-            }
+        } else if self.location != new_location {
+            self.location = new_location
         }
     }
 
@@ -377,7 +375,7 @@ impl Tile {
         // popups) are not accoutned for and will not be rendered
         // with blur.
         let window_geometry = Rectangle::from_size(self.window().size());
-        if with_states(&*wl_surface, |data| {
+        if with_states(&wl_surface, |data| {
             let renderer_data = data
                 .data_map
                 .get::<RendererSurfaceStateUserData>()
@@ -388,7 +386,7 @@ impl Tile {
                 // If there's some place left after removing opaque regions, these are
                 // transparent regions and must be rendered using blur.
                 let remaining = window_geometry.subtract_rects(opaque_regions.iter().copied());
-                remaining.len() > 0
+                !remaining.is_empty()
             } else {
                 // no opaque regions == fully transparent window surface
                 true

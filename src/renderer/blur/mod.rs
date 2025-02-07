@@ -22,7 +22,7 @@ use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Logical, Physical, Rectangle, Size, Transform};
+use smithay::utils::{Physical, Rectangle, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;

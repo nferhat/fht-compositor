@@ -33,12 +33,6 @@ impl EguiElement {
         }
     }
 
-    pub fn set_size(&mut self, new_size: Size<i32, Logical>) {
-        self.size = new_size;
-        // Reset render buffer on resize to avoid artifacts
-        let _ = self.render_buffer.lock().unwrap().take();
-    }
-
     pub fn ctx(&self) -> &egui::Context {
         &self.ctx
     }
@@ -166,7 +160,7 @@ impl EguiElement {
 
         let texture_element: FhtTextureElement = TextureRenderElement::from_texture_render_buffer(
             location.to_f64(),
-            &render_buffer,
+            render_buffer,
             Some(alpha),
             None,
             Some(self.size),

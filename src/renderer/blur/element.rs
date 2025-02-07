@@ -39,7 +39,6 @@ pub enum BlurElement {
         id: Id,
         scale: i32,
         transform: Transform,
-        alpha: f32,
         src: Rectangle<f64, Logical>,
         size: Size<i32, Logical>,
         corner_radius: f32,
@@ -104,7 +103,6 @@ impl BlurElement {
                 scale,
                 src: sample_area.to_f64(),
                 transform: Transform::Normal,
-                alpha: 1.0,
                 size: sample_area.size,
                 corner_radius,
                 loc,
@@ -221,7 +219,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
             Self::Optimized { tex, corner_radius } => {
                 if *corner_radius == 0.0 {
                     <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
-                        &tex,
+                        tex,
                         frame,
                         src,
                         dst,
@@ -301,7 +299,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
 
                 // Update the blur buffers.
                 // We use gl ffi directly to circumvent some stuff done by smithay
-                let _ = gles_frame.with_context(|gl| unsafe {
+                gles_frame.with_context(|gl| unsafe {
                     let mut prev_fbo = 0;
                     gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
 
@@ -357,9 +355,9 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst_expanded.downscale(1 << i + 1);
+                            let damage = dst_expanded.downscale(1 << (i + 1));
                             super::render_blur_pass_with_gl(
-                                &gl,
+                                gl,
                                 &vbos,
                                 debug,
                                 supports_instancing,
@@ -382,9 +380,9 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst_expanded.downscale(1 << passes - 1 - i);
+                            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
                             super::render_blur_pass_with_gl(
-                                &gl,
+                                gl,
                                 &vbos,
                                 debug,
                                 supports_instancing,
@@ -463,7 +461,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
         <Self as RenderElement<GlowRenderer>>::draw(
-            &self,
+            self,
             frame.as_mut(),
             src,
             dst,
