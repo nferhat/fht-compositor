@@ -498,6 +498,10 @@ impl Tile {
         };
 
         let border = self.config.border.with_overrides(&rules.border_overrides);
+        let (blur, blur_optimized) = (
+            self.config.blur.with_overrides(&rules.blur),
+            rules.blur.optimized,
+        );
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
@@ -646,7 +650,7 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        if !self.config.blur.disabled() && self.has_transparent_region() {
+        if !blur.disabled() && self.has_transparent_region() {
             // Optimized blur uses a pre-blurred texture containing background and bottom
             // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
             // window.
@@ -657,13 +661,17 @@ impl Tile {
             //
             // Floating windows on the other hand might have other windows below it, so they don't
             // use optimized. They are also (in comparaison) relatively small, so its even better
-            let mut optimized = !is_floating;
-            if has_opening_animation {
-                // One exception is made for opening animations. Since we pre-render the window
-                // inside a texture, there's nothing for us to sample from, so we must use optimized
-                // in order to get a blur effect going on.
-                optimized = true;
-            }
+            let optimized = blur_optimized.unwrap_or_else(|| {
+                let mut optimized = !is_floating;
+                if has_opening_animation {
+                    // One exception is made for opening animations. Since we pre-render the window
+                    // inside a texture, there's nothing for us to sample from, so we must use
+                    // optimized in order to get a blur effect going on.
+                    optimized = true;
+                }
+
+                optimized
+            });
 
             // Since tile_geometry and window_geometry are dependent on what we are rendering for
             // (opening animation, size animation) we use data gathered from self instead
@@ -682,7 +690,7 @@ impl Tile {
                 border_radius,
                 optimized,
                 scale,
-                self.config.blur,
+                blur,
             );
             elements.push(blur_element.into());
         }

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
-use fht_compositor_config::{BorderOverrides, DecorationMode};
+use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -1879,6 +1879,7 @@ pub struct ResolvedWindowRules {
     // Border overrides gets applied to the border config when we need the window-specific border
     // config with rules applied (for example when rendering)
     pub border_overrides: BorderOverrides,
+    pub blur: BlurOverrides,
     pub draw_shadow: Option<bool>,
     pub shadow_color: Option<[f32; 4]>,
     pub open_on_output: Option<String>,
@@ -1925,6 +1926,7 @@ impl ResolvedWindowRules {
             resolved_rules.border_overrides = resolved_rules
                 .border_overrides
                 .merge_with(rule.border_overrides);
+            resolved_rules.blur = resolved_rules.blur.merge_with(rule.blur);
 
             if let Some(draw_shadow) = rule.draw_shadow {
                 resolved_rules.draw_shadow = Some(draw_shadow);

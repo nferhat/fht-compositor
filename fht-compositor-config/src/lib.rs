@@ -726,6 +726,21 @@ impl Blur {
     pub fn disabled(&self) -> bool {
         self.disable || self.passes == 0 || self.radius == 0.0
     }
+
+    pub fn with_overrides(&self, overrides: &BlurOverrides) -> Self {
+        let mut ret = *self;
+        if let Some(disable) = overrides.disable {
+            ret.disable = disable;
+        }
+        if let Some(radius) = overrides.radius {
+            ret.radius = radius;
+        }
+        if let Some(passes) = overrides.passes {
+            ret.passes = passes;
+        }
+
+        ret
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -940,6 +955,7 @@ pub struct WindowRule {
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
     pub border_overrides: BorderOverrides,
+    pub blur: BlurOverrides,
     pub draw_shadow: Option<bool>,
     #[serde(deserialize_with = "deserialize_color_maybe")]
     pub shadow_color: Option<[f32; 4]>,
@@ -980,6 +996,33 @@ impl BorderOverrides {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct BlurOverrides {
+    pub disable: Option<bool>,
+    pub optimized: Option<bool>,
+    pub passes: Option<usize>,
+    pub radius: Option<f32>,
+}
+
+impl BlurOverrides {
+    pub fn merge_with(mut self, other: Self) -> Self {
+        if let Some(disable) = other.disable {
+            self.disable = Some(disable);
+        }
+        if let Some(use_xray) = other.optimized {
+            self.optimized = Some(use_xray);
+        }
+        if let Some(passes) = other.passes {
+            self.passes = Some(passes);
+        }
+        if let Some(radius) = other.radius {
+            self.radius = Some(radius);
+        }
+
+        self
+    }
+}
 fn deserialize_output_mode<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<(u16, u16, Option<f64>)>, D::Error> {
