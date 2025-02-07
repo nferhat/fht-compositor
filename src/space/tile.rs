@@ -525,8 +525,8 @@ impl Tile {
             tile_geometry.size.w as f32 / (2. * border_radius),
             tile_geometry.size.h as f32 / (2. * border_radius),
         );
-        let border_radius = border_radius * f32::min(1., reduction);
-        let inner_radius = (border_radius - border_thickness as f32).max(0.0);
+        let reduction = f32::min(1.0, reduction);
+        let border_radius = border_radius * reduction;
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
@@ -593,7 +593,8 @@ impl Tile {
                     tex,
                     program,
                     vec![
-                        Uniform::new("corner_radius", inner_radius),
+                        // FIXME: Why divide by scale to get proper rounding?
+                        Uniform::new("corner_radius", border_radius / scale as f32),
                         Uniform::new("win_size", [win_size.w as f32, win_size.h as f32]),
                         Uniform::new("curr_size", [curr_size.w as f32, curr_size.h as f32]),
                     ],
@@ -605,6 +606,8 @@ impl Tile {
                 elements.push(TileRenderElement::<R>::ResizingSurface(element.into()));
             }
         } else {
+            // FIXME: Why divide by scale to get proper rounding?
+            let border_radius = border_radius / scale as f32;
             let window_elements = self
                 .window
                 .render_toplevel_elements(
@@ -627,11 +630,11 @@ impl Tile {
                         &e,
                         scale as f64,
                         window_geometry,
-                        inner_radius,
+                        border_radius,
                     ) {
                         let rounded = RoundedWindowElement::new(
                             e,
-                            inner_radius,
+                            border_radius,
                             window_geometry,
                             scale as f64,
                         );
@@ -676,7 +679,7 @@ impl Tile {
                 output,
                 sample_area,
                 window_geometry.loc.to_physical(scale),
-                inner_radius,
+                border_radius,
                 optimized,
                 scale,
                 self.config.blur,
