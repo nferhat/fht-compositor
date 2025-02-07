@@ -9,8 +9,6 @@ use smithay::backend::renderer::Texture;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
-use super::AsGlowFrame;
-#[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
@@ -69,7 +67,7 @@ impl<E: Texture + Clone + 'static> Element for FhtTextureElement<E> {
 impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
     fn draw(
         &self,
-        frame: &mut GlowFrame<'_>,
+        frame: &mut GlowFrame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -97,7 +95,7 @@ impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
     fn draw(
         &self,
-        frame: &mut UdevFrame<'a, '_>,
+        frame: &mut UdevFrame<'a, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -125,16 +123,15 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
 impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
     fn draw(
         &self,
-        frame: &mut UdevFrame<'a, '_>,
+        frame: &mut UdevFrame<'a, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
-        let frame = frame.glow_frame_mut();
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
             &self.0,
-            frame,
+            frame.as_mut(),
             src,
             dst,
             damage,

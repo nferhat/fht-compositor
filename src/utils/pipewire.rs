@@ -175,7 +175,10 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let redraw = redraw.clone();
                 move |stream, inner, old, new| {
-                    crate::profile_scope!("pw_stream::state_changed", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::state_changed",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -202,7 +205,7 @@ impl PipeWire {
                                     node_id,
                                     size,
                                 };
-                                if let Err(_) = metadata_sender.try_send(Some(metadata)) {
+                                if metadata_sender.try_send(Some(metadata)).is_err() {
                                     error!("failed to send stream metadata to portal, stopping");
                                     stop_cast();
                                 }
@@ -222,7 +225,10 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let gbm = gbm.clone();
                 move |stream, inner, id, pod| {
-                    crate::profile_scope!("pw_stream::param_changed", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::param_changed",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -484,7 +490,7 @@ impl PipeWire {
             .add_buffer({
                 let stop_cast = stop_cast.clone();
                 move |stream, inner, buffer| {
-                    crate::profile_scope!("pw_stream::add_buffer", stream.node_id().to_string());
+                    crate::profile_scope!("pw_stream::add_buffer", &stream.node_id().to_string());
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -523,8 +529,8 @@ impl PipeWire {
                     let plane_count = dmabuf.num_planes();
                     let spa_datas = unsafe {
                         std::slice::from_raw_parts_mut(
-                            (*spa_buffer).datas,
-                            (*spa_buffer).n_datas as usize,
+                            spa_buffer.datas,
+                            spa_buffer.n_datas as usize,
                         )
                     };
                     assert_eq!(spa_datas.len(), plane_count);
@@ -541,7 +547,7 @@ impl PipeWire {
                         spa_data.mapoffset = 0;
                         spa_data.fd = fd.as_raw_fd() as i64;
                         spa_data.maxsize = 0;
-                        spa_data.data = 0 as *mut _;
+                        spa_data.data = std::ptr::null_mut();
 
                         let spa_chunk = unsafe { &mut (*spa_data.chunk) };
                         // clients have implemented to check chunk->size if the buffer is valid
@@ -564,7 +570,10 @@ impl PipeWire {
             })
             .remove_buffer({
                 move |stream, inner, buffer| {
-                    crate::profile_scope!("pw_stream::remove_buffer", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::remove_buffer",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -860,17 +869,18 @@ impl Cast {
         };
 
         let fd = buffer.datas_mut()[0].as_raw().fd;
-        let dmabuf = &guard.dmabufs[&fd].clone();
+        let mut dmabuf = guard.dmabufs[&fd].clone();
 
         let damage_tracker = match &mut guard.state {
             CastState::Ready { damage_tracker, .. } => damage_tracker.as_mut().unwrap(),
             _ => unreachable!(),
         };
 
+        let mut fb = renderer.bind(&mut dmabuf)?;
         let res = damage_tracker
-            .render_output_with(
+            .render_output(
                 renderer,
-                dmabuf.clone(),
+                &mut fb,
                 0,
                 render_elements,
                 smithay::backend::renderer::Color32F::TRANSPARENT,
@@ -880,6 +890,7 @@ impl Cast {
             trace!(cast = ?self.id, "No damage in frame, skipping");
             return Ok(false);
         }
+        drop(fb);
 
         for (data, (stride, offset)) in
             zip(buffer.datas_mut(), zip(dmabuf.strides(), dmabuf.offsets()))
@@ -954,8 +965,8 @@ fn make_video_object_params(
             // Smithay does assertions for us about sizes being always positive.
             // So truncating to u32 does not lose any data.
             Rectangle {
-                width: size.w as u32,
-                height: size.h as u32,
+                width: size.w,
+                height: size.h,
             }
         ),
         pod::property!(

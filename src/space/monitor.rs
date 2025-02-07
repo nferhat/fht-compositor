@@ -98,12 +98,12 @@ impl Monitor {
     }
 
     /// Get an iterator over the monitor's [`Workspace`]s.
-    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> + ExactSizeIterator {
+    pub fn workspaces(&self) -> impl ExactSizeIterator<Item = &Workspace> {
         self.workspaces.iter()
     }
 
     /// Get a mutable iterator over the monitor's [`Workspace`]s.
-    pub fn workspaces_mut(&mut self) -> impl Iterator<Item = &mut Workspace> + ExactSizeIterator {
+    pub fn workspaces_mut(&mut self) -> impl ExactSizeIterator<Item = &mut Workspace> {
         self.workspaces.iter_mut()
     }
 
@@ -118,7 +118,7 @@ impl Monitor {
     }
 
     /// Get the all the visible [`Window`] on this output.
-    pub fn visible_windows(&self) -> impl Iterator<Item = &Window> + ExactSizeIterator {
+    pub fn visible_windows(&self) -> impl ExactSizeIterator<Item = &Window> {
         self.workspaces[self.active_idx].windows()
     }
 
@@ -213,6 +213,18 @@ impl Monitor {
         self.workspaces.iter_mut().fold(false, |acc, ws| {
             ws.advance_animations(target_presentation_time) || acc
         })
+    }
+
+    /// Returns whether this monitor has any blurred regions.
+    pub fn has_blur(&self) -> bool {
+        for workspace in &self.workspaces {
+            // only check for visible workspaces
+            if (workspace.index() == self.active_idx || workspace.has_render_offset_animation()) && workspace.tiles().any(|tile| tile.has_transparent_region()) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Create the render elements for this [`Monitor`]

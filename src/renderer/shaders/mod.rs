@@ -1,31 +1,40 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
 use smithay::backend::renderer::gles::{
     GlesFrame, GlesPixelProgram, GlesRenderer, GlesTexProgram, UniformName, UniformType,
 };
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 
-use super::{AsGlowFrame, AsGlowRenderer};
+use super::blur::shader::BlurShaders;
 
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
-const ROUNDED_QUAD_SRC: &str = include_str!("../rounded_element/shader.frag");
+const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
+const ROUNDED_TEXTURE_SRC: &str = include_str!("./rounded-texture.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
+pub(super) const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
+pub(super) const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
+pub(super) const VERTEX_SRC: &str = include_str!("./texture.vert");
 
 pub struct Shaders {
     pub border: GlesPixelProgram,
     pub box_shadow: GlesPixelProgram,
-    pub rounded_quad: GlesTexProgram,
+    // rounded_window => complex shader that takes into account subsurface position through
+    // matrices, only used in src/space/tile.rs
+    pub rounded_window: GlesTexProgram,
+    // rounded_texture => simple shader that just rounds off a passed in texture.
+    pub rounded_texture: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
+    pub blur: BlurShaders,
 }
 
 impl Shaders {
     pub fn init(renderer: &mut GlowRenderer) {
         let renderer: &mut GlesRenderer = renderer.borrow_mut();
 
-        let rounded_quad = renderer
+        let rounded_window = renderer
             .compile_custom_texture_shader(
-                ROUNDED_QUAD_SRC,
+                ROUNDED_WINDOW_SRC,
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
@@ -33,7 +42,17 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let resizing_surface = renderer
+        let rounded_texture = renderer
+            .compile_custom_texture_shader(
+                ROUNDED_TEXTURE_SRC,
+                &[
+                    UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("geo", UniformType::_4f),
+                ],
+            )
+            .expect("Shader source should always compile!");
+
+        let resizing_texture = renderer
             .compile_custom_texture_shader(
                 RESIZING_TEXTURE_SRC,
                 &[
@@ -44,7 +63,7 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let rounded_outline = renderer
+        let border = renderer
             .compile_custom_pixel_shader(
                 BORDER_SRC,
                 &[
@@ -66,12 +85,15 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
+        let blur = BlurShaders::compile(renderer).expect("Shader source should always compile!");
 
         let shaders = Self {
-            border: rounded_outline,
+            border,
             box_shadow,
-            rounded_quad,
-            resizing_texture: resizing_surface,
+            rounded_window,
+            rounded_texture,
+            resizing_texture,
+            blur,
         };
 
         renderer
@@ -80,17 +102,16 @@ impl Shaders {
             .insert_if_missing(|| shaders);
     }
 
-    pub fn get<'a>(renderer: &'a impl AsGlowRenderer) -> &'a Self {
+    pub fn get(renderer: &GlowRenderer) -> &Self {
         renderer
-            .glow_renderer()
             .egl_context()
             .user_data()
             .get()
             .expect("Shaders are initialized at startup!")
     }
 
-    pub fn get_from_frame<'a>(frame: &'a GlowFrame<'_>) -> &'a Self {
-        Borrow::<GlesFrame>::borrow(frame.glow_frame())
+    pub fn get_from_frame<'a>(frame: &'a GlesFrame<'_, '_>) -> &'a Self {
+        frame
             .egl_context()
             .user_data()
             .get()

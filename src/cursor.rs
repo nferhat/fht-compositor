@@ -61,11 +61,11 @@ impl CursorThemeManager {
         self.image_status = image_status
     }
 
-    fn load_cursor_image<'a>(
-        &'a self,
+    fn load_cursor_image(
+        &self,
         cursor_icon: CursorIcon,
         cursor_scale: i32,
-    ) -> Result<Ref<'a, Image>, Error> {
+    ) -> Result<Ref<'_, Image>, Error> {
         crate::profile_function!();
         if let Entry::Vacant(entry) = self
             .cursor_image_cache
@@ -83,7 +83,7 @@ impl CursorThemeManager {
                     }
                     None
                 })
-                .ok_or_else(|| Error::NoCursorIcon(cursor_icon))?;
+                .ok_or(Error::NoCursorIcon(cursor_icon))?;
 
             let mut cursor_file = File::open(icon_path)?;
             let mut cursor_file_data = Vec::new();

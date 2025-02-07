@@ -113,7 +113,7 @@ impl RedrawState {
     }
 }
 
-use smithay::utils::{Logical, Rectangle, Transform};
+use smithay::utils::{Logical, Rectangle};
 
 /// Extension trait for an [`Output`].
 pub trait OutputExt {
@@ -127,7 +127,7 @@ pub trait OutputExt {
 impl OutputExt for Output {
     fn geometry(&self) -> Rectangle<i32, Logical> {
         Rectangle::new(self.current_location(), {
-            Transform::from(self.current_transform())
+            self.current_transform()
                 .transform_size(
                     self.current_mode()
                         .map(|m| m.size)

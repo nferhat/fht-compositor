@@ -21,7 +21,7 @@ use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface}
 use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::{Id, Kind};
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
     Error as MultiError, GpuManager, MultiFrame, MultiRenderer, MultiTexture, MultiTextureMapping,
@@ -53,6 +53,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{DeviceFd, Monotonic};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
@@ -60,10 +61,9 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::output::RedrawState;
-use crate::renderer::shaders::Shaders;
+use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{
-    AsGlowFrame, AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer,
-    OutputElementsResult,
+    AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
 };
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::get_monotonic_time;
@@ -88,10 +88,11 @@ pub type UdevRenderer<'a> = MultiRenderer<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
 
-pub type UdevFrame<'a, 'frame> = MultiFrame<
+pub type UdevFrame<'a, 'frame, 'buffer> = MultiFrame<
     'a,
     'a,
     'frame,
+    'buffer,
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
@@ -106,28 +107,18 @@ pub type UdevTextureMapping = MultiTextureMapping<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
 
-impl<'a> FhtRenderer for UdevRenderer<'a> {
+impl FhtRenderer for UdevRenderer<'_> {
     type FhtTextureId = MultiTexture;
     type FhtError = UdevRenderError;
     type FhtTextureMapping = UdevTextureMapping;
 }
 
-impl<'a> AsGlowRenderer for UdevRenderer<'a> {
+impl AsGlowRenderer for UdevRenderer<'_> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
 
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
-        self.as_mut()
-    }
-}
-
-impl<'a, 'frame> AsGlowFrame<'frame> for UdevFrame<'a, 'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self.as_ref()
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
         self.as_mut()
     }
 }
@@ -139,6 +130,7 @@ pub struct UdevData {
     pub primary_node: DrmNode,
     pub gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
     pub devices: HashMap<DrmNode, Device>,
+    pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
 }
 
@@ -264,10 +256,8 @@ impl UdevData {
 
         let (primary_gpu, primary_node) = if let Some(user_path) = &state.config.debug.render_node {
             let primary_gpu = DrmNode::from_path(user_path)
-                .expect(&format!(
-                    "Please make sure that {} is a valid DRM node!",
-                    user_path.display()
-                ))
+                .unwrap_or_else(|_| panic!("Please make sure that {} is a valid DRM node!",
+                    user_path.display()))
                 .node_with_type(NodeType::Render)
                 .expect("Please make sure that {user_path} is a render node!")
                 .expect("Please make sure that {user_path} is a render node!");
@@ -301,6 +291,7 @@ impl UdevData {
             gpu_manager,
             session,
             devices: HashMap::new(),
+            syncobj_state: None,
             dmabuf_global: None,
             _registration_tokens: vec![udev_token, session_token, libinput_token],
         };
@@ -351,7 +342,7 @@ impl UdevData {
         }
 
         let mut renderer = data.gpu_manager.single_renderer(&primary_gpu).unwrap();
-        Shaders::init(renderer.glow_renderer_mut());
+        crate::renderer::init(renderer.glow_renderer_mut());
 
         state.shm_state.update_formats(renderer.shm_formats());
 
@@ -431,6 +422,31 @@ impl UdevData {
             .add_node(render_node, gbm.clone())
             .context("Failed to add GBM device to GPU manager!")?;
 
+        let color_formats = if fht.config.debug.disable_10bit {
+            SUPPORTED_FORMATS_8BIT_ONLY
+        } else {
+            SUPPORTED_FORMATS
+        };
+        let allocator = GbmAllocator::new(
+            gbm.clone(),
+            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
+        );
+        let mut renderer = self.gpu_manager.single_renderer(&render_node).unwrap();
+        let render_formats = renderer
+            .as_mut()
+            .egl_context()
+            .dmabuf_render_formats()
+            .clone();
+
+        let drm_output_manager = DrmOutputManager::new(
+            drm,
+            allocator,
+            gbm.clone(),
+            Some(gbm.clone()),
+            color_formats.iter().copied(),
+            render_formats,
+        );
+
         if device_node == self.primary_node {
             debug!("Adding primary node");
 
@@ -475,32 +491,14 @@ impl UdevData {
                     });
                 });
             });
+
+            let import_device = drm_output_manager.device().device_fd().clone();
+            if supports_syncobj_eventfd(&import_device) {
+                let syncobj_state =
+                    DrmSyncobjState::new::<State>(&fht.display_handle, import_device);
+                assert!(self.syncobj_state.replace(syncobj_state).is_none());
+            }
         }
-
-        let color_formats = if fht.config.debug.disable_10bit {
-            SUPPORTED_FORMATS_8BIT_ONLY
-        } else {
-            SUPPORTED_FORMATS
-        };
-        let allocator = GbmAllocator::new(
-            gbm.clone(),
-            BufferObjectFlags::RENDERING | BufferObjectFlags::SCANOUT,
-        );
-        let mut renderer = self.gpu_manager.single_renderer(&render_node).unwrap();
-        let render_formats = renderer
-            .as_mut()
-            .egl_context()
-            .dmabuf_render_formats()
-            .clone();
-
-        let drm_output_manager = DrmOutputManager::new(
-            drm,
-            allocator,
-            gbm.clone(),
-            Some(gbm.clone()),
-            color_formats.iter().copied(),
-            render_formats,
-        );
 
         self.devices.insert(
             device_node,
@@ -760,6 +758,10 @@ impl UdevData {
             Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
         fht.add_output(output.clone(), Some(refresh_interval));
 
+        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
+        // to avoid noise and pollution from other outputs leaking into eachother
+        EffectsFramebuffers::init_for_output(&output, &mut renderer);
+
         let driver = drm_device
             .get_driver()
             .context("failed to query drm driver")?;
@@ -802,7 +804,7 @@ impl UdevData {
                 self.primary_gpu,
                 device.render_node,
                 &mut self.gpu_manager,
-                &compositor.surface(),
+                compositor.surface(),
             )
         });
 
@@ -978,7 +980,7 @@ impl UdevData {
                         Some(DrmError::Access(DrmAccessError { source, .. }))
                             if source.kind() != io::ErrorKind::PermissionDenied =>
                         {
-                            ()
+                            
                         }
                         _ => anyhow::bail!("temporary render failure: {err:?}"),
                     },
@@ -1050,9 +1052,8 @@ impl UdevData {
                             // frame events to them so they start building the next buffer
                             output_state.current_frame_sequence =
                                 output_state.current_frame_sequence.wrapping_add(1);
-                            // Also notify puffin of a new frame.
-                            #[cfg(feature = "profile-with-puffin")]
-                            puffin::GlobalProfiler::lock().new_frame();
+                            // Also notify tracy of a new frame.
+                            tracy_client::Client::running().unwrap().frame_mark();
 
                             // Damage also means screencast.
                             #[cfg(feature = "xdg-screencast-portal")]
@@ -1195,7 +1196,7 @@ impl UdevData {
 
         let now = get_monotonic_time();
         let presentation_time = match metadata.time {
-            DrmEventTime::Monotonic(tp) => tp.into(),
+            DrmEventTime::Monotonic(tp) => tp,
             DrmEventTime::Realtime(_) => now,
         };
 
@@ -1231,10 +1232,7 @@ impl UdevData {
             Ok(None) => (),
             Err(err) => {
                 warn!("Error during rendering: {:?}", err);
-                match err {
-                    SwapBuffersError::ContextLost(err) => panic!("Rendering loop lost: {}", err),
-                    _ => (),
-                }
+                if let SwapBuffersError::ContextLost(err) = err { panic!("Rendering loop lost: {}", err) }
             }
         };
 
@@ -1357,7 +1355,7 @@ fn draw_damage<'a>(
     dt: &mut Option<OutputDamageTracker>,
     elements: &[FhtRenderElement<UdevRenderer<'a>>],
 ) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
-    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(&output));
+    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(output));
     let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
         return vec![];
     };

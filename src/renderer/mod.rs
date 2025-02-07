@@ -6,17 +6,24 @@
 //!
 //! This module also has some helpers to create render elements.
 
+pub mod blur;
+mod data;
 pub mod extra_damage;
 pub mod pixel_shader_element;
 pub mod render_elements;
-pub mod rounded_element;
+pub mod rounded_window;
 pub mod shaders;
 pub mod texture_element;
+pub mod texture_shader_element;
+
+use std::borrow::BorrowMut;
 
 use anyhow::Context;
-use glam::Mat3;
+use blur::element::BlurElement;
+use blur::EffectsFramebuffers;
+use glam::{Mat3, Vec2};
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::allocator::{Buffer, Fourcc};
+use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
@@ -26,12 +33,12 @@ use smithay::backend::renderer::element::{self, AsRenderElements, Kind, RenderEl
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
 };
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::utils::{CommitCounter, RendererSurfaceStateUserData};
 use smithay::backend::renderer::{
-    Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer, Texture,
-    TextureFilter, TextureMapping,
+    Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
+    RendererSuper, Texture, TextureFilter, TextureMapping,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
@@ -40,7 +47,8 @@ use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
-use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Buffer, IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
@@ -59,6 +67,7 @@ crate::fht_render_elements! {
         Solid = SolidColorRenderElement,
         Debug = DebugRenderElement,
         Wayland = WaylandSurfaceRenderElement<R>,
+        Blur = BlurElement, // for blurred layer shells
         Monitor = MonitorRenderElement<R>,
     }
 }
@@ -203,7 +212,12 @@ impl Fht {
         }
 
         // Overlay layer shells are drawn above everything else, including fullscreen windows
-        let overlay_elements = layer_elements(renderer, output, Layer::Overlay);
+        let overlay_elements = layer_elements(
+            renderer,
+            output,
+            Layer::Overlay,
+            &self.config.decorations.blur,
+        );
         rv.elements.extend(overlay_elements);
 
         // Top layer shells sit between the normal windows and fullscreen windows.
@@ -218,23 +232,57 @@ impl Fht {
             elements: monitor_elements,
             has_fullscreen,
         } = monitor.render(renderer, scale);
+
         if !has_fullscreen {
-            rv.elements
-                .extend(layer_elements(renderer, output, Layer::Top));
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-        } else {
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-            rv.elements
-                .extend(layer_elements(renderer, output, Layer::Top));
+            rv.elements.extend(layer_elements(
+                renderer,
+                output,
+                Layer::Top,
+                &self.config.decorations.blur,
+            ));
         }
 
+        rv.elements
+            .extend(monitor_elements.into_iter().map(Into::into));
+
         // Finally we have background and bottom elements.
-        let background = layer_elements(renderer, output, Layer::Bottom)
-            .into_iter()
-            .chain(layer_elements(renderer, output, Layer::Background));
+        let background = layer_elements(
+            renderer,
+            output,
+            Layer::Bottom,
+            &self.config.decorations.blur,
+        )
+        .into_iter()
+        .chain(layer_elements(
+            renderer,
+            output,
+            Layer::Background,
+            &self.config.decorations.blur,
+        ));
         rv.elements.extend(background);
+
+        // In case the optimized blur layer is dirty, re-render
+        // It only has the bottom and background layer shells drawn onto with blur applied.
+        //
+        // We must do it now before we actually render the previous render elements into the final
+        // composited blur buffer
+        let mut fx_buffers = EffectsFramebuffers::get(output);
+        if !self.config.decorations.blur.disable
+            && self.config.decorations.blur.passes > 0
+            && fx_buffers.optimized_blur_dirty
+            && monitor.has_blur()
+        {
+            if let Err(err) = fx_buffers.update_optimized_blur_buffer(
+                renderer.glow_renderer_mut(),
+                output,
+                scale,
+                &self.config.decorations.blur,
+            ) {
+                error!(?err, "Failed to update optimized blur buffer");
+            } else {
+                fx_buffers.optimized_blur_dirty = false;
+            }
+        }
 
         rv
     }
@@ -271,7 +319,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
                 continue;
@@ -339,7 +387,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
 
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
@@ -425,7 +473,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
 
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
@@ -601,10 +649,11 @@ impl Fht {
 /// Trait to abstract away renderer requirements from function declarations.
 pub trait FhtRenderer:
     Renderer<TextureId = Self::FhtTextureId, Error = Self::FhtError>
+    + RendererSuper
     + ImportAll
     + ImportMem
     + Bind<Dmabuf>
-    + Blit<Dmabuf>
+    + Blit
     // The renderers are just wrappers around a GlowRenderer.
     // So we can create GlesTexture and Bind to them with no issues.
     + Offscreen<GlesTexture>
@@ -629,11 +678,6 @@ pub trait AsGlowRenderer: Renderer {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
 }
 
-pub trait AsGlowFrame<'frame>: Frame {
-    fn glow_frame(&self) -> &GlowFrame<'frame>;
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame>;
-}
-
 impl AsGlowRenderer for GlowRenderer {
     fn glow_renderer(&self) -> &GlowRenderer {
         self
@@ -644,35 +688,74 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
-impl<'frame> AsGlowFrame<'frame> for GlowFrame<'frame> {
-    fn glow_frame(&self) -> &GlowFrame<'frame> {
-        self
-    }
-
-    fn glow_frame_mut(&mut self) -> &mut GlowFrame<'frame> {
-        self
-    }
+/// Inititalize needed structs and shaders for custom rendering.
+pub fn init(renderer: &mut GlowRenderer) {
+    shaders::Shaders::init(renderer);
+    data::RendererData::init(renderer.borrow_mut());
 }
 
 pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,
     layer: Layer,
+    blur_config: &fht_compositor_config::Blur,
 ) -> Vec<FhtRenderElement<R>> {
     crate::profile_function!();
-    let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
+    let output_scale = output.current_scale().integer_scale();
     let layer_map = layer_map_for_output(output);
-    let output_loc = output.current_location();
+    let mut elements = vec![];
 
-    layer_map
-        .layers_on(layer)
-        .rev()
-        .filter_map(|l| layer_map.layer_geometry(l).map(|geo| (geo.loc, l)))
-        .flat_map(|(loc, layer)| {
-            let location = (loc + output_loc).to_physical_precise_round(output_scale);
-            layer.render_elements::<FhtRenderElement<R>>(renderer, location, output_scale, 1.0)
-        })
-        .collect()
+    for layer in layer_map.layers_on(layer).rev() {
+        let wl_surface = layer.wl_surface();
+        let layer_geo = layer_map.layer_geometry(layer).unwrap();
+
+        let has_transparent_region = with_states(wl_surface, |data| {
+            let renderer_data = data
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            if let Some(opaque_regions) = renderer_data.opaque_regions() {
+                // If there's some place left after removing opaque regions, these are
+                // transparent regions and must be rendered using blur.
+                //
+                // NOTE: opaque_regions are relative to surface buffer
+                let layer_geo = Rectangle::from_size(layer_geo.size);
+                let remaining = layer_geo.subtract_rects(opaque_regions.iter().copied());
+                !remaining.is_empty()
+            } else {
+                // no opaque regions == fully transparent window surface
+                true
+            }
+        });
+
+        let location = layer_geo.loc.to_physical_precise_round(output_scale);
+        elements.extend(layer.render_elements(
+            renderer,
+            location,
+            (output_scale as f64).into(),
+            1.0,
+        ));
+
+        if !blur_config.disabled() && has_transparent_region {
+            elements.push(
+                BlurElement::new(
+                    renderer,
+                    output,
+                    layer_geo,
+                    location,
+                    0.0, // FIXME: Rounded layer shells through rules
+                    false,
+                    output_scale,
+                    *blur_config,
+                )
+                .into(),
+            );
+        }
+    }
+
+    elements
 }
 
 /// Render the given `elements` inside a [`GlesTexture`].
@@ -690,13 +773,14 @@ pub fn render_to_texture<R: FhtRenderer>(
     let scale = scale.into();
     let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
 
-    let texture = renderer
+    let mut texture = renderer
         .create_buffer(fourcc, buffer_size)
         .context("error creating texture")?;
-    renderer
-        .bind(texture.clone())
+    let mut fb = renderer
+        .bind(&mut texture)
         .context("error binding texture")?;
-    let sync_point = render_elements(renderer, size, scale, transform, elements)?;
+    let sync_point = render_elements(renderer, &mut fb, size, scale, transform, elements)?;
+    drop(fb);
 
     Ok((texture, sync_point))
 }
@@ -706,6 +790,7 @@ pub fn render_to_texture<R: FhtRenderer>(
 /// It is up to **YOU** to bind and unbind the renderer before and after calling this function.
 pub fn render_elements<R: FhtRenderer>(
     renderer: &mut R,
+    fb: &mut R::Framebuffer<'_>,
     size: Size<i32, Physical>,
     scale: impl Into<Scale<f64>>,
     transform: Transform,
@@ -715,9 +800,8 @@ pub fn render_elements<R: FhtRenderer>(
     let transform = transform.invert();
     let frame_rect = Rectangle::from_size(transform.transform_size(size));
     let mut frame = renderer
-        .render(size, transform)
+        .render(fb, size, transform)
         .context("error starting frame")?;
-
     frame
         .clear(Color32F::TRANSPARENT, &[frame_rect])
         .context("error clearing")?;
@@ -783,7 +867,7 @@ where
         ScreencopyBuffer::Shm(buffer) => {
             // We cannot render into shm buffer directly.
             // Instead we render inside a texture and export memory from framebuffer.
-            let (_, _) = render_to_texture(
+            let (mut tex, _) = render_to_texture(
                 renderer,
                 output_region.size,
                 scale,
@@ -792,7 +876,9 @@ where
                 elements,
             )?;
 
+            let mut fb = renderer.bind(&mut tex)?;
             let mapping = renderer.copy_framebuffer(
+                &mut fb,
                 region.to_logical(1).to_buffer(
                     1,
                     Transform::Normal,
@@ -835,15 +921,22 @@ where
                 // Little optimization:
                 // When our screencopy region is the same as the output region, we can render inside
                 // the dmabuf directly.
-                renderer.bind(dmabuf.clone())?;
-                let sync_point =
-                    render_elements(renderer, output_region.size, scale, transform, elements)?;
-                renderer.unbind()?;
+                let mut dmabuf = dmabuf.clone();
+                let mut fb = renderer.bind(&mut dmabuf)?;
+                let sync_point = render_elements(
+                    renderer,
+                    &mut fb,
+                    output_region.size,
+                    scale,
+                    transform,
+                    elements,
+                )?;
+                drop(fb);
 
                 Ok((Some(sync_point), damage))
             } else {
                 // Otherwise we can blit inside the dmabuf
-                let (_, _) = render_to_texture(
+                let (mut tex, _) = render_to_texture(
                     renderer,
                     output_region.size,
                     scale,
@@ -852,8 +945,13 @@ where
                     elements,
                 )?;
 
-                renderer.blit_to(
-                    dmabuf.clone(),
+                let mut dmabuf = dmabuf.clone();
+                let tex_fb = renderer.bind(&mut tex)?;
+                let mut dmabuf_fb = renderer.bind(&mut dmabuf)?;
+
+                renderer.blit(
+                    &tex_fb,
+                    &mut dmabuf_fb,
                     region,
                     Rectangle::new(Point::default(), region.size),
                     TextureFilter::Linear,
@@ -873,4 +971,49 @@ pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {
             transpose: false,
         },
     )
+}
+
+// Copied from smithay, adapted to use glam structs
+fn build_texture_mat(
+    src: Rectangle<f64, Buffer>,
+    dest: Rectangle<i32, Physical>,
+    texture: Size<i32, Buffer>,
+    transform: Transform,
+) -> Mat3 {
+    let dst_src_size = transform.transform_size(src.size);
+    let scale = dst_src_size.to_f64() / dest.size.to_f64();
+
+    let mut tex_mat = Mat3::IDENTITY;
+    // first bring the damage into src scale
+    tex_mat = Mat3::from_scale(Vec2::new(scale.x as f32, scale.y as f32)) * tex_mat;
+
+    // then compensate for the texture transform
+    let transform_mat = Mat3::from_cols_array(transform.matrix().as_ref());
+    let translation = match transform {
+        Transform::Normal => Mat3::IDENTITY,
+        Transform::_90 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.w as f32)),
+        Transform::_180 => {
+            Mat3::from_translation(Vec2::new(dst_src_size.w as f32, dst_src_size.h as f32))
+        }
+        Transform::_270 => Mat3::from_translation(Vec2::new(dst_src_size.h as f32, 0f32)),
+        Transform::Flipped => Mat3::from_translation(Vec2::new(dst_src_size.w as f32, 0f32)),
+        Transform::Flipped90 => Mat3::IDENTITY,
+        Transform::Flipped180 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.h as f32)),
+        Transform::Flipped270 => {
+            Mat3::from_translation(Vec2::new(dst_src_size.h as f32, dst_src_size.w as f32))
+        }
+    };
+    tex_mat = transform_mat * tex_mat;
+    tex_mat = translation * tex_mat;
+
+    // now we can add the src crop loc, the size already done implicit by the src size
+    tex_mat = Mat3::from_translation(Vec2::new(src.loc.x as f32, src.loc.y as f32)) * tex_mat;
+
+    // at last we have to normalize the values for UV space
+    tex_mat = Mat3::from_scale(Vec2::new(
+        (1.0f64 / texture.w as f64) as f32,
+        (1.0f64 / texture.h as f64) as f32,
+    )) * tex_mat;
+
+    tex_mat
 }

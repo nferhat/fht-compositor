@@ -1,34 +1,24 @@
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
-use smithay::backend::renderer::gles::element::PixelShaderElement;
-use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, Uniform};
+use smithay::backend::renderer::gles::element::TextureShaderElement;
+use smithay::backend::renderer::gles::GlesError;
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
+use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
+/// NewType wrapper to impl [`TextureShaderElement`] for [`UdevRenderer`]
 #[derive(Debug)]
-pub struct FhtPixelShaderElement(PixelShaderElement);
+pub struct FhtTextureShaderElement(pub TextureShaderElement);
 
-impl FhtPixelShaderElement {
-    /// Create a new [`FhtPixelShaderElement`].
-    ///
-    /// See [`PixelShaderElement::new`]
-    pub fn new(
-        program: GlesPixelProgram,
-        geometry: Rectangle<i32, Logical>,
-        alpha: f32,
-        additional_uniforms: Vec<Uniform<'static>>,
-        kind: Kind,
-    ) -> Self {
-        let inner =
-            PixelShaderElement::new(program, geometry, None, alpha, additional_uniforms, kind);
-        Self(inner)
+impl From<TextureShaderElement> for FhtTextureShaderElement {
+    fn from(value: TextureShaderElement) -> Self {
+        Self(value)
     }
 }
 
-impl Element for FhtPixelShaderElement {
+impl Element for FhtTextureShaderElement {
     fn id(&self) -> &Id {
         self.0.id()
     }
@@ -61,13 +51,6 @@ impl Element for FhtPixelShaderElement {
         self.0.damage_since(scale, commit)
     }
 
-    fn opaque_regions(
-        &self,
-        scale: Scale<f64>,
-    ) -> smithay::backend::renderer::utils::OpaqueRegions<i32, Physical> {
-        self.0.opaque_regions(scale)
-    }
-
     fn alpha(&self) -> f32 {
         self.0.alpha()
     }
@@ -77,7 +60,7 @@ impl Element for FhtPixelShaderElement {
     }
 }
 
-impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
+impl RenderElement<GlowRenderer> for FhtTextureShaderElement {
     fn draw(
         &self,
         frame: &mut GlowFrame<'_, '_>,
@@ -86,7 +69,7 @@ impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+        <TextureShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,
             frame,
             src,
@@ -98,14 +81,14 @@ impl RenderElement<GlowRenderer> for FhtPixelShaderElement {
 
     fn underlying_storage(
         &self,
-        _: &mut GlowRenderer,
+        renderer: &mut GlowRenderer,
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
-        None // pixel shader elements can't be scanned out.
+        self.0.underlying_storage(renderer)
     }
 }
 
 #[cfg(feature = "udev-backend")]
-impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
+impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureShaderElement {
     fn draw(
         &self,
         frame: &mut UdevFrame<'a, '_, '_>,
@@ -114,7 +97,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), UdevRenderError> {
-        <PixelShaderElement as RenderElement<GlowRenderer>>::draw(
+        <TextureShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,
             frame.as_mut(),
             src,

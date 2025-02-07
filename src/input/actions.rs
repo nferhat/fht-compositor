@@ -374,7 +374,7 @@ impl State {
                     next_output_idx = 0;
                 }
 
-                let output = outputs.into_iter().skip(next_output_idx).next().unwrap();
+                let output = outputs.into_iter().nth(next_output_idx).unwrap();
                 if config.general.cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
@@ -398,7 +398,7 @@ impl State {
                     None => outputs_len - 1,
                 };
 
-                let output = outputs.into_iter().skip(next_output_idx).next().unwrap();
+                let output = outputs.into_iter().nth(next_output_idx).unwrap();
                 if config.general.cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());

@@ -163,6 +163,7 @@
                 toolchain.default.override {
                   extensions = ["rust-analyzer" "rust-src"];
                 }))
+              pkgs.tracy-wayland # profiler
               pkgs.alejandra # for formatting this flake if needed
               pkgs.nodePackages.prettier # formatting documentation
             ];

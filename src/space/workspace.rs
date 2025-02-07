@@ -506,21 +506,21 @@ impl Workspace {
     /// Get an iterator of the [`Workspace`]'s [`Window`]s
     ///
     /// This includes the fullscreened [`Window`], if any.
-    pub fn windows(&self) -> impl Iterator<Item = &Window> + ExactSizeIterator {
+    pub fn windows(&self) -> impl ExactSizeIterator<Item = &Window> {
         self.tiles.iter().map(Tile::window)
     }
 
     /// Get an iterator over the [`Workspace`]'s [`Tile`]s.
     ///
     /// This includes the fullscreened [`Tile`], if any.
-    pub fn tiles(&self) -> impl Iterator<Item = &Tile> + ExactSizeIterator {
+    pub fn tiles(&self) -> impl ExactSizeIterator<Item = &Tile> {
         self.tiles.iter()
     }
 
     /// Get a mutable iterator over the [`Workspace`]'s [`Tile`]s.
     ///
     /// This includes the fullscreened [`Tile`], if any.
-    pub fn tiles_mut(&mut self) -> impl Iterator<Item = &mut Tile> + ExactSizeIterator {
+    pub fn tiles_mut(&mut self) -> impl ExactSizeIterator<Item = &mut Tile> {
         self.tiles.iter_mut()
     }
 
@@ -714,7 +714,7 @@ impl Workspace {
         };
 
         let scale = self.output.current_scale().integer_scale();
-        tile.prepare_close_animation_if_needed(renderer, scale);
+        tile.prepare_close_animation_if_needed(&self.output, renderer, scale);
 
         true
     }
@@ -950,10 +950,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(0..nmaster as usize)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, master_geo.size.h);
                     // subtract border, of course.
                     let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
@@ -963,10 +960,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(nmaster as usize..)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, stack_geo.size.h);
                     // subtract border, of course.
                     let prepared_height =
@@ -990,10 +984,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(0..nmaster as usize)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, master_geo.size.w);
                     // subtract border, of course.
                     let prepared_width = lengths[unconfigured_idx] - (2 * border_width);
@@ -1003,10 +994,7 @@ impl Workspace {
                     let tiles = tiled_proportions
                         .get(nmaster as usize..)
                         .unwrap_or_default();
-                    let proportions = tiles
-                        .iter()
-                        .map(|proportion| *proportion)
-                        .collect::<Vec<_>>();
+                    let proportions = tiles.to_vec();
                     let lengths = proportion_length(&proportions, stack_geo.size.w);
                     // subtract border, of course.
                     let prepared_width =
@@ -1746,17 +1734,23 @@ impl Workspace {
                     Point::<i32, Logical>::from((x, y))
                 })
             })
-            .unwrap_or_default()
-            .to_physical_precise_round(scale);
+            .unwrap_or_default();
+        let render_offset_physical = render_offset.to_physical_precise_round(scale);
 
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
 
-            let fullscreen_elements = tile.render(renderer, scale, 1.0, true).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
+            let fullscreen_elements = tile
+                .render(renderer, scale, 1.0, &self.output, render_offset, true)
+                .map(|element| {
+                    RelocateRenderElement::from_element(
+                        element,
+                        render_offset_physical,
+                        Relocate::Relative,
+                    )
                     .into()
-            });
+                });
 
             if skip_alpha_animation_idx.is_none() {
                 return fullscreen_elements.collect();
@@ -1766,9 +1760,12 @@ impl Workspace {
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
             let element = closing_tile.render(scale, alpha);
-            let element =
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into();
+            let element = RelocateRenderElement::from_element(
+                element,
+                render_offset_physical,
+                Relocate::Relative,
+            )
+            .into();
             elements.push(element);
         }
 
@@ -1780,10 +1777,17 @@ impl Workspace {
             };
 
             // Active gets rendered above others.
-            elements.extend(tile.render(renderer, scale, alpha, true).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into()
-            }));
+            elements.extend(
+                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset_physical,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    }),
+            );
         }
 
         // Now render others, just fine.
@@ -1799,10 +1803,17 @@ impl Workspace {
                 alpha
             };
 
-            elements.extend(tile.render(renderer, scale, alpha, false).map(|element| {
-                RelocateRenderElement::from_element(element, render_offset, Relocate::Relative)
-                    .into()
-            }));
+            elements.extend(
+                tile.render(renderer, scale, alpha, &self.output, render_offset, false)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset_physical,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    }),
+            );
         }
 
         elements

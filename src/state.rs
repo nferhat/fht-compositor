@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
-use fht_compositor_config::{BorderOverrides, DecorationMode};
+use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -75,6 +75,7 @@ use crate::portals::screencast::{
     self, CursorMode, PortalSession, ScreencastSource, StreamMetadata,
 };
 use crate::protocols::screencopy::ScreencopyManagerState;
+use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::dbus::DBUS_CONNECTION;
@@ -372,6 +373,10 @@ impl State {
         }
 
         // Queue a redraw to ensure everything is up-to-date visually.
+        self.fht
+            .space
+            .outputs()
+            .for_each(|o| EffectsFramebuffers::get(o).optimized_blur_dirty = true);
         self.fht.queue_redraw_all();
     }
 
@@ -500,7 +505,7 @@ impl State {
                     let output = self
                         .fht
                         .space
-                        .output_for_surface(&*window.wl_surface().unwrap())
+                        .output_for_surface(&window.wl_surface().unwrap())
                         .unwrap();
                     let mode = output.current_mode().unwrap();
                     let scale = output.current_scale().integer_scale() as f64;
@@ -704,32 +709,29 @@ impl Fht {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
-        ContentTypeState::new::<State>(&dh);
-        CursorShapeManagerState::new::<State>(&dh);
-        TextInputManagerState::new::<State>(&dh);
-        InputMethodManagerState::new::<State, _>(&dh, |_| true);
+        ContentTypeState::new::<State>(dh);
+        CursorShapeManagerState::new::<State>(dh);
+        TextInputManagerState::new::<State>(dh);
+        InputMethodManagerState::new::<State, _>(dh, |_| true);
         IdleInhibitManagerState::new::<State>(dh);
-        VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
-        PointerConstraintsState::new::<State>(&dh);
-        TabletManagerState::new::<State>(&dh);
-        SecurityContextState::new::<State, _>(&dh, |client| {
+        VirtualKeyboardManagerState::new::<State, _>(dh, |_| true);
+        PointerConstraintsState::new::<State>(dh);
+        TabletManagerState::new::<State>(dh);
+        SecurityContextState::new::<State, _>(dh, |client| {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
-        ScreencopyManagerState::new::<State, _>(&dh, |client| {
+        ScreencopyManagerState::new::<State, _>(dh, |client| {
             // Same idea as security context state.
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
         XdgDecorationState::new::<State>(dh);
         FractionalScaleManagerState::new::<State>(dh);
@@ -902,6 +904,15 @@ impl Fht {
 
         let output_state = self.output_state.get_mut(output).unwrap();
         let _ = output_state.debug_damage_tracker.take();
+
+        let output2 = output.clone();
+        self.loop_handle.insert_idle(move |state| {
+            state.backend.with_renderer(|renderer| {
+                if let Err(err) = EffectsFramebuffers::update_for_output(&output2, renderer) {
+                    error!(?err, "Failed to update output effects framebuffers")
+                }
+            });
+        });
 
         self.queue_redraw(output);
     }
@@ -1572,7 +1583,7 @@ impl Fht {
             input_config.keyboard.repeat_delay,
         );
 
-        let disable = per_device_config.map_or(false, |c| c.disable);
+        let disable = per_device_config.is_some_and(|c| c.disable);
         // The device is disabled, no need to apply any configuration
         if disable {
             let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
@@ -1865,6 +1876,7 @@ pub struct ResolvedWindowRules {
     // Border overrides gets applied to the border config when we need the window-specific border
     // config with rules applied (for example when rendering)
     pub border_overrides: BorderOverrides,
+    pub blur: BlurOverrides,
     pub draw_shadow: Option<bool>,
     pub shadow_color: Option<[f32; 4]>,
     pub open_on_output: Option<String>,
@@ -1891,7 +1903,7 @@ impl ResolvedWindowRules {
         let mut resolved_rules = ResolvedWindowRules::default();
 
         // NOTE: Bypass for fht-share-picker since it's better when floating centered.
-        if window.app_id().as_ref().map(String::as_str) == Some("fht.desktop.SharePicker") {
+        if window.app_id().as_deref() == Some("fht.desktop.SharePicker") {
             return Self {
                 floating: Some(true),
                 centered: Some(true),
@@ -1911,6 +1923,7 @@ impl ResolvedWindowRules {
             resolved_rules.border_overrides = resolved_rules
                 .border_overrides
                 .merge_with(rule.border_overrides);
+            resolved_rules.blur = resolved_rules.blur.merge_with(rule.blur);
 
             if let Some(draw_shadow) = rule.draw_shadow {
                 resolved_rules.draw_shadow = Some(draw_shadow);
@@ -1925,7 +1938,7 @@ impl ResolvedWindowRules {
             }
 
             if let Some(open_on_workspace) = &rule.open_on_workspace {
-                resolved_rules.open_on_workspace = Some(open_on_workspace.clone())
+                resolved_rules.open_on_workspace = Some(*open_on_workspace)
             }
 
             if let Some(opacity) = rule.opacity {
