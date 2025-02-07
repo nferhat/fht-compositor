@@ -175,7 +175,10 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let redraw = redraw.clone();
                 move |stream, inner, old, new| {
-                    crate::profile_scope!("pw_stream::state_changed", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::state_changed",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -222,7 +225,10 @@ impl PipeWire {
                 let stop_cast = stop_cast.clone();
                 let gbm = gbm.clone();
                 move |stream, inner, id, pod| {
-                    crate::profile_scope!("pw_stream::param_changed", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::param_changed",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -484,7 +490,7 @@ impl PipeWire {
             .add_buffer({
                 let stop_cast = stop_cast.clone();
                 move |stream, inner, buffer| {
-                    crate::profile_scope!("pw_stream::add_buffer", stream.node_id().to_string());
+                    crate::profile_scope!("pw_stream::add_buffer", &stream.node_id().to_string());
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
@@ -564,7 +570,10 @@ impl PipeWire {
             })
             .remove_buffer({
                 move |stream, inner, buffer| {
-                    crate::profile_scope!("pw_stream::remove_buffer", stream.node_id().to_string());
+                    crate::profile_scope!(
+                        "pw_stream::remove_buffer",
+                        &stream.node_id().to_string()
+                    );
 
                     let span = debug_span!("pw_stream");
                     span.record("node_id", stream.node_id());
