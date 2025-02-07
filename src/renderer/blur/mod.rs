@@ -19,7 +19,7 @@ use glam::Mat3;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Blit, Frame, Renderer, Texture, TextureFilter};
+use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Logical, Physical, Rectangle, Size, Transform};
@@ -88,30 +88,26 @@ impl EffectsFramebuffers {
     /// The framebuffers handles live inside the Output's user data, use [`Self::get`] to access
     /// them.
     pub fn init_for_output(output: &Output, renderer: &mut impl FhtRenderer) {
-        let output_size = output.geometry().size;
+        // FIXME: Not panic here?
+        let renderer = renderer.glow_renderer_mut();
+        let scale = output.current_scale().integer_scale();
+        let output_size = output.geometry().size.to_physical(scale);
 
-        fn create_buffer(renderer: &mut impl FhtRenderer, size: Size<i32, Logical>) -> GlesTexture {
-            renderer
-                .create_buffer(Format::Abgr8888, size.to_buffer(1, Transform::Normal))
-                .expect("gl should always be able to create buffers")
+        fn create_buffer(
+            renderer: &mut GlowRenderer,
+            size: Size<i32, Physical>,
+        ) -> Result<GlesTexture, GlesError> {
+            renderer.create_buffer(
+                Format::Abgr8888,
+                size.to_logical(1).to_buffer(1, Transform::Normal),
+            )
         }
 
         let this = EffectsFramebuffers {
-            optimized_blur: renderer
-                .create_buffer(
-                    Format::Abgr8888,
-                    output_size.to_buffer(1, Transform::Normal),
-                )
-                .unwrap(),
+            optimized_blur: create_buffer(renderer, output_size).unwrap(),
             optimized_blur_dirty: true,
-            // blur_saved_pixels: renderer
-            //     .create_buffer(
-            //         Format::Abgr8888,
-            //         output_size.to_buffer(1, Transform::Normal),
-            //     )
-            //     .unwrap(),
-            effects: create_buffer(renderer, output_size),
-            effects_swapped: create_buffer(renderer, output_size),
+            effects: create_buffer(renderer, output_size).unwrap(),
+            effects_swapped: create_buffer(renderer, output_size).unwrap(),
             current_buffer: CurrentBuffer::Normal,
         };
 
@@ -122,6 +118,38 @@ impl EffectsFramebuffers {
         );
     }
 
+    /// Update the [`EffectsFramebuffers`] for an [`Output`].
+    ///
+    /// You should call this if the output's scale/size changes
+    pub fn update_for_output(
+        output: &Output,
+        renderer: &mut impl FhtRenderer,
+    ) -> Result<(), GlesError> {
+        let renderer = renderer.glow_renderer_mut();
+        let mut fx_buffers = Self::get(output);
+        let scale = output.current_scale().integer_scale();
+        let output_size = output.geometry().size.to_physical(scale);
+
+        fn create_buffer(
+            renderer: &mut GlowRenderer,
+            size: Size<i32, Physical>,
+        ) -> Result<GlesTexture, GlesError> {
+            renderer.create_buffer(
+                Format::Abgr8888,
+                size.to_logical(1).to_buffer(1, Transform::Normal),
+            )
+        }
+
+        *fx_buffers = EffectsFramebuffers {
+            optimized_blur: create_buffer(renderer, output_size)?,
+            optimized_blur_dirty: true,
+            effects: create_buffer(renderer, output_size)?,
+            effects_swapped: create_buffer(renderer, output_size)?,
+            current_buffer: CurrentBuffer::Normal,
+        };
+
+        Ok(())
+    }
     /// Render the optimized blur buffer again
     pub fn update_optimized_blur_buffer(
         &mut self,
