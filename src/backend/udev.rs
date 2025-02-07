@@ -1054,9 +1054,8 @@ impl UdevData {
                             // frame events to them so they start building the next buffer
                             output_state.current_frame_sequence =
                                 output_state.current_frame_sequence.wrapping_add(1);
-                            // Also notify puffin of a new frame.
-                            #[cfg(feature = "profile-with-puffin")]
-                            puffin::GlobalProfiler::lock().new_frame();
+                            // Also notify tracy of a new frame.
+                            tracy_client::Client::running().unwrap().frame_mark();
 
                             // Damage also means screencast.
                             #[cfg(feature = "xdg-screencast-portal")]

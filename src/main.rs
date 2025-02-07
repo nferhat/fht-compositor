@@ -33,12 +33,18 @@ mod input;
 mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
 mod portals;
+mod profiling;
 mod protocols;
 mod renderer;
 mod space;
 mod state;
 mod utils;
 mod window;
+
+#[cfg(feature = "profile-with-tracy-allocations")]
+#[global_allocator]
+static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // Do not allow the user to build a useless compositor.
@@ -68,19 +74,9 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         }
         _ => (),
     }
-
-    #[cfg(feature = "profile-with-puffin")]
-    {
-        let bind_addr = format!("127.0.0.1:{}", puffin_http::DEFAULT_PORT);
-        match puffin_http::Server::new(&bind_addr) {
-            Ok(server) => {
-                info!("Started puffin server on {bind_addr}",);
-                puffin::set_scopes_on(true);
-                std::mem::forget(server); // do not run the drop callback to not close.
-            }
-            Err(err) => error!("Failed to start puffin server, profiling disabled: {err}"),
-        }
-    }
+    // Start tracy client now since everything before is just basic setup or command handling.
+    // NOTE: If enabled feature is not toggled this does nothing
+    tracy_client::Client::start();
 
     info!(
         version = std::env!("CARGO_PKG_VERSION"),
@@ -270,33 +266,5 @@ fn notify_fd() -> anyhow::Result<()> {
     Ok(())
 }
 
-// If we do not nuse puffin, disable it entierly to avoid any overhead without profiling.
-// (this is the same approach as egui does)
-//
-// The said overhead is around ~1-2ns, but I'd rather keep that off as we can be profiling scopes
-// and functions tens of thousands of times.
-mod profiling_scopes {
-    #![allow(unused_macros)]
-    #![allow(unused_imports)]
-
-    /// Profiling macro for feature "profile-with-puffin"
-    macro_rules! profile_function {
-        ($($arg: tt)*) => {
-            #[cfg(feature = "profile-with-puffin")]
-            puffin::profile_function!($($arg)*);
-        };
-    }
-    pub(crate) use profile_function;
-
-    /// Profiling macro for feature "profile-with-puffin"
-    macro_rules! profile_scope {
-        ($($arg: tt)*) => {
-            #[cfg(feature = "profile-with-puffin")]
-            puffin::profile_scope!($($arg)*);
-        };
-    }
-    pub(crate) use profile_scope;
-}
-
 #[allow(unused_imports)]
-pub(crate) use profiling_scopes::{profile_function, profile_scope};
+pub(crate) use profiling::{profile_function, profile_scope};
