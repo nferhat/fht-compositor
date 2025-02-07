@@ -908,6 +908,15 @@ impl Fht {
         let output_state = self.output_state.get_mut(output).unwrap();
         let _ = output_state.debug_damage_tracker.take();
 
+        let output2 = output.clone();
+        self.loop_handle.insert_idle(move |state| {
+            state.backend.with_renderer(|renderer| {
+                if let Err(err) = EffectsFramebuffers::update_for_output(&output2, renderer) {
+                    error!(?err, "Failed to update output effects framebuffers")
+                }
+            });
+        });
+
         self.queue_redraw(output);
     }
 
