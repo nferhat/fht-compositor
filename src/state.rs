@@ -505,7 +505,7 @@ impl State {
                     let output = self
                         .fht
                         .space
-                        .output_for_surface(&*window.wl_surface().unwrap())
+                        .output_for_surface(&window.wl_surface().unwrap())
                         .unwrap();
                     let mode = output.current_mode().unwrap();
                     let scale = output.current_scale().integer_scale() as f64;
@@ -709,32 +709,29 @@ impl Fht {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
-        ContentTypeState::new::<State>(&dh);
-        CursorShapeManagerState::new::<State>(&dh);
-        TextInputManagerState::new::<State>(&dh);
-        InputMethodManagerState::new::<State, _>(&dh, |_| true);
+        ContentTypeState::new::<State>(dh);
+        CursorShapeManagerState::new::<State>(dh);
+        TextInputManagerState::new::<State>(dh);
+        InputMethodManagerState::new::<State, _>(dh, |_| true);
         IdleInhibitManagerState::new::<State>(dh);
-        VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
-        PointerConstraintsState::new::<State>(&dh);
-        TabletManagerState::new::<State>(&dh);
-        SecurityContextState::new::<State, _>(&dh, |client| {
+        VirtualKeyboardManagerState::new::<State, _>(dh, |_| true);
+        PointerConstraintsState::new::<State>(dh);
+        TabletManagerState::new::<State>(dh);
+        SecurityContextState::new::<State, _>(dh, |client| {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
-        ScreencopyManagerState::new::<State, _>(&dh, |client| {
+        ScreencopyManagerState::new::<State, _>(dh, |client| {
             // Same idea as security context state.
             client
-                .get_data::<ClientState>()
-                .map_or(true, |data| data.security_context.is_none())
+                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
         });
         XdgDecorationState::new::<State>(dh);
         FractionalScaleManagerState::new::<State>(dh);
@@ -1586,7 +1583,7 @@ impl Fht {
             input_config.keyboard.repeat_delay,
         );
 
-        let disable = per_device_config.map_or(false, |c| c.disable);
+        let disable = per_device_config.is_some_and(|c| c.disable);
         // The device is disabled, no need to apply any configuration
         if disable {
             let _ = device.config_send_events_set_mode(SendEventsMode::DISABLED);
@@ -1906,7 +1903,7 @@ impl ResolvedWindowRules {
         let mut resolved_rules = ResolvedWindowRules::default();
 
         // NOTE: Bypass for fht-share-picker since it's better when floating centered.
-        if window.app_id().as_ref().map(String::as_str) == Some("fht.desktop.SharePicker") {
+        if window.app_id().as_deref() == Some("fht.desktop.SharePicker") {
             return Self {
                 floating: Some(true),
                 centered: Some(true),
@@ -1941,7 +1938,7 @@ impl ResolvedWindowRules {
             }
 
             if let Some(open_on_workspace) = &rule.open_on_workspace {
-                resolved_rules.open_on_workspace = Some(open_on_workspace.clone())
+                resolved_rules.open_on_workspace = Some(*open_on_workspace)
             }
 
             if let Some(opacity) = rule.opacity {

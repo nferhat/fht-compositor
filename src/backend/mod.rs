@@ -75,7 +75,7 @@ impl Backend {
         match self {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::Winit(ref mut data) => f(&mut data.renderer()),
+            Self::Winit(ref mut data) => f(data.renderer()),
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => {

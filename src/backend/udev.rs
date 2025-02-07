@@ -107,13 +107,13 @@ pub type UdevTextureMapping = MultiTextureMapping<
     GbmGlesBackend<GlowRenderer, DrmDeviceFd>,
 >;
 
-impl<'a> FhtRenderer for UdevRenderer<'a> {
+impl FhtRenderer for UdevRenderer<'_> {
     type FhtTextureId = MultiTexture;
     type FhtError = UdevRenderError;
     type FhtTextureMapping = UdevTextureMapping;
 }
 
-impl<'a> AsGlowRenderer for UdevRenderer<'a> {
+impl AsGlowRenderer for UdevRenderer<'_> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
@@ -256,10 +256,8 @@ impl UdevData {
 
         let (primary_gpu, primary_node) = if let Some(user_path) = &state.config.debug.render_node {
             let primary_gpu = DrmNode::from_path(user_path)
-                .expect(&format!(
-                    "Please make sure that {} is a valid DRM node!",
-                    user_path.display()
-                ))
+                .unwrap_or_else(|_| panic!("Please make sure that {} is a valid DRM node!",
+                    user_path.display()))
                 .node_with_type(NodeType::Render)
                 .expect("Please make sure that {user_path} is a render node!")
                 .expect("Please make sure that {user_path} is a render node!");
@@ -806,7 +804,7 @@ impl UdevData {
                 self.primary_gpu,
                 device.render_node,
                 &mut self.gpu_manager,
-                &compositor.surface(),
+                compositor.surface(),
             )
         });
 
@@ -982,7 +980,7 @@ impl UdevData {
                         Some(DrmError::Access(DrmAccessError { source, .. }))
                             if source.kind() != io::ErrorKind::PermissionDenied =>
                         {
-                            ()
+                            
                         }
                         _ => anyhow::bail!("temporary render failure: {err:?}"),
                     },
@@ -1198,7 +1196,7 @@ impl UdevData {
 
         let now = get_monotonic_time();
         let presentation_time = match metadata.time {
-            DrmEventTime::Monotonic(tp) => tp.into(),
+            DrmEventTime::Monotonic(tp) => tp,
             DrmEventTime::Realtime(_) => now,
         };
 
@@ -1234,10 +1232,7 @@ impl UdevData {
             Ok(None) => (),
             Err(err) => {
                 warn!("Error during rendering: {:?}", err);
-                match err {
-                    SwapBuffersError::ContextLost(err) => panic!("Rendering loop lost: {}", err),
-                    _ => (),
-                }
+                if let SwapBuffersError::ContextLost(err) = err { panic!("Rendering loop lost: {}", err) }
             }
         };
 
@@ -1360,7 +1355,7 @@ fn draw_damage<'a>(
     dt: &mut Option<OutputDamageTracker>,
     elements: &[FhtRenderElement<UdevRenderer<'a>>],
 ) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
-    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(&output));
+    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(output));
     let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
         return vec![];
     };

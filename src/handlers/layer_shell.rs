@@ -93,7 +93,7 @@ impl State {
                     .initial_configure_sent
             });
 
-            let mut map = layer_map_for_output(&output);
+            let mut map = layer_map_for_output(output);
 
             // arrange the layers before sending the initial configure
             // to respect any size the client may have sent

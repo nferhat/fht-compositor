@@ -122,7 +122,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtPixelShaderElement {
             damage,
             opaque_regions,
         )
-        .map_err(|err| UdevRenderError::Render(err))
+        .map_err(UdevRenderError::Render)
     }
 
     fn underlying_storage(

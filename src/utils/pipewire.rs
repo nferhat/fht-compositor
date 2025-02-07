@@ -205,7 +205,7 @@ impl PipeWire {
                                     node_id,
                                     size,
                                 };
-                                if let Err(_) = metadata_sender.try_send(Some(metadata)) {
+                                if metadata_sender.try_send(Some(metadata)).is_err() {
                                     error!("failed to send stream metadata to portal, stopping");
                                     stop_cast();
                                 }
@@ -529,8 +529,8 @@ impl PipeWire {
                     let plane_count = dmabuf.num_planes();
                     let spa_datas = unsafe {
                         std::slice::from_raw_parts_mut(
-                            (*spa_buffer).datas,
-                            (*spa_buffer).n_datas as usize,
+                            spa_buffer.datas,
+                            spa_buffer.n_datas as usize,
                         )
                     };
                     assert_eq!(spa_datas.len(), plane_count);
@@ -547,7 +547,7 @@ impl PipeWire {
                         spa_data.mapoffset = 0;
                         spa_data.fd = fd.as_raw_fd() as i64;
                         spa_data.maxsize = 0;
-                        spa_data.data = 0 as *mut _;
+                        spa_data.data = std::ptr::null_mut();
 
                         let spa_chunk = unsafe { &mut (*spa_data.chunk) };
                         // clients have implemented to check chunk->size if the buffer is valid
@@ -965,8 +965,8 @@ fn make_video_object_params(
             // Smithay does assertions for us about sizes being always positive.
             // So truncating to u32 does not lose any data.
             Rectangle {
-                width: size.w as u32,
-                height: size.h as u32,
+                width: size.w,
+                height: size.h,
             }
         ),
         pod::property!(

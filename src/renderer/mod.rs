@@ -723,7 +723,7 @@ pub fn layer_elements<R: FhtRenderer>(
                 // NOTE: opaque_regions are relative to surface buffer
                 let layer_geo = Rectangle::from_size(layer_geo.size);
                 let remaining = layer_geo.subtract_rects(opaque_regions.iter().copied());
-                remaining.len() > 0
+                !remaining.is_empty()
             } else {
                 // no opaque regions == fully transparent window surface
                 true
@@ -788,9 +788,9 @@ pub fn render_to_texture<R: FhtRenderer>(
 /// Render the given `elements` inside the current bound target.
 ///
 /// It is up to **YOU** to bind and unbind the renderer before and after calling this function.
-pub fn render_elements<'buffer, R: FhtRenderer>(
+pub fn render_elements<R: FhtRenderer>(
     renderer: &mut R,
-    fb: &mut R::Framebuffer<'buffer>,
+    fb: &mut R::Framebuffer<'_>,
     size: Size<i32, Physical>,
     scale: impl Into<Scale<f64>>,
     transform: Transform,

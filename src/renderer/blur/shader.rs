@@ -84,7 +84,6 @@ impl BlurShader {
             let alpha = c"alpha";
             let radius = c"radius";
             let half_pixel = c"half_pixel";
-            let tint = c"tint";
 
             Ok(BlurShaderVariant {
                 normal: BlurShaderProgram {
@@ -147,9 +146,6 @@ impl BlurShader {
                         vert_position.as_ptr() as *const ffi::types::GLchar,
                     ),
                 },
-                // debug flags
-                uniform_tint: gl
-                    .GetUniformLocation(debug_program, tint.as_ptr() as *const ffi::types::GLchar),
             })
         };
 
@@ -164,8 +160,6 @@ impl BlurShader {
 pub struct BlurShaderVariant {
     pub(super) normal: BlurShaderProgram,
     pub(super) debug: BlurShaderProgram,
-    // Only valid for debug program,
-    pub(super) uniform_tint: ffi::types::GLint,
 }
 
 #[derive(Copy, Clone, Debug)]
