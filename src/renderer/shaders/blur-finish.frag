@@ -24,6 +24,7 @@ uniform float tint;
 
 uniform vec4 geo;
 uniform float corner_radius;
+uniform float noise;
 
 float rounding_alpha(vec2 coords, vec2 size, float radius) {
     vec2 center;
@@ -44,10 +45,19 @@ float rounding_alpha(vec2 coords, vec2 size, float radius) {
     return 1.0 - smoothstep(radius - 0.5, radius + 0.5, dist);
 }
 
+// Noise function copied from hyprland.
+// I like the effect it gave, can be tweaked further
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 727.727); // wysi :wink: :wink:
+    p3 += dot(p3, p3.xyz + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 void main() {
 
     // Sample the texture.
     vec4 color = texture2D(tex, v_coords);
+
 #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);
 #endif
@@ -60,6 +70,12 @@ void main() {
     vec2 loc = gl_FragCoord.xy - geo.xy;
     // Apply corner rounding inside geometry.
     color *= rounding_alpha(loc, size, corner_radius);
+
+    // Add noise fx
+    // This can be used to achieve a glass look
+    float noiseHash   = hash(loc / size);
+    float noiseAmount = (mod(noiseHash, 1.0) - 0.5);
+    color.rgb += noiseAmount * noise;
 
     // Apply final alpha and tint.
     color *= alpha;

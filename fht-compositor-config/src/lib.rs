@@ -704,6 +704,8 @@ pub struct Blur {
     pub passes: usize,
     #[serde(default = "default_blur_radius")]
     pub radius: f32,
+    #[serde(default)]
+    pub noise: f32,
 }
 
 impl Default for Blur {
@@ -712,6 +714,7 @@ impl Default for Blur {
             disable: false,
             passes: default_blur_passes(),
             radius: default_blur_radius(),
+            noise: 0.0,
         }
     }
 }
@@ -721,6 +724,7 @@ impl Blur {
         disable: true,
         passes: 0,
         radius: 0.0,
+        noise: 0.0,
     };
 
     pub fn disabled(&self) -> bool {
@@ -737,6 +741,9 @@ impl Blur {
         }
         if let Some(passes) = overrides.passes {
             ret.passes = passes;
+        }
+        if let Some(noise) = overrides.noise {
+            ret.noise = noise;
         }
 
         ret
@@ -1003,6 +1010,7 @@ pub struct BlurOverrides {
     pub optimized: Option<bool>,
     pub passes: Option<usize>,
     pub radius: Option<f32>,
+    pub noise: Option<f32>,
 }
 
 impl BlurOverrides {
@@ -1018,6 +1026,9 @@ impl BlurOverrides {
         }
         if let Some(radius) = other.radius {
             self.radius = Some(radius);
+        }
+        if let Some(noise) = other.noise {
+            self.noise = Some(noise);
         }
 
         self
