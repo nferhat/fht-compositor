@@ -14,7 +14,6 @@ use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, T
 use super::{CurrentBuffer, EffectsFramebuffers};
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
-use crate::output::OutputExt;
 use crate::renderer::data::RendererData;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;

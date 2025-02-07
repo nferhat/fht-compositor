@@ -19,6 +19,7 @@ pub mod texture_shader_element;
 use std::borrow::BorrowMut;
 
 use anyhow::Context;
+use blur::element::BlurElement;
 use blur::EffectsFramebuffers;
 use glam::{Mat3, Vec2};
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -34,7 +35,7 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::utils::{CommitCounter, RendererSurfaceStateUserData};
 use smithay::backend::renderer::{
     Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
     RendererSuper, Texture, TextureFilter, TextureMapping,
@@ -47,6 +48,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::{Buffer, IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
@@ -65,6 +67,7 @@ crate::fht_render_elements! {
         Solid = SolidColorRenderElement,
         Debug = DebugRenderElement,
         Wayland = WaylandSurfaceRenderElement<R>,
+        Blur = BlurElement, // for blurred layer shells
         Monitor = MonitorRenderElement<R>,
     }
 }
@@ -209,7 +212,12 @@ impl Fht {
         }
 
         // Overlay layer shells are drawn above everything else, including fullscreen windows
-        let overlay_elements = layer_elements(renderer, output, Layer::Overlay);
+        let overlay_elements = layer_elements(
+            renderer,
+            output,
+            Layer::Overlay,
+            &self.config.decorations.blur,
+        );
         rv.elements.extend(overlay_elements);
 
         // Top layer shells sit between the normal windows and fullscreen windows.
@@ -226,17 +234,31 @@ impl Fht {
         } = monitor.render(renderer, scale);
 
         if !has_fullscreen {
-            rv.elements
-                .extend(layer_elements(renderer, output, Layer::Top));
+            rv.elements.extend(layer_elements(
+                renderer,
+                output,
+                Layer::Top,
+                &self.config.decorations.blur,
+            ));
         }
 
         rv.elements
             .extend(monitor_elements.into_iter().map(Into::into));
 
         // Finally we have background and bottom elements.
-        let background = layer_elements(renderer, output, Layer::Bottom)
-            .into_iter()
-            .chain(layer_elements(renderer, output, Layer::Background));
+        let background = layer_elements(
+            renderer,
+            output,
+            Layer::Bottom,
+            &self.config.decorations.blur,
+        )
+        .into_iter()
+        .chain(layer_elements(
+            renderer,
+            output,
+            Layer::Background,
+            &self.config.decorations.blur,
+        ));
         rv.elements.extend(background);
 
         // In case the optimized blur layer is dirty, re-render
@@ -297,7 +319,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
                 continue;
@@ -365,7 +387,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
 
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
@@ -451,7 +473,7 @@ impl Fht {
         let mut casts_to_stop = vec![];
 
         for cast in &mut casts {
-            crate::profile_scope!("render_cast", cast.id().to_string());
+            crate::profile_scope!("render_cast", &cast.id().to_string());
 
             if !cast.active() {
                 trace!(id = ?cast.id(), "Cast is not active, skipping");
@@ -676,21 +698,64 @@ pub fn layer_elements<R: FhtRenderer>(
     renderer: &mut R,
     output: &Output,
     layer: Layer,
+    blur_config: &fht_compositor_config::Blur,
 ) -> Vec<FhtRenderElement<R>> {
     crate::profile_function!();
-    let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
+    let output_scale = output.current_scale().integer_scale();
     let layer_map = layer_map_for_output(output);
-    let output_loc = output.current_location();
+    let mut elements = vec![];
 
-    layer_map
-        .layers_on(layer)
-        .rev()
-        .filter_map(|l| layer_map.layer_geometry(l).map(|geo| (geo.loc, l)))
-        .flat_map(|(loc, layer)| {
-            let location = (loc + output_loc).to_physical_precise_round(output_scale);
-            layer.render_elements::<FhtRenderElement<R>>(renderer, location, output_scale, 1.0)
-        })
-        .collect()
+    for layer in layer_map.layers_on(layer).rev() {
+        let wl_surface = layer.wl_surface();
+        let layer_geo = layer_map.layer_geometry(layer).unwrap();
+
+        let has_transparent_region = with_states(wl_surface, |data| {
+            let renderer_data = data
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            if let Some(opaque_regions) = renderer_data.opaque_regions() {
+                // If there's some place left after removing opaque regions, these are
+                // transparent regions and must be rendered using blur.
+                //
+                // NOTE: opaque_regions are relative to surface buffer
+                let layer_geo = Rectangle::from_size(layer_geo.size);
+                let remaining = layer_geo.subtract_rects(opaque_regions.iter().copied());
+                remaining.len() > 0
+            } else {
+                // no opaque regions == fully transparent window surface
+                true
+            }
+        });
+
+        let location = layer_geo.loc.to_physical_precise_round(output_scale);
+        elements.extend(layer.render_elements(
+            renderer,
+            location,
+            (output_scale as f64).into(),
+            1.0,
+        ));
+
+        if !blur_config.disabled() && has_transparent_region {
+            elements.push(
+                BlurElement::new(
+                    renderer,
+                    output,
+                    layer_geo,
+                    location,
+                    0.0, // FIXME: Rounded layer shells through rules
+                    false,
+                    output_scale,
+                    *blur_config,
+                )
+                .into(),
+            );
+        }
+    }
+
+    elements
 }
 
 /// Render the given `elements` inside a [`GlesTexture`].

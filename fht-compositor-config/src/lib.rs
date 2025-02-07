@@ -717,6 +717,12 @@ impl Default for Blur {
 }
 
 impl Blur {
+    pub const DISABLED: Self = Self {
+        disable: true,
+        passes: 0,
+        radius: 0.0,
+    };
+
     pub fn disabled(&self) -> bool {
         self.disable || self.passes == 0 || self.radius == 0.0
     }
