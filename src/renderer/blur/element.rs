@@ -165,9 +165,17 @@ impl Element for BlurElement {
     ) -> DamageSet<i32, Physical> {
         match self {
             BlurElement::Optimized { tex, .. } => tex.damage_since(scale, commit),
-            BlurElement::TrueBlur { .. } => {
+            BlurElement::TrueBlur { blur_config, .. } => {
+                // Since the blur element samples from around itself, we must expand the damage it
+                // induces to include any potential changes.
+                let mut geometry = self.geometry(scale);
+                let size =
+                    (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius).ceil() as i32;
+                geometry.loc -= Point::from((size, size));
+                geometry.size += Size::from((size, size)).upscale(2);
+
                 // FIXME: Damage tracking?
-                DamageSet::from_slice(&[self.geometry(scale)])
+                DamageSet::from_slice(&[geometry])
             }
         }
     }
@@ -282,6 +290,15 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 let debug = !gles_frame.debug_flags().is_empty();
                 let projection_matrix = glam::Mat3::from_cols_array(gles_frame.projection());
 
+                let dst_expanded = {
+                    let mut dst = dst;
+                    let size = (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius)
+                        .ceil() as i32;
+                    dst.loc -= Point::from((size, size));
+                    dst.size += Size::from((size, size)).upscale(2);
+                    dst
+                };
+
                 // Update the blur buffers.
                 // We use gl ffi directly to circumvent some stuff done by smithay
                 let _ = gles_frame.with_context(|gl| unsafe {
@@ -313,14 +330,14 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         // as the bound fbo size, so blitting uses dst immediatly
                         gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
                         gl.BlitFramebuffer(
-                            dst.loc.x,
-                            dst.loc.y,
-                            dst.loc.x + dst.size.w,
-                            dst.loc.y + dst.size.h,
-                            dst.loc.x,
-                            dst.loc.y,
-                            dst.loc.x + dst.size.w,
-                            dst.loc.y + dst.size.h,
+                            dst_expanded.loc.x,
+                            dst_expanded.loc.y,
+                            dst_expanded.loc.x + dst_expanded.size.w,
+                            dst_expanded.loc.y + dst_expanded.size.h,
+                            dst_expanded.loc.x,
+                            dst_expanded.loc.y,
+                            dst_expanded.loc.x + dst_expanded.size.w,
+                            dst_expanded.loc.y + dst_expanded.size.h,
                             ffi::COLOR_BUFFER_BIT,
                             ffi::LINEAR,
                         );
@@ -340,7 +357,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst.downscale(1 << i + 1);
+                            let damage = dst_expanded.downscale(1 << i + 1);
                             super::render_blur_pass_with_gl(
                                 &gl,
                                 &vbos,
@@ -365,7 +382,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst.downscale(1 << passes - 1 - i);
+                            let damage = dst_expanded.downscale(1 << passes - 1 - i);
                             super::render_blur_pass_with_gl(
                                 &gl,
                                 &vbos,
