@@ -221,7 +221,9 @@ impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             // Override texture shader with our uniforms
-            let program = Shaders::get_from_frame(frame).rounded_window.clone();
+            let program = Shaders::get_from_frame(frame.borrow_mut())
+                .rounded_window
+                .clone();
             let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(frame);
 
             gles_frame.override_default_tex_program(
@@ -261,7 +263,9 @@ impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'
             self.element.draw(frame, src, dst, damage, opaque_regions)
         } else {
             let glow_frame = frame.as_mut();
-            let program = Shaders::get_from_frame(glow_frame).rounded_window.clone();
+            let program = Shaders::get_from_frame(glow_frame.borrow_mut())
+                .rounded_window
+                .clone();
             let gles_frame: &mut GlesFrame = BorrowMut::borrow_mut(glow_frame);
 
             gles_frame.override_default_tex_program(

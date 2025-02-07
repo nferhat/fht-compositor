@@ -7,6 +7,7 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::backend::renderer::Texture;
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
@@ -47,6 +48,7 @@ pub enum BlurElement {
         output: Output,
         // FIXME: Use DamageBag and expand it as needed?
         commit_counter: CommitCounter,
+        blur_config: fht_compositor_config::Blur,
     },
 }
 
@@ -67,6 +69,7 @@ impl BlurElement {
         corner_radius: f32,
         optimized: bool,
         scale: i32,
+        blur_config: fht_compositor_config::Blur,
     ) -> Self {
         let fbs = &mut *EffectsFramebuffers::get(output);
         let texture = fbs.optimized_blur.clone();
@@ -108,6 +111,7 @@ impl BlurElement {
                 loc,
                 output: output.clone(), // fixme i hate this
                 commit_counter: CommitCounter::default(),
+                blur_config,
             }
         }
     }
@@ -218,7 +222,9 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         opaque_regions,
                     )
                 } else {
-                    let program = Shaders::get_from_frame(frame).rounded_texture.clone();
+                    let program = Shaders::get_from_frame(frame.borrow_mut())
+                        .rounded_texture
+                        .clone();
                     let gles_frame: &mut GlesFrame = frame.borrow_mut();
                     gles_frame.override_default_tex_program(
                         program,
@@ -251,31 +257,36 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     res
                 }
             }
-            Self::TrueBlur { output, scale, .. } => {
+            Self::TrueBlur {
+                output,
+                scale,
+                corner_radius,
+                blur_config,
+                ..
+            } => {
                 let mut fx_buffers = EffectsFramebuffers::get(output);
-                let output_rect = output.geometry().to_physical(*scale);
                 fx_buffers.current_buffer = CurrentBuffer::Normal;
+                // NOTE: We know that both the effects and effects swapped textures are of the same
+                // size
+                let tex_size = fx_buffers
+                    .effects
+                    .size()
+                    .to_logical(1, Transform::Normal)
+                    .to_physical(*scale);
 
-                let shaders = Shaders::get_from_frame(frame).blur.clone();
-                let frame: &mut GlesFrame = frame.borrow_mut();
-                let vbos = RendererData::get_from_frame(frame).vbos;
-                let supports_instancing = frame
+                let gles_frame: &mut GlesFrame = frame.borrow_mut();
+                let shaders = Shaders::get_from_frame(gles_frame).blur.clone();
+                let vbos = RendererData::get_from_frame(gles_frame).vbos;
+                let supports_instancing = gles_frame
                     .capabilities()
                     .contains(&smithay::backend::renderer::gles::Capability::Instancing);
-                let debug = !frame.debug_flags().is_empty();
-                let projection_matrix = glam::Mat3::from_cols_array(frame.projection());
+                let debug = !gles_frame.debug_flags().is_empty();
+                let projection_matrix = glam::Mat3::from_cols_array(gles_frame.projection());
 
-                let gl = unsafe {
-                    let mut gl = std::mem::MaybeUninit::zeroed(); // get the gl context outside of the frame to bypass borrow checker
-                    let _ = frame.with_context(|gles| {
-                        std::ptr::write(gl.as_mut_ptr(), gles.clone());
-                    })?;
-                    gl.assume_init()
-                };
-                let egl = frame.egl_context();
-
-                let mut prev_fbo = 0;
-                unsafe {
+                // Update the blur buffers.
+                // We use gl ffi directly to circumvent some stuff done by smithay
+                let _ = gles_frame.with_context(|gl| unsafe {
+                    let mut prev_fbo = 0;
                     gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
 
                     // First get a fbo for the texture we are about to read into
@@ -299,9 +310,6 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     }
 
                     {
-                        // blit the contents
-                        egl.make_current()?;
-
                         // NOTE: We are assured that the size of the effects texture is the same
                         // as the bound fbo size, so blitting uses dst immediatly
                         gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
@@ -325,13 +333,15 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     }
 
                     {
+                        let passes = blur_config.passes;
                         let half_pixel = [
-                            0.5 / (output_rect.size.w as f32 / 2.0),
-                            0.5 / (output_rect.size.h as f32 / 2.0),
+                            0.5 / (tex_size.w as f32 / 2.0),
+                            0.5 / (tex_size.h as f32 / 2.0),
                         ];
-                        for _ in 0..2 {
+                        for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
+                            let damage = dst.downscale(1 << i + 1);
                             super::render_blur_pass_with_gl(
                                 &gl,
                                 &vbos,
@@ -340,26 +350,23 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                 projection_matrix,
                                 &sample_buffer,
                                 &mut render_buffer,
+                                *scale,
                                 &shaders.down,
                                 half_pixel,
-                                &fht_compositor_config::Blur {
-                                    disable: false,
-                                    passes: 3,
-                                    radius: 5.0,
-                                },
-                                src,
-                                dst,
+                                blur_config,
+                                damage,
                             )?;
                             fx_buffers.current_buffer.swap();
                         }
 
                         let half_pixel = [
-                            0.5 / (output_rect.size.w as f32 * 2.0),
-                            0.5 / (output_rect.size.h as f32 * 2.0),
+                            0.5 / (tex_size.w as f32 * 2.0),
+                            0.5 / (tex_size.h as f32 * 2.0),
                         ];
-                        for _ in 0..2 {
+                        for i in 0..passes {
                             let mut render_buffer = fx_buffers.render_buffer();
                             let sample_buffer = fx_buffers.sample_buffer();
+                            let damage = dst.downscale(1 << passes - 1 - i);
                             super::render_blur_pass_with_gl(
                                 &gl,
                                 &vbos,
@@ -368,15 +375,11 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                 projection_matrix,
                                 &sample_buffer,
                                 &mut render_buffer,
+                                *scale,
                                 &shaders.up,
                                 half_pixel,
-                                &fht_compositor_config::Blur {
-                                    disable: false,
-                                    passes: 3,
-                                    radius: 5.0,
-                                },
-                                src,
-                                dst,
+                                blur_config,
+                                damage,
                             )?;
                             fx_buffers.current_buffer.swap();
                         }
@@ -387,10 +390,33 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
                         gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
                     }
-                }
+
+                    Result::<_, GlesError>::Ok(())
+                })??;
 
                 let last_buffer = fx_buffers.sample_buffer();
-                frame.render_texture_from_to(
+                let (program, additional_uniforms) = if *corner_radius == 0.0 {
+                    (None, vec![])
+                } else {
+                    let program = Shaders::get_from_frame(gles_frame).rounded_texture.clone();
+                    (
+                        Some(program),
+                        vec![
+                            Uniform::new(
+                                "geo",
+                                [
+                                    dst.loc.x as f32,
+                                    dst.loc.y as f32,
+                                    dst.size.w as f32,
+                                    dst.size.h as f32,
+                                ],
+                            ),
+                            Uniform::new("corner_radius", *corner_radius),
+                        ],
+                    )
+                };
+
+                gles_frame.render_texture_from_to(
                     &last_buffer,
                     src,
                     dst,
@@ -398,11 +424,9 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     opaque_regions,
                     Transform::Normal,
                     1.0,
-                    None,
-                    &[],
-                )?;
-
-                Ok(())
+                    program.as_ref(),
+                    &additional_uniforms,
+                )
             }
         }
     }
