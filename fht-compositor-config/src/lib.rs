@@ -716,6 +716,12 @@ impl Default for Blur {
     }
 }
 
+impl Blur {
+    pub fn disabled(&self) -> bool {
+        self.disable || self.passes == 0 || self.radius == 0.0
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum DecorationMode {

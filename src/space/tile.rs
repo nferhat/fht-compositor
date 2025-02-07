@@ -509,6 +509,7 @@ impl Tile {
         drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
+        let has_opening_animation = self.opening_animation.is_some();
         let tile_geometry = Rectangle::new(location, self.visual_size());
         let window_geometry = Rectangle::new(
             location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
@@ -642,21 +643,43 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        if !self.config.blur_disabled && self.has_transparent_region() {
-            // TODO: Explore better conditions for optimized blur?
-            let optimized = is_floating;
+        if !self.config.blur.disabled() && self.has_transparent_region() {
+            // Optimized blur uses a pre-blurred texture containing background and bottom
+            // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
+            // window.
+            //
+            // When a window is tiled, it will most likely only display the background, IE there
+            // are no windows behind it, so we win quit a lot of performance when enabling optimized
+            // blur here since tiled windows are *huge*
+            //
+            // Floating windows on the other hand might have other windows below it, so they don't
+            // use optimized. They are also (in comparaison) relatively small, so its even better
+            let mut optimized = !is_floating;
+            if has_opening_animation {
+                // One exception is made for opening animations. Since we pre-render the window
+                // inside a texture, there's nothing for us to sample from, so we must use optimized
+                // in order to get a blur effect going on.
+                optimized = true;
+            }
+
+            // Since tile_geometry and window_geometry are dependent on what we are rendering for
+            // (opening animation, size animation) we use data gathered from self instead
+            //
+            // render_offset is from the workspace, to account for switching animations
+            let sample_area = Rectangle::new(
+                self.visual_location() + self.window_loc() + render_offset,
+                window_geometry.size,
+            );
 
             let blur_element = BlurElement::new(
                 renderer,
                 output,
-                Rectangle::new(
-                    self.visual_location() + self.window_loc() + render_offset,
-                    window_geometry.size,
-                ),
+                sample_area,
                 window_geometry.loc.to_physical(scale),
                 inner_radius,
                 optimized,
                 scale,
+                self.config.blur,
             );
             elements.push(blur_element.into());
         }

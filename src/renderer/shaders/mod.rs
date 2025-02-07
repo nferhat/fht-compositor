@@ -1,9 +1,9 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
 use smithay::backend::renderer::gles::{
     GlesFrame, GlesPixelProgram, GlesRenderer, GlesTexProgram, UniformName, UniformType,
 };
-use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::glow::GlowRenderer;
 
 use super::blur::shader::BlurShaders;
 
@@ -110,8 +110,8 @@ impl Shaders {
             .expect("Shaders are initialized at startup!")
     }
 
-    pub fn get_from_frame<'a>(frame: &'a GlowFrame<'_, '_>) -> &'a Self {
-        Borrow::<GlesFrame>::borrow(frame)
+    pub fn get_from_frame<'a>(frame: &'a GlesFrame<'_, '_>) -> &'a Self {
+        frame
             .egl_context()
             .user_data()
             .get()

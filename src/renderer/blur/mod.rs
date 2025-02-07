@@ -15,14 +15,14 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use anyhow::Context;
-use glam::{Mat3, Vec2};
+use glam::Mat3;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Frame, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform};
+use smithay::utils::{Logical, Physical, Rectangle, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;
@@ -401,17 +401,21 @@ unsafe fn render_blur_pass_with_gl(
     // The buffers used for blurring
     sample_buffer: &GlesTexture,
     render_buffer: &mut GlesTexture,
+    scale: i32,
     // The current blur program + config
     blur_program: &shader::BlurShader,
     half_pixel: [f32; 2],
     config: &fht_compositor_config::Blur,
     // dst is the region that should have blur
-    _src: Rectangle<f64, Buffer>,
-    _dst: Rectangle<i32, Physical>,
+    // it gets up/downscaled with passes
+    damage: Rectangle<i32, Physical>,
 ) -> Result<(), GlesError> {
-    // FIXME: I can't get things to render with the correct src/dst???
-    let dst = Rectangle::from_size(Size::from((1920, 1080)));
-    let src = Rectangle::from_size(Size::from((1920., 1080.)));
+    let tex_size = sample_buffer.size();
+    let src = Rectangle::from_size(tex_size.to_f64());
+    let dest = src
+        .to_logical(1.0, Transform::Normal, &src.size)
+        .to_physical(scale as f64)
+        .to_i32_round();
 
     // FIXME: Should we call gl.Finish() when done rendering this pass? If yes, should we check
     // if the gl context is shared or not? What about fencing, we don't have access to that
@@ -439,35 +443,22 @@ unsafe fn render_blur_pass_with_gl(
         }
     }
 
-    let mat =
-        Mat3::from_translation(Vec2::new(dst.loc.x as f32, dst.loc.y as f32)) * projection_matrix;
-    let tex_size = sample_buffer.size();
-    let src_size = src.size;
-
-    if tex_size.is_empty() || src_size.is_empty() {
-        return Ok(());
-    }
-
-    let mut tex_mat = super::build_texture_mat(src, dst, tex_size, Transform::Normal);
+    let mat = projection_matrix;
+    // NOTE: We are assured that tex_size != 0, and src.size != too (by damage tracker)
+    let mut tex_mat = super::build_texture_mat(src, dest, tex_size, Transform::Normal);
     if sample_buffer.is_y_inverted() {
         tex_mat *= Mat3::from_cols_array(&[1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
     }
 
     gl.Disable(ffi::BLEND);
 
-    let dest_size = dst.size;
-    let rect_constrained_loc = dst.loc.constrain(Rectangle::from_size(dest_size));
-    let rect_clamped_size = dst.size.clamp(
-        (0, 0),
-        (dest_size.to_point() - rect_constrained_loc).to_size(),
-    );
-
-    let rect = Rectangle::new(rect_constrained_loc, rect_clamped_size);
+    // FIXME: Use actual damage for this? Would require making a custom window render element that
+    // includes blur and whatnot to get the damage for the window only
     let damage = [
-        rect.loc.x as f32,
-        rect.loc.y as f32,
-        rect.size.w as f32,
-        rect.size.h as f32,
+        damage.loc.x as f32,
+        damage.loc.y as f32,
+        damage.size.w as f32,
+        damage.size.h as f32,
     ];
 
     let mut vertices = Vec::with_capacity(4);
