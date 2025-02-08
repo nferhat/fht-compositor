@@ -688,6 +688,7 @@ impl Tile {
                 border_radius,
                 optimized,
                 scale,
+                alpha,
                 blur,
             );
             elements.push(blur_element.into());

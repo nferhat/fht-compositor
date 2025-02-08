@@ -45,6 +45,7 @@ pub enum BlurElement {
         corner_radius: f32,
         loc: Point<i32, Physical>,
         output: Output,
+        alpha: f32,
         // FIXME: Use DamageBag and expand it as needed?
         commit_counter: CommitCounter,
         blur_config: fht_compositor_config::Blur,
@@ -68,6 +69,7 @@ impl BlurElement {
         corner_radius: f32,
         optimized: bool,
         scale: i32,
+        alpha: f32,
         blur_config: fht_compositor_config::Blur,
     ) -> Self {
         let fbs = &mut *EffectsFramebuffers::get(output);
@@ -81,7 +83,7 @@ impl BlurElement {
                 texture,
                 scale,
                 Transform::Normal,
-                Some(1.0),
+                Some(alpha),
                 Some(sample_area.to_f64()),
                 Some(sample_area.size),
                 // NOTE: Since this is "optimized" blur, anything below the window will not be
@@ -108,6 +110,7 @@ impl BlurElement {
                 size: sample_area.size,
                 corner_radius,
                 loc,
+                alpha,
                 output: output.clone(), // fixme i hate this
                 commit_counter: CommitCounter::default(),
                 blur_config,
@@ -274,6 +277,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 scale,
                 corner_radius,
                 blur_config,
+                alpha,
                 ..
             } => {
                 let mut fx_buffers = EffectsFramebuffers::get(output);
@@ -445,7 +449,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     damage,
                     opaque_regions,
                     Transform::Normal,
-                    1.0,
+                    *alpha,
                     program.as_ref(),
                     &additional_uniforms,
                 )

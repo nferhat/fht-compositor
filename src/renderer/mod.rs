@@ -748,6 +748,7 @@ pub fn layer_elements<R: FhtRenderer>(
                     0.0, // FIXME: Rounded layer shells through rules
                     false,
                     output_scale,
+                    1.0,
                     *blur_config,
                 )
                 .into(),
