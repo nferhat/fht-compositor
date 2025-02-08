@@ -16,13 +16,14 @@ use std::rc::Rc;
 
 use anyhow::Context;
 use glam::Mat3;
+use shader::BlurShaders;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Physical, Rectangle, Size, Transform};
+use smithay::utils::{Physical, Point, Rectangle, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;
@@ -197,12 +198,11 @@ impl EffectsFramebuffers {
             0.5 / (output_rect.size.h as f32 / 2.0),
         ];
         for _ in 0..config.passes {
-            let mut render_buffer = self.render_buffer();
-            let sample_buffer = self.sample_buffer();
+            let (sample_buffer, render_buffer) = self.buffers();
             render_blur_pass_with_frame(
                 renderer,
-                &sample_buffer,
-                &mut render_buffer,
+                sample_buffer,
+                render_buffer,
                 &shaders.down,
                 half_pixel,
                 config,
@@ -216,12 +216,11 @@ impl EffectsFramebuffers {
         ];
         // FIXME: Why we need inclusive here but down is exclusive?
         for _ in 0..config.passes {
-            let mut render_buffer = self.render_buffer();
-            let sample_buffer = self.sample_buffer();
+            let (sample_buffer, render_buffer) = self.buffers();
             render_blur_pass_with_frame(
                 renderer,
-                &sample_buffer,
-                &mut render_buffer,
+                sample_buffer,
+                render_buffer,
                 &shaders.up,
                 half_pixel,
                 config,
@@ -231,8 +230,7 @@ impl EffectsFramebuffers {
 
         // Now blit from the last render buffer into optimized_blur
         // We are already bound so its just a blit
-        let mut target_texture = self.sample_buffer();
-        let tex_fb = renderer.bind(&mut target_texture).unwrap();
+        let tex_fb = renderer.bind(&mut self.effects).unwrap();
         let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
         renderer.blit(
@@ -246,19 +244,11 @@ impl EffectsFramebuffers {
         Ok(())
     }
 
-    /// Get the buffer that was sampled from in the previous pass.
-    pub fn sample_buffer(&self) -> GlesTexture {
+    /// Get the sample and render buffers.
+    pub fn buffers(&mut self) -> (&GlesTexture, &mut GlesTexture) {
         match self.current_buffer {
-            CurrentBuffer::Normal => self.effects.clone(),
-            CurrentBuffer::Swapped => self.effects_swapped.clone(),
-        }
-    }
-
-    /// Get the buffer that was rendered into in the previous pass.
-    pub fn render_buffer(&self) -> GlesTexture {
-        match self.current_buffer {
-            CurrentBuffer::Normal => self.effects_swapped.clone(),
-            CurrentBuffer::Swapped => self.effects.clone(),
+            CurrentBuffer::Normal => (&self.effects, &mut self.effects_swapped),
+            CurrentBuffer::Swapped => (&self.effects_swapped, &mut self.effects),
         }
     }
 }
@@ -603,4 +593,138 @@ unsafe fn render_blur_pass_with_gl(
     }
 
     Ok(())
+}
+
+pub(super) unsafe fn get_main_buffer_blur(
+    gl: &ffi::Gles2,
+    fx_buffers: &mut EffectsFramebuffers,
+    shaders: &BlurShaders,
+    blur_config: &fht_compositor_config::Blur,
+    projection_matrix: Mat3,
+    scale: i32,
+    vbos: &[u32; 2],
+    debug: bool,
+    supports_instancing: bool,
+    // dst is the region that we want blur on
+    dst: Rectangle<i32, Physical>,
+) -> Result<GlesTexture, GlesError> {
+    let tex_size = fx_buffers
+        .effects
+        .size()
+        .to_logical(1, Transform::Normal)
+        .to_physical(scale);
+    let dst_expanded = {
+        let mut dst = dst;
+        let size = (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius).ceil() as i32;
+        dst.loc -= Point::from((size, size));
+        dst.size += Size::from((size, size)).upscale(2);
+        dst
+    };
+
+    let mut prev_fbo = 0;
+    gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
+
+    let (sample_buffer, _) = fx_buffers.buffers();
+
+    // First get a fbo for the texture we are about to read into
+    let mut sample_fbo = 0u32;
+    {
+        gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
+        gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
+        gl.FramebufferTexture2D(
+            ffi::FRAMEBUFFER,
+            ffi::COLOR_ATTACHMENT0,
+            ffi::TEXTURE_2D,
+            sample_buffer.tex_id(),
+            0,
+        );
+        gl.Clear(ffi::COLOR_BUFFER_BIT);
+        let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+        if status != ffi::FRAMEBUFFER_COMPLETE {
+            gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+            return Err(GlesError::FramebufferBindingError);
+        }
+    }
+
+    {
+        // NOTE: We are assured that the size of the effects texture is the same
+        // as the bound fbo size, so blitting uses dst immediatly
+        gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
+        gl.BlitFramebuffer(
+            dst_expanded.loc.x,
+            dst_expanded.loc.y,
+            dst_expanded.loc.x + dst_expanded.size.w,
+            dst_expanded.loc.y + dst_expanded.size.h,
+            dst_expanded.loc.x,
+            dst_expanded.loc.y,
+            dst_expanded.loc.x + dst_expanded.size.w,
+            dst_expanded.loc.y + dst_expanded.size.h,
+            ffi::COLOR_BUFFER_BIT,
+            ffi::LINEAR,
+        );
+
+        if gl.GetError() == ffi::INVALID_OPERATION {
+            error!("TrueBlur needs GLES3.0 for blitting");
+            return Err(GlesError::BlitError);
+        }
+    }
+
+    {
+        let passes = blur_config.passes;
+        let half_pixel = [
+            0.5 / (tex_size.w as f32 / 2.0),
+            0.5 / (tex_size.h as f32 / 2.0),
+        ];
+        for i in 0..passes {
+            let (sample_buffer, render_buffer) = fx_buffers.buffers();
+            let damage = dst_expanded.downscale(1 << (i + 1));
+            render_blur_pass_with_gl(
+                gl,
+                vbos,
+                debug,
+                supports_instancing,
+                projection_matrix,
+                sample_buffer,
+                render_buffer,
+                scale,
+                &shaders.down,
+                half_pixel,
+                blur_config,
+                damage,
+            )?;
+            fx_buffers.current_buffer.swap();
+        }
+
+        let half_pixel = [
+            0.5 / (tex_size.w as f32 * 2.0),
+            0.5 / (tex_size.h as f32 * 2.0),
+        ];
+        for i in 0..passes {
+            let (sample_buffer, render_buffer) = fx_buffers.buffers();
+            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+            render_blur_pass_with_gl(
+                gl,
+                &vbos,
+                debug,
+                supports_instancing,
+                projection_matrix,
+                sample_buffer,
+                render_buffer,
+                scale,
+                &shaders.up,
+                half_pixel,
+                blur_config,
+                damage,
+            )?;
+            fx_buffers.current_buffer.swap();
+        }
+    }
+
+    // Cleanup
+    {
+        gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
+    }
+
+    Ok(fx_buffers.effects.clone())
 }
