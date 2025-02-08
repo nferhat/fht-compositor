@@ -68,14 +68,16 @@ void main() {
     // relative to the output. This corresponds to gl_FragCoord.
     vec2 size = geo.zw;
     vec2 loc = gl_FragCoord.xy - geo.xy;
-    // Apply corner rounding inside geometry.
-    color *= rounding_alpha(loc, size, corner_radius);
 
     // Add noise fx
     // This can be used to achieve a glass look
     float noiseHash   = hash(loc / size);
     float noiseAmount = (mod(noiseHash, 1.0) - 0.5);
     color.rgb += noiseAmount * noise;
+
+    // Apply corner rounding inside geometry.
+    color *= rounding_alpha(loc, size, corner_radius);
+
 
     // Apply final alpha and tint.
     color *= alpha;
