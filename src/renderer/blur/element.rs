@@ -2,12 +2,9 @@ use std::borrow::BorrowMut;
 
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::{
-    ffi, GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform,
-};
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
-use smithay::backend::renderer::Texture;
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
@@ -282,13 +279,6 @@ impl RenderElement<GlowRenderer> for BlurElement {
             } => {
                 let mut fx_buffers = EffectsFramebuffers::get(output);
                 fx_buffers.current_buffer = CurrentBuffer::Normal;
-                // NOTE: We know that both the effects and effects swapped textures are of the same
-                // size
-                let tex_size = fx_buffers
-                    .effects
-                    .size()
-                    .to_logical(1, Transform::Normal)
-                    .to_physical(*scale);
 
                 let gles_frame: &mut GlesFrame = frame.borrow_mut();
                 let shaders = Shaders::get_from_frame(gles_frame).blur.clone();
@@ -299,127 +289,23 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 let debug = !gles_frame.debug_flags().is_empty();
                 let projection_matrix = glam::Mat3::from_cols_array(gles_frame.projection());
 
-                let dst_expanded = {
-                    let mut dst = dst;
-                    let size = (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius)
-                        .ceil() as i32;
-                    dst.loc -= Point::from((size, size));
-                    dst.size += Size::from((size, size)).upscale(2);
-                    dst
-                };
-
                 // Update the blur buffers.
                 // We use gl ffi directly to circumvent some stuff done by smithay
-                gles_frame.with_context(|gl| unsafe {
-                    let mut prev_fbo = 0;
-                    gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
-
-                    // First get a fbo for the texture we are about to read into
-                    let mut sample_fbo = 0u32;
-                    {
-                        gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
-                        gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
-                        gl.FramebufferTexture2D(
-                            ffi::FRAMEBUFFER,
-                            ffi::COLOR_ATTACHMENT0,
-                            ffi::TEXTURE_2D,
-                            fx_buffers.sample_buffer().tex_id(),
-                            0,
-                        );
-                        gl.Clear(ffi::COLOR_BUFFER_BIT);
-                        let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
-                        if status != ffi::FRAMEBUFFER_COMPLETE {
-                            gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
-                            return Ok(());
-                        }
-                    }
-
-                    {
-                        // NOTE: We are assured that the size of the effects texture is the same
-                        // as the bound fbo size, so blitting uses dst immediatly
-                        gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
-                        gl.BlitFramebuffer(
-                            dst_expanded.loc.x,
-                            dst_expanded.loc.y,
-                            dst_expanded.loc.x + dst_expanded.size.w,
-                            dst_expanded.loc.y + dst_expanded.size.h,
-                            dst_expanded.loc.x,
-                            dst_expanded.loc.y,
-                            dst_expanded.loc.x + dst_expanded.size.w,
-                            dst_expanded.loc.y + dst_expanded.size.h,
-                            ffi::COLOR_BUFFER_BIT,
-                            ffi::LINEAR,
-                        );
-
-                        if gl.GetError() == ffi::INVALID_OPERATION {
-                            error!("TrueBlur needs GLES3.0 for blitting");
-                            return Ok(());
-                        }
-                    }
-
-                    {
-                        let passes = blur_config.passes;
-                        let half_pixel = [
-                            0.5 / (tex_size.w as f32 / 2.0),
-                            0.5 / (tex_size.h as f32 / 2.0),
-                        ];
-                        for i in 0..passes {
-                            let mut render_buffer = fx_buffers.render_buffer();
-                            let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst_expanded.downscale(1 << (i + 1));
-                            super::render_blur_pass_with_gl(
-                                gl,
-                                &vbos,
-                                debug,
-                                supports_instancing,
-                                projection_matrix,
-                                &sample_buffer,
-                                &mut render_buffer,
-                                *scale,
-                                &shaders.down,
-                                half_pixel,
-                                blur_config,
-                                damage,
-                            )?;
-                            fx_buffers.current_buffer.swap();
-                        }
-
-                        let half_pixel = [
-                            0.5 / (tex_size.w as f32 * 2.0),
-                            0.5 / (tex_size.h as f32 * 2.0),
-                        ];
-                        for i in 0..passes {
-                            let mut render_buffer = fx_buffers.render_buffer();
-                            let sample_buffer = fx_buffers.sample_buffer();
-                            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
-                            super::render_blur_pass_with_gl(
-                                gl,
-                                &vbos,
-                                debug,
-                                supports_instancing,
-                                projection_matrix,
-                                &sample_buffer,
-                                &mut render_buffer,
-                                *scale,
-                                &shaders.up,
-                                half_pixel,
-                                blur_config,
-                                damage,
-                            )?;
-                            fx_buffers.current_buffer.swap();
-                        }
-                    }
-
-                    // Cleanup
-                    {
-                        gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
-                        gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
-                    }
-
-                    Result::<_, GlesError>::Ok(())
+                let blurred_texture = gles_frame.with_context(|gl| unsafe {
+                    super::get_main_buffer_blur(
+                        gl,
+                        &mut *fx_buffers,
+                        &shaders,
+                        blur_config,
+                        projection_matrix,
+                        *scale,
+                        &vbos,
+                        debug,
+                        supports_instancing,
+                        dst,
+                    )
                 })??;
 
-                let last_buffer = fx_buffers.sample_buffer();
                 let (program, additional_uniforms) = if *corner_radius == 0.0 {
                     (None, vec![])
                 } else {
@@ -443,7 +329,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 };
 
                 gles_frame.render_texture_from_to(
-                    &last_buffer,
+                    &blurred_texture,
                     src,
                     dst,
                     damage,
