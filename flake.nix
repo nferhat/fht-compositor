@@ -44,17 +44,12 @@
       withWinitBackend ? true,
       withXdgScreenCast ? true,
       withProfiling ? false,
+      withUWSM ? false,
     }:
       rustPlatform.buildRustPackage {
         pname = "fht-compositor";
         version = self.shortRev or self.dirtyShortRev or "unknown";
         src = ./.;
-
-        postPatch = ''
-          patchShebangs res/fht-compositor-session
-          substituteInPlace res/fht-compositor.service \
-            --replace-fail '/usr/bin' "$out/bin"
-        '';
 
         preFixup = ''
           mkdir completions
@@ -64,7 +59,6 @@
           done
 
           installShellCompletion completions/*
-          installShellCompletion
         '';
 
         cargoLock = {
@@ -87,15 +81,18 @@
           lib.optional withXdgScreenCast "xdg-screencast-portal"
           ++ lib.optional withWinitBackend "winit-backend"
           ++ lib.optional withUdevBackend "udev-backend"
-          ++ lib.optional withProfiling "profile-with-puffin";
+          ++ lib.optional withProfiling "profile-with-puffin"
+          ++ lib.optional withUWSM "uwsm";
         buildNoDefaultFeatures = true;
 
         postInstall =
           ''
+            # Install generic session script
             install -Dm644 res/fht-compositor.desktop -t $out/share/wayland-sessions
-            # Supporting session targets. Maybe add a systemd option?
-            install -Dm755 res/fht-compositor-session $out/bin/fht-compositor-session
-            install -Dm644 res/fht-compositor{.service,-shutdown.target} -t $out/share/systemd/user
+          ''
+          + lib.optionalString withUWSM ''
+            # Install the UWSM script.
+            install -Dm644 res/fht-compositor-uwsm.desktop -t $out/share/wayland-sessions
           ''
           + lib.optionalString withXdgScreenCast ''
             install -Dm644 res/fht-compositor.portal -t $out/share/xdg-desktop-portal/portals
@@ -111,7 +108,7 @@
           ]
         );
 
-        passthru.providedSessions = ["fht-compositor"];
+        passthru.providedSessions = ["fht-compositor"] ++ lib.optional withUWSM "fht-compositor-uwsm";
 
         meta = {
           description = "A dynamic tiling Wayland compositor.";
@@ -191,86 +188,107 @@
         }: let
           cfg = config.programs.fht-compositor;
           fht-share-picker-pkg = inputs.fht-share-picker.packages."${pkgs.system}".default;
+          wayland-session = import (inputs.nixpkgs + "/nixos/modules/programs/wayland/wayland-session.nix");
+          # NOTE: If user uses custom package it will break the options provided in the module, but
+          # this is what official nixos modules seem todo (take for example the steam one)
+          defaultPackage = pkgs.callPackage fht-compositor-package {
+            inherit (cfg) withUWSM;
+          };
         in {
           options.programs.fht-compositor = {
             enable = lib.mkEnableOption "fht-compositor";
+            withUWSM =
+              lib.mkEnableOption null
+              // {
+                default = true;
+                # FIXME: Make a note about using uswm for slices
+                description = ''
+                  Launch the fht-compositor session with UWSM (Universal Wayland Session Manager).
+                  Using this is highly recommended since it improves fht-compositor's systemd
+                  support by binding appropriate targets like `graphical-session.target`,
+                  `wayland-session@fht-compositor.target`, etc. for a regular desktop session.
+                '';
+              };
             package = lib.mkOption {
               type = lib.types.package;
-              default = pkgs.callPackage fht-compositor-package {};
+              default = defaultPackage;
             };
           };
 
-          config = lib.mkMerge [
-            {
-              # Require an XDG environment. Makes our life 100x easier.
-              environment.systemPackages = [pkgs.xdg-utils];
-              xdg = {
-                autostart.enable = lib.mkDefault true;
-                menus.enable = lib.mkDefault true;
-                mime.enable = lib.mkDefault true;
-                icons.enable = lib.mkDefault true;
-              };
-            }
+          # Module config copied from hyprland.nix in official nixpkgs.
+          # We also include additional recommended software to ease the experience
+          config = lib.mkIf cfg.enable (
+            lib.mkMerge [
+              {
+                environment.systemPackages = [cfg.package pkgs.xdg-utils];
 
-            (lib.mkIf (builtins.elem "xdg-screencast-portal" cfg.package.buildFeatures) {
-              # Install the share-picker application in order to select what to screencast.
-              environment.systemPackages = [fht-share-picker-pkg];
-            })
+                # OpenGL/mesa is required. We do not have a software renderer.
+                hardware =
+                  if lib.strings.versionAtLeast config.system.nixos.release "24.11"
+                  then {
+                    graphics.enable = lib.mkDefault true;
+                  }
+                  else {
+                    opengl.enable = lib.mkDefault true;
+                  };
 
-            (lib.mkIf cfg.enable {
-              # Install the fht-compositor package to display servers in order to make the .desktop
-              # file discoverable (providing a fht-compositor desktop entry)
-              services =
-                if lib.strings.versionAtLeast config.system.nixos.release "24.05"
-                then {
-                  displayManager.sessionPackages = [cfg.package];
-                }
-                else {
-                  xserver.displayManager.sessionPackages = [cfg.package];
+                services.gnome.gnome-keyring.enable = true;
+                systemd.user.services.fht-compositor-polkit = {
+                  description = "PolicyKit Authentication Agent provided by fht-compositor";
+                  wantedBy = ["fht-compositor.service"];
+                  after = ["graphical-session.target"];
+                  partOf = ["graphical-session.target"];
+                  serviceConfig = {
+                    Type = "simple";
+                    ExecStart = "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
+                    Restart = "on-failure";
+                    RestartSec = 1;
+                    TimeoutStopSec = 10;
+                  };
                 };
-              # OpenGL/mesa is required. We do not have a software renderer.
-              hardware =
-                if lib.strings.versionAtLeast config.system.nixos.release "24.11"
-                then {
-                  graphics.enable = lib.mkDefault true;
-                }
-                else {
-                  opengl.enable = lib.mkDefault true;
-                };
-            })
+              }
 
-            (lib.mkIf cfg.enable {
-              environment.systemPackages = [cfg.package];
-              services.gnome.gnome-keyring.enable = true;
-              # Provide the xdg-desktop-portal-gtk portal for users, since we only cover the screencast
-              # one with the compositor. Fallback on GTK for everything else.
-              xdg.portal = {
-                enable = true;
-                extraPortals = lib.mkIf (
-                  !cfg.package.cargoBuildNoDefaultFeatures || builtins.elem "xdg-screencast-portal" cfg.package.cargoBuildFeatures
-                ) [pkgs.xdg-desktop-portal-gtk];
-                configPackages = [cfg.package];
-              };
+              (lib.mkIf (builtins.elem "xdg-screencast-portal" cfg.package.buildFeatures) {
+                # Install the share-picker application in order to select what to screencast.
+                # NOTE: the wayland-session.nix included in nixpkgs provides us with GTK and dconf
+                environment.systemPackages = [fht-share-picker-pkg];
+                xdg.portal.configPackages = [cfg.package];
+              })
 
-              # These also contribute to making our life 100x easier, as well as providing a more
-              # fleshed out setup out of the box.
-              security.polkit.enable = true;
-              programs.dconf.enable = lib.mkDefault true;
-              systemd.user.services.fht-compositor-polkit = {
-                description = "PolicyKit Authentication Agent provided by fht-compositor";
-                wantedBy = ["fht-compositor.service"];
-                after = ["graphical-session.target"];
-                partOf = ["graphical-session.target"];
-                serviceConfig = {
-                  Type = "simple";
-                  ExecStart = "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
-                  Restart = "on-failure";
-                  RestartSec = 1;
-                  TimeoutStopSec = 10;
+              # Use UWSM.
+              (lib.mkIf cfg.withUWSM {
+                programs = {
+                  uwsm = {
+                    enable = true;
+                    waylandCompositors."fht-compositor" = {
+                      prettyName = "fht-compositor";
+                      comment = "A dynamic tiling wayland compositor";
+                      binPath = "/run/current-system/sw/bin/fht-compositor";
+                    };
+                  };
                 };
-              };
-            })
-          ];
+              })
+              # Otherwise just install a simple .desktop file
+              (lib.mkIf (!cfg.withUWSM) {
+                # Install the fht-compositor package to display servers in order to make the .desktop
+                # file discoverable (providing a fht-compositor desktop entry)
+                services =
+                  if lib.strings.versionAtLeast config.system.nixos.release "24.05"
+                  then {
+                    displayManager.sessionPackages = [cfg.package];
+                  }
+                  else {
+                    xserver.displayManager.sessionPackages = [cfg.package];
+                  };
+              })
+
+              (wayland-session {
+                inherit lib pkgs;
+                enableXWayland = false; # we dont have xwayland support
+                enableWlrPortal = false; # fht-compositor ships its own portal.
+              })
+            ]
+          );
         };
       };
 
@@ -302,7 +320,9 @@
               '';
 
               exitCode = lib.strings.toInt (builtins.readFile "${checkResult}/exit-code");
-            in if exitCode == 0 then result
+            in
+              if exitCode == 0
+              then result
               else throw (builtins.readFile "${checkResult}/stdout");
           };
         in {

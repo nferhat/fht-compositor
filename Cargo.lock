@@ -990,7 +990,6 @@ dependencies = [
  "libc",
  "owning_ref",
  "pipewire",
- "sd-notify",
  "serde",
  "serde_json",
  "smithay",
@@ -2363,12 +2362,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "sd-notify"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be20c5f7f393ee700f8b2f28ea35812e4e212f40774b550cd2a93ea91684451"
 
 [[package]]
 name = "semver"

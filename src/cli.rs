@@ -21,15 +21,6 @@ pub struct Cli {
     /// The configuration path to use.
     #[arg(short, long, value_name = "PATH")]
     pub config_path: Option<PathBuf>,
-
-    #[arg(long)]
-    /// Start the compositor as a login session.
-    ///
-    /// Set this flag when running from a systemd service/login manager, or when you run the main
-    /// compositor instance. DO NOT set this flag when running under a winit window, or when
-    /// running another instance of the compositor!
-    pub session: bool,
-
     #[command(subcommand)]
     pub command: Option<Command>,
 }
