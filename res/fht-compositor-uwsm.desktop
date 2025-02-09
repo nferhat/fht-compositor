@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=fht-compositor
+Name=fht-compositor (UWSM)
 Comment=A dynamic tiling Wayland compositor
-Exec=fht-compositor
-Type=Application
+Exec=uwsm start -- fht-compositor.desktop
 DesktopNames=fht-compositor
+Type=Application
