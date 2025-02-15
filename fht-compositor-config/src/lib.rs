@@ -1142,6 +1142,7 @@ pub struct Debug {
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
     pub draw_damage: bool,
+    pub draw_opaque_regions: bool,
     pub debug_overlay: bool,
     pub tile_debug_overlay: bool,
 }
@@ -1153,6 +1154,7 @@ impl Default for Debug {
             disable_overlay_planes: default_disable_overlay_planes(),
             render_node: default_render_node(),
             draw_damage: false,
+            draw_opaque_regions: false,
             debug_overlay: false,
             tile_debug_overlay: false,
         }
