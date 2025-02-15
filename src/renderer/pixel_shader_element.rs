@@ -2,14 +2,14 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
 #[derive(Debug)]
-pub struct FhtPixelShaderElement(PixelShaderElement);
+pub struct FhtPixelShaderElement(PixelShaderElement, Option<DamageSet<i32, Logical>>);
 
 impl FhtPixelShaderElement {
     /// Create a new [`FhtPixelShaderElement`].
@@ -20,11 +20,12 @@ impl FhtPixelShaderElement {
         geometry: Rectangle<i32, Logical>,
         alpha: f32,
         additional_uniforms: Vec<Uniform<'static>>,
+        damage: Option<&[Rectangle<i32, Logical>]>,
         kind: Kind,
     ) -> Self {
         let inner =
             PixelShaderElement::new(program, geometry, None, alpha, additional_uniforms, kind);
-        Self(inner)
+        Self(inner, damage.map(DamageSet::from_slice))
     }
 }
 
@@ -58,7 +59,17 @@ impl Element for FhtPixelShaderElement {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> smithay::backend::renderer::utils::DamageSet<i32, Physical> {
-        self.0.damage_since(scale, commit)
+        match &self.1 {
+            // If we have custom damage, use that. Otherwise pixel shader element uses full
+            // area. FIXME: Maybe avoid the allocation, but this should live on the stack
+            Some(damage) => DamageSet::from_iter(
+                damage
+                    .iter()
+                    .copied()
+                    .map(|rect| rect.to_physical_precise_round(scale)),
+            ),
+            None => self.0.damage_since(scale, commit),
+        }
     }
 
     fn opaque_regions(
