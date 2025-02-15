@@ -74,7 +74,7 @@ crate::fht_render_elements! {
 
 crate::fht_render_elements! {
     DebugRenderElement => {
-        Damage = SolidColorRenderElement,
+        Solid = SolidColorRenderElement,
     }
 }
 

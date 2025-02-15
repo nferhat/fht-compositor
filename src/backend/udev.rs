@@ -20,7 +20,7 @@ use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::{Id, Kind};
+use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
@@ -50,7 +50,7 @@ use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_li
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Monotonic};
+use smithay::utils::{DeviceFd, Monotonic, Scale};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
@@ -62,9 +62,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::output::RedrawState;
 use crate::renderer::blur::EffectsFramebuffers;
-use crate::renderer::{
-    AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
-};
+use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::get_monotonic_time;
 
@@ -256,8 +254,12 @@ impl UdevData {
 
         let (primary_gpu, primary_node) = if let Some(user_path) = &state.config.debug.render_node {
             let primary_gpu = DrmNode::from_path(user_path)
-                .unwrap_or_else(|_| panic!("Please make sure that {} is a valid DRM node!",
-                    user_path.display()))
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "Please make sure that {} is a valid DRM node!",
+                        user_path.display()
+                    )
+                })
                 .node_with_type(NodeType::Render)
                 .expect("Please make sure that {user_path} is a render node!")
                 .expect("Please make sure that {user_path} is a render node!");
@@ -928,27 +930,22 @@ impl UdevData {
             anyhow::bail!("Failed to get renderer")
         };
 
-        let output_elements_result = {
-            let OutputElementsResult {
-                mut elements,
-                mut cursor_elements_len,
-            } = fht.output_elements(&mut renderer, output);
+        let mut output_elements_result = fht.output_elements(&mut renderer, output);
 
-            // To render damage we just use solid color elements,
-            if fht.config.debug.draw_damage {
-                let state = fht.output_state.get_mut(output).unwrap();
-                let damage_elements =
-                    draw_damage(output, &mut state.debug_damage_tracker, &elements);
-                // HACK: We dont want damage rectangles inside screencopy.
-                cursor_elements_len += damage_elements.len();
-                elements = damage_elements.into_iter().chain(elements).collect();
-            }
+        // To render damage we just use solid color elements,
+        if fht.config.debug.draw_damage {
+            let state = fht.output_state.get_mut(output).unwrap();
+            draw_damage(
+                output,
+                &mut state.debug_damage_tracker,
+                &mut output_elements_result.elements,
+            );
+        }
 
-            OutputElementsResult {
-                elements,
-                cursor_elements_len,
-            }
-        };
+        if fht.config.debug.draw_opaque_regions {
+            let scale = output.current_scale().integer_scale() as f64;
+            draw_opaque_regions(&mut output_elements_result.elements, scale.into());
+        }
 
         // Renderand check for damage.
         let res = surface
@@ -978,10 +975,7 @@ impl UdevData {
                     {
                         Some(DrmError::DeviceInactive) => (),
                         Some(DrmError::Access(DrmAccessError { source, .. }))
-                            if source.kind() != io::ErrorKind::PermissionDenied =>
-                        {
-                            
-                        }
+                            if source.kind() != io::ErrorKind::PermissionDenied => {}
                         _ => anyhow::bail!("temporary render failure: {err:?}"),
                     },
                     SwapBuffersError::ContextLost(err) => match err.downcast_ref::<DrmError>() {
@@ -1232,7 +1226,9 @@ impl UdevData {
             Ok(None) => (),
             Err(err) => {
                 warn!("Error during rendering: {:?}", err);
-                if let SwapBuffersError::ContextLost(err) = err { panic!("Rendering loop lost: {}", err) }
+                if let SwapBuffersError::ContextLost(err) = err {
+                    panic!("Rendering loop lost: {}", err)
+                }
             }
         };
 
@@ -1348,19 +1344,20 @@ fn get_surface_dmabuf_feedback(
     })
 }
 
-const DAMAGE_COLOR: Color32F = Color32F::new(0.05, 0.0, 0.0, 0.05);
+const DAMAGE_COLOR: Color32F = Color32F::new(0.3, 0.0, 0.0, 0.3);
+const OPAQUE_REGION_COLOR: Color32F = Color32F::new(0.0, 0.0, 0.3, 0.3);
+const SEMITRANSPARENT_COLOR: Color32F = Color32F::new(0.0, 0.3, 0.0, 0.3);
 
-fn draw_damage<'a>(
+fn draw_damage<R: FhtRenderer>(
     output: &Output,
     dt: &mut Option<OutputDamageTracker>,
-    elements: &[FhtRenderElement<UdevRenderer<'a>>],
-) -> Vec<FhtRenderElement<UdevRenderer<'a>>> {
+    elements: &mut Vec<FhtRenderElement<R>>,
+) {
     let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(output));
     let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
-        return vec![];
+        return;
     };
 
-    let mut damage_elements = vec![];
     for damage_rect in damage {
         let damage_element: DebugRenderElement = SolidColorRenderElement::new(
             Id::new(),
@@ -1370,10 +1367,65 @@ fn draw_damage<'a>(
             Kind::Unspecified,
         )
         .into();
-        damage_elements.push(damage_element.into())
+        elements.insert(0, damage_element.into())
     }
+}
 
-    damage_elements
+pub fn draw_opaque_regions<R: FhtRenderer>(
+    elements: &mut Vec<FhtRenderElement<R>>,
+    scale: Scale<f64>,
+) {
+    crate::profile_function!();
+
+    let mut i = 0;
+    while i < elements.len() {
+        let elem = &elements[i];
+        i += 1;
+
+        // HACK
+        if format!("{elem:?}").contains("ExtraDamage") {
+            continue;
+        }
+
+        let geo = elem.geometry(scale);
+        let mut opaque = elem.opaque_regions(scale).to_vec();
+
+        for rect in &mut opaque {
+            rect.loc += geo.loc;
+        }
+
+        let semitransparent = geo.subtract_rects(opaque.iter().copied());
+
+        for rect in opaque {
+            let color = SolidColorRenderElement::new(
+                Id::new(),
+                rect,
+                CommitCounter::default(),
+                OPAQUE_REGION_COLOR,
+                Kind::Unspecified,
+            );
+            elements.insert(
+                i - 1,
+                FhtRenderElement::Debug(DebugRenderElement::Solid(color)),
+            );
+            i += 1;
+        }
+
+        for rect in semitransparent {
+            let color = SolidColorRenderElement::new(
+                Id::new(),
+                rect,
+                CommitCounter::default(),
+                SEMITRANSPARENT_COLOR,
+                Kind::Unspecified,
+            );
+            elements.insert(
+                i - 1,
+                FhtRenderElement::Debug(DebugRenderElement::Solid(color)),
+            );
+            i += 1;
+        }
+    }
 }
 
 fn get_property_val(
