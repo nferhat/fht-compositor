@@ -168,7 +168,7 @@ impl Element for BlurElement {
             BlurElement::TrueBlur { blur_config, .. } => {
                 // Since the blur element samples from around itself, we must expand the damage it
                 // induces to include any potential changes.
-                let mut geometry = self.geometry(scale);
+                let mut geometry = Rectangle::from_size(self.geometry(scale).size);
                 let size =
                     (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius).ceil() as i32;
                 geometry.loc -= Point::from((size, size));

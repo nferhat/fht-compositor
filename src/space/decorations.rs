@@ -25,6 +25,27 @@ pub fn draw_border(
         fht_compositor_config::Color::Gradient { start, end, angle } => (start, end, angle),
     };
 
+    // Only draw whats needed for the border.
+    //
+    // XXXXXXXXXXXXXXXXXX
+    // XXooooooooooooooXX
+    // XooooooooooooooooX
+    // XooooooooooooooooX
+    // XooooooooooooooooX
+    // XooooooooooooooooX
+    // XXooooooooooooooXX
+    // XXXXXXXXXXXXXXXXXX
+    //
+    // We leave the four patches of X at each border for corner radius
+    // FIXME: const?
+    let border_damage = Rectangle::from_size(geometry.size).subtract_rect(Rectangle::new(
+        Point::from((scaled_thickness, scaled_thickness)).to_i32_round(),
+        geometry.size
+            - Size::from((scaled_thickness, scaled_thickness))
+                .upscale(2.0)
+                .to_i32_round(),
+    ));
+
     FhtPixelShaderElement::new(
         Shaders::get(renderer.glow_renderer()).border.clone(),
         geometry,
@@ -37,6 +58,7 @@ pub fn draw_border(
             Uniform::new("thickness", scaled_thickness as f32),
             Uniform::new("corner_radius", radius as f32),
         ],
+        Some(&border_damage),
         Kind::Unspecified,
     )
 }
@@ -52,9 +74,26 @@ pub fn draw_shadow(
     corner_radius: f32,
     color: [f32; 4],
 ) -> FhtPixelShaderElement {
-    let r_blur_sigma = (blur_sigma / scale as f32).round() as i32;
-    geometry.loc -= Point::from((r_blur_sigma, r_blur_sigma));
-    geometry.size += Size::from((2 * r_blur_sigma, 2 * r_blur_sigma));
+    let scaled_blur_sigma = (blur_sigma / scale as f32).round() as i32;
+    geometry.loc -= Point::from((scaled_blur_sigma, scaled_blur_sigma));
+    geometry.size += Size::from((2 * scaled_blur_sigma, 2 * scaled_blur_sigma));
+
+    // We only draw the shadow around the window, its pointless to damage everything, only causing
+    // useless drawing from the GPU.
+    //
+    // XXXXXXXXXXXXXXXXXX
+    // XXooooooooooooooXX
+    // XXooooooooooooooXX
+    // XXooooooooooooooXX
+    // XXooooooooooooooXX
+    // XXXXXXXXXXXXXXXXXX
+    //
+    // We generate the damage for the regions marked by X, relative to (0,0)
+    // FIXME: const?
+    let shadow_damage = Rectangle::from_size(geometry.size).subtract_rect(Rectangle::new(
+        Point::from((scaled_blur_sigma, scaled_blur_sigma)),
+        geometry.size - Size::from((scaled_blur_sigma, scaled_blur_sigma)).upscale(2),
+    ));
 
     FhtPixelShaderElement::new(
         Shaders::get(renderer.glow_renderer()).box_shadow.clone(),
@@ -66,6 +105,7 @@ pub fn draw_shadow(
             Uniform::new("blur_sigma", blur_sigma),
             Uniform::new("corner_radius", corner_radius),
         ],
+        Some(&shadow_damage),
         Kind::Unspecified,
     )
 }
