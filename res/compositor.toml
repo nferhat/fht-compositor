@@ -160,8 +160,8 @@ Super-h = { action = "change-mwfact", arg = -0.01 }
 Super-l = { action = "change-mwfact", arg = +0.01 }
 Super-Shift-h = { action = "change-nmaster", arg = +1 }
 Super-Shift-l = { action = "change-nmaster", arg = -1 }
-Super-i = { action = "change-window-proportion", arg = +0.1 }
-Super-o = { action = "change-window-proportion", arg = -0.1 }
+Super-i = { action = "change-window-proportion", arg = +0.5 }
+Super-o = { action = "change-window-proportion", arg = -0.5 }
 
 # Workspaces
 Super-1 = { action = "focus-workspace", arg = 0 }
