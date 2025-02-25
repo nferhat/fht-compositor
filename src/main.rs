@@ -133,7 +133,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
-        cli,
+        cli.config_path,
+        cli.backend,
         socket_name.clone(),
     );
 
@@ -152,7 +153,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     }
 
     #[cfg(feature = "uwsm")]
-    {
+    if cli.uwsm {
         // Run "uwsm finalize" in order to export environment to systemd activation
         // This will also signal that the compositor has started up and is ready to go
         match std::process::Command::new("uwsm").arg("finalize").spawn() {

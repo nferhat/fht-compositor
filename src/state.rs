@@ -94,13 +94,14 @@ impl State {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
-        cli: cli::Cli,
+        config_path: Option<std::path::PathBuf>,
+        backend: Option<crate::cli::BackendType>,
         _socket_name: String,
     ) -> Self {
         #[allow(unused)]
-        let mut fht = Fht::new(dh, loop_handle, loop_signal, cli.config_path);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, config_path);
         #[allow(unused)]
-        let backend: crate::backend::Backend = if let Some(backend_type) = cli.backend {
+        let backend: crate::backend::Backend = if let Some(backend_type) = backend {
             match backend_type {
                 #[cfg(feature = "winit-backend")]
                 cli::BackendType::Winit => crate::backend::winit::WinitData::new(&mut fht)
@@ -709,7 +710,8 @@ impl Fht {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
@@ -726,12 +728,14 @@ impl Fht {
             // From: https://wayland.app/protocols/security-context-v1
             // "Compositors should forbid nesting multiple security contexts"
             client
-                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
         });
         ScreencopyManagerState::new::<State, _>(dh, |client| {
             // Same idea as security context state.
             client
-                .get_data::<ClientState>().is_none_or(|data| data.security_context.is_none())
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
         });
         XdgDecorationState::new::<State>(dh);
         FractionalScaleManagerState::new::<State>(dh);

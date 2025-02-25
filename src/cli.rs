@@ -21,6 +21,10 @@ pub struct Cli {
     /// The configuration path to use.
     #[arg(short, long, value_name = "PATH")]
     pub config_path: Option<PathBuf>,
+    /// Whether to run `uwsm` to finalize the compositor environment.
+    #[arg(long)]
+    #[cfg(feature = "uwsm")]
+    pub uwsm: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
