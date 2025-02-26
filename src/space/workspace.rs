@@ -851,11 +851,7 @@ impl Workspace {
         }
 
         let rules = unconfigured_window.rules();
-        let border_width = self
-            .config
-            .border
-            .with_overrides(&rules.border_overrides)
-            .thickness;
+        let border_width = self.config.border.with_overrides(&rules.border).thickness;
         let prepared_proportion = rules.proportion.unwrap_or(1.0);
 
         if unconfigured_window.fullscreen() {

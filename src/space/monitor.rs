@@ -219,7 +219,9 @@ impl Monitor {
     pub fn has_blur(&self) -> bool {
         for workspace in &self.workspaces {
             // only check for visible workspaces
-            if (workspace.index() == self.active_idx || workspace.has_render_offset_animation()) && workspace.tiles().any(|tile| tile.has_transparent_region()) {
+            if (workspace.index() == self.active_idx || workspace.has_render_offset_animation())
+                && workspace.tiles().any(|tile| tile.has_transparent_region())
+            {
                 return true;
             }
         }

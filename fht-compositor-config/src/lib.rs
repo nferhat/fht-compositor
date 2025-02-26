@@ -677,6 +677,17 @@ pub struct Shadow {
     pub sigma: f32,
 }
 
+impl Shadow {
+    pub fn with_overrides(&self, overrides: &ShadowOverrides) -> Self {
+        let mut ret = *self;
+        ret.disable = overrides.disable.unwrap_or(ret.disable);
+        ret.color = overrides.color.unwrap_or(ret.color);
+        ret.sigma = overrides.sigma.unwrap_or(ret.sigma);
+
+        ret
+    }
+}
+
 impl Default for Shadow {
     fn default() -> Self {
         Self {
@@ -961,11 +972,9 @@ pub struct WindowRule {
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
-    pub border_overrides: BorderOverrides,
+    pub border: BorderOverrides,
     pub blur: BlurOverrides,
-    pub draw_shadow: Option<bool>,
-    #[serde(deserialize_with = "deserialize_color_maybe")]
-    pub shadow_color: Option<[f32; 4]>,
+    pub shadow: ShadowOverrides,
     pub proportion: Option<f64>,
     pub opacity: Option<f32>,
     pub decoration_mode: Option<DecorationMode>,
@@ -1034,6 +1043,32 @@ impl BlurOverrides {
         self
     }
 }
+
+#[derive(Default, Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ShadowOverrides {
+    pub disable: Option<bool>,
+    #[serde(deserialize_with = "deserialize_color_maybe")]
+    pub color: Option<[f32; 4]>,
+    pub sigma: Option<f32>,
+}
+
+impl ShadowOverrides {
+    pub fn merge_with(mut self, other: &Self) -> Self {
+        if let Some(disable) = other.disable {
+            self.disable = Some(disable);
+        }
+        if let Some(color) = other.color {
+            self.color = Some(color);
+        }
+        if let Some(sigma) = other.sigma {
+            self.sigma = Some(sigma);
+        }
+
+        self
+    }
+}
+
 fn deserialize_output_mode<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<(u16, u16, Option<f64>)>, D::Error> {

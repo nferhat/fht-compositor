@@ -286,10 +286,7 @@ impl Tile {
             0 // No border is drawn when the window is fullscreened.
         } else {
             let rules = self.window.rules();
-            self.config
-                .border
-                .with_overrides(&rules.border_overrides)
-                .thickness
+            self.config.border.with_overrides(&rules.border).thickness
         };
 
         Size::from((ww + 2 * border_thickness, wh + 2 * border_thickness))
@@ -306,7 +303,7 @@ impl Tile {
         } else {
             let rules = self.window.rules();
             let fht_compositor_config::Border { thickness, .. } =
-                self.config.border.with_overrides(&rules.border_overrides);
+                self.config.border.with_overrides(&rules.border);
             Point::from((thickness, thickness))
         }
     }
@@ -329,11 +326,7 @@ impl Tile {
 
         self.extra_damage.set_size(new_size);
         let rules = self.window.rules();
-        let mut border_thickness = self
-            .config
-            .border
-            .with_overrides(&rules.border_overrides)
-            .thickness;
+        let mut border_thickness = self.config.border.with_overrides(&rules.border).thickness;
         if self.window.fullscreen() {
             // When we have a fullscreen window, no border is drawn
             border_thickness = 0;
@@ -495,7 +488,11 @@ impl Tile {
             alpha * rules.opacity.unwrap_or(1.0)
         };
 
-        let border = self.config.border.with_overrides(&rules.border_overrides);
+        let border = self.config.border.with_overrides(&rules.border);
+        let shadow = self
+            .config
+            .shadow
+            .map(|cfg| cfg.with_overrides(&rules.shadow));
         let (blur, blur_optimized) = (
             self.config.blur.with_overrides(&rules.blur),
             rules.blur.optimized,
@@ -505,8 +502,6 @@ impl Tile {
         } else {
             (border.thickness, border.radius)
         };
-        let draw_shadow = rules.draw_shadow;
-        let shadow_color = rules.shadow_color;
 
         drop(rules); // Avoid deadlock :skull:
 
@@ -713,15 +708,19 @@ impl Tile {
             );
         }
 
-        if let Some(shadow_config) = &self.config.shadow {
-            let color = shadow_color.unwrap_or(shadow_config.color);
-            let should_draw = match shadow_config.floating_only {
-                true => is_floating,
-                // NOTE: For now we draw shadows by default.
-                // Maybe reconsider this?
-                false => draw_shadow.unwrap_or(true),
+        if let Some(shadow_config) = &shadow {
+            let should_draw = if shadow_config.disable {
+                false
+            } else {
+                match shadow_config.floating_only {
+                    true => is_floating,
+                    // NOTE: For now we draw shadows by default.
+                    // Maybe reconsider this?
+                    false => true,
+                }
             };
-            if !is_fullscreen && color[3] > 0.0 && should_draw {
+
+            if !is_fullscreen && shadow_config.color[3] > 0.0 && should_draw {
                 elements.push(
                     super::decorations::draw_shadow(
                         renderer,
@@ -730,7 +729,7 @@ impl Tile {
                         window_geometry,
                         shadow_config.sigma,
                         border_radius,
-                        color,
+                        shadow_config.color,
                     )
                     .into(),
                 );
