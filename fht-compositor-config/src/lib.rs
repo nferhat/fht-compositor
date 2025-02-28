@@ -1016,6 +1016,7 @@ pub struct LayerRule {
     #[serde(default = "default_shadow_overrides_disabled")]
     pub shadow: ShadowOverrides,
     pub opacity: Option<f32>,
+    pub corner_radius: Option<f32>,
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize)]
