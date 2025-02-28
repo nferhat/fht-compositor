@@ -18,12 +18,29 @@ use crate::state::Fht;
 
 // Resolved layer rules that get computed from the configuration.
 // They keep around actual values the user specified.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ResolvedLayerRules {
     pub blur: BlurOverrides,
     pub corner_radius: Option<f32>,
     pub shadow: ShadowOverrides,
     pub opacity: Option<f32>,
+}
+
+impl Default for ResolvedLayerRules {
+    fn default() -> Self {
+        Self {
+            blur: BlurOverrides {
+                disable: Some(true),
+                ..Default::default()
+            },
+            corner_radius: None,
+            shadow: ShadowOverrides {
+                disable: Some(true),
+                ..Default::default()
+            },
+            opacity: None,
+        }
+    }
 }
 
 impl ResolvedLayerRules {
@@ -77,7 +94,7 @@ fn rule_matches(
     let namespace = layer.namespace();
 
     if rule.match_all {
-        if rule
+        if !rule
             .on_output
             .as_ref()
             .is_some_and(|name| name != &output.name())
