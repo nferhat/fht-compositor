@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use fht_compositor_config::{MouseAction, WorkspaceLayout};
+use fht_compositor_config::{KeyPattern, MouseAction, WorkspaceLayout};
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Point, Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
@@ -54,6 +56,8 @@ pub struct KeyAction {
     r#type: KeyActionType,
     /// Whether we should allow this [`KeyAction`] to be executed while the compositor is locked.
     allow_while_locked: bool,
+    /// Whether we should repeat this key binding.
+    repeat: bool,
 }
 
 impl KeyAction {
@@ -64,6 +68,7 @@ impl KeyAction {
         Self {
             r#type: KeyActionType::None,
             allow_while_locked: false,
+            repeat: false,
         }
     }
 }
@@ -72,10 +77,12 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
     fn from(value: fht_compositor_config::KeyActionDesc) -> Self {
         let r#type;
         let allow_while_locked;
+        let repeat;
 
         match value {
             fht_compositor_config::KeyActionDesc::Simple(value) => {
                 allow_while_locked = false; // by default, key actions should not run.
+                repeat = false;
                 r#type = match value {
                     fht_compositor_config::SimpleKeyAction::Quit => KeyActionType::Quit,
                     fht_compositor_config::SimpleKeyAction::ReloadConfig => {
@@ -132,8 +139,10 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
             fht_compositor_config::KeyActionDesc::Complex {
                 action,
                 allow_while_locked: allow_while_locked_value,
+                repeat: repeat_value,
             } => {
                 allow_while_locked = allow_while_locked_value;
+                repeat = repeat_value;
                 r#type = match action {
                     fht_compositor_config::ComplexKeyAction::Quit => KeyActionType::Quit,
                     fht_compositor_config::ComplexKeyAction::ReloadConfig => {
@@ -216,12 +225,13 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
         Self {
             r#type,
             allow_while_locked,
+            repeat,
         }
     }
 }
 
 impl State {
-    pub fn process_key_action(&mut self, action: KeyAction) {
+    pub fn process_key_action(&mut self, action: KeyAction, key_pattern: KeyPattern) {
         crate::profile_function!();
         if self.fht.is_locked() && !action.allow_while_locked {
             return;
@@ -231,17 +241,17 @@ impl State {
         let config = Arc::clone(&self.fht.config);
         let active_window = self.fht.space.active_window();
 
-        match action.r#type {
+        match &action.r#type {
             KeyActionType::Quit => self.fht.stop = true,
             KeyActionType::ReloadConfig => self.reload_config(),
             KeyActionType::RunCommand(cmd) => crate::utils::spawn(cmd),
             KeyActionType::SelectNextLayout => self.fht.space.select_next_layout(true),
             KeyActionType::SelectPreviousLayout => self.fht.space.select_previous_layout(true),
-            KeyActionType::ChangeMwfact(delta) => self.fht.space.change_mwfact(delta, true),
-            KeyActionType::ChangeNmaster(delta) => self.fht.space.change_nmaster(delta, true),
+            KeyActionType::ChangeMwfact(delta) => self.fht.space.change_mwfact(*delta, true),
+            KeyActionType::ChangeNmaster(delta) => self.fht.space.change_nmaster(*delta, true),
             KeyActionType::ChangeProportion(delta) => {
                 if let Some(window) = active_window {
-                    self.fht.space.change_proportion(&window, delta, true)
+                    self.fht.space.change_proportion(&window, *delta, true)
                 }
             }
             KeyActionType::MaximizeFocusedWindow => {
@@ -284,7 +294,7 @@ impl State {
                 let is_floating_layout = active.current_layout() == WorkspaceLayout::Floating;
                 if let Some(tile) = active.active_tile_mut() {
                     if is_floating_layout || !tile.window().tiled() {
-                        let new_loc = tile.location() + Point::from((dx, dy));
+                        let new_loc = tile.location() + Point::from((*dx, *dy));
                         tile.set_location(new_loc, true);
                     }
                 }
@@ -412,7 +422,7 @@ impl State {
             }
             KeyActionType::FocusWorkspace(idx) => {
                 let mon = self.fht.space.active_monitor_mut();
-                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                if let Some(window) = mon.set_active_workspace_idx(*idx, true) {
                     self.set_keyboard_focus(Some(window));
                 }
             }
@@ -441,12 +451,44 @@ impl State {
                         self.set_keyboard_focus(Some(window));
                     }
 
-                    let idx = idx.clamp(0, 9);
+                    let idx = (*idx).clamp(0, 9);
                     let mon = self.fht.space.active_monitor_mut();
                     mon.workspace_mut_by_index(idx).insert_window(window, true);
                 }
             }
             KeyActionType::None => (), // disabled the key combo
+        }
+
+        if action.repeat {
+            // If we were repeating a bind previously, stop it
+            if let Some((token, _)) = self.fht.repeated_keyaction_timer.take() {
+                self.fht.loop_handle.remove(token);
+            }
+
+            let fht_compositor_config::Keyboard {
+                repeat_delay,
+                repeat_rate,
+                ..
+            } = self.fht.config.input.keyboard;
+            // repeat_rate is the frequency at which we repeat the keys, invert to get the duration
+            let repeat_duration = Duration::from_secs_f64(1. / f64::from(repeat_rate));
+            let repeat_timer = Timer::from_duration(Duration::from_millis(repeat_delay as u64));
+
+            let action = action.clone();
+            let keysym = key_pattern.1;
+            let Ok(token) = self
+                .fht
+                .loop_handle
+                .insert_source(repeat_timer, move |_, _, state| {
+                    state.process_key_action(action.clone(), key_pattern);
+                    TimeoutAction::ToDuration(repeat_duration)
+                })
+                .inspect_err(|err| error!(?err, "Failed to create keyaction repeat timer"))
+            else {
+                return;
+            };
+
+            self.fht.repeated_keyaction_timer = Some((token, keysym));
         }
     }
 }

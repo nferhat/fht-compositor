@@ -117,7 +117,7 @@ impl From<SmithayModifiersState> for ModifiersState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyPattern(pub ModifiersState, pub Keysym);
 
 impl<'de> Deserialize<'de> for KeyPattern {
@@ -196,6 +196,9 @@ pub enum KeyActionDesc {
         #[serde(default)]
         #[serde(rename = "allow-while-locked")]
         allow_while_locked: bool,
+        #[serde(default)]
+        #[serde(rename = "repeat")]
+        repeat: bool,
     },
 }
 

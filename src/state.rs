@@ -20,7 +20,7 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{LoopHandle, LoopSignal};
+use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
 use smithay::reexports::input::{self, DeviceCapability, SendEventsMode};
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
@@ -616,6 +616,10 @@ pub struct Fht {
     pub pointer: PointerHandle<State>,
     pub clock: Clock<Monotonic>,
     pub suppressed_keys: HashSet<Keysym>,
+    // We store both the timer and the keysym used to trigger the key action.
+    // When we remove the keysym from suppressed keys we stop it.
+    pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
+
     pub devices: Vec<input::Device>,
 
     pub dnd_icon: Option<WlSurface>,
@@ -794,6 +798,7 @@ impl Fht {
 
             clock,
             suppressed_keys: HashSet::new(),
+            repeated_keyaction_timer: None,
             seat,
             devices: vec![],
             seat_state,

@@ -3,6 +3,7 @@ pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
 pub use actions::*;
+use fht_compositor_config::KeyPattern;
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
     GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,
@@ -302,7 +303,10 @@ impl State {
                                             + 1) as i32,
                                     );
                                     suppressed_keys.insert(keysym);
-                                    return FilterResult::Intercept(KeyAction::none());
+                                    return FilterResult::Intercept((
+                                        KeyAction::none(),
+                                        KeyPattern::default(),
+                                    ));
                                 }
                             }
                         }
@@ -320,9 +324,9 @@ impl State {
                             }
                         }
 
+                        let key_pattern =
+                            fht_compositor_config::KeyPattern(modifiers.into(), keysym);
                         if key_state == KeyState::Pressed && !inhibited {
-                            let key_pattern =
-                                fht_compositor_config::KeyPattern(modifiers.into(), keysym);
                             let action = state
                                 .fht
                                 .config
@@ -334,12 +338,23 @@ impl State {
 
                             if let Some(action) = action {
                                 suppressed_keys.insert(keysym);
-                                FilterResult::Intercept(action)
+                                FilterResult::Intercept((action, key_pattern))
                             } else {
                                 FilterResult::Forward
                             }
                         } else if suppressed_keys.remove(&keysym) {
-                            FilterResult::Intercept(KeyAction::none())
+                            // If the current repeat timer is for the following keysym, remove it
+                            // FIXME: Check this logic since sometimes (for obscure reasons) there
+                            // can be two keyactions running
+                            if let Some((token, _)) = state
+                                .fht
+                                .repeated_keyaction_timer
+                                .take_if(|(_, k)| *k == keysym)
+                            {
+                                state.fht.loop_handle.remove(token);
+                            }
+
+                            FilterResult::Intercept((KeyAction::none(), key_pattern))
                         } else {
                             FilterResult::Forward
                         }
@@ -347,8 +362,8 @@ impl State {
                 );
 
                 self.fht.suppressed_keys = suppressed_keys;
-                if let Some(action) = action {
-                    self.process_key_action(action);
+                if let Some((action, key_pattern)) = action {
+                    self.process_key_action(action, key_pattern);
                 }
             }
             InputEvent::PointerMotion { event } => {
@@ -457,7 +472,8 @@ impl State {
                         Some(constraint) if !constraint.is_active() => {
                             let point = pointer_location.to_i32_round() - surface_location;
                             if constraint
-                                .region().is_none_or(|region| region.contains(point.to_i32_round()))
+                                .region()
+                                .is_none_or(|region| region.contains(point.to_i32_round()))
                             {
                                 constraint.activate();
                             }
@@ -570,12 +586,8 @@ impl State {
             }
             InputEvent::TabletToolAxis { event } => {
                 let tablet_seat = self.fht.seat.tablet_seat();
-                let Some(output_geometry) = self
-                    .fht
-                    .space
-                    .outputs()
-                    .next()
-                    .map(OutputExt::geometry)
+                let Some(output_geometry) =
+                    self.fht.space.outputs().next().map(OutputExt::geometry)
                 else {
                     return;
                 };

@@ -150,7 +150,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     }
 
     for cmd in &state.fht.config.autostart {
-        utils::spawn(cmd.clone());
+        utils::spawn(cmd);
     }
 
     #[cfg(feature = "uwsm")]
