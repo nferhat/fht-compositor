@@ -69,6 +69,7 @@ pub struct Config {
     pub decorations: Decorations,
     pub animations: Animations,
     pub rules: Vec<WindowRule>,
+    pub layer_rules: Vec<LayerRule>,
     pub outputs: HashMap<String, Output>,
     pub debug: Debug,
 }
@@ -88,6 +89,7 @@ impl Default for Config {
             decorations: Default::default(),
             animations: Default::default(),
             rules: Default::default(),
+            layer_rules: Default::default(),
             outputs: HashMap::new(),
             debug: Default::default(),
         }
@@ -982,6 +984,38 @@ pub struct WindowRule {
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
+}
+
+// NOTE: For layer shells we by default disable blur and shadow
+fn default_blur_overrides_disabled() -> BlurOverrides {
+    BlurOverrides {
+        disable: Some(true),
+        ..Default::default()
+    }
+}
+
+fn default_shadow_overrides_disabled() -> ShadowOverrides {
+    ShadowOverrides {
+        disable: Some(true),
+        ..Default::default()
+    }
+}
+
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LayerRule {
+    // Matching requirements
+    // When match_all == true, all the given layer properties should have a match below
+    pub match_all: bool,
+    #[serde(deserialize_with = "deserialize_regexes")]
+    pub match_namespace: Vec<Regex>,
+    pub on_output: Option<String>,
+    // Rules to apply
+    #[serde(default = "default_blur_overrides_disabled")]
+    pub blur: BlurOverrides,
+    #[serde(default = "default_shadow_overrides_disabled")]
+    pub shadow: ShadowOverrides,
+    pub opacity: Option<f32>,
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize)]

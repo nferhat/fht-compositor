@@ -10,13 +10,12 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
+use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
@@ -29,7 +28,7 @@ use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
-use crate::renderer::{render_to_texture, FhtRenderer};
+use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -367,28 +366,7 @@ impl Tile {
         // We only care about main window surface blurring, subsurfaces (for example
         // popups) are not accoutned for and will not be rendered
         // with blur.
-        let window_geometry = Rectangle::from_size(self.window().size());
-        if with_states(&wl_surface, |data| {
-            let renderer_data = data
-                .data_map
-                .get::<RendererSurfaceStateUserData>()
-                .unwrap()
-                .lock()
-                .unwrap();
-            if let Some(opaque_regions) = renderer_data.opaque_regions() {
-                // If there's some place left after removing opaque regions, these are
-                // transparent regions and must be rendered using blur.
-                let remaining = window_geometry.subtract_rects(opaque_regions.iter().copied());
-                !remaining.is_empty()
-            } else {
-                // no opaque regions == fully transparent window surface
-                true
-            }
-        }) {
-            return true;
-        }
-
-        false
+        has_transparent_region(&wl_surface, self.window.size())
     }
 
     /// Advance animations for this [`Tile`].

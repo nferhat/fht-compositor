@@ -26,6 +26,7 @@ mod focus_target;
 mod frame_clock;
 mod handlers;
 mod input;
+mod layer;
 mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
 mod portals;

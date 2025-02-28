@@ -1,12 +1,29 @@
+use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
+use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::Color32F;
 use smithay::delegate_session_lock;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
+use smithay::utils::Point;
 use smithay::wayland::compositor::{send_surface_state, with_states};
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::session_lock::{self, LockSurface, SessionLockHandler};
 
 use crate::output::OutputExt;
+use crate::renderer::FhtRenderer;
 use crate::state::{Fht, State};
+
+crate::fht_render_elements! {
+    SessionLockRenderElement<R> => {
+        ClearBackdrop = SolidColorRenderElement,
+        LockSurface = WaylandSurfaceRenderElement<R>,
+    }
+}
+
+const LOCKED_OUTPUT_BACKDROP_COLOR: Color32F = Color32F::new(0.05, 0.05, 0.05, 1.0);
 
 impl SessionLockHandler for State {
     fn lock_state(&mut self) -> &mut session_lock::SessionLockManagerState {
@@ -23,7 +40,7 @@ impl SessionLockHandler for State {
         let outputs = self.fht.space.outputs().cloned().collect::<Vec<_>>();
         for output in &outputs {
             let output_state = self.fht.output_state.get_mut(output).unwrap();
-            output_state.has_lock_backdrop = false;
+            output_state.lock_backdrop = None;
             let _ = output_state.lock_surface.take();
         }
         // Reset focus
@@ -69,6 +86,49 @@ delegate_session_lock!(State);
 impl Fht {
     pub fn is_locked(&self) -> bool {
         matches!(&self.lock_state, LockState::Locked | LockState::Pending(_))
+    }
+
+    pub fn session_lock_elements<R: FhtRenderer>(
+        &mut self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<SessionLockRenderElement<R>> {
+        let scale = output.current_scale().integer_scale() as f64;
+        let mut elements = vec![];
+        if !self.is_locked() {
+            return elements;
+        }
+
+        let output_state = self.output_state.get_mut(output).unwrap();
+
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
+            elements.extend(render_elements_from_surface_tree(
+                renderer,
+                lock_surface.wl_surface(),
+                Point::default(),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            ));
+        }
+
+        // We still render a black drop to not show desktop content
+        let solid_buffer = output_state.lock_backdrop.get_or_insert_with(|| {
+            SolidColorBuffer::new(output.geometry().size, LOCKED_OUTPUT_BACKDROP_COLOR)
+        });
+
+        elements.push(
+            SolidColorRenderElement::from_buffer(
+                &*solid_buffer,
+                Point::default(),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            )
+            .into(),
+        );
+
+        elements
     }
 }
 

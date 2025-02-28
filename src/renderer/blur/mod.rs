@@ -17,10 +17,13 @@ use std::rc::Rc;
 use anyhow::Context;
 use glam::Mat3;
 use shader::BlurShaders;
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
+use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Physical, Point, Rectangle, Size, Transform};
@@ -28,7 +31,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;
 use super::shaders::Shaders;
-use super::{layer_elements, render_elements, FhtRenderer};
+use super::{render_elements, FhtRenderer};
 use crate::output::OutputExt;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -162,19 +165,23 @@ impl EffectsFramebuffers {
         // first render layer shell elements
         // NOTE: We use Blur::DISABLED since we should not include blur with Background/Bottom
         // layer shells
-        let elements = layer_elements(
-            renderer,
-            output,
-            Layer::Background,
-            &fht_compositor_config::Blur::DISABLED,
-        )
-        .into_iter()
-        .chain(layer_elements(
-            renderer,
-            output,
-            Layer::Bottom,
-            &fht_compositor_config::Blur::DISABLED,
-        ));
+        let layer_map = layer_map_for_output(output);
+
+        let mut elements = vec![];
+        for layer in layer_map
+            .layers_on(Layer::Background)
+            .chain(layer_map.layers_on(Layer::Bottom))
+            .rev()
+        {
+            let layer_geo = layer_map.layer_geometry(layer).unwrap();
+            let location = layer_geo.loc.to_physical_precise_round(scale);
+            elements.extend(layer.render_elements::<WaylandSurfaceRenderElement<_>>(
+                renderer,
+                location,
+                (scale as f64).into(),
+                1.0,
+            ));
+        }
         let mut fb = renderer.bind(&mut self.effects).unwrap();
         let output_rect = output.geometry().to_physical(scale);
         let _ = render_elements(
@@ -183,7 +190,7 @@ impl EffectsFramebuffers {
             output_rect.size,
             scale as f64,
             Transform::Normal,
-            elements,
+            elements.iter(),
         )
         .expect("failed to render for optimized blur buffer");
         drop(fb);

@@ -8,6 +8,7 @@ use smithay::wayland::shell::wlr_layer::{
     self, Layer, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
 };
 
+use crate::layer::ResolvedLayerRules;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::state::{Fht, State};
 
@@ -33,8 +34,13 @@ impl WlrLayerShellHandler for State {
             .expect("layer-shell requested output should not be invalid!");
         let layer_surface = LayerSurface::new(surface, namespace);
 
+        // Initially resolve layer rules.
+        // ---
+        // The layer surface might not have sent its namespace yet, but still initialize state with
+        // whatever we have here.
+        ResolvedLayerRules::resolve(&layer_surface, &self.fht.config.layer_rules, &output);
+
         if matches!(wlr_layer, Layer::Background | Layer::Bottom) {
-            dbg!("optimized blur buffer dirty");
             // the optimized blur buffer has been dirtied, re-render on next State::dispatch
             EffectsFramebuffers::get(&output).optimized_blur_dirty = true;
         }
@@ -60,7 +66,6 @@ impl WlrLayerShellHandler for State {
             layer.layer_surface().send_close();
 
             if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
-                dbg!("optimized blur buffer dirty");
                 // the optimized blur buffer has been dirtied, re-render on next State::dispatch
                 EffectsFramebuffers::get(&output).optimized_blur_dirty = true;
             }
@@ -98,19 +103,21 @@ impl State {
             // arrange the layers before sending the initial configure
             // to respect any size the client may have sent
             map.arrange();
+            let layer = map
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .unwrap();
             // send the initial configure if relevant
             if !initial_configure_sent {
-                let layer = map
-                    .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
-                    .unwrap();
                 if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
-                    dbg!("optimized blur buffer dirty");
                     // the optimized blur buffer has been dirtied, re-render on next State::dispatch
                     EffectsFramebuffers::get(output).optimized_blur_dirty = true;
                 }
 
                 layer.layer_surface().send_configure();
             }
+
+            // FIXME: Maybe check if there were changes before commiting?
+            ResolvedLayerRules::resolve(layer, &state.config.layer_rules, output);
         }
         if let Some(output) = layer_output.as_ref() {
             // fighting rust's borrow checker episode 32918731287

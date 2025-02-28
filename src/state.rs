@@ -68,7 +68,7 @@ use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
 use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::frame_clock::FrameClock;
-use crate::handlers::LockState;
+use crate::handlers::session_lock::LockState;
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
@@ -151,9 +151,9 @@ impl State {
             let locked = self.fht.is_locked();
             for output in self.fht.space.outputs() {
                 let output_state = self.fht.output_state.get_mut(output).unwrap();
-                if locked {
+                if !locked {
                     // Take away the lock surface
-                    output_state.has_lock_backdrop = false;
+                    output_state.lock_backdrop = None;
                     output_state.lock_surface = None;
                 } else {
                     let _ = output_state
@@ -170,19 +170,23 @@ impl State {
                 self.redraw(output);
             }
         };
-        self.fht.lock_state =
-            match std::mem::take(&mut self.fht.lock_state) {
-                // Switch from pending to locked when we finished drawing a backdrop at least once.
-                LockState::Pending(locker)
-                    if self.fht.space.outputs().all(|output| {
-                        self.fht.output_state.get(output).unwrap().has_lock_backdrop
-                    }) =>
-                {
-                    locker.lock();
-                    LockState::Locked
-                }
-                state => state,
-            };
+        self.fht.lock_state = match std::mem::take(&mut self.fht.lock_state) {
+            // Switch from pending to locked when we finished drawing a backdrop at least once.
+            LockState::Pending(locker)
+                if self.fht.space.outputs().all(|output| {
+                    self.fht
+                        .output_state
+                        .get(output)
+                        .unwrap()
+                        .lock_backdrop
+                        .is_some()
+                }) =>
+            {
+                locker.lock();
+                LockState::Locked
+            }
+            state => state,
+        };
 
         {
             crate::profile_scope!("refresh_focus");
@@ -210,9 +214,8 @@ impl State {
                 // We are focusing nothing, default to the active workspace focused window.
                 let old_focus_dead = self
                     .fht
-                    .focus_state
-                    .keyboard_focus
-                    .as_ref()
+                    .keyboard
+                    .current_focus()
                     .is_some_and(|ft| !ft.alive());
                 {
                     if old_focus_dead {
@@ -372,6 +375,11 @@ impl State {
         for device in devices {
             self.fht.add_libinput_device(device);
         }
+
+        // For layer shell rules, we only recompute them on layer-shell commit. Some layer shells
+        // just don't commit (for example your wallpaper). so we must refresh them at least once
+        // here.
+        self.fht.resolve_rules_for_all_layer_shells();
 
         // Queue a redraw to ensure everything is up-to-date visually.
         self.fht
@@ -614,7 +622,6 @@ pub struct Fht {
     pub cursor_theme_manager: CursorThemeManager,
     pub space: Space,
     pub unmapped_windows: Vec<UnmappedWindow>,
-    pub focus_state: FocusState,
     pub popups: PopupManager,
     pub root_surfaces: HashMap<WlSurface, WlSurface>,
     pub idle_inhibiting_surfaces: Vec<WlSurface>,
@@ -792,7 +799,6 @@ impl Fht {
             seat_state,
             keyboard,
             pointer,
-            focus_state: FocusState::default(),
             lock_state: LockState::Unlocked,
 
             dnd_icon: None,
@@ -851,8 +857,7 @@ impl Fht {
             screencopy_damage_tracker: None,
             debug_damage_tracker: None,
             lock_surface: None,
-            // We did not render anything yet, so there's nothing to worry about
-            has_lock_backdrop: self.is_locked(),
+            lock_backdrop: None,
         };
         self.output_state.insert(output.clone(), state);
 
@@ -908,6 +913,10 @@ impl Fht {
 
         let output_state = self.output_state.get_mut(output).unwrap();
         let _ = output_state.debug_damage_tracker.take();
+
+        if let Some(buffer) = &mut output_state.lock_backdrop {
+            buffer.resize(output.geometry().size);
+        }
 
         let output2 = output.clone();
         self.loop_handle.insert_idle(move |state| {
@@ -1838,11 +1847,6 @@ impl ClientData for ClientState {
         _reason: smithay::reexports::wayland_server::backend::DisconnectReason,
     ) {
     }
-}
-
-#[derive(Default, Debug)]
-pub struct FocusState {
-    pub keyboard_focus: Option<KeyboardFocusTarget>,
 }
 
 // We track ourselves window configure state since some clients may set initial_configure_sent to

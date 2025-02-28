@@ -19,44 +19,44 @@ pub mod texture_shader_element;
 use std::borrow::BorrowMut;
 
 use anyhow::Context;
-use blur::element::BlurElement;
 use blur::EffectsFramebuffers;
 use glam::{Mat3, Vec2};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
-use smithay::backend::renderer::element::{self, AsRenderElements, Kind, RenderElement};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::utils::{CommitCounter, RendererSurfaceStateUserData};
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::{
     Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
     RendererSuper, Texture, TextureFilter, TextureMapping,
 };
-use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
-use smithay::utils::{Buffer, IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::utils::{
+    Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size, Transform,
+};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use crate::config::ui::ConfigUiRenderElement;
 use crate::cursor::CursorRenderElement;
-use crate::output::OutputExt;
+use crate::handlers::session_lock::SessionLockRenderElement;
+use crate::layer::{layer_elements, LayerShellRenderElement};
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
-use crate::space::{MonitorRenderElement, MonitorRenderResult, WorkspaceRenderElement};
+use crate::space::{MonitorRenderElement, MonitorRenderResult};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
 
@@ -64,11 +64,10 @@ crate::fht_render_elements! {
     FhtRenderElement<R> => {
         Cursor = CursorRenderElement<R>,
         ConfigUi = ConfigUiRenderElement,
-        Solid = SolidColorRenderElement,
-        Debug = DebugRenderElement,
-        Wayland = WaylandSurfaceRenderElement<R>,
-        Blur = BlurElement, // for blurred layer shells
         Monitor = MonitorRenderElement<R>,
+        LayerShell = LayerShellRenderElement<R>,
+        SessionLock = SessionLockRenderElement<R>,
+        Debug = DebugRenderElement,
     }
 }
 
@@ -77,8 +76,6 @@ crate::fht_render_elements! {
         Solid = SolidColorRenderElement,
     }
 }
-
-const LOCKED_OUTPUT_BACKDROP_COLOR: Color32F = Color32F::new(0.0, 0.0, 0.0, 0.0);
 
 /// Result of [`Fht::output_elements`].
 ///
@@ -112,7 +109,6 @@ impl Fht {
     ) -> OutputElementsResult<R> {
         crate::profile_function!();
         let active_output = self.space.active_output();
-        let monitor = self.space.active_monitor();
         // Yes, we do not support fractional scale.
         //
         // For now, the ecosystem in wayland has all the required protocols and stuff to support it
@@ -156,7 +152,7 @@ impl Fht {
 
             // Draw drag and drop icon.
             if let Some(surface) = self.dnd_icon.as_ref().filter(IsAlive::alive) {
-                let elements = AsRenderElements::<R>::render_elements(
+                let elements = AsRenderElements::<R>::render_elements::<CursorRenderElement<R>>(
                     &SurfaceTree::from_surface(surface),
                     renderer,
                     cursor_element_pos,
@@ -164,7 +160,7 @@ impl Fht {
                     1.0,
                 );
                 rv.cursor_elements_len += elements.len();
-                rv.elements.extend(elements);
+                rv.elements.extend(elements.into_iter().map(Into::into));
             }
         }
 
@@ -182,42 +178,12 @@ impl Fht {
 
         // Render session lock surface between output and elements
         if self.is_locked() {
-            let output_state = self.output_state.get_mut(output).unwrap();
-            if let Some(lock_surface) = output_state.lock_surface.as_ref() {
-                rv.elements.extend(render_elements_from_surface_tree(
-                    renderer,
-                    lock_surface.wl_surface(),
-                    Point::default(),
-                    Scale::from(scale as f64),
-                    1.0,
-                    Kind::Unspecified,
-                ));
-            } else {
-                // We still render a black drop to not show desktop content
-                let mut output_geo = output.geometry().to_physical_precise_round(scale);
-                output_geo.loc = Point::default(); // render at output origin.
-                rv.elements.push(
-                    SolidColorRenderElement::new(
-                        element::Id::new(),
-                        output_geo,
-                        CommitCounter::default(),
-                        LOCKED_OUTPUT_BACKDROP_COLOR,
-                        Kind::Unspecified,
-                    )
-                    .into(),
-                );
-            }
-
-            output_state.has_lock_backdrop = true;
+            let elements = self.session_lock_elements(renderer, output);
+            rv.elements.extend(elements.into_iter().map(Into::into));
         }
 
         // Overlay layer shells are drawn above everything else, including fullscreen windows
-        let overlay_elements = layer_elements(
-            renderer,
-            output,
-            Layer::Overlay,
-            &self.config.decorations.blur,
-        );
+        let overlay_elements = layer_elements(renderer, output, Layer::Overlay, &self.config);
         rv.elements.extend(overlay_elements);
 
         // Top layer shells sit between the normal windows and fullscreen windows.
@@ -228,37 +194,29 @@ impl Fht {
         // the output its mapped in.
         //
         // We do not have to offset the render elements in order to position them on the Output.
+        let monitor = self.space.active_monitor();
         let MonitorRenderResult {
             elements: monitor_elements,
             has_fullscreen,
         } = monitor.render(renderer, scale);
 
         if !has_fullscreen {
-            rv.elements.extend(layer_elements(
-                renderer,
-                output,
-                Layer::Top,
-                &self.config.decorations.blur,
-            ));
+            rv.elements
+                .extend(layer_elements(renderer, output, Layer::Top, &self.config));
         }
 
         rv.elements
             .extend(monitor_elements.into_iter().map(Into::into));
 
         // Finally we have background and bottom elements.
-        let background = layer_elements(
-            renderer,
-            output,
-            Layer::Bottom,
-            &self.config.decorations.blur,
-        )
-        .into_iter()
-        .chain(layer_elements(
-            renderer,
-            output,
-            Layer::Background,
-            &self.config.decorations.blur,
-        ));
+        let background = layer_elements(renderer, output, Layer::Bottom, &self.config)
+            .into_iter()
+            .chain(layer_elements(
+                renderer,
+                output,
+                Layer::Background,
+                &self.config,
+            ));
         rv.elements.extend(background);
 
         // In case the optimized blur layer is dirty, re-render
@@ -294,7 +252,7 @@ impl Fht {
         renderer: &mut R,
         output_elements_result: &OutputElementsResult<R>,
     ) where
-        FhtRenderElement<R>: element::RenderElement<R>,
+        FhtRenderElement<R>: RenderElement<R>,
     {
         // NOTE: For output screencasts there's no need to send frame callbacks since this is called
         // right before [`Fht::send_frames`]
@@ -361,7 +319,7 @@ impl Fht {
         renderer: &mut R,
         target_presentation_time: std::time::Duration,
     ) where
-        WaylandSurfaceRenderElement<R>: element::RenderElement<R>,
+        WaylandSurfaceRenderElement<R>: RenderElement<R>,
     {
         crate::profile_function!();
 
@@ -448,7 +406,7 @@ impl Fht {
         renderer: &mut R,
         target_presentation_time: std::time::Duration,
     ) where
-        WorkspaceRenderElement<R>: element::RenderElement<R>,
+        crate::space::WorkspaceRenderElement<R>: RenderElement<R>,
     {
         crate::profile_function!();
 
@@ -692,71 +650,6 @@ impl AsGlowRenderer for GlowRenderer {
 pub fn init(renderer: &mut GlowRenderer) {
     shaders::Shaders::init(renderer);
     data::RendererData::init(renderer.borrow_mut());
-}
-
-pub fn layer_elements<R: FhtRenderer>(
-    renderer: &mut R,
-    output: &Output,
-    layer: Layer,
-    blur_config: &fht_compositor_config::Blur,
-) -> Vec<FhtRenderElement<R>> {
-    crate::profile_function!();
-    let output_scale = output.current_scale().integer_scale();
-    let layer_map = layer_map_for_output(output);
-    let mut elements = vec![];
-
-    for layer in layer_map.layers_on(layer).rev() {
-        let wl_surface = layer.wl_surface();
-        let layer_geo = layer_map.layer_geometry(layer).unwrap();
-
-        let has_transparent_region = with_states(wl_surface, |data| {
-            let renderer_data = data
-                .data_map
-                .get::<RendererSurfaceStateUserData>()
-                .unwrap()
-                .lock()
-                .unwrap();
-            if let Some(opaque_regions) = renderer_data.opaque_regions() {
-                // If there's some place left after removing opaque regions, these are
-                // transparent regions and must be rendered using blur.
-                //
-                // NOTE: opaque_regions are relative to surface buffer
-                let layer_geo = Rectangle::from_size(layer_geo.size);
-                let remaining = layer_geo.subtract_rects(opaque_regions.iter().copied());
-                !remaining.is_empty()
-            } else {
-                // no opaque regions == fully transparent window surface
-                true
-            }
-        });
-
-        let location = layer_geo.loc.to_physical_precise_round(output_scale);
-        elements.extend(layer.render_elements(
-            renderer,
-            location,
-            (output_scale as f64).into(),
-            1.0,
-        ));
-
-        if !blur_config.disabled() && has_transparent_region {
-            elements.push(
-                BlurElement::new(
-                    renderer,
-                    output,
-                    layer_geo,
-                    location,
-                    0.0, // FIXME: Rounded layer shells through rules
-                    false,
-                    output_scale,
-                    1.0,
-                    *blur_config,
-                )
-                .into(),
-            );
-        }
-    }
-
-    elements
 }
 
 /// Render the given `elements` inside a [`GlesTexture`].
@@ -1017,4 +910,28 @@ fn build_texture_mat(
     )) * tex_mat;
 
     tex_mat
+}
+
+/// Get whether a surface has any transparent region. This is calculated from opaque regions
+/// provided by the surface aswell as the render format.
+pub fn has_transparent_region(surface: &WlSurface, surface_size: Size<i32, Logical>) -> bool {
+    // Opaque regions are described in surface-local coordinates.
+    let surface_geo = Rectangle::from_size(surface_size);
+    with_states(&surface, |data| {
+        let renderer_data = data
+            .data_map
+            .get::<RendererSurfaceStateUserData>()
+            .unwrap()
+            .lock()
+            .unwrap();
+        if let Some(opaque_regions) = renderer_data.opaque_regions() {
+            // If there's some place left after removing opaque regions, these are
+            // transparent regions and must be rendered using blur.
+            let remaining = surface_geo.subtract_rects(opaque_regions.iter().copied());
+            !remaining.is_empty()
+        } else {
+            // no opaque regions == fully transparent window surface
+            true
+        }
+    })
 }

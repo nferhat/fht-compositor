@@ -1,4 +1,5 @@
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::output::Output;
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::wayland::session_lock::LockSurface;
@@ -55,12 +56,12 @@ pub struct OutputState {
     /// it does not, we instead draw a black backdrop instead of the [`LockSurface`], to ensure
     /// that user content is not displayed on the outputs.
     pub lock_surface: Option<LockSurface>,
-    /// Whether we drew a lock backdrop on this output.
+    /// The lock backdrop of this output.
     ///
-    /// For a proper session lock implementation, we draw on all outputs for at least ONE frame
-    /// a black backdrop, or [`Self::lock_surface`] if any, before sending the [`lock`](lock) event
-    /// to the session lock client.
-    pub has_lock_backdrop: bool,
+    /// This is drawn behind the lock surface (if any) to ensure that session contents are not
+    /// displayed while the session is locked. If this is [`None`], a new buffer is
+    /// initialized.
+    pub lock_backdrop: Option<SolidColorBuffer>,
 }
 
 /// A state machine to describe where an [`Output`](smithay::output::Output) in the redraw loop.

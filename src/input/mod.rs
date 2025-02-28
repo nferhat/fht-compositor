@@ -131,7 +131,6 @@ impl State {
 
     pub fn set_keyboard_focus(&mut self, ft: Option<impl Into<KeyboardFocusTarget>>) {
         let ft = ft.map(Into::into);
-        self.fht.focus_state.keyboard_focus = ft.clone();
         self.fht
             .keyboard
             .clone()

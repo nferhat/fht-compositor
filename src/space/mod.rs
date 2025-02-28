@@ -27,7 +27,7 @@ use crate::output::OutputExt;
 use crate::window::Window;
 
 mod closing_tile;
-mod decorations;
+pub mod decorations;
 mod monitor;
 mod tile;
 mod workspace;
@@ -106,6 +106,7 @@ impl Space {
     }
 
     /// Get the [`Window`]s on the associated [`Output`].
+    #[allow(unused)]
     pub fn windows_on_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
         self.monitors
             .iter()
@@ -121,6 +122,7 @@ impl Space {
     }
 
     /// Get an iterator of all the [`Windows`]s managed by this [`Space`].
+    #[allow(unused)]
     pub fn windows(&self) -> impl Iterator<Item = &Window> {
         self.monitors
             .iter()
