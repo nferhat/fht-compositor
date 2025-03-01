@@ -1,6 +1,7 @@
 <h1 align=center>fht-compositor</h1>
 <p align=center>A dynamic tiling Wayland compositor.</p>
 <p align="center">
+    <a href="https://matrix.to/#/#fht-compositor:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-fht--compositor-violet?logo=matrix"></a>
     <a href="https://github.com/nferhat/fht-compositor/blob/main/LICENSE"><img alt="GitHub License" src="https://img.shields.io/github/license/nferhat/fht-compositor"></a>
     <a href="https://github.com/nferhat/fht-compositor/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/nferhat/fht-compositor?logo=github"></a>
 </p>
