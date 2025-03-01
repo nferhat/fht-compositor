@@ -60,6 +60,7 @@ use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
+use crate::frame_clock::FrameClock;
 use crate::output::RedrawState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer};
@@ -685,13 +686,6 @@ impl UdevData {
 
         let mut new_scale = None;
         let drm_mode;
-        fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
-            modes
-                .iter()
-                .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-                .copied()
-                .unwrap_or_else(|| *modes.first().unwrap())
-        }
 
         let mut new_transform = None;
 
@@ -812,6 +806,7 @@ impl UdevData {
 
         let surface = Surface {
             render_node: device.render_node,
+            connector: connector.handle(),
             output: output.clone(),
             output_global,
             drm_output,
@@ -1264,6 +1259,74 @@ impl UdevData {
     pub fn primary_gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
         self.devices.get(&self.primary_node).map(|d| d.gbm.clone())
     }
+
+    /// Reload output configuration and apply new surface modes.
+    pub fn reload_output_configuration(&mut self, fht: &mut Fht) {
+        crate::profile_function!();
+
+        for device in self.devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                let output_name = surface.output.name();
+                let output_config = fht
+                    .config
+                    .outputs
+                    .get(&output_name)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let Some(connector) = device.drm_scanner.connectors().get(&surface.connector)
+                else {
+                    error!("missing enabled connector in drm_scanner");
+                    continue;
+                };
+
+                let modes = connector.modes();
+                let new_mode;
+                if let Some((width, height, refresh)) = output_config.mode {
+                    new_mode = match get_matching_mode(modes, width, height, refresh) {
+                        Some((mode, false)) => mode,
+                        Some((mode, true)) => {
+                            warn!("Unable to find matching mode for output {output_name}! Using preferred");
+                            mode
+                        }
+                        None => {
+                            warn!("Unable to find matching/preferred mode for {output_name}! Using first available mode");
+                            *modes.first().unwrap()
+                        }
+                    }
+                } else {
+                    new_mode = get_default_mode(modes);
+                }
+
+                if surface
+                    .drm_output
+                    .with_compositor(|compositor| compositor.pending_mode() == new_mode)
+                {
+                    // Mode didn't change, there's nothing else to change.
+                    continue;
+                }
+
+                if let Err(err) = surface
+                    .drm_output
+                    .with_compositor(|compositor| compositor.use_mode(new_mode))
+                {
+                    warn!(?err, "Error change mode for {output_name}");
+                    continue;
+                }
+
+                let wl_mode = OutputMode::from(new_mode);
+                surface
+                    .output
+                    .change_current_state(Some(wl_mode), None, None, None);
+                surface.output.set_preferred(wl_mode);
+                let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+                let refresh_interval =
+                    Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
+                output_state.frame_clock = FrameClock::new(Some(refresh_interval));
+                fht.output_resized(&surface.output);
+            }
+        }
+    }
 }
 
 pub struct Device {
@@ -1288,6 +1351,7 @@ pub struct Surface {
     render_node: DrmNode,
     output: Output,
     output_global: GlobalId,
+    connector: ConnectorHandle,
     drm_output: DrmOutput<
         GbmAllocator<DrmDeviceFd>,
         GbmDevice<DrmDeviceFd>,
@@ -1517,6 +1581,16 @@ fn get_matching_mode(
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
         .map(|pref| (*pref, true))
+}
+
+/// Get the default mode from a mode list.
+/// It first tries to find the preferred mode, if not found, uses the first one available
+fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
+    modes
+        .iter()
+        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .copied()
+        .unwrap_or_else(|| *modes.first().unwrap())
 }
 
 /// Get a [`Mode`](drm::control::Mode)'s refresh rate in millihertz

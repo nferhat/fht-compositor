@@ -957,7 +957,12 @@ impl Fht {
 
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
-        self.arrange_outputs(None);
+        self.loop_handle.insert_idle(|state| {
+            if let Backend::Udev(udev) = &mut state.backend {
+                udev.reload_output_configuration(&mut state.fht);
+            }
+            state.fht.arrange_outputs(None);
+        });
 
         // We don't have todo this since it should be done with State::reload_config
         // self.queue_redraw_all();
