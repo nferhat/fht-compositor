@@ -1398,6 +1398,10 @@ impl Workspace {
             return false;
         };
 
+        if window.maximized() || window.fullscreen() {
+            return false;
+        }
+
         let initial_window_location = tile.location();
         self.interactive_swap = Some(InteractiveSwap {
             window: window.clone(),
