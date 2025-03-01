@@ -23,4 +23,8 @@ from a visual and practical standpoint, see features for more information.
 
 ## Video demo
 
-> 🚧 New video demo planned for `0.2.0` release... 
+https://github.com/user-attachments/assets/4ea9b294-85a8-49ab-9f42-2f76111f063b
+
+
+
+
