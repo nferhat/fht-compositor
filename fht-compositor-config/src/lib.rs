@@ -1176,6 +1176,7 @@ impl Into<SmithayTransform> for OutputTransform {
 #[derive(Default, Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Output {
+    pub disable: bool,
     // Configured output mode, takes the form of (width, height, refresh (in hz))
     // If refresh rate is not specified, use the highest available.
     #[serde(deserialize_with = "deserialize_output_mode")]

@@ -958,6 +958,7 @@ impl Fht {
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
         self.loop_handle.insert_idle(|state| {
+            #[allow(irrefutable_let_patterns)]
             if let Backend::Udev(udev) = &mut state.backend {
                 udev.reload_output_configuration(&mut state.fht);
             }

@@ -1264,8 +1264,11 @@ impl UdevData {
     pub fn reload_output_configuration(&mut self, fht: &mut Fht) {
         crate::profile_function!();
 
-        for device in self.devices.values_mut() {
-            for surface in device.surfaces.values_mut() {
+        let mut to_disable = vec![];
+        let mut to_enable = vec![];
+
+        for (&node, device) in &mut self.devices {
+            for (&crtc, surface) in &mut device.surfaces {
                 let output_name = surface.output.name();
                 let output_config = fht
                     .config
@@ -1273,12 +1276,16 @@ impl UdevData {
                     .get(&output_name)
                     .cloned()
                     .unwrap_or_default();
-
                 let Some(connector) = device.drm_scanner.connectors().get(&surface.connector)
                 else {
-                    error!("missing enabled connector in drm_scanner");
+                    error!("Missing connector in DRM scanner");
                     continue;
                 };
+
+                if output_config.disable {
+                    to_disable.push((node, connector.clone(), crtc));
+                    continue;
+                }
 
                 let modes = connector.modes();
                 let new_mode;
@@ -1324,6 +1331,48 @@ impl UdevData {
                     Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
                 output_state.frame_clock = FrameClock::new(Some(refresh_interval));
                 fht.output_resized(&surface.output);
+            }
+
+            for (connector, crtc) in device.drm_scanner.crtcs() {
+                if connector.state() != connector::State::Connected {
+                    continue;
+                }
+
+                // Do not duplicate
+                if device.surfaces.contains_key(&crtc)
+                    || device
+                        .non_desktop_connectors
+                        .contains(&(connector.handle(), crtc))
+                {
+                    continue;
+                }
+
+                let output_name = format!(
+                    "{}-{}",
+                    connector.interface().as_str(),
+                    connector.interface_id()
+                );
+                let output_config = fht
+                    .config
+                    .outputs
+                    .get(&output_name)
+                    .cloned()
+                    .unwrap_or_default();
+                if !output_config.disable {
+                    to_enable.push((node, connector.clone(), crtc));
+                }
+            }
+        }
+
+        for (node, connector, crtc) in to_disable {
+            if let Err(err) = self.connector_disconnected(node, connector, crtc, fht) {
+                warn!(?node, ?crtc, ?err, "Failed to disable connector");
+            }
+        }
+
+        for (node, connector, crtc) in to_enable {
+            if let Err(err) = self.connector_connected(node, connector, crtc, fht) {
+                warn!(?node, ?crtc, ?err, "Failed to enable connector");
             }
         }
     }
