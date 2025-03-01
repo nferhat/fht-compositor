@@ -5,7 +5,8 @@
     <a href="https://github.com/nferhat/fht-compositor/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/nferhat/fht-compositor?logo=github"></a>
 </p>
 
-![image preview of the compositor](../res/preview.png)
+![preview](https://github.com/user-attachments/assets/31e53789-d2a8-4c82-af4d-1c5352df01ab)
+
 
 ## About
 
