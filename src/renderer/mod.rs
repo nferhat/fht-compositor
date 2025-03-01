@@ -25,7 +25,6 @@ use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
@@ -319,7 +318,8 @@ impl Fht {
         renderer: &mut R,
         target_presentation_time: std::time::Duration,
     ) where
-        WaylandSurfaceRenderElement<R>: RenderElement<R>,
+        smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>:
+            RenderElement<R>,
     {
         crate::profile_function!();
 

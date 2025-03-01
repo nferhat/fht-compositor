@@ -1258,6 +1258,12 @@ impl UdevData {
             error!(?err, "Failed to switch virtual terminals")
         }
     }
+
+    /// Get the GBM device associated with the primary node.
+    #[cfg(feature = "xdg-screencast-portal")]
+    pub fn primary_gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
+        self.devices.get(&self.primary_node).map(|d| d.gbm.clone())
+    }
 }
 
 pub struct Device {
@@ -1271,7 +1277,8 @@ pub struct Device {
         OutputPresentationFeedback,
         DrmDeviceFd,
     >,
-    pub gbm: GbmDevice<DrmDeviceFd>,
+    #[allow(unused)] // only read when using xdg-screencast-portal
+    gbm: GbmDevice<DrmDeviceFd>,
     drm_scanner: DrmScanner,
     render_node: DrmNode,
     drm_registration_token: RegistrationToken,

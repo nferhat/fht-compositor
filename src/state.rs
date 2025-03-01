@@ -445,11 +445,7 @@ impl State {
                 anyhow::bail!("screencast is only supported on udev")
             };
 
-            let Some(gbm_device) = data
-                .devices
-                .get(&data.primary_node)
-                .map(|device| device.gbm.clone())
-            else {
+            let Some(gbm_device) = data.primary_gbm_device() else {
                 anyhow::bail!("no primary GBM device")
             };
 
@@ -1770,6 +1766,7 @@ impl Fht {
 /// didn't receive frame callbacks.
 ///
 /// In [`Fht::render_screencast_windows`] we make use of this function to avoid such behaviour
+#[cfg(feature = "xdg-screencast-portal")]
 pub fn send_frame_for_screencast_window(
     output: &Output,
     output_state: &HashMap<Output, output::OutputState>,

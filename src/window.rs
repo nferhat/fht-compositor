@@ -104,12 +104,6 @@ impl Window {
         }
     }
 
-    pub fn downgrade(&self) -> WeakWindow {
-        WeakWindow {
-            inner: Arc::downgrade(&self.inner),
-        }
-    }
-
     pub fn id(&self) -> WindowId {
         self.inner.id
     }
@@ -176,19 +170,6 @@ impl Window {
 
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
         self.inner.data.lock().unwrap().bbox
-    }
-
-    pub fn bbox_with_popups(&self) -> Rectangle<i32, Logical> {
-        let mut bounding_box = self.bbox();
-        if let Some(surface) = self.wl_surface() {
-            for (popup, location) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                let offset = self.render_offset() + location - popup.geometry().loc;
-                bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
-            }
-        }
-
-        bounding_box
     }
 
     pub fn size(&self) -> Size<i32, Logical> {
@@ -582,22 +563,57 @@ impl Window {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct WeakWindow {
-    inner: std::sync::Weak<WindowInner>,
-}
+// Put the weak window reference implementation behind a module since we don't make use of it unless
+// we are using pipewire (since CastTarget keep a weak ref to the window) in order to make cargo
+// shut up.
+#[cfg(feature = "xdg-screencast-portal")]
+mod weak {
+    use smithay::desktop::utils::bbox_from_surface_tree;
+    use smithay::desktop::PopupManager;
+    use smithay::utils::Rectangle;
+    use smithay::wayland::seat::WaylandFocus as _;
 
-impl PartialEq for WeakWindow {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        std::sync::Weak::ptr_eq(&self.inner, &other.inner)
+    #[derive(Clone, Debug)]
+    pub struct WeakWindow {
+        inner: std::sync::Weak<super::WindowInner>,
+    }
+
+    impl PartialEq for WeakWindow {
+        #[inline]
+        fn eq(&self, other: &Self) -> bool {
+            std::sync::Weak::ptr_eq(&self.inner, &other.inner)
+        }
+    }
+
+    impl Eq for WeakWindow {}
+
+    impl WeakWindow {
+        pub fn upgrade(&self) -> Option<super::Window> {
+            self.inner.upgrade().map(|inner| super::Window { inner })
+        }
+    }
+
+    impl super::Window {
+        pub fn downgrade(&self) -> WeakWindow {
+            WeakWindow {
+                inner: std::sync::Arc::downgrade(&self.inner),
+            }
+        }
+
+        pub fn bbox_with_popups(&self) -> Rectangle<i32, smithay::utils::Logical> {
+            let mut bounding_box = self.bbox();
+            if let Some(surface) = self.wl_surface() {
+                for (popup, location) in PopupManager::popups_for_surface(&surface) {
+                    let surface = popup.wl_surface();
+                    let offset = self.render_offset() + location - popup.geometry().loc;
+                    bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
+                }
+            }
+
+            bounding_box
+        }
     }
 }
-
-impl Eq for WeakWindow {}
-
-impl WeakWindow {
-    pub fn upgrade(&self) -> Option<Window> {
-        self.inner.upgrade().map(|inner| Window { inner })
-    }
-}
+#[allow(unused_imports)]
+#[cfg(feature = "xdg-screencast-portal")]
+pub use weak::WeakWindow;
