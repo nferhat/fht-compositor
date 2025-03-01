@@ -739,11 +739,25 @@ impl Tile {
             let progress = *animation.value();
 
             let glow_renderer = renderer.glow_renderer_mut();
+
+            // Account for the shadow else it will get cut short.
+            let mut shadow_offset = Point::default();
+            let rules = self.window.rules();
+            if let Some(shadow) = self
+                .config
+                .shadow
+                .map(|shadow| shadow.with_overrides(&rules.shadow))
+            {
+                let scaled_sigma = (shadow.sigma / scale as f32).round() as i32;
+                shadow_offset = Point::from((scaled_sigma, scaled_sigma));
+            }
+            drop(rules);
+
             // NOTE: We use the border thickness as the location to actually include it with the
             // render elements, otherwise it would be clipped out of the tile.
             let elements = self.render_inner(
                 glow_renderer,
-                (0, 0).into(),
+                shadow_offset,
                 scale,
                 alpha,
                 output,
@@ -776,7 +790,7 @@ impl Tile {
                 let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     glow_renderer.id(),
-                    render_geo.loc.to_f64(),
+                    render_geo.loc.to_f64() - shadow_offset.to_f64().to_physical(scale as f64),
                     texture,
                     scale,
                     Transform::Normal,
