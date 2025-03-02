@@ -43,8 +43,8 @@
       withUdevBackend ? true,
       withWinitBackend ? true,
       withXdgScreenCast ? true,
+      withUWSM ? true,
       withProfiling ? false,
-      withUWSM ? false,
     }:
       rustPlatform.buildRustPackage {
         pname = "fht-compositor";
@@ -90,25 +90,25 @@
             # Install generic session script
             install -Dm644 res/fht-compositor.desktop -t $out/share/wayland-sessions
           ''
-          + lib.optionalString withUWSM ''
-            # Install the UWSM script.
-            install -Dm644 res/fht-compositor-uwsm.desktop -t $out/share/wayland-sessions
-          ''
           + lib.optionalString withXdgScreenCast ''
             install -Dm644 res/fht-compositor.portal -t $out/share/xdg-desktop-portal/portals
             install -Dm644 res/fht-compositor-portals.conf -t $out/share/xdg-desktop-portal
           '';
 
-        env.RUSTFLAGS = toString (
-          map (arg: "-C link-arg=" + arg) [
-            "-Wl,--push-state,--no-as-needed"
-            "-lEGL"
-            "-lwayland-client"
-            "-Wl,--pop-state"
-          ]
-        );
+        env = {
+          RUSTFLAGS = toString (
+            map (arg: "-C link-arg=" + arg) [
+              "-Wl,--push-state,--no-as-needed"
+              "-lEGL"
+              "-lwayland-client"
+              "-Wl,--pop-state"
+            ]
+          );
+          # Make GIT_HASH available so that the fht-compositor -V reports it correctly.
+          GIT_HASH = self.shortRev or self.dirtyShortRev or "unknown";
+        };
 
-        passthru.providedSessions = ["fht-compositor"] ++ lib.optional withUWSM "fht-compositor-uwsm";
+        passthru.providedSessions = ["fht-compositor"];
 
         meta = {
           description = "A dynamic tiling Wayland compositor.";
@@ -263,7 +263,13 @@
                     waylandCompositors."fht-compositor" = {
                       prettyName = "fht-compositor";
                       comment = "A dynamic tiling wayland compositor";
-                      binPath = "/run/current-system/sw/bin/fht-compositor";
+                      binPath = let
+                        # To make the compositor run `uwsm finalize`, we must pass the --uwsm flag
+                        # The easier way to achieve this is by using a wrapper script.
+                        wrapperWithFlag = pkgs.writeShellScript "fht-compositor-with-uwsm.sh" ''
+                          /run/current-system/sw/bin/fht-compositor --uwsm
+                        '';
+                      in "${wrapperWithFlag}";
                     };
                   };
                 };
