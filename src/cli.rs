@@ -48,9 +48,16 @@ pub enum BackendType {
 }
 
 fn get_version_string() -> String {
-    format!(
-        "{} ({})",
-        std::env!("CARGO_PKG_VERSION"),
-        std::option_env!("GIT_HASH").unwrap_or("unknown git revision")
-    )
+    let major = env!("CARGO_PKG_VERSION_MAJOR");
+    let minor = env!("CARGO_PKG_VERSION_MINOR");
+    let patch = env!("CARGO_PKG_VERSION_PATCH");
+    let commit = option_env!("GIT_HASH").unwrap_or("unknown");
+
+    // Since cargo forces us to "follow" semantic versionning, we must work around it.
+    // Release 25.03 will be marked as 25.3.0 in Cargo.toml
+    if patch == "0" {
+        format!("{major}.{minor:0>2} ({commit})")
+    } else {
+        format!("{major}.{minor:0>2}.{patch} ({commit})")
+    }
 }
