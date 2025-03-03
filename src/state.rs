@@ -44,6 +44,7 @@ use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::presentation::PresentationState;
+use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
@@ -751,6 +752,7 @@ impl Fht {
         ViewporterState::new::<State>(dh);
         SinglePixelBufferState::new::<State>(dh);
         AlphaModifierState::new::<State>(dh);
+        RelativePointerManagerState::new::<State>(dh);
 
         // Initialize a seat and immediatly attach a keyboard and pointer to it.
         // If clients try to connect and do not find any of them they will try to initialize them
