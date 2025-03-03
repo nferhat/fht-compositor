@@ -146,7 +146,7 @@ impl EguiElement {
             // If we want the best way I would bee to access egui::Memory::visible_windows, but its
             // gated behind a pub(crate), and all the funtions needed to reproduce it are too...
             let egui::Rect { min, max } = self.ctx().used_rect();
-            let used_rect = Rectangle::<i32, Logical>::from_extemities(
+            let used_rect = Rectangle::<i32, Logical>::from_extremities(
                 (min.x.round() as i32, min.y.round() as i32),
                 (max.x.round() as i32, max.y.round() as i32),
             );

@@ -21,14 +21,12 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-branch = "feature/gl_framebuffer_type"
-# rev = "e1a863b"
+rev = "99cd2507255f62c46e67467db2fc378451d58aa7"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-branch = "feature/gl_framebuffer_type"
-# rev = "e1a863b"
+rev = "99cd2507255f62c46e67467db2fc378451d58aa7"
 
 [profile.opt]
 inherits = "release"
