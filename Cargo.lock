@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "fht-compositor"
-version = "0.1.1"
+version = "25.3.1"
 dependencies = [
  "anyhow",
  "async-channel",
