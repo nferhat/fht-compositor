@@ -1,22 +1,32 @@
-# Summary
+# fht-compositor docs
 
 [Introduction](./introduction.md)
 
 ---
 
-# Getting started
-
-- [Installing](./getting-started/installing.md)
-- [Configuration](./getting-started/configuration.md)
-- [Recommended software](./getting-started/recommended-software.md)
+- [Getting Started](./getting-started/readme.md)
+  - [Install](./getting-started/install.md)
+  - [Guided tour](./getting-started/guided-tour.md)
+  - [Reommended Software](./getting-started/recommended-software.md)
+  - [Example setup with Nix](./getting-started/example-setup-with-nix.md)
 
 ---
 
-# Reference Guide
+- [Configuration](./configuration/readme.md)
+  - [General]()
+  - [Key-bindings]()
+  - [Mouse-bindings]()
+  - [Input]()
+  - [Cursor theme]()
+  - [Decorations]()
+  - [Animations]()
+  - [Window rules]()
+  - [Layer rules]()
+  - [Output configuration]()
+  - [Debug]()
 
-- [Command-line interface](./cli.md)
-- [Configuration reference](./configuration/readme.md)
-  - [`general` section](./configuration/general.md)
-  - [`input` section](./configuration/input.md)
-  - [`cursor` section](./configuration/cursor.md)
-  - [`keybinds` section](./configuration/keybinds.md)
+---
+
+- [Nix](./nix/readme.md)
+  - [Flake](./nix/flake.md)
+  - [Developing/Contributing](./nix/developing.md)
