@@ -798,18 +798,18 @@ impl Config {
             workspace_switch_animation: AnimationConfig::new(
                 config.animations.workspace_switch.duration,
                 config.animations.workspace_switch.curve,
-                config.animations.workspace_switch.disable,
+                !config.animations.disable && !config.animations.workspace_switch.disable,
             )
             .map(|a| (a, config.animations.workspace_switch.direction)),
             window_geometry_animation: AnimationConfig::new(
                 config.animations.window_geometry.duration,
                 config.animations.window_geometry.curve,
-                config.animations.window_geometry.disable,
+                !config.animations.disable && !config.animations.window_geometry.disable,
             ),
             window_open_close_animation: AnimationConfig::new(
                 config.animations.window_open_close.duration,
                 config.animations.window_open_close.curve,
-                config.animations.window_open_close.disable,
+                !config.animations.disable && !config.animations.window_open_close.disable,
             ),
             shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
             insert_window_strategy: config.general.insert_window_strategy,
@@ -831,7 +831,7 @@ pub struct AnimationConfig {
 }
 
 impl AnimationConfig {
-    pub fn new(duration: Duration, curve: AnimationCurve, disable: bool) -> Option<Self> {
-        (!disable).then_some(Self { duration, curve })
+    pub fn new(duration: Duration, curve: AnimationCurve, enable: bool) -> Option<Self> {
+        enable.then_some(Self { duration, curve })
     }
 }
