@@ -1,74 +1,31 @@
-# Example configuration for fht-compositor.
-# This configuration uses the TOML format: https://toml.io/en/
-# 
-# This configuration is enough to get you started. Refer to the wiki for more details.
-# You can open it using: `cd fht-compositor/docs && mdbook serve --open`
+# Default configuration for fht-compositor.
+# This is a good starter configuration in case you have never used the compositor
+# before. You should build yours on top of this one.
+# ---
+# You can find everything you want by reading the wiki!
+# https://nferhat.github.io/fht-compositor
 
-
-# If you need any applications to run when the compositor is starting, (for example, wallpaper,
-# sound daemon, notification daemon, etc...), add them here.
-#
-# Each entry is a full cmdline that will be executed using `/bin/sh -c "<ITEM>"`, so you benefit
-# from shell expansion.
-autostart = [
-  # "/usr/bin/swaybg -i ~/Pictures/wall/mountainous-landspace.png",
-  # "nm-applet",
-]
-
+# Autostart
+# Command lines that are executed with `/bin/sh -c "<autostart string>"`
+# ---
+# NOTE: If you are on systemd with UWSM you should not use this and instead bind
+# whatever you need to service files instead! This will provide many niceties like
+# logging and restart-on-failure
+autostart = []
 
 # ---------------------------------------------------------
 
-
-# General compositor behaviour
-# See section 5.1: general
-[general]
-cursor-warps = true # Move the cursor to newly opened windows
-focus-new-windows = true # Give newly inserted windows keyboard focus
-
-# fht-compositor is a dynamic tiler, so windows (that are not floating) will get arranged
-# according some parameters, like the nmaster, or mwfact.
-#
-# Refer to the docs for more informations and details about how these layouts work!
-layouts = ["tile", "floating"]
-nmaster = 1
-mwfact = 0.5
-inner-gaps = 5 # gaps between tiles
-outer-gaps = 20 # gaps around the screen
-
-
-# ---------------------------------------------------------
-
-
-# Decorations: I.E the pretty
-# See section 5.2: decorations
-[decorations]
-# server-side is the best mode in the case you want to have a true tiled feeling, making clients
-# disable title bars and shadows.
-#
-# WARN: libadwaita and GNOME applications IGNORE this hint/mode, do not complain about them.
-# Just ask GNOME devs to implement xdg_decoration for this to actually work.
-decoration-mode = "force-server-side"
-
-# Border around windows! (You'd probably want to leave this on)
-[decorations.border]
-thickness = 2
-radius = 10
-# You can either use a gradient color or a solid color.
-# Refer to the docs for more details on how to use them.
-focused-color = "#6791c9"
-normal-color = "#222230"
-
-
-# ---------------------------------------------------------
-
-
-# Input configuration
-# Refer to section 5.2: input
+# Input configuration.
+# Config section: 2.5
 [input]
+# -%- Keyboard configuration
+# You can configure the keyboard layout, rules, etc.
+# NOTE: Keyboard configuration can only be set globally, there are no ways to set it
+# per-device for now!
+# 
+# SEE: man 7 xkeyboard-config
 [input.keyboard]
-# Keyboard XKB settings, applied globally.
-# See: man xkeyboard-config(7)
-layout = "us" # layout = "fr"
+layout = "us"
 rules = ""
 repeat-rate = 50
 repeat-delay = 250
@@ -91,29 +48,91 @@ repeat-delay = 250
 # Per mouse configuration
 # mouse.tap-to-click = true
 
+# ---------------------------------------------------------
+
+# General compositor behaviour
+# Config section: 2.1
+[general]
+cursor-warps = true      # Move the cursor to newly opened windows
+focus-new-windows = true # Give newly inserted windows keyboard focus
+
+# The dynamic layouts, the core feature of fht-compositor.
+# ---
+# You can build up a list of layouts and configure them on-the-fly. The values here
+# for nmaster and mwfact are only the defaults! See the keybinds sections for more
+# information!
+#
+# By default we only enable the tile/master-stack layout, and a floating layout.
+layouts = ["tile", "floating"]
+nmaster = 1     # Only one master client
+mwfact = 0.5    # And share the screen size between the master and slave equally
+inner-gaps = 10 # gaps between tiles
+outer-gaps = 30 # gaps around the screen
 
 # ---------------------------------------------------------
 
+# Decorations: I.E the pretty
+# See section 2.4: decorations
+# ---
+# All the decorations can be overriden on a per-window basis using window rules.
+# See window-rules below for examples!
+[decorations]
+# server-side is the best mode in the case you want to have a true tiled feeling, making clients
+# disable title bars and shadows.
+#
+# WARN: libadwaita and GNOME applications IGNORE this hint/mode, do not complain about them.
+# Just ask GNOME devs to implement xdg_decoration for this to actually work.
+decoration-mode = "force-server-side"
 
-# Animations: Cause we love 'em
-# See section 5.6: animations
+# Border around windows! (You'd probably want to leave this on)
+[decorations.border]
+thickness = 2
+radius = 15
+# You can either use a gradient color or a solid color.
+# Refer to the docs for more details on how to use them.
+focused-color = "#6791c9"
+normal-color = "#222230"
+
+# Shadows! Very useful for floating windows.
+[decorations.shadow]
+color = "black" # by default its rgba(black, 0.5)
+floating-only = false # Up to you, I don't judge!
+
+# Blur, because yes!
+# NOTE: Blur can be expensive, and disabling blur on lower-end devices or when
+# performance is needed (for example video games) is HIGHLY recommended.
+# Disable it with window rules if that's the case, or entierly.
+[decorations.blur]
+disable = false
+# About performance. More passes == more upscaling/downscaling == more GPU time wasted/used
+# to create blur texture == worse performance for other programs. More passes gives a more
+# blended/uniform look, which looks very similar to glass blurring
+passes = 2
+radius = 10
+# Add static noise to the final blur texture. Gives off the same effect as Windows' 11
+# Mica or Frost Glass looks.
+noise = 0.05
+
+# ---------------------------------------------------------
+
+# Animations. Makes everything smooooooooooooooth!
+# See section 2.6: animations
 [animations]
 # In case you don't need them, here's a global switch
 # Each animation kind have a disable section, for more fine-grained control.
 # Again refer to the documention for more details!
-# disable = true
-
+disable = false
 
 # ---------------------------------------------------------
 
-
 # Key bindings.
-#
+# See section 5.4: keybinds for a list!
+# ---
 # WARN: You should AT ALL times keep a bind to quit the compositor and reload the config.
 # Why? Since key bindings is the only section that the compositor does not fill by
 # default for you!
-#
-# Refer to section 5.4: keybinds for a list!
+# ---
+# Default keybinds are heavily influenced by DWM, and XMonad.
 [keybinds]
 # Most keybinds will not need an argument passed to them, so you can just use the following
 # syntax to bind those "simple" actions
@@ -124,7 +143,7 @@ Super-Ctrl-r = "reload-config"
 #
 # NOTE: run-command argument is a command line, executed in the same fashion as the autostart section
 # Example key actions that need an argument passed in
-Super-Return = { action = "run-command", arg = "alacritty" }
+Super-Return = { action = "run-command", arg = "ghostty --gtk-single-instance=false" }
 Super-p = { action = "run-command", arg = "wofi --show drun" }
 Super-Shift-s = { action = "run-command", arg = """grim -g "`slurp -o`" - | wl-copy --type image/png""" }
 Super-Alt-l = { action = "run-command", arg = "gtklock" }
@@ -156,8 +175,8 @@ Super-Shift-k = "swap-with-previous-window"
 # These changes persist through configuration reloads
 Super-Space = "select-next-layout"
 Super-Shift-Space = "select-previous-layout"
-Super-h = { action = "change-mwfact", arg = -0.01 }
-Super-l = { action = "change-mwfact", arg = +0.01 }
+Super-h = { action = "change-mwfact", arg = -0.1 }
+Super-l = { action = "change-mwfact", arg = +0.1 }
 Super-Shift-h = { action = "change-nmaster", arg = +1 }
 Super-Shift-l = { action = "change-nmaster", arg = -1 }
 Super-i = { action = "change-window-proportion", arg = +0.5 }
@@ -185,26 +204,24 @@ Super-Shift-7 = { action = "send-to-workspace", arg = 6 }
 Super-Shift-8 = { action = "send-to-workspace", arg = 7 }
 Super-Shift-9 = { action = "send-to-workspace", arg = 8 }
 
-
 # ---------------------------------------------------------
-
 
 # Mouse bindings
-# Refer to section 5.5: mousebinds
+# Refer to section 2.4: mousebinds
 [mousebinds]
-# We don't have much here, sadly :/
 Super-Left = "swap-tile"
-
+Super-Right = "resize-tile"
 
 # ---------------------------------------------------------
 
-
 # Window rules
-# Refer to section 5.6: window rules
+# Refer to section 2.6: window rules
+# ---
+# Window rules are dynamic and always refresh and keep themselves up to date
+# Properties like on-workspace, is-focused, etc.
 #
-# NOTE: Window rule order matter, since they combine and stack up.
-# If window rule 1, 3 and 4 match onto a Window, the compositor will apply the rules from 1, then 3,
-# then 4 onto the said window.
+# The match strings are Regexes, so you can get creative with what you match
+# in the app-id or title. Nothing is impossible!
 
 # All windows on workspace 6 (so index 5) will be floating and centered
 # [[rules]]
@@ -234,3 +251,16 @@ Super-Left = "swap-tile"
 # on-output = "HDMI-A-1"
 # on-workspace = 4
 # fullscreen = true
+
+# ---------------------------------------------------------
+
+# Layer-shell rules
+# Refer to section 2.7: layer rules
+# ---
+# These are mostly used to enable effects on layer shells
+# Example here to enable blur for wofi
+# [[layer-rules]]
+# corner-radius = 25
+# match-namespace = ["wofi"]
+# blur = { disable = false, noise = 0, passes = 4, radius = 1 }
+# shadow = {  color = "black", disable = false }
