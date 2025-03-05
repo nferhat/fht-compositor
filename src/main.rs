@@ -157,7 +157,14 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     if cli.uwsm {
         // Run "uwsm finalize" in order to export environment to systemd activation
         // This will also signal that the compositor has started up and is ready to go
-        match std::process::Command::new("uwsm").arg("finalize").spawn() {
+        match std::process::Command::new("uwsm")
+            .arg("finalize")
+            // Also include XDG_CURRENT_DESKTOP since apparently uwsm doesn't pick it up by default
+            // and causes the provided .desktop file in the NixOS module to have the wrong value
+            // set
+            .args(["XDG_CURRENT_DESKTOP", "MOZ_ENABLE_WAYLAND"])
+            .spawn()
+        {
             Ok(mut child) => match child.wait() {
                 Ok(status) if !status.success() => {
                     warn!("uwsm finalize process exited unsuccessfully")
