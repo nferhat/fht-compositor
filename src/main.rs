@@ -125,11 +125,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         (dh, socket_name)
     };
 
-    #[cfg(any(feature = "xdg-screencast-portal"))]
-    if let Err(err) = portals::start(&loop_handle) {
-        error!(?err, "Failed to start XDG portals")
-    }
-
     let mut state = State::new(
         &dh,
         event_loop.handle(),
@@ -147,6 +142,13 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
         std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
         std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
+    }
+
+    #[cfg(any(feature = "xdg-screencast-portal"))]
+    if let Some(dbus_connection) = &state.fht.dbus_connection {
+        if let Err(err) = portals::start(dbus_connection, &loop_handle) {
+            error!(?err, "Failed to start XDG portals")
+        }
     }
 
     for cmd in &state.fht.config.autostart {

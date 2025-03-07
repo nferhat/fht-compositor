@@ -79,8 +79,6 @@ use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
-use crate::utils::dbus::DBUS_CONNECTION;
-#[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
@@ -648,6 +646,9 @@ pub struct Fht {
     // This will be useful for configuration file imports (when implemented)
     pub config_watcher: Option<crate::config::Watcher>,
 
+    #[cfg(feature = "dbus")]
+    pub dbus_connection: Option<zbus::blocking::Connection>,
+
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire_initialised: std::sync::Once,
     #[cfg(feature = "xdg-screencast-portal")]
@@ -786,6 +787,17 @@ impl Fht {
         let cursor_theme_manager = CursorThemeManager::new(config.cursor.clone());
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<State>(dh);
 
+        #[cfg(feature = "dbus")]
+        let dbus_connection = {
+            zbus::blocking::Connection::session()
+                .and_then(|cnx| {
+                    cnx.request_name("fht.desktop.Compositor")?;
+                    Ok(cnx)
+                })
+                .inspect_err(|err| error!(?err, "Failed to connect to session D-Bus"))
+                .ok()
+        };
+
         let space = Space::new(&config);
 
         Self {
@@ -819,6 +831,9 @@ impl Fht {
             config_ui,
             config_ui_output: None,
             config_watcher,
+
+            #[cfg(feature = "dbus")]
+            dbus_connection,
 
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire_initialised: std::sync::Once::new(),
@@ -1738,6 +1753,10 @@ impl Fht {
             return;
         };
 
+        let Some(dbus_conn) = self.dbus_connection.as_mut() else {
+            return;
+        };
+
         let Some(idx) = pipewire.casts.iter().position(|c| c.id() == id) else {
             warn!("Tried to stop an invalid cast");
             return;
@@ -1747,7 +1766,7 @@ impl Fht {
         self.loop_handle.remove(cast.to_compositor_token); // remove calloop stream
         let _ = cast.stream.disconnect(); // even if this fails we dont use the stream anymore
 
-        let object_server = DBUS_CONNECTION.object_server();
+        let object_server = dbus_conn.object_server();
         let Ok(interface) = object_server.interface::<_, ScreencastSession>(&cast.session_handle)
         else {
             warn!(?id, "Cast session doesn't exist");
@@ -1757,7 +1776,7 @@ impl Fht {
         async_io::block_on(async {
             if let Err(err) = interface
                 .get()
-                .closed(interface.signal_context(), std::collections::HashMap::new())
+                .closed(interface.signal_emitter(), std::collections::HashMap::new())
                 .await
             {
                 warn!(?err, "Failed to send closed signal to screencast session");

@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicUsize;
 use anyhow::Context;
 use smithay::reexports::calloop;
 use smithay::utils::{Physical, Size};
-use zbus::object_server::SignalContext;
+use zbus::object_server::SignalEmitter;
 use zbus::{interface, ObjectServer};
 
 use crate::utils::pipewire::CastId;
@@ -136,7 +136,7 @@ impl Portal {
         session_handle: zvariant::ObjectPath<'_>,
         _app_id: String,
         options: HashMap<&str, zvariant::Value<'_>>,
-        #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
+        #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
         let span = make_screencast_span("select_sources", &session_handle, &request_handle);
@@ -179,12 +179,12 @@ impl Portal {
                     "fht-share-picker exited unsuccessfully"
                 );
 
-                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
                 warn!(?err, "Failed to spawn fht-share-picker");
-                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         }
@@ -194,13 +194,13 @@ impl Portal {
             Ok(_) => (),
             Err(err) => {
                 warn!(?err, "Failed to read fht-share-picker results");
-                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         }
         if buf.is_empty() {
             // The user didnt select anything
-            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            let _ = session.closed(&signal_emitter, HashMap::new()).await;
             return (PortalResponse::Cancelled, HashMap::new());
         }
 
@@ -221,7 +221,7 @@ impl Portal {
         _app_id: String,
         _parent_window: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
-        #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
+        #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
         let span = make_screencast_span("start", &session_handle, &request_handle);
@@ -255,7 +255,7 @@ impl Portal {
             cursor_mode,
         }) {
             warn!(?err, "Failed to send StartCast request to compositor");
-            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            let _ = session.closed(&signal_emitter, HashMap::new()).await;
             return (PortalResponse::Error, HashMap::new());
         }
 
@@ -266,7 +266,7 @@ impl Portal {
         } = match metadata_receiver.recv().await {
             Ok(Some(metadata)) => metadata,
             Ok(None) => {
-                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
@@ -274,7 +274,7 @@ impl Portal {
                     ?err,
                     "Metadata receiver channel closed when it should not, weird..."
                 );
-                let _ = session.closed(&signal_ctx, HashMap::new()).await;
+                let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         };
