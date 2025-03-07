@@ -17,7 +17,7 @@ use crate::utils::pipewire::CastId;
 pub const PORTAL_VERSION: u32 = 5;
 
 pub type ScreencastSession = super::shared::Session<SessionData>;
-use super::shared::Request as ScreencastRequest;
+use super::shared::{PortalResponse, Request as ScreencastRequest};
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, PartialEq)]
@@ -82,14 +82,14 @@ impl Portal {
         _app_id: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
-    ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+    ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
         let span = make_screencast_span("create_session", &session_handle, &request_handle);
         let _span_guard = span.enter();
 
         let request = ScreencastRequest::new(request_handle.clone());
         if let Err(err) = object_server.at(&request_handle, request).await {
             warn!(?err, "Failed to create screencast request object");
-            return (2, HashMap::new());
+            return (PortalResponse::Error, HashMap::new());
         };
 
         let id = next_session_id();
@@ -121,10 +121,13 @@ impl Portal {
                 .remove::<ScreencastRequest, _>(&request_handle)
                 .await; // even we dont remove this its not really important
             warn!(?err, "Failed to create screencast session object");
-            return (2, HashMap::new());
+            return (PortalResponse::Error, HashMap::new());
         };
 
-        (0, HashMap::new())
+        let session_id = format!("fht-compositor-screencast-{id}");
+        let results = HashMap::from_iter([("session_id", session_id.into())]);
+
+        (PortalResponse::Success, results)
     }
 
     async fn select_sources(
@@ -135,7 +138,7 @@ impl Portal {
         options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
-    ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+    ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
         let span = make_screencast_span("select_sources", &session_handle, &request_handle);
         let _span_guard = span.enter();
 
@@ -177,12 +180,12 @@ impl Portal {
                 );
 
                 let _ = session.closed(&signal_ctx, HashMap::new()).await;
-                return (2, HashMap::new());
+                return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
                 warn!(?err, "Failed to spawn fht-share-picker");
                 let _ = session.closed(&signal_ctx, HashMap::new()).await;
-                return (2, HashMap::new());
+                return (PortalResponse::Error, HashMap::new());
             }
         }
 
@@ -192,8 +195,13 @@ impl Portal {
             Err(err) => {
                 warn!(?err, "Failed to read fht-share-picker results");
                 let _ = session.closed(&signal_ctx, HashMap::new()).await;
-                return (2, HashMap::new());
+                return (PortalResponse::Error, HashMap::new());
             }
+        }
+        if buf.is_empty() {
+            // The user didnt select anything
+            let _ = session.closed(&signal_ctx, HashMap::new()).await;
+            return (PortalResponse::Cancelled, HashMap::new());
         }
 
         let source =
@@ -203,7 +211,7 @@ impl Portal {
             data.cursor_mode = Some(cursor_mode)
         });
 
-        (0, HashMap::new())
+        (PortalResponse::Success, HashMap::new())
     }
 
     async fn start(
@@ -215,7 +223,7 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(signal_context)] signal_ctx: SignalContext<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
-    ) -> (u32, HashMap<&str, zvariant::Value<'_>>) {
+    ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
         let span = make_screencast_span("start", &session_handle, &request_handle);
         let _span_guard = span.enter();
 
@@ -230,7 +238,7 @@ impl Portal {
                 .and_then(|source| Some((source, data.cursor_mode?)))
         }) else {
             error!("Tried to start screencast before select_sources");
-            return (2, HashMap::new());
+            return (PortalResponse::Error, HashMap::new());
         };
 
         // What we do now is ask the compositor to start the screencast.
@@ -248,7 +256,7 @@ impl Portal {
         }) {
             warn!(?err, "Failed to send StartCast request to compositor");
             let _ = session.closed(&signal_ctx, HashMap::new()).await;
-            return (2, HashMap::new());
+            return (PortalResponse::Error, HashMap::new());
         }
 
         let StreamMetadata {
@@ -259,7 +267,7 @@ impl Portal {
             Ok(Some(metadata)) => metadata,
             Ok(None) => {
                 let _ = session.closed(&signal_ctx, HashMap::new()).await;
-                return (1, HashMap::new());
+                return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
                 warn!(
@@ -267,7 +275,7 @@ impl Portal {
                     "Metadata receiver channel closed when it should not, weird..."
                 );
                 let _ = session.closed(&signal_ctx, HashMap::new()).await;
-                return (2, HashMap::new());
+                return (PortalResponse::Error, HashMap::new());
             }
         };
 
@@ -293,7 +301,7 @@ impl Portal {
 
         // as per the portal API documentation,
         // return 0 as the status code, and results contain our node metadata
-        (0, results)
+        (PortalResponse::Success, results)
     }
 }
 

@@ -86,6 +86,7 @@ serde_json = "1.0.134"
 xdg = "2.5.2"
 serde = { version = "1.0.217", features = ["derive"] }
 tracy-client = { version = "0.18.0", default-features = false }
+serde_repr = "0.1.20"
 
 [features]
 default = ["winit-backend", "udev-backend", "all-portals"]

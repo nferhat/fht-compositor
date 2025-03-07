@@ -100,3 +100,21 @@ impl Request {
         }
     }
 }
+
+/// A result from a portal request.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde_repr::Deserialize_repr,
+    serde_repr::Serialize_repr,
+    zvariant::Type,
+)]
+#[repr(u32)]
+pub enum PortalResponse {
+    Success,
+    Cancelled,
+    Error,
+}
