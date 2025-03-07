@@ -6,8 +6,6 @@ use std::time::Duration;
 use smithay::reexports::rustix;
 use smithay::utils::{Coordinate, Point, Rectangle};
 
-#[cfg(feature = "dbus")]
-pub mod dbus;
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod pipewire;
 

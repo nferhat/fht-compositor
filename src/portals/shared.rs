@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use zbus::object_server::SignalEmitter;
+
 /// A long-lived XDG portal session.
 ///
 /// You can optionally associate some portal-specific data with this session. Useful to keep for
@@ -66,7 +68,7 @@ impl<T: Send + 'static> Session<T> {
     #[zbus(signal)]
     pub async fn closed(
         &self,
-        signal_ctx: &zbus::SignalContext<'_>,
+        _emitter: &SignalEmitter<'_>,
         details: HashMap<&str, zvariant::Value<'_>>,
     ) -> zbus::Result<()>;
 }

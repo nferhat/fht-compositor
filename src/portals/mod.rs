@@ -2,14 +2,16 @@ use anyhow::Context;
 use smithay::reexports::calloop::{self, LoopHandle};
 
 use crate::state::State;
-use crate::utils::dbus::DBUS_CONNECTION;
 
 mod shared;
 
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod screencast;
 
-pub fn start(loop_handle: &LoopHandle<'static, State>) -> anyhow::Result<()> {
+pub fn start(
+    dbus_connection: &zbus::blocking::Connection,
+    loop_handle: &LoopHandle<'static, State>,
+) -> anyhow::Result<()> {
     #[cfg(feature = "xdg-screencast-portal")]
     {
         info!("Starting XDG screencast portal");
@@ -25,7 +27,7 @@ pub fn start(loop_handle: &LoopHandle<'static, State>) -> anyhow::Result<()> {
             .map_err(|err| {
                 anyhow::anyhow!("Failed to insert XDG screencast portal source! {err}")
             })?;
-        assert!(DBUS_CONNECTION
+        assert!(dbus_connection
             .object_server()
             .at("/org/freedesktop/portal/desktop", portal)
             .context("Failed to insert XDG screencast portal in dbus!")?);
