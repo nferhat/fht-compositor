@@ -4,6 +4,8 @@ use smithay::reexports::calloop::{self, LoopHandle};
 use crate::state::State;
 use crate::utils::dbus::DBUS_CONNECTION;
 
+mod shared;
+
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod screencast;
 

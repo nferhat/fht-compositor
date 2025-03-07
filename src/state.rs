@@ -71,9 +71,11 @@ use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::output::{self, OutputExt, RedrawState};
+#[cfg(feature = "xdg-global-shortcuts-portal")]
+use crate::portals::global_shortcuts;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
-    self, CursorMode, PortalSession, ScreencastSource, StreamMetadata,
+    self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -1748,7 +1750,7 @@ impl Fht {
         let _ = cast.stream.disconnect(); // even if this fails we dont use the stream anymore
 
         let object_server = DBUS_CONNECTION.object_server();
-        let Ok(interface) = object_server.interface::<_, PortalSession>(&cast.session_handle)
+        let Ok(interface) = object_server.interface::<_, ScreencastSession>(&cast.session_handle)
         else {
             warn!(?id, "Cast session doesn't exist");
             return;

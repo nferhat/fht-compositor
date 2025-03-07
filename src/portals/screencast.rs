@@ -3,7 +3,6 @@
 //! This file only handles D-Bus communication. For pipewire logic, see `src/pipewire/mod.rs`
 
 use std::collections::HashMap;
-use std::fmt::Write;
 use std::io::Read;
 use std::sync::atomic::AtomicUsize;
 
@@ -13,10 +12,12 @@ use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalContext;
 use zbus::{interface, ObjectServer};
 
-use crate::state::{Fht, State};
 use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
+
+pub type ScreencastSession = super::shared::Session<SessionData>;
+use super::shared::Request as ScreencastRequest;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, PartialEq)]
@@ -85,36 +86,45 @@ impl Portal {
         let span = make_screencast_span("create_session", &session_handle, &request_handle);
         let _span_guard = span.enter();
 
-        let request = PortalRequest;
+        let request = ScreencastRequest::new(request_handle.clone());
         if let Err(err) = object_server.at(&request_handle, request).await {
             warn!(?err, "Failed to create screencast request object");
             return (2, HashMap::new());
         };
 
         let id = next_session_id();
-        let session = PortalSession {
+        let session_data = SessionData {
             id,
             to_compositor: self.to_compositor.clone(),
             cast_id: None,
             source: None,      // lazily created when receiving metadata
             cursor_mode: None, // ^^^^
         };
+        let session = ScreencastSession::new(
+            session_handle.clone(),
+            session_data,
+            Some(|data: &SessionData| {
+                if let Some(cast_id) = data.cast_id {
+                    if let Err(err) = data.to_compositor.send(Request::StopCast { cast_id }) {
+                        error!(
+                            ?err,
+                            ?cast_id,
+                            "Failed to send StopCast request to compositor"
+                        );
+                    };
+                }
+            }),
+        );
 
         if let Err(err) = object_server.at(&session_handle, session).await {
             let _ = object_server
-                .remove::<PortalRequest, _>(&request_handle)
+                .remove::<ScreencastRequest, _>(&request_handle)
                 .await; // even we dont remove this its not really important
             warn!(?err, "Failed to create screencast session object");
             return (2, HashMap::new());
         };
 
-        let mut session_id_string = String::new();
-        write!(&mut session_id_string, "session-{}", id).unwrap();
-
-        (
-            0,
-            HashMap::from_iter([("session_id", zvariant::Value::new(session_id_string))]),
-        )
+        (0, HashMap::new())
     }
 
     async fn select_sources(
@@ -130,10 +140,10 @@ impl Portal {
         let _span_guard = span.enter();
 
         let session_ref = object_server
-            .interface::<_, PortalSession>(&session_handle)
+            .interface::<_, ScreencastSession>(&session_handle)
             .await
             .expect("select_sources call should be on a valid session");
-        let mut session = session_ref.get_mut().await;
+        let session = session_ref.get_mut().await;
 
         let cursor_mode = get_option_value::<u32>(&options, "cursor_mode")
             .ok()
@@ -188,8 +198,10 @@ impl Portal {
 
         let source =
             serde_json::de::from_str(&buf).expect("fht-share-picker should give valid JSON!");
-        session.source = Some(source);
-        session.cursor_mode = Some(cursor_mode);
+        session.with_data(|data| {
+            data.source = Some(source);
+            data.cursor_mode = Some(cursor_mode)
+        });
 
         (0, HashMap::new())
     }
@@ -208,18 +220,18 @@ impl Portal {
         let _span_guard = span.enter();
 
         let session_ref = object_server
-            .interface::<_, PortalSession>(&session_handle)
+            .interface::<_, ScreencastSession>(&session_handle)
             .await
             .unwrap();
-        let mut session = session_ref.get_mut().await;
-
-        let source = session
-            .source
-            .clone()
-            .expect("a session can only start after select_sources");
-        let cursor_mode = session
-            .cursor_mode
-            .expect("a session can only start after select_sources");
+        let session = session_ref.get_mut().await;
+        let Some((source, cursor_mode)) = session.with_data(|data| {
+            data.source
+                .clone()
+                .and_then(|source| Some((source, data.cursor_mode?)))
+        }) else {
+            error!("Tried to start screencast before select_sources");
+            return (2, HashMap::new());
+        };
 
         // What we do now is ask the compositor to start the screencast.
         // In the dbus thread we block on the receiver until we receive *something*.
@@ -259,29 +271,25 @@ impl Portal {
             }
         };
 
-        assert!(session.cast_id.replace(cast_id).is_none());
-        let mut results = HashMap::new();
+        // A client should only be able to call start once per session.
+        // We assert this here.
+        session.with_data(|data| assert!(data.cast_id.replace(cast_id).is_none()));
 
-        results.insert(
-            "streams",
-            zvariant::Value::new(vec![(node_id, {
-                let mut response = HashMap::new();
-                // NOTE: Even we don't include position, it doesn't seem to be used at all
-                response.insert("size", zvariant::Value::new((size.w, size.h)));
-                response.insert(
-                    "source_type",
-                    zvariant::Value::new(match &source {
-                        ScreencastSource::Output { .. } => SourceType::MONITOR.bits(),
-                        ScreencastSource::Window { .. } => SourceType::WINDOW.bits(),
-                        ScreencastSource::Workspace { .. } => SourceType::VIRTUAL.bits(),
-                    }),
-                );
+        let size = zvariant::Value::new((size.w, size.h));
+        let source_type = zvariant::Value::new(match &source {
+            ScreencastSource::Output { .. } => SourceType::MONITOR.bits(),
+            ScreencastSource::Window { .. } => SourceType::WINDOW.bits(),
+            ScreencastSource::Workspace { .. } => SourceType::VIRTUAL.bits(),
+        });
+        let stream_info: HashMap<_, _, std::hash::BuildHasherDefault<std::hash::DefaultHasher>> =
+            HashMap::from_iter([("size", size), ("source_type", source_type)]);
+        let stream = (node_id, stream_info);
 
-                response
-            })]),
-        );
         // TODO: Support persist mode
-        results.insert("persist_mode", zvariant::Value::U32(0));
+        let results = HashMap::from_iter([
+            ("streams", zvariant::Value::new(vec![stream])),
+            ("persist_mode", zvariant::Value::new("")),
+        ]);
 
         // as per the portal API documentation,
         // return 0 as the status code, and results contain our node metadata
@@ -294,10 +302,7 @@ fn next_session_id() -> usize {
     SESSION_IDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
-/// A single screencast session.
-///
-/// Read more <https://flatpak.github.io/xdg-desktop-portal/docs/sessions.html>
-pub struct PortalSession {
+pub struct SessionData {
     /// The unique ID of this [`ScreenCastSession`].
     #[allow(dead_code)]
     id: usize,
@@ -318,50 +323,6 @@ pub struct StreamMetadata {
     pub size: Size<u32, Physical>,
 }
 
-#[interface(name = "org.freedesktop.impl.portal.Session")]
-impl PortalSession {
-    pub fn close(&self) {
-        if let Some(cast_id) = self.cast_id {
-            if let Err(err) = self.to_compositor.send(Request::StopCast { cast_id }) {
-                warn!(?err, "Failed to send StopCast request to compositor");
-            }
-        }
-    }
-
-    #[zbus(signal)]
-    pub async fn closed(
-        &self,
-        signal_ctx: &SignalContext<'_>,
-        details: HashMap<&str, zvariant::Value<'_>>,
-    ) -> zbus::Result<()>;
-}
-
-/// A singla screencast request.
-///
-/// NOTE: This does nothing much, expect being compliant with the portal interface? Even what
-/// xdg-desktop-portal-wlr does is just create it and forget about it.
-///
-/// Read more <https://flatpak.github.io/xdg-desktop-portal/docs/requests.html>
-pub struct PortalRequest;
-
-#[interface(name = "org.freedesktop.portal.Request")]
-impl PortalRequest {
-    /// Closes the portal request to which this object refers and ends all related user interaction
-    /// (dialogs, etc).
-    ///
-    /// A [`Self::response`] signal will not be emitted in this case.
-    fn close(&self) {}
-
-    /// Emitted when the user interaction for a portal request is over.
-    #[zbus(signal)]
-    async fn response(
-        &self,
-        signal_ctx: &SignalContext<'_>,
-        reason: u32,
-        results: HashMap<&str, zvariant::Value<'_>>,
-    ) -> zbus::Result<()>;
-}
-
 // This enum is taken straight from fht-share-picker
 // SEE: https://github.com/nferhat/fht-share-picker
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -370,10 +331,6 @@ pub enum ScreencastSource {
     Workspace { output: String, idx: usize },
     Output { name: String },
 }
-
-impl State {}
-
-impl Fht {}
 
 fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
     options: &'value HashMap<&str, zvariant::Value<'value>>,
@@ -389,24 +346,15 @@ fn make_screencast_span<'a>(
     session_handle: &zvariant::ObjectPath<'a>,
     request_handle: &zvariant::ObjectPath<'a>,
 ) -> tracing::Span {
-    let session_handle = session_handle.to_string();
     let session_handle = session_handle
+        .as_str()
         .strip_prefix("/org/freedesktop/portal/desktop/session/")
         .expect("session handle should always contain prefix");
-    let request_handle = request_handle.to_string();
     let request_handle = request_handle
+        .as_str()
         .strip_prefix("/org/freedesktop/portal/desktop/request/")
         .expect("request handle should always contain prefix");
-
-    let span = debug_span!(
-        "screencast",
-        event = tracing::field::Empty,
-        session = tracing::field::Empty,
-        request = tracing::field::Empty,
-    );
-    span.record("event", event);
-    span.record("session", session_handle);
-    span.record("request", request_handle);
+    let span = debug_span!("screencast", ?event, ?session_handle, ?request_handle);
 
     span
 }
