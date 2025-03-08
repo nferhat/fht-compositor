@@ -108,7 +108,6 @@ impl Monitor {
     }
 
     /// Get a reference to a workspace [`Workspace`] from this [`Monitor`] by index.
-    #[cfg(feature = "xdg-screencast-portal")] // used by it to get the workspace info from share-picker
     pub fn workspace_by_index(&self, index: usize) -> &Workspace {
         &self.workspaces[index]
     }
