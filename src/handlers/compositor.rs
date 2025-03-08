@@ -90,6 +90,11 @@ impl State {
                     output = named_output;
                 }
 
+                if let Some(open_on_workspace) = rules.open_on_workspace {
+                    let mon = self.fht.space.monitor_mut_for_output(&output).unwrap();
+                    workspace_id = mon.workspace_by_index(open_on_workspace.clamp(0, 8)).id();
+                }
+
                 let decoration_mode = rules
                     .decoration_mode
                     .unwrap_or(self.fht.config.decorations.decoration_mode);
