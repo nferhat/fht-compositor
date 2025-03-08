@@ -71,8 +71,6 @@ use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::output::{self, OutputExt, RedrawState};
-#[cfg(feature = "xdg-global-shortcuts-portal")]
-use crate::portals::global_shortcuts;
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
