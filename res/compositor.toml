@@ -143,7 +143,7 @@ Super-Ctrl-r = "reload-config"
 #
 # NOTE: run-command argument is a command line, executed in the same fashion as the autostart section
 # Example key actions that need an argument passed in
-Super-Return = { action = "run-command", arg = "ghostty --gtk-single-instance=false" }
+Super-Return = { action = "run-command", arg = "alacritty" }
 Super-p = { action = "run-command", arg = "wofi --show drun" }
 Super-Shift-s = { action = "run-command", arg = """grim -g "`slurp -o`" - | wl-copy --type image/png""" }
 Super-Alt-l = { action = "run-command", arg = "gtklock" }
