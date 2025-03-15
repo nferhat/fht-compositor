@@ -193,7 +193,7 @@ impl Fht {
         // the output its mapped in.
         //
         // We do not have to offset the render elements in order to position them on the Output.
-        let monitor = self.space.active_monitor();
+        let monitor = self.space.monitor_for_output(output).unwrap();
         let MonitorRenderResult {
             elements: monitor_elements,
             has_fullscreen,

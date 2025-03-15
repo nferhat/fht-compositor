@@ -93,6 +93,11 @@ impl Space {
     }
 
     /// Get the [`Monitor`] associated with this [`Output`].
+    pub fn monitor_for_output(&self, output: &Output) -> Option<&Monitor> {
+        self.monitors.iter().find(|mon| mon.output() == output)
+    }
+
+    /// Get the [`Monitor`] associated with this [`Output`].
     pub fn monitor_mut_for_output(&mut self, output: &Output) -> Option<&mut Monitor> {
         self.monitors.iter_mut().find(|mon| mon.output() == output)
     }
