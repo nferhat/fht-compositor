@@ -1604,9 +1604,10 @@ fn get_matching_mode(
         let refresh_milli_hz = (refresh * 1000.).round() as i32;
         if let Some(mode) = modes
             .iter()
-            .find(|mode| {
-                mode.size() == (width, height) && refresh_milli_hz == get_refresh_milli_hz(mode)
-            })
+            .filter(|mode| mode.size() == (width, height))
+            // Get the mode with the closest refresh.
+            // Since generally you will type `@180` not `@179.998`
+            .min_by_key(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs())
             .copied()
         {
             return Some((mode, true));
