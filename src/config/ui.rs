@@ -157,7 +157,7 @@ impl ConfigUi {
                 mut last_tick,
             } => {
                 animations_ongoing = true;
-                if last_tick - started_at >= SHOWN_DURATION {
+                if last_tick.saturating_sub(started_at) >= SHOWN_DURATION {
                     if animate {
                         State::Sliding {
                             animation: Animation::new(1.0, 0.0, SLIDE_DURATION)
