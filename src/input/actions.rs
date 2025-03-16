@@ -389,7 +389,9 @@ impl State {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
-                self.fht.space.set_active_output(&output);
+                if let Some(window) = self.fht.space.set_active_output(&output) {
+                    self.set_keyboard_focus(Some(window));
+                }
             }
             KeyActionType::FocusPreviousOutput => {
                 let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
@@ -413,7 +415,9 @@ impl State {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
-                self.fht.space.set_active_output(&output);
+                if let Some(window) = self.fht.space.set_active_output(&output) {
+                    self.set_keyboard_focus(Some(window));
+                }
             }
             KeyActionType::CloseFocusedWindow => {
                 if let Some(window) = active_window {

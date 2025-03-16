@@ -228,12 +228,13 @@ impl Space {
     }
 
     /// Set the active [`Output`]
-    pub fn set_active_output(&mut self, output: &Output) {
+    pub fn set_active_output(&mut self, output: &Output) -> Option<Window> {
         let Some(idx) = self.monitors.iter().position(|mon| mon.output() == output) else {
             error!("Tried to activate an output that is not tracked by the Space!");
-            return;
+            return None;
         };
         self.active_idx = idx;
+        self.monitors[idx].active_workspace().active_window()
     }
 
     /// Get the active [`Output`].
