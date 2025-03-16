@@ -685,27 +685,23 @@ impl UdevData {
         }
 
         let mut new_scale = None;
-        let drm_mode;
-
         let mut new_transform = None;
 
+        // Sometimes DRM connectors can have custom modes.
+        // ---
+        // The user specifies one, for example 1920x1080@165 and we build a new DrmMode out
+        // of this and the connector info. We test it, it works, nice, otherwise, use
+        // closest requested, or fallback.
         let modes = connector.modes();
+        let mut custom_mode = None;
+        let fallback_mode = get_default_mode(modes);
+        let mut requested_mode = fallback_mode;
+
         if let Some(output_config) = fht.config.outputs.get(&output_name) {
-            if let Some((w, h, refresh)) = output_config.mode {
-                drm_mode = match get_matching_mode(modes, w, h, refresh) {
-                    // We found a mode specified by the user, best case scenario
-                    Some((mode, false)) => mode,
-                    Some((mode, true)) => {
-                        warn!("Unable to find matching mode for output {output_name}! Using preferred");
-                        mode
-                    }
-                    None => {
-                        warn!("Unable to find matching/preferred mode for {output_name}! Using first available mode");
-                        *modes.first().unwrap()
-                    }
-                }
-            } else {
-                drm_mode = get_default_mode(modes);
+            if let Some((width, height, refresh)) = output_config.mode {
+                requested_mode =
+                    get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
+                custom_mode = get_custom_mode(width, height, refresh);
             }
 
             if let Some(transform) = output_config.transform {
@@ -715,11 +711,7 @@ impl UdevData {
             if let Some(scale) = output_config.scale {
                 new_scale = Some(smithay::output::Scale::Integer(scale));
             }
-        } else {
-            drm_mode = get_default_mode(modes);
         }
-
-        let mode = OutputMode::from(drm_mode);
 
         // Create the output object and expose it's wl_output global to clients
         let physical_size = connector
@@ -741,22 +733,24 @@ impl UdevData {
             model,
         };
 
-        let output = Output::new(output_name, physical_properties);
+        let output = Output::new(output_name.clone(), physical_properties);
         for mode in modes {
             output.add_mode(OutputMode::from(*mode)); // adversite all the modes
         }
-        output.set_preferred(mode);
-        output.change_current_state(Some(mode), new_transform, new_scale, None);
+        if let Some(custom_mode) = &custom_mode {
+            // Include the custom mode by default.
+            // Later when we create the DrmOutput if there's an error we will remove it.
+            output.add_mode(OutputMode::from(*custom_mode));
+        }
+        // First use the fallback since its needed to create a DRM output.
+        output.change_current_state(
+            Some(OutputMode::from(custom_mode.unwrap_or(fallback_mode))),
+            new_transform,
+            new_scale,
+            None,
+        );
 
         let output_global = output.create_global::<State>(&fht.display_handle);
-
-        let refresh_interval =
-            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&drm_mode));
-        fht.add_output(output.clone(), Some(refresh_interval));
-
-        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
-        // to avoid noise and pollution from other outputs leaking into eachother
-        EffectsFramebuffers::init_for_output(&output, &mut renderer);
 
         let driver = drm_device
             .get_driver()
@@ -780,18 +774,75 @@ impl UdevData {
             planes.overlay = vec![];
         }
 
-        let drm_output = device
-            .drm_output_manager
-            .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
-                crtc,
-                drm_mode,
-                &[connector.handle()],
-                &output,
-                Some(planes),
-                &mut renderer,
-                &DrmOutputRenderElements::default(),
-            )
-            .context("failed to initialize drm output")?;
+        let mut drm_output = None;
+
+        if let Some(custom_mode) = custom_mode {
+            match device
+                .drm_output_manager
+                .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
+                    crtc,
+                    custom_mode,
+                    &[connector.handle()],
+                    &output,
+                    Some(planes.clone()),
+                    &mut renderer,
+                    &DrmOutputRenderElements::default(),
+                ) {
+                Ok(d_output) => {
+                    let refresh_interval =
+                        Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&custom_mode));
+                    drm_output = Some((d_output, refresh_interval));
+                    // We created the output with custom mode successfully, now we can switch to it.
+                    let mode = OutputMode::from(custom_mode);
+                    output.set_preferred(mode);
+                    output.change_current_state(Some(mode), None, None, None);
+                }
+                Err(err) => {
+                    error!(
+                        ?err,
+                        "Failed to create DRM output {output_name} with custom mode"
+                    );
+                    output.delete_mode(OutputMode::from(custom_mode));
+                }
+            };
+        }
+
+        if drm_output.is_none() {
+            // DRM output didn't initialize yet. Either:
+            // - We dont have a custom mode, so this is the first try.
+            // - There was an error with custom mode, we try creating here.
+            match device
+                .drm_output_manager
+                .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
+                    crtc,
+                    requested_mode,
+                    &[connector.handle()],
+                    &output,
+                    Some(planes),
+                    &mut renderer,
+                    &DrmOutputRenderElements::default(),
+                ) {
+                Ok(d_output) => {
+                    let refresh_interval =
+                        Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&requested_mode));
+                    drm_output = Some((d_output, refresh_interval));
+                    let mode = OutputMode::from(requested_mode);
+                    output.set_preferred(mode);
+                    output.change_current_state(Some(mode), None, None, None);
+                }
+                Err(err) => {
+                    anyhow::bail!("Failed to create DRM output: {err:?}")
+                }
+            };
+        }
+
+        // SAFETY: If there was any issue up to here we would have already returned
+        let (drm_output, refresh_interval) = drm_output.unwrap();
+        fht.add_output(output.clone(), Some(refresh_interval));
+
+        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
+        // to avoid noise and pollution from other outputs leaking into eachother
+        EffectsFramebuffers::init_for_output(&output, &mut renderer);
 
         let dmabuf_feedback = drm_output.with_compositor(|compositor| {
             // We only render on one primary gpu, so we don't have to manage different feedbacks
@@ -1287,23 +1338,25 @@ impl UdevData {
                     continue;
                 }
 
+                // Sometimes DRM connectors can have custom modes.
+                // ---
+                // The user specifies one, for example 1920x1080@165 and we build a new DrmMode out
+                // of this and the connector info. We test it, it works, nice, otherwise, use
+                // fallback
+                //
+                // When we try to check for modes, we try three:
+                // - Finally we apply the fallback option, IE the first mode available.
                 let modes = connector.modes();
-                let new_mode;
+                let mut requested_mode = get_default_mode(modes);
+                let mut custom_mode = None;
+
                 if let Some((width, height, refresh)) = output_config.mode {
-                    new_mode = match get_matching_mode(modes, width, height, refresh) {
-                        Some((mode, false)) => mode,
-                        Some((mode, true)) => {
-                            warn!("Unable to find matching mode for output {output_name}! Using preferred");
-                            mode
-                        }
-                        None => {
-                            warn!("Unable to find matching/preferred mode for {output_name}! Using first available mode");
-                            *modes.first().unwrap()
-                        }
-                    }
-                } else {
-                    new_mode = get_default_mode(modes);
+                    requested_mode =
+                        get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
+                    custom_mode = get_custom_mode(width, height, refresh);
                 }
+
+                let new_mode = custom_mode.unwrap_or(requested_mode);
 
                 if surface
                     .drm_output
@@ -1313,13 +1366,38 @@ impl UdevData {
                     continue;
                 }
 
-                if let Err(err) = surface
-                    .drm_output
-                    .with_compositor(|compositor| compositor.use_mode(new_mode))
-                {
-                    warn!(?err, "Error change mode for {output_name}");
-                    continue;
+                // First try custom mode
+                let mut new_mode = None;
+                let used_custom = false;
+                if let Some(custom_mode) = custom_mode {
+                    if let Err(err) = surface
+                        .drm_output
+                        .with_compositor(|compositor| compositor.use_mode(custom_mode))
+                    {
+                        error!(?err, "Failed to apply custom mode for {output_name}");
+                    } else {
+                        new_mode = Some(custom_mode);
+                    }
                 }
+
+                if !used_custom {
+                    if let Err(err) = surface
+                        .drm_output
+                        .with_compositor(|compositor| compositor.use_mode(requested_mode))
+                    {
+                        error!(
+                            ?err,
+                            "Failed to apply requested/fallback mode for {output_name}"
+                        );
+                        continue;
+                    } else {
+                        new_mode = Some(requested_mode);
+                    }
+                }
+
+                // SAFETY: If there was any error above we would have either fallbacked or
+                // continued to the next iteration.
+                let new_mode = new_mode.unwrap();
 
                 let wl_mode = OutputMode::from(new_mode);
                 surface
@@ -1586,16 +1664,12 @@ fn calculate_refresh_rate(mode: &drm::control::Mode) -> f64 {
 }
 
 /// Gets the mode that matches the given description the closest.
-///
-/// - If there's a match, this returns `Ok((mode, false))`
-/// - If nothing matches, this returns `Ok((preferred_mode, true))`
-/// - If there's no match/preferred mode, this returns None
 fn get_matching_mode(
     modes: &[drm::control::Mode],
     width: u16,
     height: u16,
     refresh: Option<f64>,
-) -> Option<(drm::control::Mode, bool)> {
+) -> Option<drm::control::Mode> {
     if modes.is_empty() {
         return None;
     }
@@ -1610,7 +1684,7 @@ fn get_matching_mode(
             .min_by_key(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs())
             .copied()
         {
-            return Some((mode, true));
+            return Some(mode);
         }
     } else {
         // User just wants highest refresh rate
@@ -1622,15 +1696,11 @@ fn get_matching_mode(
         matching_modes.sort_by_key(|mode| mode.vrefresh());
 
         if let Some(mode) = matching_modes.first() {
-            return Some((*mode, true));
+            return Some(*mode);
         }
     }
 
-    // Last try: find a preferred mode.
-    modes
-        .iter()
-        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-        .map(|pref| (*pref, true))
+    None
 }
 
 /// Get the default mode from a mode list.
@@ -1664,4 +1734,54 @@ fn get_refresh_milli_hz(mode: &drm::control::Mode) -> i32 {
     }
 
     refresh as i32
+}
+
+/// Create a new DRM mode info struct from a width, height and refresh rate.
+/// Implementation copied from Hyprland's backend, Aquamarine
+fn get_custom_mode(width: u16, height: u16, refresh: Option<f64>) -> Option<drm::control::Mode> {
+    use libdisplay_info::cvt;
+
+    let cvt_options = cvt::Options {
+        red_blank_ver: cvt::ReducedBlankingVersion::None,
+        h_pixels: width as _,
+        v_lines: height as _,
+        ip_freq_rqd: refresh.unwrap_or(60.0),
+        video_opt: false,
+        vblank: 0.0,
+        additional_hblank: 0,
+        early_vsync_rqd: false,
+        int_rqd: false,
+        margins_rqd: false,
+    };
+    let timing = cvt::Timing::compute(cvt_options);
+    let hsync_start = width as f64 + timing.h_front_porch;
+    let vsync_start = timing.v_lines_rnd + timing.v_front_porch;
+    let hsync_end = hsync_start + timing.h_sync;
+    let vsync_end = vsync_start + timing.v_sync;
+
+    let name = unsafe {
+        let mut name = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
+        name.resize(32, ' ' as u8);
+        let name = &*(name.as_slice() as *const [u8] as *const [i8]);
+        name.try_into().ok()?
+    };
+    let mode_info = drm_ffi::drm_mode_modeinfo {
+        clock: (timing.act_pixel_freq * 1000.).round() as u32,
+        hdisplay: width,
+        hsync_start: hsync_start as u16,
+        hsync_end: hsync_end as u16,
+        htotal: (hsync_end + timing.h_back_porch) as u16,
+        hskew: 0,
+        vdisplay: timing.v_lines_rnd as u16,
+        vsync_start: vsync_start as u16,
+        vsync_end: vsync_end as u16,
+        vtotal: (vsync_end + timing.v_back_porch) as u16,
+        vscan: 0,
+        vrefresh: timing.act_frame_rate.round() as u32,
+        flags: drm_ffi::DRM_MODE_FLAG_NHSYNC | drm_ffi::DRM_MODE_FLAG_PVSYNC,
+        type_: drm_ffi::DRM_MODE_TYPE_USERDEF,
+        name,
+    };
+
+    Some(mode_info.into())
 }
