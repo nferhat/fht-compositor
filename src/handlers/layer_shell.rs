@@ -30,8 +30,7 @@ impl WlrLayerShellHandler for State {
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
-            .or_else(|| self.fht.space.outputs().next().cloned())
-            .expect("layer-shell requested output should not be invalid!");
+            .unwrap_or_else(|| self.fht.space.active_output().clone());
         let layer_surface = LayerSurface::new(surface, namespace);
 
         // Initially resolve layer rules.
