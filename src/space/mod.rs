@@ -570,12 +570,13 @@ impl Space {
     /// `point` is expected to be in global coordinate space.
     pub fn window_under(
         &self,
-        point: Point<f64, Logical>,
+        mut point: Point<f64, Logical>,
     ) -> Option<(Window, Point<i32, Logical>)> {
         let monitor = self
             .monitors
             .iter()
             .find(|mon| mon.output().geometry().to_f64().contains(point))?;
+        point -= monitor.output().current_location().to_f64(); // make relative to output
         let active = monitor.active_workspace();
 
         // Fullscreened tile always get priority
