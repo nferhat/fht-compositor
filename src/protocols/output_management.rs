@@ -1,3 +1,8 @@
+// I am too stupid to figure this kind of low-level protocol stuff myself...
+// ---
+// So thank you very much Pinnacle (https://github.com/pinnacle-comp/pinnacle) for this code!
+// Licensed under GPL-3.0
+
 use anyhow::Context;
 use smithay::{
     output::{Output, WeakOutput},
