@@ -901,6 +901,7 @@ impl Fht {
         // wlr-output-management
         self.output_management_manager_state
             .add_head::<State>(&output);
+        self.output_management_manager_state.update::<State>();
 
         self.arrange_outputs(Some(output));
     }
@@ -911,6 +912,7 @@ impl Fht {
         self.arrange_outputs(None);
         // wlr-output-management
         self.output_management_manager_state.remove_head(&output);
+        self.output_management_manager_state.update::<State>();
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
