@@ -151,14 +151,16 @@
           rust-bin = inputs.rust-overlay.lib.mkRustBin {} pkgs;
           inherit (self'.packages) fht-compositor;
         in
-          pkgs.mkShell {
+          pkgs.mkShell.override {
+            stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
+          } {
             packages = [
               # For developement purposes, a nightly toolchain is preferred.
               # We use nightly cargo for formatting, though compiling is limited to
               # whatever is specified inside ./rust-toolchain.toml
               (rust-bin.selectLatestNightlyWith (toolchain:
                 toolchain.default.override {
-                  extensions = ["rust-analyzer" "rust-src"];
+                  extensions = ["rust-analyzer" "rust-src" "rustc-codegen-cranelift-preview"];
                 }))
               pkgs.tracy-wayland # profiler
               pkgs.alejandra # for formatting this flake if needed
