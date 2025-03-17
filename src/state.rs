@@ -1165,8 +1165,7 @@ impl Fht {
         if let Some((fullscreen, mut fullscreen_loc)) = self.space.fullscreened_window(point) {
             fullscreen_loc -= fullscreen.render_offset();
             let window_wl_surface = fullscreen.wl_surface().unwrap();
-            // NOTE: window location passed here is already global, since its from
-            // `Fht::window_geometry`
+            // NOTE: Fullscreen loc is already global.
             if let Some(ret) = fullscreen
                 .surface_under(
                     point_in_output - fullscreen_loc.to_f64(),
@@ -1179,12 +1178,12 @@ impl Fht {
                         // State::process_mouse_action).
                         (
                             PointerFocusTarget::Window(fullscreen.clone()),
-                            (fullscreen_loc + output_loc).to_f64(),
+                            fullscreen_loc.to_f64(),
                         )
                     } else {
                         (
                             PointerFocusTarget::from(surface),
-                            (surface_loc + fullscreen_loc + output_loc).to_f64(),
+                            (surface_loc + fullscreen_loc).to_f64(),
                         )
                     }
                 })
@@ -1207,8 +1206,6 @@ impl Fht {
 
         if let Some((window, window_loc)) = self.space.window_under(point) {
             let window_wl_surface = window.wl_surface().unwrap();
-            // NOTE: window location passed here is already global, since its from
-            // `Fht::window_geometry`
             if let Some(ret) = window
                 .surface_under(
                     point_in_output - window_loc.to_f64(),
