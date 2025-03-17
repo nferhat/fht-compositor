@@ -70,7 +70,7 @@ impl OutputManagementHandler for State {
             }
         }
 
-        any_changed
+        true
     }
 
     fn test_configuration(&mut self, _config: HashMap<Output, OutputConfiguration>) -> bool {
