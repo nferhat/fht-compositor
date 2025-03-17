@@ -1354,9 +1354,13 @@ impl UdevData {
                 };
 
                 if output_config.disable {
+                    fht.output_management_manager_state
+                        .set_head_enabled::<State>(&surface.output, false);
                     to_disable.push((node, connector.clone(), crtc));
                     continue;
                 }
+                fht.output_management_manager_state
+                    .set_head_enabled::<State>(&surface.output, true);
 
                 // Sometimes DRM connectors can have custom modes.
                 // ---
@@ -1473,6 +1477,8 @@ impl UdevData {
                 warn!(?node, ?crtc, ?err, "Failed to enable connector");
             }
         }
+
+        fht.output_management_manager_state.update::<State>();
     }
 
     /// Set the mode for an [`Output`] and its associated connector.
