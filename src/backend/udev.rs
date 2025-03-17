@@ -61,7 +61,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::frame_clock::FrameClock;
-use crate::output::RedrawState;
+use crate::output::{OutputSerial, RedrawState};
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
@@ -662,6 +662,10 @@ impl UdevData {
             .as_ref()
             .and_then(|info| info.model())
             .unwrap_or_else(|| "Unknown".into());
+        let serial = info
+            .as_ref()
+            .and_then(|info| info.serial())
+            .unwrap_or_else(|| "Unknown".into());
 
         if non_desktop {
             debug!(
@@ -753,6 +757,9 @@ impl UdevData {
             new_scale,
             None,
         );
+        output
+            .user_data()
+            .insert_if_missing(|| OutputSerial(serial));
 
         let output_global = output.create_global::<State>(&fht.display_handle);
 
@@ -1465,6 +1472,110 @@ impl UdevData {
                 warn!(?node, ?crtc, ?err, "Failed to enable connector");
             }
         }
+    }
+
+    /// Set the mode for an [`Output`] and its associated connector.
+    pub fn set_output_mode(
+        &mut self,
+        fht: &mut Fht,
+        output: &Output,
+        mode: OutputMode,
+    ) -> anyhow::Result<()> {
+        let Some((device_node, crtc)) =
+            self.devices.iter_mut().find_map(|(device_node, device)| {
+                let crtc = device
+                    .surfaces
+                    .iter()
+                    .find(|(_, surface)| surface.output == *output)
+                    .map(|(crtc, _)| *crtc);
+                crtc.map(|crtc| (*device_node, crtc))
+            })
+        else {
+            anyhow::bail!("No surface matching output")
+        };
+
+        // Try to find matching mode using data from output mode.
+        let OutputMode { size, refresh } = mode;
+        let (width, height) = size.into();
+        let (width, height) = (width as u16, height as u16);
+        let refresh = (refresh as f64) / 1000.;
+
+        let output_name = output.name();
+        let device = self.devices.get_mut(&device_node).unwrap();
+        let surface = device.surfaces.get_mut(&crtc).unwrap();
+
+        let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
+            self.gpu_manager.single_renderer(&surface.render_node)
+        } else {
+            let format = surface.drm_output.format();
+            self.gpu_manager
+                .renderer(&self.primary_gpu, &surface.render_node, format)
+        }) else {
+            anyhow::bail!("Failed to get renderer");
+        };
+
+        let connector = device
+            .drm_scanner
+            .crtcs()
+            .find(|(_, handle)| *handle == crtc)
+            .map(|(info, _)| info)
+            .unwrap();
+        let modes = connector.modes();
+        let requested_mode = get_matching_mode(modes, width, height, Some(refresh))
+            .unwrap_or_else(|| get_default_mode(modes));
+        let custom_mode = get_custom_mode(width, height, Some(refresh));
+        let new_mode = custom_mode.unwrap_or(requested_mode);
+
+        if surface
+            .drm_output
+            .with_compositor(|compositor| compositor.pending_mode() == new_mode)
+        {
+            // Mode didn't change, there's nothing else to change.
+            return Ok(());
+        }
+
+        // First try custom mode
+        let mut new_mode = None;
+        let mut used_custom = false;
+        if let Some(custom_mode) = custom_mode {
+            if let Err(err) = surface.drm_output.use_mode(
+                custom_mode,
+                &mut renderer,
+                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
+            ) {
+                error!(?err, "Failed to apply custom mode for {output_name}");
+            } else {
+                new_mode = Some(custom_mode);
+                used_custom = true;
+            }
+        }
+
+        if !used_custom {
+            if let Err(err) = surface.drm_output.use_mode(
+                requested_mode,
+                &mut renderer,
+                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
+            ) {
+                anyhow::bail!("Failed to apply requested/fallback mode for {output_name}: {err:?}");
+            } else {
+                new_mode = Some(requested_mode);
+            }
+        }
+
+        // SAFETY: If there was any error above we would have either fallbacked or
+        // continued to the next iteration.
+        let new_mode = new_mode.unwrap();
+
+        let wl_mode = OutputMode::from(new_mode);
+        surface
+            .output
+            .change_current_state(Some(wl_mode), None, None, None);
+        let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+        let refresh_interval =
+            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
+        output_state.frame_clock = FrameClock::new(Some(refresh_interval));
+
+        Ok(())
     }
 }
 

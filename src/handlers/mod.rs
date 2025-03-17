@@ -18,6 +18,7 @@ mod input_method;
 mod keyboard_shortcuts_inhibit;
 mod layer_shell;
 mod output;
+mod output_management;
 mod pointer_constraints;
 mod pointer_gestures;
 mod presentation;

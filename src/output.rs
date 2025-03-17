@@ -116,6 +116,9 @@ impl RedrawState {
 
 use smithay::utils::{Logical, Rectangle};
 
+/// Newtype wrapper around a [`String`] representing an output EDID serial.
+pub struct OutputSerial(pub String);
+
 /// Extension trait for an [`Output`].
 pub trait OutputExt {
     /// Get this [`Output`]'s geometry in global compositor space.
@@ -123,6 +126,9 @@ pub trait OutputExt {
     /// This uses the output's current mode size, and the advertised wl_output location.
     /// Read more at <https://wayland.app/protocols/wayland#wl_output:event:geometry>
     fn geometry(&self) -> Rectangle<i32, Logical>;
+
+    /// Get this [`Output`]'s EDID serial.
+    fn serial(&self) -> Option<String>;
 }
 
 impl OutputExt for Output {
@@ -138,5 +144,11 @@ impl OutputExt for Output {
                 .to_logical(self.current_scale().fractional_scale())
                 .to_i32_round()
         })
+    }
+
+    fn serial(&self) -> Option<String> {
+        self.user_data()
+            .get::<OutputSerial>()
+            .map(|serial| serial.0.clone())
     }
 }

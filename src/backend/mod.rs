@@ -90,4 +90,21 @@ impl Backend {
             _ => unreachable!(),
         }
     }
+
+    pub fn set_output_mode(
+        &mut self,
+        fht: &mut Fht,
+        output: &Output,
+        mode: smithay::output::Mode,
+    ) -> anyhow::Result<()> {
+        match self {
+            #[cfg(feature = "winit-backend")]
+            #[allow(irrefutable_let_patterns)]
+            // winit who cares
+            Self::Winit(_) => Ok(()),
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.set_output_mode(fht, output, mode),
+        }
+    }
 }

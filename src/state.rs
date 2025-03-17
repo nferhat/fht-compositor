@@ -75,6 +75,7 @@ use crate::output::{self, OutputExt, RedrawState};
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
+use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
@@ -662,6 +663,7 @@ pub struct Fht {
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub idle_notifier_state: IdleNotifierState<State>,
     pub layer_shell_state: WlrLayerShellState,
+    pub output_management_manager_state: OutputManagementManagerState,
     pub primary_selection_state: PrimarySelectionState,
     pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
@@ -713,6 +715,13 @@ impl Fht {
         let foreign_toplevel_list_state = ForeignToplevelListState::new::<State>(dh);
         let dmabuf_state = DmabufState::new();
         let layer_shell_state = WlrLayerShellState::new::<State>(dh);
+        let output_management_manager_state =
+            OutputManagementManagerState::new::<State, _>(dh, |client| {
+                // Only privileded clients
+                client
+                    .get_data::<ClientState>()
+                    .is_none_or(|data| data.security_context.is_none())
+            });
         let shm_state =
             ShmState::new::<State>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let session_lock_manager_state = SessionLockManagerState::new::<State, _>(dh, |client| {
@@ -848,6 +857,7 @@ impl Fht {
             keyboard_shortcuts_inhibit_state,
             idle_notifier_state,
             layer_shell_state,
+            output_management_manager_state,
             primary_selection_state,
             shm_state,
             session_lock_manager_state,
@@ -888,6 +898,10 @@ impl Fht {
         }
         self.space.set_active_output(&output);
 
+        // wlr-output-management
+        self.output_management_manager_state
+            .add_head::<State>(&output);
+
         self.arrange_outputs(Some(output));
     }
 
@@ -895,6 +909,8 @@ impl Fht {
         info!(name = output.name(), "Removing output");
         self.space.remove_output(output);
         self.arrange_outputs(None);
+        // wlr-output-management
+        self.output_management_manager_state.remove_head(&output);
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
