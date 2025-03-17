@@ -1335,6 +1335,17 @@ impl UdevData {
                     continue;
                 };
 
+                let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
+                    self.gpu_manager.single_renderer(&surface.render_node)
+                } else {
+                    let format = surface.drm_output.format();
+                    self.gpu_manager
+                        .renderer(&self.primary_gpu, &surface.render_node, format)
+                }) else {
+                    error!("Failed to get renderer");
+                    continue;
+                };
+
                 if output_config.disable {
                     to_disable.push((node, connector.clone(), crtc));
                     continue;
@@ -1369,10 +1380,11 @@ impl UdevData {
                 let mut new_mode = None;
                 let mut used_custom = false;
                 if let Some(custom_mode) = custom_mode {
-                    if let Err(err) = surface
-                        .drm_output
-                        .with_compositor(|compositor| compositor.use_mode(custom_mode))
-                    {
+                    if let Err(err) = surface.drm_output.use_mode(
+                        custom_mode,
+                        &mut renderer,
+                        &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
+                    ) {
                         error!(?err, "Failed to apply custom mode for {output_name}");
                     } else {
                         new_mode = Some(custom_mode);
@@ -1381,10 +1393,11 @@ impl UdevData {
                 }
 
                 if !used_custom {
-                    if let Err(err) = surface
-                        .drm_output
-                        .with_compositor(|compositor| compositor.use_mode(requested_mode))
-                    {
+                    if let Err(err) = surface.drm_output.use_mode(
+                        requested_mode,
+                        &mut renderer,
+                        &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
+                    ) {
                         error!(
                             ?err,
                             "Failed to apply requested/fallback mode for {output_name}"
