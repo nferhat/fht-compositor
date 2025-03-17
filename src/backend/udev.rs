@@ -735,7 +735,11 @@ impl UdevData {
 
         let output = Output::new(output_name.clone(), physical_properties);
         for mode in modes {
-            output.add_mode(OutputMode::from(*mode)); // adversite all the modes
+            let wl_mode = OutputMode::from(*mode);
+            if mode.mode_type().contains(ModeTypeFlags::PREFERRED) {
+                output.set_preferred(wl_mode);
+            }
+            output.add_mode(wl_mode);
         }
         if let Some(custom_mode) = &custom_mode {
             // Include the custom mode by default.
@@ -794,7 +798,6 @@ impl UdevData {
                     drm_output = Some((d_output, refresh_interval));
                     // We created the output with custom mode successfully, now we can switch to it.
                     let mode = OutputMode::from(custom_mode);
-                    output.set_preferred(mode);
                     output.change_current_state(Some(mode), None, None, None);
                 }
                 Err(err) => {
@@ -827,7 +830,6 @@ impl UdevData {
                         Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&requested_mode));
                     drm_output = Some((d_output, refresh_interval));
                     let mode = OutputMode::from(requested_mode);
-                    output.set_preferred(mode);
                     output.change_current_state(Some(mode), None, None, None);
                 }
                 Err(err) => {
@@ -1343,9 +1345,6 @@ impl UdevData {
                 // The user specifies one, for example 1920x1080@165 and we build a new DrmMode out
                 // of this and the connector info. We test it, it works, nice, otherwise, use
                 // fallback
-                //
-                // When we try to check for modes, we try three:
-                // - Finally we apply the fallback option, IE the first mode available.
                 let modes = connector.modes();
                 let mut requested_mode = get_default_mode(modes);
                 let mut custom_mode = None;
@@ -1368,7 +1367,7 @@ impl UdevData {
 
                 // First try custom mode
                 let mut new_mode = None;
-                let used_custom = false;
+                let mut used_custom = false;
                 if let Some(custom_mode) = custom_mode {
                     if let Err(err) = surface
                         .drm_output
@@ -1377,6 +1376,7 @@ impl UdevData {
                         error!(?err, "Failed to apply custom mode for {output_name}");
                     } else {
                         new_mode = Some(custom_mode);
+                        used_custom = true;
                     }
                 }
 
@@ -1403,7 +1403,6 @@ impl UdevData {
                 surface
                     .output
                     .change_current_state(Some(wl_mode), None, None, None);
-                surface.output.set_preferred(wl_mode);
                 let output_state = fht.output_state.get_mut(&surface.output).unwrap();
                 let refresh_interval =
                     Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
