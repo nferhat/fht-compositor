@@ -364,7 +364,7 @@ impl State {
         // If we made it up to here, the configuration must be valid
         self.fht.config = config;
 
-        if old_config.outputs != self.fht.config.outputs {
+        if old_config.outputs != self.fht.config.outputs || self.fht.has_transient_output_changes {
             self.fht.reload_output_config();
         }
 
@@ -628,6 +628,11 @@ pub struct Fht {
     pub lock_state: LockState,
 
     pub output_state: HashMap<Output, output::OutputState>,
+    // Keep track whether we did some transient output changes.
+    //
+    // This can happen when you use a tool that interacts with the wlr-output-management protocol.
+    // When reloading the config, we want to undo those changes.
+    pub has_transient_output_changes: bool,
 
     pub config: Arc<fht_compositor_config::Config>,
     pub cli_config_path: Option<std::path::PathBuf>,
@@ -834,6 +839,7 @@ impl Fht {
             idle_inhibiting_surfaces: Vec::new(),
 
             output_state: HashMap::new(),
+            has_transient_output_changes: false,
 
             config: Arc::new(config),
             cli_config_path: config_path,
@@ -1000,15 +1006,20 @@ impl Fht {
             output.change_current_state(None, Some(new_transform), Some(new_scale), None);
         }
 
+        // If we had previous output changes, we force re-apply all config.
+        let force = self.has_transient_output_changes;
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
-        self.loop_handle.insert_idle(|state| {
+        self.loop_handle.insert_idle(move |state| {
             #[allow(irrefutable_let_patterns)]
             if let Backend::Udev(udev) = &mut state.backend {
-                udev.reload_output_configuration(&mut state.fht);
+                udev.reload_output_configuration(&mut state.fht, force);
             }
             state.fht.arrange_outputs(None);
         });
+
+        // By now we would have applied everything aligned to our config.
+        self.has_transient_output_changes = false;
 
         // We don't have todo this since it should be done with State::reload_config
         // self.queue_redraw_all();

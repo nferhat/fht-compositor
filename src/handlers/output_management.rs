@@ -70,6 +70,10 @@ impl OutputManagementHandler for State {
             }
         }
 
+        if any_changed {
+            self.fht.has_transient_output_changes = true;
+        }
+
         true
     }
 

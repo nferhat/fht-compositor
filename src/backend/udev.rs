@@ -1321,7 +1321,7 @@ impl UdevData {
     }
 
     /// Reload output configuration and apply new surface modes.
-    pub fn reload_output_configuration(&mut self, fht: &mut Fht) {
+    pub fn reload_output_configuration(&mut self, fht: &mut Fht, force: bool) {
         crate::profile_function!();
 
         let mut to_disable = vec![];
@@ -1378,6 +1378,7 @@ impl UdevData {
                 if surface
                     .drm_output
                     .with_compositor(|compositor| compositor.pending_mode() == new_mode)
+                    && !force
                 {
                     // Mode didn't change, there's nothing else to change.
                     continue;
