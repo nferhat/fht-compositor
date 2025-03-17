@@ -932,7 +932,17 @@ impl Fht {
         let output_state = self.output_state.get_mut(output).unwrap();
         let _ = output_state.debug_damage_tracker.take();
 
+        if let Some(lock_surface) = output_state.lock_surface.as_ref() {
+            // Resize lock surface to make sure it always covers up everything
+            lock_surface.with_pending_state(|state| {
+                let size = output.geometry().size;
+                state.size = Some((size.w as _, size.h as _).into());
+            });
+            lock_surface.send_configure();
+        }
+
         if let Some(buffer) = &mut output_state.lock_backdrop {
+            // Resize lock backdrop to make sure it always covers up everything
             buffer.resize(output.geometry().size);
         }
 
