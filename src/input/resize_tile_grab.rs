@@ -4,10 +4,12 @@ use smithay::input::pointer::{
     GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
     MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
 };
+use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::{Logical, Point};
 
 use crate::focus_target::PointerFocusTarget;
+use crate::output::OutputExt;
 use crate::state::State;
 use crate::window::Window;
 
@@ -58,6 +60,7 @@ impl From<ResizeEdge> for xdg_toplevel::ResizeEdge {
 
 pub struct ResizeTileGrab {
     pub window: Window,
+    pub output: Output,
     pub start_data: GrabStartData<State>,
 }
 
@@ -69,8 +72,20 @@ impl PointerGrab<State> for ResizeTileGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
+        // Clamp the event's position so that we do not go outside the output.
+        let (pos_x, pos_y) = event.location.into();
+        let geometry = self.output.geometry().to_f64();
+        // Give is -/+5.0 to avoid the pointer being between two outputs.
+        let clamped_x = pos_x.clamp(geometry.loc.x + 5.0, geometry.loc.x + geometry.size.w - 5.0);
+        let clamped_y = pos_y.clamp(geometry.loc.y + 5.0, geometry.loc.y + geometry.size.h - 5.0);
+        let event = MotionEvent {
+            location: (clamped_x, clamped_y).into(),
+            ..*event
+        };
+
         // No focus while motion is active
-        handle.motion(data, None, event);
+        handle.motion(data, None, &event);
+
         let delta = (event.location - self.start_data.location).to_i32_round();
         if data
             .fht

@@ -110,8 +110,13 @@ impl XdgShellHandler for State {
             .find_window_and_workspace_mut(surface.wl_surface())
         {
             if workspace.start_interactive_swap(&window) {
-                output = Some(workspace.output().clone()); // augh, the borrow checker
-                let grab = SwapTileGrab { window, start_data };
+                let ws_output = workspace.output().clone();
+                output = Some(ws_output.clone()); // augh, the borrow checker
+                let grab = SwapTileGrab {
+                    window,
+                    output: ws_output,
+                    start_data,
+                };
                 pointer.set_grab(self, grab, serial, Focus::Clear);
             }
         }
@@ -156,8 +161,13 @@ impl XdgShellHandler for State {
         {
             let edges = ResizeEdge::from(edges);
             if workspace.start_interactive_resize(&window, edges) {
-                output = Some(workspace.output().clone()); // augh, the borrow checker
-                let grab = ResizeTileGrab { window, start_data };
+                let ws_output = workspace.output().clone();
+                output = Some(ws_output.clone()); // augh, the borrow checker
+                let grab = ResizeTileGrab {
+                    window,
+                    output: ws_output,
+                    start_data,
+                };
                 pointer.set_grab(self, grab, serial, Focus::Clear);
             }
         }
