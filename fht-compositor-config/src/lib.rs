@@ -1264,9 +1264,14 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             info!(?path, "Creating configuration file");
-            let mut new_file = fs::OpenOptions::new().read(true).write(true).open(&path)?;
-            let _ = new_file.write(DEFAULT_CONFIG_CONTENTS.as_bytes())?;
-            new_file
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            let mut new_file = fs::File::create(&path)?;
+            new_file.write_all(DEFAULT_CONFIG_CONTENTS.as_bytes())?;
+
+            fs::OpenOptions::new().read(true).open(&path)?
         }
         Err(err) => return Err(err.into()),
     };
