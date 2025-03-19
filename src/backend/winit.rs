@@ -175,7 +175,7 @@ impl WinitData {
     pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
         crate::profile_function!();
 
-        let age = self.backend.buffer_age().unwrap();
+        let age = self.backend.buffer_age().unwrap_or(1);
         let res = self.backend.bind().and_then(|(renderer, mut fb)| {
             let OutputElementsResult { ref elements, .. } =
                 fht.output_elements(renderer, &self.output);
