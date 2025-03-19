@@ -22,7 +22,7 @@ autostart = []
 # You can configure the keyboard layout, rules, etc.
 # NOTE: Keyboard configuration can only be set globally, there are no ways to set it
 # per-device for now!
-# 
+#
 # SEE: man 7 xkeyboard-config
 [input.keyboard]
 layout = "us"
@@ -53,8 +53,9 @@ repeat-delay = 250
 # General compositor behaviour
 # Config section: 2.1
 [general]
-cursor-warps = true      # Move the cursor to newly opened windows
-focus-new-windows = true # Give newly inserted windows keyboard focus
+cursor-warps = true         # Move the cursor to newly opened windows
+focus-new-windows = true    # Give newly inserted windows keyboard focus
+focus-follows-mouse = false # When true, hovering over a window will focus it without clicking
 
 # The dynamic layouts, the core feature of fht-compositor.
 # ---

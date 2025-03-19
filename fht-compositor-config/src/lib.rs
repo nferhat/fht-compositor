@@ -529,6 +529,8 @@ pub struct General {
     pub cursor_warps: bool,
     #[serde(default = "default_true")]
     pub focus_new_windows: bool,
+    #[serde(default = "default_false")]
+    pub focus_follows_mouse: bool,
     pub insert_window_strategy: InsertWindowStrategy,
     #[serde(default = "default_layouts")]
     pub layouts: Vec<WorkspaceLayout>,
@@ -547,6 +549,7 @@ impl Default for General {
         Self {
             cursor_warps: true,
             focus_new_windows: true,
+            focus_follows_mouse: false,
             insert_window_strategy: InsertWindowStrategy::default(),
             layouts: default_layouts(),
             nmaster: 1,
