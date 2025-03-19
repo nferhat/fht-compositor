@@ -7,6 +7,15 @@
 
 You can go to the [Nix](../nix/flake.md) page for more information.
 
+## Arch Linux install
+
+[fht-compositor](https://aur.archlinux.org/packages/fht-compositor) is available on the AUR.
+It can be installed using an AUR helper (e.g. `paru`):
+
+```sh
+paru -S fht-compositor
+```
+
 ## Manual install
 
 First, install [`rustup`](https://rustup.rs) to get the latest rust version
