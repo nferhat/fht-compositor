@@ -1989,6 +1989,7 @@ impl ResolvedWindowRules {
                 current_output,
                 current_workspace_idx,
                 is_focused,
+                !window.tiled(),
             )
         }) {
             resolved_rules.border = resolved_rules.border.merge_with(rule.border);
@@ -2042,6 +2043,7 @@ fn rule_matches(
     current_output: &str,
     current_workspace_idx: usize,
     is_focused: bool,
+    is_floating: bool,
 ) -> bool {
     if rule.match_all {
         // When the user wants to match all the match criteria onto the window, there's two
@@ -2087,6 +2089,12 @@ fn rule_matches(
             }
         }
 
+        if let Some(rule_is_floating) = rule.is_floating {
+            if rule_is_floating != is_floating {
+                return false;
+            }
+        }
+
         true
     } else {
         if let Some(window_title) = window.title() {
@@ -2123,6 +2131,12 @@ fn rule_matches(
 
         if let Some(rule_is_focused) = rule.is_focused {
             if rule_is_focused == is_focused {
+                return true;
+            }
+        }
+
+        if let Some(rule_is_floating) = rule.is_floating {
+            if rule_is_floating == is_floating {
                 return true;
             }
         }
