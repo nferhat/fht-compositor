@@ -60,6 +60,7 @@ fn default_keybinds() -> HashMap<KeyPattern, KeyActionDesc> {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     pub autostart: Vec<String>,
+    pub env: HashMap<String, String>,
     #[serde(default = "default_keybinds")]
     pub keybinds: HashMap<KeyPattern, KeyActionDesc>,
     pub mousebinds: HashMap<MousePattern, MouseAction>,
@@ -81,6 +82,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             autostart: Default::default(),
+            env: Default::default(),
             keybinds: default_keybinds(),
             mousebinds: Default::default(),
             input: Default::default(),

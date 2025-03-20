@@ -15,6 +15,15 @@ autostart = []
 
 # ---------------------------------------------------------
 
+# Environment variables
+#
+# Example:
+#
+# env = { DISPLAY = ":0" }
+env = {}
+
+# ---------------------------------------------------------
+
 # Input configuration.
 # Config section: 2.5
 [input]
