@@ -1945,6 +1945,7 @@ pub struct ResolvedWindowRules {
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
+    pub ontop: Option<bool>,
     pub centered: Option<bool>,
     pub centered_in_parent: Option<bool>,
 }
@@ -2017,6 +2018,10 @@ impl ResolvedWindowRules {
 
             if let Some(centered) = rule.centered {
                 resolved_rules.centered = Some(centered);
+            }
+
+            if let Some(ontop) = rule.ontop {
+                resolved_rules.ontop = Some(ontop);
             }
         }
 
