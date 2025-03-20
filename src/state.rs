@@ -15,7 +15,9 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, under_from_surface_tree,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, PopupManager, WindowSurfaceType};
+use smithay::desktop::{
+    layer_map_for_output, LayerSurface, PopupKind, PopupManager, WindowSurfaceType,
+};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -53,7 +55,7 @@ use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState};
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
-use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::{PopupSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::tablet_manager::TabletManagerState;
@@ -1816,6 +1818,49 @@ impl Fht {
             {
                 warn!(?err, "Failed to send closed signal to screencast session");
             };
+        });
+    }
+
+    pub fn unconstrain_layer_popup(&self, parent: &LayerSurface, popup: &PopupSurface) {
+        let output = self.space.outputs().find(|output| {
+            let layer_map = layer_map_for_output(output);
+            layer_map
+                .layer_for_surface(parent.wl_surface(), WindowSurfaceType::TOPLEVEL)
+                .is_some()
+        });
+
+        let Some(output) = output else {
+            return;
+        };
+
+        let layer_map = layer_map_for_output(output);
+        let Some(layer_geo) = layer_map.layer_geometry(parent) else {
+            return;
+        };
+
+        let mut target = output.geometry();
+        target.loc = layer_geo.loc;
+
+        let parent_surface = popup.get_parent_surface();
+        if let Some(parent_wl_surface) = parent_surface {
+            if &parent_wl_surface != parent.wl_surface() {
+                let parent_popup_kind = self.popups.find_popup(&parent_wl_surface);
+                if let Some(PopupKind::Xdg(parent_popup)) = parent_popup_kind {
+                    let mut nested_target = target;
+
+                    let parent_loc = parent_popup.with_pending_state(|state| state.geometry.loc);
+                    nested_target.loc = nested_target.loc + parent_loc;
+
+                    popup.with_pending_state(|state| {
+                        state.geometry = state.positioner.get_unconstrained_geometry(nested_target);
+                    });
+                    return;
+                }
+            }
+        }
+
+        popup.with_pending_state(|state| {
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
     }
 }

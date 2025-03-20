@@ -1,5 +1,5 @@
 use smithay::delegate_layer_shell;
-use smithay::desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType};
+use smithay::desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -7,6 +7,7 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{
     self, Layer, LayerSurfaceData, WlrLayerShellHandler, WlrLayerShellState,
 };
+use smithay::wayland::shell::xdg::PopupSurface;
 
 use crate::layer::ResolvedLayerRules;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -74,6 +75,23 @@ impl WlrLayerShellHandler for State {
 
         if let Some(output) = layer_output {
             self.fht.output_resized(&output);
+        }
+    }
+
+    fn new_popup(&mut self, parent: wlr_layer::LayerSurface, popup: PopupSurface) {
+        let desktop_layer = self.fht.space.outputs().find_map(|output| {
+            let layer_map = layer_map_for_output(output);
+            let layer = layer_map
+                .layers()
+                .find(|layer| layer.layer_surface() == &parent);
+            layer.cloned()
+        });
+
+        if let Some(parent_layer) = desktop_layer {
+            self.fht.unconstrain_layer_popup(&parent_layer, &popup);
+            if let Err(err) = self.fht.popups.track_popup(PopupKind::from(popup)) {
+                tracing::warn!(?err, "Failed to track layer shell popup!");
+            }
         }
     }
 }
