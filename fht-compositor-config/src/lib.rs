@@ -992,6 +992,7 @@ pub struct WindowRule {
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
+    pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
 }
 
