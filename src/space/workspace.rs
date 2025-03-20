@@ -388,7 +388,6 @@ impl Workspace {
     ///
     /// This will get clamped to a valid value when [`Workspace::refresh`] is called.
     pub fn set_active_tile_idx(&mut self, idx: usize) {
-        self.remove_current_fullscreen();
         self.active_tile_idx = Some(idx);
     }
 
