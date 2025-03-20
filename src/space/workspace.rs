@@ -1832,6 +1832,18 @@ impl Workspace {
 
         elements
     }
+
+    pub fn insert_window_at(
+        &mut self,
+        window: Window,
+        location: Point<i32, Logical>,
+        animate: bool,
+    ) {
+        let mut tile = Tile::new(window, Rc::clone(&self.config));
+        tile.set_location(location, animate);
+        self.tiles.push(tile);
+        self.arrange_tiles(animate);
+    }
 }
 
 fht_render_elements! {

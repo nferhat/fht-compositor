@@ -536,33 +536,74 @@ impl Space {
     pub fn move_window_to_output(&mut self, window: &Window, output: &Output, animate: bool) {
         // If we try to add the window back into its original workspace.
         let mut original_workspace_id = None;
-        'monitors: for monitor in &mut self.monitors {
-            for workspace in monitor.workspaces_mut() {
-                if workspace.remove_window(window, true) {
-                    // We successfully removed the window,
-                    // Stop checking for other monitors
+        let mut original_location = None;
+        let mut original_monitor_idx = None;
+
+        for (monitor_idx, monitor) in self.monitors.iter().enumerate() {
+            for workspace in monitor.workspaces() {
+                if let Some(tile) = workspace.tiles().find(|tile| tile.window() == window) {
+                    original_location = Some(tile.location());
                     original_workspace_id = Some(workspace.id());
-                    break 'monitors;
+                    original_monitor_idx = Some(monitor_idx);
+                    break;
                 }
             }
+            if original_workspace_id.is_some() {
+                break;
+            }
         }
+
         let Some(original_workspace_id) = original_workspace_id else {
             // We did not find the window!? Do not proceed.
             return;
         };
 
-        let Some(target_monitor) = self.monitors.iter_mut().find(|mon| mon.output() == output)
-        else {
-            // No matching monitor, insert back
-            let original_workspace = self
-                .workspace_mut_for_id(original_workspace_id)
-                .expect("original_workspace_id should always be valid");
-            original_workspace.insert_window(window.clone(), animate);
+        if let Some(monitor_idx) = original_monitor_idx {
+            if let Some(monitor) = self.monitors.get_mut(monitor_idx) {
+                for workspace in monitor.workspaces_mut() {
+                    if workspace.id() == original_workspace_id {
+                        workspace.remove_window(window, true);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let original_output = if let Some(monitor_idx) = original_monitor_idx {
+            self.monitors[monitor_idx].output()
+        } else {
             return;
         };
 
-        let active = target_monitor.active_workspace_mut();
-        active.insert_window(window.clone(), animate);
+        let target_monitor_idx = self.monitors.iter().position(|mon| mon.output() == output);
+        if target_monitor_idx.is_none() {
+            // No matching monitor, insert back
+            if let Some(monitor_idx) = original_monitor_idx {
+                if let Some(monitor) = self.monitors.get_mut(monitor_idx) {
+                    for workspace in monitor.workspaces_mut() {
+                        if workspace.id() == original_workspace_id {
+                            workspace.insert_window(window.clone(), animate);
+                            break;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        let target_monitor_idx = target_monitor_idx.unwrap();
+        let target_output = self.monitors[target_monitor_idx].output();
+        let monitor_offset = target_output.current_location() - original_output.current_location();
+
+        if let Some(monitor) = self.monitors.get_mut(target_monitor_idx) {
+            let active = monitor.active_workspace_mut();
+            if let Some(original_loc) = original_location {
+                let adjusted_location = original_loc + monitor_offset;
+                active.insert_window_at(window.clone(), adjusted_location, animate);
+            } else {
+                active.insert_window(window.clone(), animate);
+            }
+        }
     }
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.

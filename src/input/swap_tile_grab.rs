@@ -30,17 +30,6 @@ impl PointerGrab<State> for SwapTileGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // Clamp the event's position so that we do not go outside the output.
-        let (pos_x, pos_y) = event.location.into();
-        let geometry = self.output.geometry().to_f64();
-        // Give is -/+5.0 to avoid the pointer being between two outputs.
-        let clamped_x = pos_x.clamp(geometry.loc.x + 5.0, geometry.loc.x + geometry.size.w - 5.0);
-        let clamped_y = pos_y.clamp(geometry.loc.y + 5.0, geometry.loc.y + geometry.size.h - 5.0);
-        let event = MotionEvent {
-            location: (clamped_x, clamped_y).into(),
-            ..*event
-        };
-
         // No focus while motion is active
         handle.motion(data, None, &event);
 
@@ -74,9 +63,30 @@ impl PointerGrab<State> for SwapTileGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
+            let current_location = handle.current_location();
+
+            let target_output = data
+                .fht
+                .space
+                .outputs()
+                .find(|output| output.geometry().to_f64().contains(current_location))
+                .cloned();
+
+            if let Some(target_output) = target_output {
+                if target_output != self.output {
+                    let window = self.window.clone();
+                    let output = target_output.clone();
+                    handle.unset_grab(self, data, event.serial, event.time, true);
+                    data.fht.space.move_window_to_output(&window, &output, true);
+                    data.fht.space.set_active_output(&output);
+                    data.fht.space.activate_window(&window, true);
+                    return;
+                }
+            }
+
             data.fht
                 .space
-                .handle_interactive_swap_end(&self.window, handle.current_location());
+                .handle_interactive_swap_end(&self.window, current_location);
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -88,10 +98,6 @@ impl PointerGrab<State> for SwapTileGrab {
         details: AxisFrame,
     ) {
         handle.axis(data, details)
-    }
-
-    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
-        handle.frame(data)
     }
 
     fn gesture_swipe_begin(
@@ -154,7 +160,7 @@ impl PointerGrab<State> for SwapTileGrab {
         handle: &mut PointerInnerHandle<'_, State>,
         event: &GestureHoldBeginEvent,
     ) {
-        handle.gesture_hold_begin(data, event);
+        handle.gesture_hold_begin(data, event)
     }
 
     fn gesture_hold_end(
@@ -163,12 +169,20 @@ impl PointerGrab<State> for SwapTileGrab {
         handle: &mut PointerInnerHandle<'_, State>,
         event: &GestureHoldEndEvent,
     ) {
-        handle.gesture_hold_end(data, event);
+        handle.gesture_hold_end(data, event)
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
     fn start_data(&self) -> &GrabStartData<State> {
         &self.start_data
     }
 
-    fn unset(&mut self, _: &mut State) {}
+    fn unset(&mut self, data: &mut State) {
+        data.fht
+            .space
+            .handle_interactive_swap_end(&self.window, self.start_data.location)
+    }
 }
