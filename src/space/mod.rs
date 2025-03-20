@@ -677,45 +677,7 @@ impl Space {
         point -= monitor.output().current_location().to_f64(); // make relative to output
         let active = monitor.active_workspace();
 
-        // Fullscreened tile always get priority
-        if let Some(tile) = active.fullscreened_tile() {
-            let window = tile.window();
-            let loc = tile.location() + tile.window_loc();
-            let bbox = {
-                let mut bbox = window.bbox();
-                bbox.loc += loc;
-                bbox
-            };
-            let render_location = loc - window.render_offset();
-            if bbox.to_f64().contains(point)
-                && window
-                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
-                    .is_some()
-            {
-                return Some((window.clone(), render_location));
-            }
-        }
-
-        // Active tile is always above everything else
-        if let Some(tile) = active.active_tile() {
-            let window = tile.window();
-            let loc = tile.location() + tile.window_loc();
-            let bbox = {
-                let mut bbox = window.bbox();
-                bbox.loc += loc;
-                bbox
-            };
-            let render_location = loc - window.render_offset();
-            if bbox.to_f64().contains(point)
-                && window
-                    .surface_under(point - render_location.to_f64(), WindowSurfaceType::ALL)
-                    .is_some()
-            {
-                return Some((window.clone(), render_location));
-            }
-        }
-
-        for tile in active.tiles() {
+        for tile in active.tiles_in_render_order() {
             let window = tile.window();
             let loc = tile.location() + tile.window_loc();
             let bbox = {
