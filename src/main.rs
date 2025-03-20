@@ -142,6 +142,10 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
         std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
         std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
+
+        for (key, value) in &state.fht.config.env {
+            std::env::set_var(key, value);
+        }
     }
 
     #[cfg(any(feature = "xdg-screencast-portal"))]
