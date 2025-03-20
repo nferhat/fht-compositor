@@ -375,9 +375,9 @@ impl Fht {
 
         // The target (aka the popup) geometry should be relative to the parent (aka the window's)
         // geometry, based on the xdg_shell protocol requirements.
+        let window_loc = workspace.window_location(&window).unwrap();
         let mut target = workspace.output().geometry();
-        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= workspace.window_location(&window).unwrap();
+        target.loc = window_loc + get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
 
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
