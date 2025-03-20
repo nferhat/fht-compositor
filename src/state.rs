@@ -1062,9 +1062,8 @@ impl Fht {
                 .filter(|&target_pos| {
                     let target_geo = Rectangle::new(target_pos, size);
                     // if we have overlap, this position is not good, simple as that.
-                    if let Some(overlap) = self
-                        .space
-                        .outputs()
+                    if let Some(overlap) = arranged_outputs
+                        .iter()
                         .map(OutputExt::geometry)
                         .find(|geo| geo.overlaps(target_geo))
                     {
