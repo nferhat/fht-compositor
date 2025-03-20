@@ -1876,34 +1876,14 @@ impl Workspace {
             elements.push(element);
         }
 
-        if let Some(tile) = self.active_tile() {
-            let alpha = if self.active_tile_idx == skip_alpha_animation_idx {
-                1.0
-            } else {
-                alpha
-            };
+        let (ontop_tiles, normal_tiles) = self
+            .tiles
+            .iter()
+            .enumerate()
+            .partition::<Vec<_>, _>(|(_, tile)| tile.window().rules().ontop.unwrap_or(false));
 
-            // Active gets rendered above others.
-            elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset_physical,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    }),
-            );
-        }
-
-        // Now render others, just fine.
-        for (idx, tile) in self.tiles.iter().enumerate() {
-            // NOTE: active_tile_idx is always fullscreen_tile_idx, ensured by Workspace::refresh
-            if Some(idx) == self.active_tile_idx {
-                continue; // active tile has already been rendered.
-            }
-
+        // First render ontop tiles.
+        for (idx, tile) in ontop_tiles.into_iter() {
             let alpha = if Some(idx) == skip_alpha_animation_idx {
                 1.0
             } else {
@@ -1911,15 +1891,50 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, false)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset_physical,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    }),
+                tile.render(
+                    renderer,
+                    scale,
+                    alpha,
+                    &self.output,
+                    render_offset,
+                    Some(idx) == self.active_tile_idx,
+                )
+                .map(|element| {
+                    RelocateRenderElement::from_element(
+                        element,
+                        render_offset_physical,
+                        Relocate::Relative,
+                    )
+                    .into()
+                }),
+            );
+        }
+
+        // Now render others, just fine.
+        for (idx, tile) in normal_tiles.into_iter() {
+            let alpha = if Some(idx) == skip_alpha_animation_idx {
+                1.0
+            } else {
+                alpha
+            };
+
+            elements.extend(
+                tile.render(
+                    renderer,
+                    scale,
+                    alpha,
+                    &self.output,
+                    render_offset,
+                    Some(idx) == self.active_tile_idx,
+                )
+                .map(|element| {
+                    RelocateRenderElement::from_element(
+                        element,
+                        render_offset_physical,
+                        Relocate::Relative,
+                    )
+                    .into()
+                }),
             );
         }
 
