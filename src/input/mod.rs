@@ -142,6 +142,10 @@ impl State {
         let pointer = self.fht.pointer.clone();
         let under = self.fht.focus_target_under(point);
 
+        if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+            self.update_keyboard_focus();
+        }
+
         pointer.motion(
             self,
             under,
@@ -451,6 +455,10 @@ impl State {
                     }
                 }
 
+                if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+                    self.update_keyboard_focus();
+                }
+
                 pointer.motion(
                     self,
                     under,
@@ -490,6 +498,10 @@ impl State {
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
+
+                if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+                    self.update_keyboard_focus();
+                }
 
                 pointer.motion(
                     self,
