@@ -602,22 +602,15 @@ impl State {
                                 self.process_mouse_action(event.button_code(), action, serial);
                             }
                         }
-                    } else {
-                        let pointer_loc = pointer.current_location();
-                        let under = self.fht.focus_target_under(pointer_loc);
-                        let filtered_under = self.filter_focus_target_for_active_layers(under);
-
-                        if filtered_under.is_some() {
-                            self.update_keyboard_focus();
-                        }
                     }
                 }
 
-                if !self.has_active_layer() || {
-                    let pointer_loc = pointer.current_location();
-                    let under = self.fht.focus_target_under(pointer_loc);
-                    self.filter_focus_target_for_active_layers(under).is_some()
-                } {
+                let pointer_loc = pointer.current_location();
+                let under = self.fht.focus_target_under(pointer_loc);
+                let filtered_under_exists =
+                    self.filter_focus_target_for_active_layers(under).is_some();
+
+                if !self.has_active_layer() || filtered_under_exists {
                     pointer.button(
                         self,
                         &ButtonEvent {
