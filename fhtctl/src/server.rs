@@ -98,7 +98,16 @@ fn handle_client(
     let command: Command = serde_json::from_str(&buffer)?;
 
     let registry = registry.lock().unwrap();
-    let response = match registry.get(&command) {
+
+    let handler = registry.iter().find_map(|(registered_cmd, handler)| {
+        if commands_match(registered_cmd, &command) {
+            Some(handler)
+        } else {
+            None
+        }
+    });
+
+    let response = match handler {
         Some(handler) => handler(command),
         None => {
             let cmd_name = format!("{:?}", command);
@@ -110,6 +119,19 @@ fn handle_client(
     stream.write_all(response_json.as_bytes())?;
 
     Ok(())
+}
+
+fn commands_match(cmd1: &Command, cmd2: &Command) -> bool {
+    match (cmd1, cmd2) {
+        (Command::GetState, Command::GetState) => true,
+        (Command::GetOutputs, Command::GetOutputs) => true,
+        (Command::GetWorkspaces, Command::GetWorkspaces) => true,
+        (Command::GetWindows, Command::GetWindows) => true,
+        (Command::CloseWindow, Command::CloseWindow) => true,
+        (Command::FocusWindow { .. }, Command::FocusWindow { .. }) => true,
+        (Command::SwitchWorkspace { .. }, Command::SwitchWorkspace { .. }) => true,
+        _ => false,
+    }
 }
 
 pub struct ServerControl {
