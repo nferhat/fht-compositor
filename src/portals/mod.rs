@@ -5,6 +5,8 @@ use crate::state::State;
 
 mod shared;
 
+#[cfg(feature = "xdg-global-shortcuts-portal")]
+pub mod global_shortcuts;
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod screencast;
 
