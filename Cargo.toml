@@ -1,7 +1,7 @@
 # {{{ Workspace
 
 [workspace]
-members = ["fht-compositor-config"]
+members = ["fht-compositor-config", "fhtctl"]
 resolver = "2"
 
 [workspace.package]
@@ -71,6 +71,7 @@ zvariant = { version = "5.4.0", features = ["option-as-array"], optional = true 
 pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = ["v0_3_33"] }
 xcursor = "0.3.5"
 fht-compositor-config.path = "./fht-compositor-config"
+fhtctl.path = "./fhtctl"
 glam = "0.28.0"
 egui = "0.31"
 egui_glow = "0.31"
@@ -94,16 +95,16 @@ drm-ffi = "0.9.0"
 default = ["winit-backend", "udev-backend", "all-portals"]
 
 # Marker feature to enable D-Bus connectivity.
-# 
+#
 # You should not enable this yourself, this is meant to be used by compositor
 # feature dependencies.
 dbus = ["zbus", "zvariant"]
 
 # Enable the winit backend.
-# 
+#
 # This allows the compositor to run under a winit window.
-# 
-# NOTE: Although this backend works, it's not explicity supported, since its only here for 
+#
+# NOTE: Although this backend works, it's not explicity supported, since its only here for
 # developement. For all regular usage, please use the udev backend.
 winit-backend = [
     "smithay/backend_winit",
@@ -112,7 +113,7 @@ winit-backend = [
 ]
 
 # Enable the winit backend.
-# 
+#
 # This allows the compositor to run under a libseat session.
 udev-backend = [
     "smithay-drm-extras",
@@ -127,7 +128,7 @@ udev-backend = [
 ]
 
 # Enable profiling with tracy
-# 
+#
 # You should **NOT** enable this unless you want to profile compositor performance.
 # This will automatically stream compositor data to localhost:DEFAULT_PORT.
 profile-with-tracy = ["tracy-client/default"]

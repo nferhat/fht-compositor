@@ -26,7 +26,7 @@ static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
 /// Identifier of a [`Workspace`].
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct WorkspaceId(usize);
+pub struct WorkspaceId(pub usize);
 impl WorkspaceId {
     /// Create a unique [`WorkspaceId`].
     ///

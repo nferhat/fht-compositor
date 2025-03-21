@@ -950,6 +950,7 @@ dependencies = [
  "egui_glow",
  "fht-animation",
  "fht-compositor-config",
+ "fhtctl",
  "glam",
  "libc",
  "libdisplay-info",
@@ -984,6 +985,20 @@ dependencies = [
  "toml",
  "tracing",
  "xdg",
+]
+
+[[package]]
+name = "fhtctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-io",
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
