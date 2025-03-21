@@ -8,11 +8,11 @@ edition = "2021"
 [dependencies]
 csscolorparser = { version = "0.7.0", features = ["serde"] }
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0", features = ["serde"] }
-regex = "1.10.6"
-serde = { version = "1.0.203", features = ["derive"] }
+regex = "1.11.1"
+serde = { version = "1.0.219", features = ["derive"] }
 smithay = { workspace = true, features = ["backend_libinput"] }
-sscanf = "0.4.2"
-thiserror = "1.0.56"
-toml = { version = "0.8.19", default-features = false, features = ["parse", "display"] }
+sscanf = "0.4.3"
+thiserror = "2.0.12"
+toml = { version = "0.8.20", default-features = false, features = ["parse", "display"] }
 tracing.workspace = true
 xdg = "2.5.2"
