@@ -285,8 +285,8 @@ impl State {
                 let output_geometry = active.output().geometry();
                 if let Some(tile) = active.active_tile_mut() {
                     if !tile.window().tiled() {
-                        let loc = tile.location();
-                        tile.set_location(output_geometry.center() - loc.downscale(2), true);
+                        let size = tile.size();
+                        tile.set_location(output_geometry.center() - size.downscale(2), true);
                     }
                 }
             }
