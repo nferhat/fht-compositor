@@ -2,7 +2,8 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use async_channel::{Receiver, Sender};
-use fhtctl::{Command, Output, Response, ResponseData, Workspace, Window as FhtctlWindow, server::Server};
+use fhtctl::server::Server;
+use fhtctl::{Command, Output, Response, ResponseData, Window as FhtctlWindow, Workspace};
 use smithay::reexports::calloop;
 use tracing::{info, warn};
 
@@ -109,29 +110,35 @@ pub fn init_ipc_server(state: &mut State) -> Result<()> {
     });
 
     let cmd_sender = command_sender.clone();
-    server.register_handler(Command::FocusWindow { app_id: None, title: None }, move |cmd| {
-        let (app_id, title) = if let Command::FocusWindow { app_id, title } = cmd {
-            (app_id, title)
-        } else {
-            return Response::error("Invalid command");
-        };
+    server.register_handler(
+        Command::FocusWindow {
+            app_id: None,
+            title: None,
+        },
+        move |cmd| {
+            let (app_id, title) = if let Command::FocusWindow { app_id, title } = cmd {
+                (app_id, title)
+            } else {
+                return Response::error("Invalid command");
+            };
 
-        let (response_sender, response_receiver) = async_channel::bounded(1);
+            let (response_sender, response_receiver) = async_channel::bounded(1);
 
-        if let Err(e) = cmd_sender.try_send(IpcCommand::FocusWindow {
-            app_id,
-            title,
-            response_sender,
-        }) {
-            return Response::error(format!("Failed to send command: {}", e));
-        }
+            if let Err(e) = cmd_sender.try_send(IpcCommand::FocusWindow {
+                app_id,
+                title,
+                response_sender,
+            }) {
+                return Response::error(format!("Failed to send command: {}", e));
+            }
 
-        match response_receiver.recv_blocking() {
-            Ok(Ok(())) => Response::success(None),
-            Ok(Err(e)) => Response::error(e),
-            Err(e) => Response::error(format!("Failed to receive response: {}", e)),
-        }
-    });
+            match response_receiver.recv_blocking() {
+                Ok(Ok(())) => Response::success(None),
+                Ok(Err(e)) => Response::error(e),
+                Err(e) => Response::error(format!("Failed to receive response: {}", e)),
+            }
+        },
+    );
 
     let cmd_sender = command_sender.clone();
     server.register_handler(Command::CloseWindow, move |_| {
@@ -200,11 +207,15 @@ fn setup_command_handler(state: &mut State, command_receiver: Receiver<IpcComman
             }
         })?;
 
-    state.fht.loop_handle.insert_source(rx, move |event, _, state| {
-        if let calloop::channel::Event::Msg(cmd) = event {
-            handle_ipc_command(cmd, state);
-        }
-    }).map_err(|err| anyhow::anyhow!("Failed to insert IPC command handler: {:?}", err))?;
+    state
+        .fht
+        .loop_handle
+        .insert_source(rx, move |event, _, state| {
+            if let calloop::channel::Event::Msg(cmd) = event {
+                handle_ipc_command(cmd, state);
+            }
+        })
+        .map_err(|err| anyhow::anyhow!("Failed to insert IPC command handler: {:?}", err))?;
 
     Ok(())
 }
@@ -212,18 +223,25 @@ fn setup_command_handler(state: &mut State, command_receiver: Receiver<IpcComman
 fn handle_ipc_command(command: IpcCommand, state: &mut State) {
     match command {
         IpcCommand::GetOutputs(response_sender) => {
-            let outputs = state.fht.space.outputs().map(|output| {
-                let physical_props = output.physical_properties();
-                Output {
-                    name: output.name(),
-                    make: physical_props.make.clone(),
-                    model: physical_props.model.clone(),
-                    width: output.current_mode().map(|m| m.size.w).unwrap_or_default() as u32,
-                    height: output.current_mode().map(|m| m.size.h).unwrap_or_default() as u32,
-                    refresh_rate: output.current_mode().map(|m| m.refresh).unwrap_or_default() as f64 / 1000.0,
-                    active: true,
-                }
-            }).collect();
+            let outputs = state
+                .fht
+                .space
+                .outputs()
+                .map(|output| {
+                    let physical_props = output.physical_properties();
+                    Output {
+                        name: output.name(),
+                        make: physical_props.make.clone(),
+                        model: physical_props.model.clone(),
+                        width: output.current_mode().map(|m| m.size.w).unwrap_or_default() as u32,
+                        height: output.current_mode().map(|m| m.size.h).unwrap_or_default() as u32,
+                        refresh_rate: output.current_mode().map(|m| m.refresh).unwrap_or_default()
+                            as f64
+                            / 1000.0,
+                        active: true,
+                    }
+                })
+                .collect();
 
             let _ = response_sender.try_send(outputs);
         }
@@ -262,7 +280,9 @@ fn handle_ipc_command(command: IpcCommand, state: &mut State) {
                             app_id: window.app_id(),
                             title: window.title(),
                             workspace_id: workspace.id().0 as usize,
-                            focused: active_window.as_ref().map_or(false, |w| w.id() == window.id()),
+                            focused: active_window
+                                .as_ref()
+                                .map_or(false, |w| w.id() == window.id()),
                             maximized: window.maximized(),
                             fullscreen: window.fullscreen(),
                             pid: None,
@@ -274,7 +294,11 @@ fn handle_ipc_command(command: IpcCommand, state: &mut State) {
             let _ = response_sender.try_send(windows);
         }
 
-        IpcCommand::FocusWindow { app_id, title, response_sender } => {
+        IpcCommand::FocusWindow {
+            app_id,
+            title,
+            response_sender,
+        } => {
             let mut target_output = None;
             let mut target_workspace_idx = None;
 
@@ -286,7 +310,9 @@ fn handle_ipc_command(command: IpcCommand, state: &mut State) {
                         });
 
                         let matches_title = title.as_ref().map_or(true, |t| {
-                            window.title().is_some_and(|window_title| window_title == *t)
+                            window
+                                .title()
+                                .is_some_and(|window_title| window_title == *t)
                         });
 
                         if matches_app_id && matches_title {
@@ -326,7 +352,10 @@ fn handle_ipc_command(command: IpcCommand, state: &mut State) {
             }
         }
 
-        IpcCommand::SwitchWorkspace { id, response_sender } => {
+        IpcCommand::SwitchWorkspace {
+            id,
+            response_sender,
+        } => {
             let mut target_output = None;
             let mut target_idx = None;
 
