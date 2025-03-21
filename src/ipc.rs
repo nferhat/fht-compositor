@@ -10,7 +10,7 @@ use tracing::{info, warn};
 use crate::state::State;
 
 #[derive(Debug)]
-enum IpcCommand {
+pub(crate) enum IpcCommand {
     GetOutputs(async_channel::Sender<Vec<Output>>),
     GetWorkspaces(async_channel::Sender<Vec<Workspace>>),
     GetWindows(async_channel::Sender<Vec<FhtctlWindow>>),
@@ -27,6 +27,7 @@ enum IpcCommand {
 }
 
 pub struct IpcState {
+    #[allow(dead_code)]
     command_sender: Sender<IpcCommand>,
     server_control: Option<fhtctl::server::ServerControl>,
 }
