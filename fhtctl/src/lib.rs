@@ -32,28 +32,21 @@ pub enum IpcError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Command {
-    /// Get information about the compositor and its state
     GetState,
 
-    /// Get a list of outputs
     GetOutputs,
 
-    /// Get information about workspaces
     GetWorkspaces,
 
-    /// Get a list of windows
     GetWindows,
 
-    /// Focus a window by app ID or title
     FocusWindow {
         app_id: Option<String>,
         title: Option<String>,
     },
 
-    /// Close a focused window
     CloseWindow,
 
-    /// Switch to a specific workspace
     SwitchWorkspace { id: usize },
 }
 

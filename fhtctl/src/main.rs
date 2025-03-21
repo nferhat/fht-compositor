@@ -13,14 +13,19 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Get compositor state information (version and uptime)
     State,
 
+    /// List all active outputs (monitors)
     Outputs,
 
+    /// List all workspaces
     Workspaces,
 
+    /// List all windows
     Windows,
 
+    /// Focus a window by app_id and/or title
     #[command(arg_required_else_help = true)]
     Focus {
         #[arg(long)]
@@ -30,8 +35,10 @@ enum Commands {
         title: Option<String>,
     },
 
+    /// Close the currently focused window
     Close,
 
+    /// Switch to the specified workspace
     #[command(arg_required_else_help = true)]
     Workspace {
         id: usize,
