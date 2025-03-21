@@ -47,7 +47,9 @@ pub enum Command {
 
     CloseWindow,
 
-    SwitchWorkspace { id: usize },
+    SwitchWorkspace {
+        id: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

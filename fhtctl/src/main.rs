@@ -40,9 +40,7 @@ enum Commands {
 
     /// Switch to the specified workspace
     #[command(arg_required_else_help = true)]
-    Workspace {
-        id: usize,
-    },
+    Workspace { id: usize },
 }
 
 fn main() -> Result<()> {
