@@ -55,6 +55,7 @@ use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState};
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
+use smithay::wayland::shell::xdg::dialog::XdgDialogState;
 use smithay::wayland::shell::xdg::{PopupSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
@@ -675,6 +676,7 @@ pub struct Fht {
     pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
     pub xdg_activation_state: XdgActivationState,
+    pub xdg_dialog_state: XdgDialogState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
 }
@@ -739,6 +741,7 @@ impl Fht {
                 .is_none_or(|data| data.security_context.is_none())
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
+        let xdg_dialog_state = XdgDialogState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         ContentTypeState::new::<State>(dh);
@@ -870,6 +873,7 @@ impl Fht {
             shm_state,
             session_lock_manager_state,
             xdg_activation_state,
+            xdg_dialog_state,
             xdg_shell_state,
             xdg_foreign_state,
         }

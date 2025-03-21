@@ -16,7 +16,10 @@ use smithay::wayland::compositor::{
 use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgPopupSurfaceData};
+use smithay::wayland::shell::xdg::{
+    SurfaceCachedState, XdgPopupSurfaceData, XdgToplevelSurfaceData,
+    XdgToplevelSurfaceRoleAttributes,
+};
 
 use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
@@ -180,10 +183,24 @@ impl State {
                 // If the parent is floating, the child shall be too.
                 let parent_floating = parent.as_ref().is_some_and(|w| !w.tiled());
 
+                let is_modal = with_states(surface, |data| {
+                    let state = data
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.modal
+                });
+
                 // We only honor our floating heuristics if we dont have a fullscreen/maximized
                 // state from client/rules, to avoid jankiness
                 let default_floating = !(is_maximized || is_fullscreened)
-                    && (has_parent || has_fixed_size || has_content_type || parent_floating);
+                    && (is_modal
+                        || has_parent
+                        || has_fixed_size
+                        || has_content_type
+                        || parent_floating);
 
                 if let Some(floating) = rules.floating {
                     window.request_tiled(!floating);
