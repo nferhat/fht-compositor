@@ -1605,8 +1605,8 @@ impl Workspace {
             new_size.h += dy;
         }
 
-        new_size.w = new_size.w.max(5);
-        new_size.h = new_size.h.max(5);
+        new_size.w = new_size.w.max(20);
+        new_size.h = new_size.h.max(20);
 
         window.request_size(new_size);
 
