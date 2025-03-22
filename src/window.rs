@@ -168,6 +168,12 @@ impl Window {
         });
     }
 
+    pub fn reset_size(&self) {
+        self.toplevel().with_pending_state(|state| {
+            state.size = None;
+        });
+    }
+
     pub fn bbox(&self) -> Rectangle<i32, Logical> {
         self.inner.data.lock().unwrap().bbox
     }

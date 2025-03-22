@@ -35,5 +35,6 @@ mod viewporter;
 mod virtual_keyboard;
 mod xdg_activation;
 mod xdg_decoration;
+mod xdg_dialog;
 mod xdg_foreign;
 mod xdg_shell;

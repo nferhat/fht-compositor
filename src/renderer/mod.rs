@@ -165,7 +165,9 @@ impl Fht {
 
         if !self.config_ui.hidden() {
             // Draw config ui below cursor, only if we didnt start drawing it on another output.
-            let config_ui_output = self.config_ui_output.get_or_insert_with(|| output.clone());
+            let config_ui_output = self
+                .config_ui_output
+                .get_or_insert_with(|| self.space.active_output().clone());
             if config_ui_output == output {
                 if let Some(element) = self.config_ui.render(renderer, output, scale) {
                     rv.elements.push(element.into())

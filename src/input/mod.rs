@@ -138,17 +138,71 @@ impl State {
             .set_focus(self, ft, SERIAL_COUNTER.next_serial());
     }
 
+    fn has_active_layer(&self) -> bool {
+        self.fht.space.outputs().any(|output| {
+            let layer_map = layer_map_for_output(output);
+            let layers: Vec<_> = layer_map.layers().collect();
+            layers.iter().any(|layer| {
+                let data = with_states(layer.layer_surface().wl_surface(), |state| {
+                    *state
+                        .cached_state
+                        .get::<LayerSurfaceCachedState>()
+                        .current()
+                });
+                (data.layer == Layer::Top || data.layer == Layer::Overlay)
+                    && data.keyboard_interactivity != KeyboardInteractivity::None
+            })
+        })
+    }
+
+    fn filter_focus_target_for_active_layers(
+        &self,
+        under: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        if !self.has_active_layer() {
+            return under;
+        }
+
+        if let Some((target, loc)) = under {
+            if let Some(wl_surface) = target.wl_surface() {
+                if let Some(layer) = self
+                    .fht
+                    .layer_shell_state
+                    .layer_surfaces()
+                    .find(|layer| *layer.wl_surface() == *wl_surface)
+                {
+                    let data = with_states(layer.wl_surface(), |state| {
+                        *state
+                            .cached_state
+                            .get::<LayerSurfaceCachedState>()
+                            .current()
+                    });
+
+                    if data.layer == Layer::Top || data.layer == Layer::Overlay {
+                        return Some((target, loc));
+                    }
+                }
+            }
+            return None;
+        }
+        None
+    }
+
     pub fn move_pointer(&mut self, point: Point<f64, Logical>) {
         let pointer = self.fht.pointer.clone();
         let under = self.fht.focus_target_under(point);
+        let filtered_under = self.filter_focus_target_for_active_layers(under.clone());
 
-        if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+        if self.fht.config.general.focus_follows_mouse
+            && !pointer.is_grabbed()
+            && !self.has_active_layer()
+        {
             self.update_keyboard_focus();
         }
 
         pointer.motion(
             self,
-            under,
+            filtered_under,
             &MotionEvent {
                 location: point,
                 serial: SERIAL_COUNTER.next_serial(),
@@ -374,13 +428,14 @@ impl State {
                 let pointer = self.fht.pointer.clone();
                 let mut pointer_location = pointer.current_location();
                 let under = self.fht.focus_target_under(pointer_location);
+                let filtered_under = self.filter_focus_target_for_active_layers(under.clone());
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let mut pointer_locked = false;
                 let mut pointer_confined = false;
                 let mut confine_region = None;
 
-                if let Some((wl_surface, &surface_loc)) = under
+                if let Some((wl_surface, &surface_loc)) = filtered_under
                     .as_ref()
                     .and_then(|(ft, l)| Some((ft.wl_surface()?, l)))
                 {
@@ -410,7 +465,7 @@ impl State {
 
                 pointer.relative_motion(
                     self,
-                    under.clone(),
+                    filtered_under.clone(),
                     &RelativeMotionEvent {
                         delta: event.delta(),
                         delta_unaccel: event.delta_unaccel(),
@@ -427,6 +482,8 @@ impl State {
                 pointer_location += event.delta();
                 pointer_location = self.clamp_coords(pointer_location);
                 let new_under = self.fht.focus_target_under(pointer_location);
+                let filtered_new_under =
+                    self.filter_focus_target_for_active_layers(new_under.clone());
 
                 let maybe_new_output = self
                     .fht
@@ -440,8 +497,11 @@ impl State {
 
                 // Confine pointer if possible.
                 if pointer_confined {
-                    if let Some((ft, loc)) = &under {
-                        if new_under.as_ref().and_then(|(ft, _)| ft.wl_surface()) != ft.wl_surface()
+                    if let Some((ft, loc)) = &filtered_under {
+                        if filtered_new_under
+                            .as_ref()
+                            .and_then(|(ft, _)| ft.wl_surface())
+                            != ft.wl_surface()
                         {
                             pointer.frame(self);
                             return;
@@ -455,13 +515,16 @@ impl State {
                     }
                 }
 
-                if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+                if self.fht.config.general.focus_follows_mouse
+                    && !pointer.is_grabbed()
+                    && !self.has_active_layer()
+                {
                     self.update_keyboard_focus();
                 }
 
                 pointer.motion(
                     self,
-                    under,
+                    filtered_under,
                     &MotionEvent {
                         location: pointer_location,
                         serial,
@@ -473,7 +536,7 @@ impl State {
                 // If pointer is now in a constraint region, activate it
                 // TODO: Anywhere else pointer is moved needs to do this (in the self.move_pointer
                 // function)
-                if let Some((under, surface_location)) = new_under
+                if let Some((under, surface_location)) = filtered_new_under
                     .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
                 {
                     with_pointer_constraint(&under, &pointer, |constraint| match constraint {
@@ -498,14 +561,18 @@ impl State {
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
+                let filtered_under = self.filter_focus_target_for_active_layers(under.clone());
 
-                if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
+                if self.fht.config.general.focus_follows_mouse
+                    && !pointer.is_grabbed()
+                    && !self.has_active_layer()
+                {
                     self.update_keyboard_focus();
                 }
 
                 pointer.motion(
                     self,
-                    under,
+                    filtered_under,
                     &MotionEvent {
                         location: pointer_location,
                         serial,
@@ -521,30 +588,39 @@ impl State {
                 let pointer = self.fht.pointer.clone();
 
                 if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
-                    self.update_keyboard_focus();
+                    if !self.has_active_layer() {
+                        self.update_keyboard_focus();
 
-                    if let Some(button) = event.button() {
-                        let mouse_pattern = fht_compositor_config::MousePattern(
-                            self.fht.keyboard.modifier_state().into(),
-                            button.into(),
-                        );
-                        if let Some(action) =
-                            self.fht.config.mousebinds.get(&mouse_pattern).cloned()
-                        {
-                            self.process_mouse_action(event.button_code(), action, serial);
+                        if let Some(button) = event.button() {
+                            let mouse_pattern = fht_compositor_config::MousePattern(
+                                self.fht.keyboard.modifier_state().into(),
+                                button.into(),
+                            );
+                            if let Some(action) =
+                                self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                            {
+                                self.process_mouse_action(event.button_code(), action, serial);
+                            }
                         }
                     }
                 }
 
-                pointer.button(
-                    self,
-                    &ButtonEvent {
-                        button,
-                        state: state.try_into().unwrap(),
-                        serial,
-                        time: event.time_msec(),
-                    },
-                );
+                let pointer_loc = pointer.current_location();
+                let under = self.fht.focus_target_under(pointer_loc);
+                let filtered_under_exists =
+                    self.filter_focus_target_for_active_layers(under).is_some();
+
+                if !self.has_active_layer() || filtered_under_exists {
+                    pointer.button(
+                        self,
+                        &ButtonEvent {
+                            button,
+                            state: state.try_into().unwrap(),
+                            serial,
+                            time: event.time_msec(),
+                        },
+                    );
+                }
                 pointer.frame(self);
             }
             InputEvent::PointerAxis { event } => {
@@ -609,12 +685,13 @@ impl State {
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
+                let filtered_under = self.filter_focus_target_for_active_layers(under.clone());
                 let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
                 let tool = tablet_seat.get_tool(&event.tool());
 
                 pointer.motion(
                     self,
-                    under.clone(),
+                    filtered_under.clone(),
                     &MotionEvent {
                         location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),
@@ -642,13 +719,26 @@ impl State {
                         tool.wheel(event.wheel_delta(), event.wheel_delta_discrete());
                     }
 
-                    tool.motion(
-                        pointer_location,
-                        under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
-                        &tablet,
-                        SERIAL_COUNTER.next_serial(),
-                        event.time_msec(),
-                    );
+                    if let Some(under_with_loc) = filtered_under
+                        .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc)))
+                    {
+                        tool.motion(
+                            pointer_location,
+                            Some(under_with_loc),
+                            &tablet,
+                            SERIAL_COUNTER.next_serial(),
+                            event.time_msec(),
+                        );
+                    } else if !self.has_active_layer() {
+                        tool.motion(
+                            pointer_location,
+                            under
+                                .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
+                            &tablet,
+                            SERIAL_COUNTER.next_serial(),
+                            event.time_msec(),
+                        );
+                    }
                 }
                 pointer.frame(self);
             }
@@ -669,12 +759,13 @@ impl State {
 
                 let pointer = self.fht.pointer.clone();
                 let under = self.fht.focus_target_under(pointer_location);
+                let filtered_under = self.filter_focus_target_for_active_layers(under.clone());
                 let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
                 let tool = tablet_seat.get_tool(&tool);
 
                 pointer.motion(
                     self,
-                    under.clone(),
+                    filtered_under.clone(),
                     &MotionEvent {
                         location: pointer_location,
                         serial: SERIAL_COUNTER.next_serial(),
@@ -683,11 +774,14 @@ impl State {
                 );
                 pointer.frame(self);
 
-                if let (Some(under), Some(tablet), Some(tool)) = (
-                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
-                    tablet,
-                    tool,
-                ) {
+                let target_under = if self.has_active_layer() {
+                    filtered_under
+                        .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc)))
+                } else {
+                    under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc)))
+                };
+
+                if let (Some(under), Some(tablet), Some(tool)) = (target_under, tablet, tool) {
                     match event.state() {
                         ProximityState::In => tool.proximity_in(
                             pointer_location,
@@ -703,16 +797,26 @@ impl State {
             InputEvent::TabletToolTip { event } => {
                 let tool = self.fht.seat.tablet_seat().get_tool(&event.tool());
 
+                let allow_tip = if self.has_active_layer() {
+                    let pointer_loc = self.fht.pointer.current_location();
+                    let under = self.fht.focus_target_under(pointer_loc);
+                    self.filter_focus_target_for_active_layers(under).is_some()
+                } else {
+                    true
+                };
+
                 if let Some(tool) = tool {
-                    match event.tip_state() {
-                        TabletToolTipState::Down => {
-                            let serial = SERIAL_COUNTER.next_serial();
-                            tool.tip_down(serial, event.time_msec());
-                            // change the keyboard focus
-                            self.update_keyboard_focus();
-                        }
-                        TabletToolTipState::Up => {
-                            tool.tip_up(event.time_msec());
+                    if allow_tip {
+                        match event.tip_state() {
+                            TabletToolTipState::Down => {
+                                let serial = SERIAL_COUNTER.next_serial();
+                                tool.tip_down(serial, event.time_msec());
+                                // change the keyboard focus
+                                self.update_keyboard_focus();
+                            }
+                            TabletToolTipState::Up => {
+                                tool.tip_up(event.time_msec());
+                            }
                         }
                     }
                 }
