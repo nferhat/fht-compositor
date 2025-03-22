@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use fht_animation::AnimationCurve;
 pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
-use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -770,9 +769,17 @@ impl Space {
     ///
     /// Returns [`true`] if the grab got started inside the [`Workspace`].
     pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
+        if self.interactive_swap.is_some() {
+            return false;
+        }
+
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if let Some(tile) = workspace.start_interactive_swap(window) {
+                if let Some(mut tile) = workspace.start_interactive_swap(window) {
+                    // Make the tile slightly smaller, just for aesthetic purposes and give a visual
+                    // clue that we grabbed it and is not in a swap state.
+                    tile.set_size(tile.size().to_f64().upscale(0.8).to_i32_round(), true);
+
                     let output = workspace.output().clone();
                     let mut initial_geometry = tile.geometry();
                     // Must convert location to global coordinates for this to work properly.
@@ -840,15 +847,16 @@ impl Space {
             return;
         }
 
-        let monitor_under = self
+        let monitor_under_idx = self
             .monitors
             .iter_mut()
-            .find(|mon| {
+            .position(|mon| {
                 mon.output()
                     .geometry()
                     .contains(cursor_position.to_i32_round())
             })
             .expect("Cursor position out of space!");
+        let monitor_under = &mut self.monitors[monitor_under_idx];
         // Move the tile to the correct position relative to the output so that animation doesn't
         // break, since handle_interactive_swap_motion sets the absolute position
         interactive_swap.tile.set_location(
@@ -861,6 +869,7 @@ impl Space {
                 interactive_swap.tile,
                 cursor_position.to_i32_round(),
             );
+        self.active_idx = monitor_under_idx;
     }
 
     /// Renders the tile affected by the current interactive swap.
