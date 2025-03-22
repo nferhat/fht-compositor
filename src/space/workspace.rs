@@ -1605,6 +1605,9 @@ impl Workspace {
             new_size.h += dy;
         }
 
+        new_size.w = new_size.w.max(5);
+        new_size.h = new_size.h.max(5);
+
         window.request_size(new_size);
 
         true
@@ -1852,24 +1855,61 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
 ///
 /// This function ensures that the the returned lengths' sum is equal to `length`
 fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
-    let total_proportions: f64 = proportions.iter().sum();
-    let lengths = proportions
-        .iter()
-        .map(|&cfact| (length as f64 * (cfact / total_proportions)).floor() as i32)
-        .collect::<Vec<_>>();
-    let mut rest = lengths.iter().sum::<i32>() - length;
-    lengths
-        .into_iter()
-        .map(|len| {
-            if rest < 0 {
-                rest += 1;
-                len + 1
-            } else if rest > 0 {
-                rest -= 1;
-                len - 1
-            } else {
-                len
+    // Minimum size a window can be - prevents crashes when too many windows
+    const MIN_WINDOW_SIZE: i32 = 20;
+
+    let items_count = proportions.len();
+
+    // If we can't fit all windows with minimum size, adjust the distribution
+    if items_count as i32 * MIN_WINDOW_SIZE > length {
+        // Create a vector where each window gets the minimum size
+        // If we need more space than available, at least we won't crash
+        let mut lengths = vec![MIN_WINDOW_SIZE; items_count];
+
+        // Distribute any remaining space to the first few windows
+        let remaining = length - (items_count as i32 * MIN_WINDOW_SIZE);
+        for i in 0..remaining.max(0) as usize {
+            if i < lengths.len() {
+                lengths[i] += 1;
             }
+        }
+
+        return lengths;
+    }
+
+    let total_proportions: f64 = proportions.iter().sum();
+    let mut lengths = proportions
+        .iter()
+        .map(|&cfact| {
+            let size = (length as f64 * (cfact / total_proportions)).floor() as i32;
+            size.max(MIN_WINDOW_SIZE)
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    let current_sum = lengths.iter().sum::<i32>();
+    let mut rest = current_sum - length;
+
+    if rest > 0 {
+        for len in lengths.iter_mut() {
+            if rest <= 0 {
+                break;
+            }
+            if *len > MIN_WINDOW_SIZE {
+                *len -= 1;
+                rest -= 1;
+            }
+        }
+    }
+
+    if rest < 0 {
+        for len in lengths.iter_mut() {
+            if rest >= 0 {
+                break;
+            }
+            *len += 1;
+            rest += 1;
+        }
+    }
+
+    lengths
 }
