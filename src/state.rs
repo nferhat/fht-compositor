@@ -260,6 +260,9 @@ impl State {
                 target_presentation_time,
                 !self.fht.config.animations.disable,
             );
+            // If we finished animating the config_ui this means its hidden.
+            // Clear the output its opened on
+            let _ = self.fht.config_ui_output.take_if(|_| !ongoing);
 
             let monitor = self
                 .fht
