@@ -42,12 +42,6 @@ impl std::fmt::Debug for WorkspaceId {
 }
 
 #[derive(Debug)]
-struct InteractiveSwap {
-    window: Window,
-    initial_window_location: Point<i32, Logical>,
-}
-
-#[derive(Debug)]
 struct InteractiveResize {
     window: Window,
     initial_window_geometry: Rectangle<i32, Logical>,
@@ -141,13 +135,6 @@ pub struct Workspace {
     /// If the specified index is [`None`], all [`Tile`]s should fade.
     fullscreen_fade_animation: Option<(Option<usize>, Animation<f32>)>,
 
-    /// An interactive tile "swap".
-    ///
-    /// It can
-    /// - Swap two **tiled** (non-floating) tiles in the tile list
-    /// - Move around floating tiles
-    interactive_swap: Option<InteractiveSwap>,
-
     /// An interactive tile resize.
     interactive_resize: Option<InteractiveResize>,
 
@@ -174,7 +161,6 @@ impl Workspace {
             has_transient_layout_changes: false,
             render_offset: None,
             fullscreen_fade_animation: None,
-            interactive_swap: None,
             interactive_resize: None,
             config: Rc::clone(config),
         }
@@ -313,9 +299,9 @@ impl Workspace {
             );
         }
 
-        let _ = self.interactive_swap.take_if(|swap| {
-            !swap.window.alive() || !self.tiles.iter().any(|tile| *tile.window() == swap.window)
-        });
+        // let _ = self.interactive_swap.take_if(|swap| {
+        //     !swap.window.alive() || !self.tiles.iter().any(|tile| *tile.window() == swap.window)
+        // });
         let _ = self.interactive_resize.take_if(|swap| {
             !swap.window.alive() || !self.tiles.iter().any(|tile| *tile.window() == swap.window)
         });
@@ -639,6 +625,21 @@ impl Workspace {
 
         self.arrange_tiles(animate);
         self.tiles[new_idx].stop_location_animation();
+    }
+
+    /// Inserts a [`Tile`] inside this workspace.
+    ///
+    /// - If the tile is floating, it will just be added to the workspace at the same location.
+    /// - If the tile is tiled, it will try to insert it at the closest location possible in the
+    ///   tile stack, depending on where the pointer position in.
+    pub(super) fn insert_tile_with_cursor_position(
+        &mut self,
+        tile: Tile,
+        cursor_position: Point<i32, Logical>,
+    ) {
+        // FIXME: Actually handle cursor position and stuff
+        self.tiles.push(tile);
+        self.arrange_tiles(true);
     }
 
     /// Remove a [`Window`] from this [`Workspace`].
@@ -1386,136 +1387,23 @@ impl Workspace {
     /// Start an interactive swap grab.
     ///
     /// Returns [`true`] if the grab was successfully registered.
-    pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
-        if self.interactive_swap.is_some() {
-            // Can't have two interactive swaps at a time.
-            return false;
-        }
-
-        let Some(tile) = self.tiles.iter().find(|tile| tile.window() == window) else {
+    pub fn start_interactive_swap(&mut self, window: &Window) -> Option<Tile> {
+        let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
             // Can't find the adequate tile
-            return false;
+            return None;
         };
 
+        let tile = &self.tiles[idx];
+
+        // FIXME: Perhaps handle better maximized/fullscreen?
+        // Would be janky though.
         if window.maximized() || window.fullscreen() {
-            return false;
+            return None;
         }
 
-        let initial_window_location = tile.location();
-        self.interactive_swap = Some(InteractiveSwap {
-            window: window.clone(),
-            initial_window_location,
-        });
-
-        true
-    }
-
-    /// Handle an interactive swap grab motion.
-    ///
-    /// `delta` is how much the cursor moved from its initial window location.
-    ///
-    /// Returns [`true`] if the grab was successfully registered.
-    pub fn handle_interactive_swap_motion(
-        &mut self,
-        window: &Window,
-        delta: Point<i32, Logical>,
-    ) -> bool {
-        let Some(interactive_swap) = &self.interactive_swap else {
-            return false;
-        };
-
-        if interactive_swap.window != *window {
-            return false;
-        }
-
-        let active_window = self.active_window();
-        if Some(window) != active_window.as_ref() {
-            return false;
-        }
-
-        let new_location = interactive_swap.initial_window_location + delta;
-        let Some(tile) = self.tiles.iter_mut().find(|tile| tile.window() == window) else {
-            // Can't find the adequate tile
-            return false;
-        };
-        tile.set_location(new_location, false);
-
-        true
-    }
-
-    /// Handle an interactive swap grab motion.
-    ///
-    /// `position` is the cursor position relative to the workspace.
-    ///
-    /// Returns [`true`] if the grab was successfully registered.
-    pub fn handle_interactive_swap_end(
-        &mut self,
-        window: &Window,
-        position: Point<f64, Logical>,
-    ) -> bool {
-        let Some(interactive_swap) = self.interactive_swap.take() else {
-            return false;
-        };
-
-        if interactive_swap.window != *window {
-            return false;
-        }
-
-        if window.tiled() && self.current_layout() != WorkspaceLayout::Floating {
-            // We only do the swap part if the window is tiled.
-            // Otherwise for floating windows just let them move
-            if let Some(other_window) = self
-                .tiles
-                .iter()
-                .filter(|tile| tile.window() != window)
-                .find(|tile| tile.geometry().to_f64().contains(position))
-                .map(Tile::window)
-                .cloned()
-            {
-                self.swap_tiles(window, &other_window, true);
-                if let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) {
-                    self.set_active_tile_idx(idx);
-                }
-            } else {
-                // We still run the arrange tiles function in order to get the swapped/grabbed
-                // window back to its original place.
-                self.arrange_tiles(true);
-            }
-        } else {
-            // If the window is floating, avoid letting it go out of bounds.
-            // We just give it a small edge around the screen
-            const MINIMUM_VISIBLE_SIZE: i32 = 100;
-            let minimum_rect = calculate_work_area(&self.output, MINIMUM_VISIBLE_SIZE);
-            let tile = self
-                .tiles
-                .iter_mut()
-                .find(|tile| tile.window() == window)
-                .unwrap();
-            let tile_geo = tile.geometry();
-
-            let mut target = Point::<_, Logical>::from((Option::<i32>::None, None));
-
-            if tile_geo.loc.x > minimum_rect.loc.x + minimum_rect.size.w {
-                target.x = Some(minimum_rect.loc.x + minimum_rect.size.w);
-            } else if tile_geo.loc.x + tile_geo.size.w < minimum_rect.loc.x {
-                target.x = Some(-tile_geo.size.w + MINIMUM_VISIBLE_SIZE);
-            }
-
-            if tile_geo.loc.y > minimum_rect.loc.y + minimum_rect.size.h {
-                target.y = Some(minimum_rect.loc.y + minimum_rect.size.h);
-            } else if tile_geo.loc.y + tile_geo.size.h < minimum_rect.loc.y {
-                target.y = Some(-tile_geo.size.h + MINIMUM_VISIBLE_SIZE);
-            }
-
-            let new_loc = Point::from((
-                target.x.unwrap_or(tile_geo.loc.x),
-                target.y.unwrap_or(tile_geo.loc.y),
-            ));
-
-            tile.set_location(new_loc, true);
-        }
-
-        true
+        let tile = self.tiles.remove(idx);
+        self.arrange_tiles(true);
+        Some(tile)
     }
 
     /// Start an interactive resize grab.

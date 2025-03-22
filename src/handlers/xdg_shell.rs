@@ -109,16 +109,16 @@ impl XdgShellHandler for State {
             .space
             .find_window_and_workspace_mut(surface.wl_surface())
         {
-            if workspace.start_interactive_swap(&window) {
-                let ws_output = workspace.output().clone();
-                output = Some(ws_output.clone()); // augh, the borrow checker
-                let grab = SwapTileGrab {
-                    window,
-                    output: ws_output,
-                    start_data,
-                };
-                pointer.set_grab(self, grab, serial, Focus::Clear);
-            }
+            // if workspace.start_interactive_swap(&window) {
+            //     let ws_output = workspace.output().clone();
+            //     output = Some(ws_output.clone()); // augh, the borrow checker
+            //     let grab = SwapTileGrab {
+            //         window,
+            //         output: ws_output,
+            //         start_data,
+            //     };
+            //     pointer.set_grab(self, grab, serial, Focus::Clear);
+            // }
         }
 
         if let Some(ref output) = output {
