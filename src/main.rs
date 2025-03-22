@@ -26,6 +26,7 @@ mod focus_target;
 mod frame_clock;
 mod handlers;
 mod input;
+mod ipc;
 mod layer;
 mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
@@ -182,6 +183,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         }
     }
 
+    if let Err(err) = ipc::init_ipc_server(&mut state) {
+        warn!(?err, "Failed to initialize IPC server");
+    }
+
+    info!("Initialization complete, starting the event loop");
     event_loop
         .run(None, &mut state, |state| {
             if state.fht.stop {

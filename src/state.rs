@@ -681,6 +681,7 @@ pub struct Fht {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
+    pub ipc_state: Option<crate::ipc::IpcState>,
 }
 
 impl Fht {
@@ -877,6 +878,7 @@ impl Fht {
             xdg_activation_state,
             xdg_shell_state,
             xdg_foreign_state,
+            ipc_state: None,
         }
     }
 
