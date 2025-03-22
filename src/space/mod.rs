@@ -832,9 +832,13 @@ impl Space {
         window: &Window,
         cursor_position: Point<f64, Logical>,
     ) {
-        let Some(interactive_swap) = self.interactive_swap.take() else {
+        let Some(mut interactive_swap) = self.interactive_swap.take() else {
             return;
         };
+
+        if interactive_swap.tile.window() != window {
+            return;
+        }
 
         let monitor_under = self
             .monitors
@@ -845,6 +849,12 @@ impl Space {
                     .contains(cursor_position.to_i32_round())
             })
             .expect("Cursor position out of space!");
+        // Move the tile to the correct position relative to the output so that animation doesn't
+        // break, since handle_interactive_swap_motion sets the absolute position
+        interactive_swap.tile.set_location(
+            interactive_swap.current_location - monitor_under.output().current_location(),
+            false,
+        );
         monitor_under
             .active_workspace_mut()
             .insert_tile_with_cursor_position(
