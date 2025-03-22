@@ -780,7 +780,9 @@ impl Space {
                 if let Some((idx, mut tile)) = workspace.start_interactive_swap(window) {
                     // Make the tile slightly smaller, just for aesthetic purposes and give a visual
                     // clue that we grabbed it and is not in a swap state.
-                    tile.set_size(tile.size().to_f64().upscale(0.8).to_i32_round(), true);
+                    if tile.window().tiled() {
+                        tile.set_size(tile.size().to_f64().upscale(0.8).to_i32_round(), true);
+                    }
 
                     let output = workspace.output().clone();
                     let mut initial_geometry = tile.geometry();
