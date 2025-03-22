@@ -676,7 +676,6 @@ pub struct Fht {
     pub session_lock_manager_state: SessionLockManagerState,
     pub shm_state: ShmState,
     pub xdg_activation_state: XdgActivationState,
-    pub xdg_dialog_state: XdgDialogState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
 }
@@ -741,7 +740,6 @@ impl Fht {
                 .is_none_or(|data| data.security_context.is_none())
         });
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
-        let xdg_dialog_state = XdgDialogState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         ContentTypeState::new::<State>(dh);
@@ -765,6 +763,7 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
+        XdgDialogState::new::<State>(dh);
         XdgDecorationState::new::<State>(dh);
         FractionalScaleManagerState::new::<State>(dh);
         OutputManagerState::new_with_xdg_output::<State>(dh);
@@ -873,7 +872,6 @@ impl Fht {
             shm_state,
             session_lock_manager_state,
             xdg_activation_state,
-            xdg_dialog_state,
             xdg_shell_state,
             xdg_foreign_state,
         }
