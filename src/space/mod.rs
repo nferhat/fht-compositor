@@ -895,7 +895,7 @@ impl Space {
 
         interactive_swap
             .tile
-            .render_at(
+            .render_for_interactive_grab(
                 renderer,
                 interactive_swap.current_location - output.current_location(),
                 scale,
