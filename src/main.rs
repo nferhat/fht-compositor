@@ -184,6 +184,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
 
     event_loop
         .run(None, &mut state, |state| {
+            state::set_state(state);
+
             if state.fht.stop {
                 state.fht.loop_signal.stop();
                 state.fht.loop_signal.wakeup();

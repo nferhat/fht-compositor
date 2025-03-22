@@ -29,6 +29,23 @@ use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::output::OutputExt;
 use crate::state::State;
 
+/// Extension trait for PointerHandle to get the current output
+pub trait PointerHandleExt {
+    /// Get the output the pointer is currently over
+    fn current_output(&self) -> Option<smithay::output::Output>;
+}
+
+impl PointerHandleExt for smithay::input::pointer::PointerHandle<State> {
+    fn current_output(&self) -> Option<smithay::output::Output> {
+        let location = self.current_location();
+        crate::state::with_state(|state| {
+            state.fht.space.outputs().find(move |output|
+                output.geometry().to_f64().contains(location)
+            ).cloned()
+        }).flatten()
+    }
+}
+
 impl State {
     fn update_keyboard_focus(&mut self) {
         crate::profile_function!();

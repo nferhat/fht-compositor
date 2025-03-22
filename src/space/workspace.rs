@@ -1783,6 +1783,20 @@ impl Workspace {
             elements.push(element);
         }
 
+        let is_window_dragged_to_other_output = |window: &Window| -> bool {
+            if let Some(interactive_swap) = &self.interactive_swap {
+                if let Some(compositor) = crate::state::with_state(|state| {
+                    use crate::input::PointerHandleExt;
+                    state.fht.pointer.current_output()
+                }) {
+                    if &interactive_swap.window == window && compositor != Some(self.output.clone()) {
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+
         if let Some(tile) = self.active_tile() {
             let alpha = if self.active_tile_idx == skip_alpha_animation_idx {
                 1.0
@@ -1790,18 +1804,20 @@ impl Workspace {
                 alpha
             };
 
-            // Active gets rendered above others.
-            elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset_physical,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    }),
-            );
+            if !is_window_dragged_to_other_output(tile.window()) {
+                // Active gets rendered above others.
+                elements.extend(
+                    tile.render(renderer, scale, alpha, &self.output, render_offset, true)
+                        .map(|element| {
+                            RelocateRenderElement::from_element(
+                                element,
+                                render_offset_physical,
+                                Relocate::Relative,
+                            )
+                            .into()
+                        }),
+                );
+            }
         }
 
         // Now render others, just fine.
@@ -1809,6 +1825,10 @@ impl Workspace {
             // NOTE: active_tile_idx is always fullscreen_tile_idx, ensured by Workspace::refresh
             if Some(idx) == self.active_tile_idx {
                 continue; // active tile has already been rendered.
+            }
+
+            if is_window_dragged_to_other_output(tile.window()) {
+                continue;
             }
 
             let alpha = if Some(idx) == skip_alpha_animation_idx {

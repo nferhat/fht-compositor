@@ -87,6 +87,28 @@ use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
+thread_local! {
+    static STATE: RefCell<Option<*mut State>> = RefCell::new(None);
+}
+
+pub fn set_state(state: &mut State) {
+    STATE.with(|cell| {
+        *cell.borrow_mut() = Some(state as *mut _);
+    });
+}
+
+pub fn with_state<F, T>(cb: F) -> Option<T>
+where
+    F: FnOnce(&State) -> T,
+{
+    STATE.with(|cell| {
+        cell.borrow().map(|state| {
+            let state = unsafe { &*state };
+            cb(state)
+        })
+    })
+}
+
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
