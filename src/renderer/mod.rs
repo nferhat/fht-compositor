@@ -58,6 +58,8 @@ use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
 use crate::space::{MonitorRenderElement, MonitorRenderResult};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
+use crate::output::OutputExt;
+use crate::space::tile::TileRenderElement;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
@@ -67,6 +69,7 @@ crate::fht_render_elements! {
         LayerShell = LayerShellRenderElement<R>,
         SessionLock = SessionLockRenderElement<R>,
         Debug = DebugRenderElement,
+        Tile = TileRenderElement<R>,
     }
 }
 
@@ -208,6 +211,38 @@ impl Fht {
 
         rv.elements
             .extend(monitor_elements.into_iter().map(Into::into));
+
+        if let Some((dragged_window, source_output, initial_window_location)) = self.space.interactive_swap_info() {
+            if source_output != output {
+                let pointer_location = self.pointer.current_location();
+
+                if output.geometry().to_f64().contains(pointer_location) {
+                    if let Some(workspace) = self.space
+                        .monitor_for_output(source_output)
+                        .and_then(|m| m.workspaces().find(|w| w.tiles().any(|t| t.window() == dragged_window)))
+                    {
+                        if let Some(tile) = workspace.tiles().find(|t| t.window() == dragged_window) {
+                            let cursor_in_output = (pointer_location - output.current_location().to_f64()).to_i32_round();
+
+                            let window_geo = tile.geometry();
+                            let cursor_offset_from_window = window_geo.loc - initial_window_location;
+
+                            let window_target_pos = cursor_in_output - cursor_offset_from_window;
+
+                            let elements = tile.render(
+                                renderer,
+                                scale,
+                                1.0,
+                                output,
+                                window_target_pos,
+                                true
+                            );
+                            rv.elements.extend(elements.map(|e| FhtRenderElement::Tile(e)));
+                        }
+                    }
+                }
+            }
+        }
 
         // Finally we have background and bottom elements.
         let background = layer_elements(renderer, output, Layer::Bottom, &self.config)

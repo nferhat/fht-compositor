@@ -1844,6 +1844,10 @@ impl Workspace {
         self.tiles.push(tile);
         self.arrange_tiles(animate);
     }
+
+    pub fn interactive_swap_window(&self) -> Option<(&Window, Point<i32, Logical>)> {
+        self.interactive_swap.as_ref().map(|swap| (&swap.window, swap.initial_window_location))
+    }
 }
 
 fht_render_elements! {

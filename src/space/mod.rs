@@ -30,7 +30,7 @@ use crate::window::Window;
 mod closing_tile;
 pub mod decorations;
 mod monitor;
-mod tile;
+pub mod tile;
 mod workspace;
 
 /// The workspace system [`Space`].
@@ -801,6 +801,20 @@ impl Space {
                 }
             }
         }
+    }
+
+    /// Get information about the currently active interactive swap window, if any.
+    ///
+    /// Returns the window being dragged, its original output, and the initial grab position.
+    pub fn interactive_swap_info(&self) -> Option<(&Window, &Output, Point<i32, Logical>)> {
+        for monitor in &self.monitors {
+            for workspace in monitor.workspaces() {
+                if let Some((window, initial_location)) = workspace.interactive_swap_window() {
+                    return Some((window, workspace.output(), initial_location));
+                }
+            }
+        }
+        None
     }
 }
 
