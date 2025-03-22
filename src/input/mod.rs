@@ -32,17 +32,13 @@ use crate::state::State;
 /// Extension trait for PointerHandle to get the current output
 pub trait PointerHandleExt {
     /// Get the output the pointer is currently over
-    fn current_output(&self) -> Option<smithay::output::Output>;
+    fn current_output(&self, state: &State) -> Option<smithay::output::Output>;
 }
 
 impl PointerHandleExt for smithay::input::pointer::PointerHandle<State> {
-    fn current_output(&self) -> Option<smithay::output::Output> {
+    fn current_output(&self, state: &State) -> Option<smithay::output::Output> {
         let location = self.current_location();
-        crate::state::with_state(|state| {
-            state.fht.space.outputs().find(move |output|
-                output.geometry().to_f64().contains(location)
-            ).cloned()
-        }).flatten()
+        crate::state::output_for_position(&state.fht.space, location)
     }
 }
 

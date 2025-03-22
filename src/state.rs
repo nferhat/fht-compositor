@@ -87,26 +87,13 @@ use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
-thread_local! {
-    static STATE: RefCell<Option<*mut State>> = RefCell::new(None);
-}
-
-pub fn set_state(state: &mut State) {
-    STATE.with(|cell| {
-        *cell.borrow_mut() = Some(state as *mut _);
-    });
-}
-
-pub fn with_state<F, T>(cb: F) -> Option<T>
-where
-    F: FnOnce(&State) -> T,
-{
-    STATE.with(|cell| {
-        cell.borrow().map(|state| {
-            let state = unsafe { &*state };
-            cb(state)
-        })
-    })
+pub fn output_for_position(
+    space: &crate::space::Space,
+    location: smithay::utils::Point<f64, smithay::utils::Logical>,
+) -> Option<smithay::output::Output> {
+    space.outputs().find(move |output|
+        output.geometry().to_f64().contains(location)
+    ).cloned()
 }
 
 pub struct State {

@@ -816,6 +816,41 @@ impl Space {
         }
         None
     }
+
+    pub fn update_interactive_swap_output_status(&mut self, pointer_location: Point<f64, Logical>) {
+        let mut source_output = None;
+        let mut source_workspace_id = None;
+
+        for monitor in &self.monitors {
+            for workspace in monitor.workspaces() {
+                if workspace.has_interactive_swap() {
+                    source_output = Some(workspace.output().clone());
+                    source_workspace_id = Some(workspace.id());
+                    break;
+                }
+            }
+            if source_output.is_some() {
+                break;
+            }
+        }
+
+        if let Some(source_output) = source_output {
+            if let Some(source_workspace_id) = source_workspace_id {
+                let pointer_output = crate::state::output_for_position(self, pointer_location);
+
+                let is_over_different_output = pointer_output.as_ref() != Some(&source_output);
+
+                for monitor in &mut self.monitors {
+                    for workspace in monitor.workspaces_mut() {
+                        if workspace.id() == source_workspace_id {
+                            workspace.set_interactive_swap_output_status(is_over_different_output);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Configuration for the workspace system derived from the compositor configuration.

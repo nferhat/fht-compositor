@@ -45,6 +45,7 @@ impl std::fmt::Debug for WorkspaceId {
 struct InteractiveSwap {
     window: Window,
     initial_window_location: Point<i32, Logical>,
+    is_dragged_to_other_output: bool,
 }
 
 #[derive(Debug)]
@@ -1405,6 +1406,7 @@ impl Workspace {
         self.interactive_swap = Some(InteractiveSwap {
             window: window.clone(),
             initial_window_location,
+            is_dragged_to_other_output: false,
         });
 
         true
@@ -1785,13 +1787,8 @@ impl Workspace {
 
         let is_window_dragged_to_other_output = |window: &Window| -> bool {
             if let Some(interactive_swap) = &self.interactive_swap {
-                if let Some(compositor) = crate::state::with_state(|state| {
-                    use crate::input::PointerHandleExt;
-                    state.fht.pointer.current_output()
-                }) {
-                    if &interactive_swap.window == window && compositor != Some(self.output.clone()) {
-                        return true;
-                    }
+                if &interactive_swap.window == window {
+                    return interactive_swap.is_dragged_to_other_output;
                 }
             }
             false
@@ -1867,6 +1864,16 @@ impl Workspace {
 
     pub fn interactive_swap_window(&self) -> Option<(&Window, Point<i32, Logical>)> {
         self.interactive_swap.as_ref().map(|swap| (&swap.window, swap.initial_window_location))
+    }
+
+    pub fn has_interactive_swap(&self) -> bool {
+        self.interactive_swap.is_some()
+    }
+
+    pub fn set_interactive_swap_output_status(&mut self, is_dragged_to_other_output: bool) {
+        if let Some(swap) = &mut self.interactive_swap {
+            swap.is_dragged_to_other_output = is_dragged_to_other_output;
+        }
     }
 }
 
