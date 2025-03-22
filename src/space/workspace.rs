@@ -807,7 +807,7 @@ impl Workspace {
         };
 
         let scale = self.output.current_scale().integer_scale();
-        tile.prepare_close_animation_if_needed(&self.output, renderer, scale);
+        tile.prepare_close_animation_if_needed(renderer, scale);
 
         true
     }
