@@ -829,6 +829,122 @@ impl Tile {
 
         opening_element.into_iter().chain(normal_elements)
     }
+
+    /// Render the elements for this [`Tile`] at a specific visual location.
+    /// The passed in location will be used instead of [`Tile::visual_location`]
+    ///
+    /// The [`Tile`] uses its `location` to render the elements.
+    pub fn render_at<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        visual_location: Point<i32, Logical>,
+        scale: i32,
+        alpha: f32,
+        output: &Output,
+        render_offset: Point<i32, Logical>,
+        active: bool,
+    ) -> impl Iterator<Item = TileRenderElement<R>> {
+        crate::profile_function!();
+        let fractional_scale = Scale::from(scale as f64);
+        let mut opening_element = None;
+        let mut normal_elements = vec![];
+
+        if let Some(animation) = self.opening_animation.as_ref() {
+            let render_geo =
+                Rectangle::new(visual_location, self.visual_geometry().size).to_physical(scale);
+            let progress = *animation.value();
+
+            let glow_renderer = renderer.glow_renderer_mut();
+
+            // Account for the shadow else it will get cut short.
+            let mut shadow_offset = Point::default();
+            let rules = self.window.rules();
+            if let Some(shadow) = self
+                .config
+                .shadow
+                .map(|shadow| shadow.with_overrides(&rules.shadow))
+            {
+                let scaled_sigma = (shadow.sigma / scale as f32).round() as i32;
+                shadow_offset = Point::from((scaled_sigma, scaled_sigma));
+            }
+            drop(rules);
+
+            // NOTE: We use the border thickness as the location to actually include it with the
+            // render elements, otherwise it would be clipped out of the tile.
+            let elements = self.render_inner(
+                glow_renderer,
+                shadow_offset,
+                scale,
+                alpha,
+                output,
+                render_offset,
+                active,
+            );
+            let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
+                acc.merge(e.geometry(fractional_scale))
+            });
+
+            opening_element = render_to_texture(
+                glow_renderer,
+                rec.size,
+                fractional_scale,
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                elements.into_iter().rev(),
+            )
+            .map_err(|err| {
+                warn!(
+                    ?err,
+                    "Failed to render window elements to texture for open animation!"
+                )
+            })
+            .ok()
+            .map(|(texture, _sync_point)| {
+                let glow_renderer = renderer.glow_renderer_mut();
+
+                let element_id = Id::new();
+                let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
+                    element_id.clone(),
+                    glow_renderer.id(),
+                    render_geo.loc.to_f64() - shadow_offset.to_f64().to_physical(scale as f64),
+                    texture,
+                    scale,
+                    Transform::Normal,
+                    Some(alpha * progress.clamp(0., 1.) as f32),
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                )
+                .into();
+                self.window.set_offscreen_element_id(Some(element_id));
+
+                let origin = render_geo.center();
+                let rescale = RescaleRenderElement::from_element(
+                    texture,
+                    origin,
+                    opening_animation_progress_to_scale(progress),
+                );
+
+                TileRenderElement::<R>::Opening(rescale)
+            });
+        };
+
+        if opening_element.is_none() {
+            self.window.set_offscreen_element_id(None);
+            normal_elements = self.render_inner(
+                renderer,
+                visual_location,
+                scale,
+                alpha,
+                output,
+                render_offset,
+                active,
+            )
+        }
+
+        opening_element.into_iter().chain(normal_elements)
+    }
 }
 
 fn opening_animation_progress_to_scale(progress: f64) -> f64 {

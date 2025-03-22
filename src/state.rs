@@ -264,12 +264,10 @@ impl State {
             // Clear the output its opened on
             let _ = self.fht.config_ui_output.take_if(|_| !ongoing);
 
-            let monitor = self
+            ongoing |= self
                 .fht
                 .space
-                .monitor_mut_for_output(&output)
-                .expect("all outputs should be tracked by Space");
-            ongoing |= monitor.advance_animations(target_presentation_time);
+                .advance_animations(target_presentation_time, &output);
 
             ongoing
         };

@@ -15,16 +15,19 @@ use std::time::Duration;
 
 use fht_animation::AnimationCurve;
 pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point};
+use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
+pub use tile::TileRenderElement;
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
 use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
+use crate::renderer::FhtRenderer;
 use crate::window::Window;
 
 mod closing_tile;
@@ -44,13 +47,29 @@ pub struct Space {
     /// this index is incremented by one.
     primary_idx: usize,
 
-    /// The index of the active [`Monitoir`].
+    /// The index of the active [`Monitor`].
     ///
     /// This should be the monitor that has the pointer cursor in its bounds.
     active_idx: usize,
 
+    /// Interactive move/swap state.
+    ///
+    /// It has to live in the space to handle cross-monitor tile moving.
+    interactive_swap: Option<InteractiveSwap>,
+
     /// Shared configuration with across the workspace system.
     config: Rc<Config>,
+}
+
+struct InteractiveSwap {
+    /// The tile currently being swapped around.
+    tile: tile::Tile,
+    /// The initial tile geometry.
+    initial_geometry: Rectangle<i32, Logical>,
+    /// The current tile location with pointer movement applied.
+    current_location: Point<i32, Logical>,
+    /// We need to track on which outputs the tile is visible on, to render it accordingly.
+    overlap_outputs: Vec<Output>,
 }
 
 impl Space {
@@ -61,6 +80,7 @@ impl Space {
             monitors: vec![],
             primary_idx: 0,
             active_idx: 0,
+            interactive_swap: None,
             config: Rc::new(config),
         }
     }
@@ -68,9 +88,62 @@ impl Space {
     /// Run periodic clean-up tasks.
     pub fn refresh(&mut self) {
         crate::profile_function!();
+
+        if let Some(InteractiveSwap {
+            tile,
+            overlap_outputs,
+            ..
+        }) = &self.interactive_swap
+        {
+            tile.window().request_activated(true);
+            let bbox = tile.window().bbox();
+
+            for output in overlap_outputs {
+                let output_geometry = output.geometry();
+                let mut bbox = bbox;
+                bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
+                if let Some(mut overlap) = output_geometry.intersection(bbox) {
+                    // overlap must be in window-local coordinates.
+                    overlap.loc -= bbox.loc;
+                    tile.window().enter_output(output, overlap);
+                }
+            }
+
+            tile.window().send_pending_configure();
+            tile.window().refresh();
+        }
+
         for (idx, monitor) in self.monitors.iter_mut().enumerate() {
             monitor.refresh(idx == self.active_idx)
         }
+    }
+
+    /// Advance the animations for the [`Monitor`] associated with this [`Output`].
+    pub fn advance_animations(
+        &mut self,
+        target_presentation_time: Duration,
+        output: &Output,
+    ) -> bool {
+        let mut ongoing = false;
+
+        if let Some(InteractiveSwap {
+            tile,
+            overlap_outputs,
+            ..
+        }) = &mut self.interactive_swap
+        {
+            if overlap_outputs.contains(output) {
+                tile.advance_animations(target_presentation_time);
+                ongoing = true;
+            }
+        }
+
+        let Some(monitor) = self.monitors.iter_mut().find(|mon| mon.output() == output) else {
+            warn!("Called Space::advance_animations with invalid output");
+            return ongoing;
+        };
+
+        monitor.advance_animations(target_presentation_time) || ongoing
     }
 
     /// Reload the [`Config`] of the [`Space`].
@@ -104,11 +177,19 @@ impl Space {
 
     /// Get the visible [`Window`]s for the associated [`Output`].
     pub fn visible_windows_for_output(&self, output: &Output) -> impl Iterator<Item = &Window> {
-        self.monitors
+        let monitor_windows = self
+            .monitors
             .iter()
             .find(|mon| mon.output() == output)
             .into_iter()
-            .flat_map(|mon| mon.visible_windows())
+            .flat_map(|mon| mon.visible_windows());
+        let interactive_swap_window = self
+            .interactive_swap
+            .as_ref()
+            .filter(|swap| swap.overlap_outputs.contains(output))
+            .map(|swap| swap.tile.window());
+
+        interactive_swap_window.into_iter().chain(monitor_windows)
     }
 
     /// Get the [`Window`]s on the associated [`Output`].
@@ -666,7 +747,17 @@ impl Space {
     pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if workspace.start_interactive_swap(window) {
+                if let Some(tile) = workspace.start_interactive_swap(window) {
+                    let output = workspace.output().clone();
+                    let mut initial_geometry = tile.geometry();
+                    // Must convert location to global coordinates for this to work properly.
+                    initial_geometry.loc += output.current_location();
+                    self.interactive_swap = Some(InteractiveSwap {
+                        tile,
+                        initial_geometry,
+                        current_location: initial_geometry.loc,
+                        overlap_outputs: vec![output],
+                    });
                     return true;
                 }
             }
@@ -683,30 +774,87 @@ impl Space {
         window: &Window,
         delta: Point<i32, Logical>,
     ) -> bool {
-        for monitor in &mut self.monitors {
-            for workspace in monitor.workspaces_mut() {
-                if workspace.handle_interactive_swap_motion(window, delta) {
-                    return true;
-                }
-            }
+        let Some(interactive_swap) = &mut self.interactive_swap else {
+            return false;
+        };
+
+        if interactive_swap.tile.window() != window {
+            return false;
         }
 
-        false
+        let new_location = interactive_swap.initial_geometry.loc + delta;
+        interactive_swap.tile.set_location(new_location, false);
+        interactive_swap.current_location = new_location;
+
+        // Now, update the outputs the tile is overlapping with.
+        let new_geometry = interactive_swap.tile.geometry();
+        interactive_swap.overlap_outputs = self
+            .monitors
+            .iter()
+            .map(|mon| mon.output())
+            .filter(|o| o.geometry().intersection(new_geometry).is_some())
+            .cloned()
+            .collect();
+
+        true
     }
 
     /// Handle the iteractive swap motion for this window.
     ///
     /// Returns [`true`] if the grab should continue.
-    pub fn handle_interactive_swap_end(&mut self, window: &Window, position: Point<f64, Logical>) {
-        for monitor in &mut self.monitors {
-            for workspace in monitor.workspaces_mut() {
-                let position_in_workspace =
-                    position - workspace.output().current_location().to_f64();
-                if workspace.handle_interactive_swap_end(window, position_in_workspace) {
-                    return;
-                }
-            }
+    pub fn handle_interactive_swap_end(
+        &mut self,
+        window: &Window,
+        cursor_position: Point<f64, Logical>,
+    ) {
+        let Some(interactive_swap) = self.interactive_swap.take() else {
+            return;
+        };
+
+        let monitor_under = self
+            .monitors
+            .iter_mut()
+            .find(|mon| {
+                mon.output()
+                    .geometry()
+                    .contains(cursor_position.to_i32_round())
+            })
+            .expect("Cursor position out of space!");
+        monitor_under
+            .active_workspace_mut()
+            .insert_tile_with_cursor_position(
+                interactive_swap.tile,
+                cursor_position.to_i32_round(),
+            );
+    }
+
+    /// Renders the tile affected by the current interactive swap.
+    pub fn render_interactive_swap<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        scale: i32,
+    ) -> Vec<TileRenderElement<R>> {
+        let Some(interactive_swap) = self.interactive_swap.as_ref() else {
+            return vec![];
+        };
+
+        if !interactive_swap.overlap_outputs.contains(output) {
+            return vec![];
         }
+
+        interactive_swap
+            .tile
+            .render_at(
+                renderer,
+                interactive_swap.current_location - output.current_location(),
+                scale,
+                1.0,
+                output,
+                Point::default(),
+                true,
+            )
+            .collect()
     }
 
     /// Start an interactive resize in the [`Workspace`] of this [`Window`].

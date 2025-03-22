@@ -30,19 +30,8 @@ impl PointerGrab<State> for SwapTileGrab {
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // Clamp the event's position so that we do not go outside the output.
-        let (pos_x, pos_y) = event.location.into();
-        let geometry = self.output.geometry().to_f64();
-        // Give is -/+5.0 to avoid the pointer being between two outputs.
-        let clamped_x = pos_x.clamp(geometry.loc.x + 5.0, geometry.loc.x + geometry.size.w - 5.0);
-        let clamped_y = pos_y.clamp(geometry.loc.y + 5.0, geometry.loc.y + geometry.size.h - 5.0);
-        let event = MotionEvent {
-            location: (clamped_x, clamped_y).into(),
-            ..*event
-        };
-
         // No focus while motion is active
-        handle.motion(data, None, &event);
+        handle.motion(data, None, event);
 
         let delta = (event.location - self.start_data.location).to_i32_round();
         if data
