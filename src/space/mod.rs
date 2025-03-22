@@ -64,6 +64,8 @@ pub struct Space {
 struct InteractiveSwap {
     /// The tile currently being swapped around.
     tile: tile::Tile,
+    /// The previous index the tile was inserted at in the workspace.
+    previous_idx: usize,
     /// The initial tile geometry.
     initial_geometry: Rectangle<i32, Logical>,
     /// The current tile location with pointer movement applied.
@@ -775,7 +777,7 @@ impl Space {
 
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if let Some(mut tile) = workspace.start_interactive_swap(window) {
+                if let Some((idx, mut tile)) = workspace.start_interactive_swap(window) {
                     // Make the tile slightly smaller, just for aesthetic purposes and give a visual
                     // clue that we grabbed it and is not in a swap state.
                     tile.set_size(tile.size().to_f64().upscale(0.8).to_i32_round(), true);
@@ -786,6 +788,7 @@ impl Space {
                     initial_geometry.loc += output.current_location();
                     self.interactive_swap = Some(InteractiveSwap {
                         tile,
+                        previous_idx: idx,
                         initial_geometry,
                         current_location: initial_geometry.loc,
                         overlap_outputs: vec![output],
@@ -857,17 +860,18 @@ impl Space {
             })
             .expect("Cursor position out of space!");
         let monitor_under = &mut self.monitors[monitor_under_idx];
+        let output_loc = monitor_under.output().current_location();
         // Move the tile to the correct position relative to the output so that animation doesn't
         // break, since handle_interactive_swap_motion sets the absolute position
-        interactive_swap.tile.set_location(
-            interactive_swap.current_location - monitor_under.output().current_location(),
-            false,
-        );
+        interactive_swap
+            .tile
+            .set_location(interactive_swap.current_location - output_loc, false);
         monitor_under
             .active_workspace_mut()
             .insert_tile_with_cursor_position(
                 interactive_swap.tile,
-                cursor_position.to_i32_round(),
+                interactive_swap.previous_idx,
+                cursor_position.to_i32_round() - output_loc,
             );
         self.active_idx = monitor_under_idx;
     }

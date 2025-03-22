@@ -415,19 +415,6 @@ impl Workspace {
         self.active_window()
     }
 
-    /// Swap the two [`Tile`]s associated with these [`Window`]s
-    pub fn swap_tiles(&mut self, a: &Window, b: &Window, animate: bool) {
-        let Some(a_idx) = self.tiles.iter().position(|tile| tile.window() == a) else {
-            return;
-        };
-        let Some(b_idx) = self.tiles.iter().position(|tile| tile.window() == b) else {
-            return;
-        };
-
-        self.tiles.swap(a_idx, b_idx);
-        self.arrange_tiles(animate);
-    }
-
     /// Swaps the currently active [`Tile`] with the next one.
     pub fn swap_active_tile_with_next(&mut self, keep_focus: bool, animate: bool) -> bool {
         if self.tiles.len() < 2 {
@@ -635,10 +622,101 @@ impl Workspace {
     pub(super) fn insert_tile_with_cursor_position(
         &mut self,
         tile: Tile,
+        previous_idx: usize,
         cursor_position: Point<i32, Logical>,
     ) {
-        // FIXME: Actually handle cursor position and stuff
-        self.tiles.push(tile);
+        if self.tiles.is_empty() || !tile.window().tiled() {
+            self.tiles.push(tile);
+            self.active_tile_idx = Some(self.tiles.len() - 1);
+            self.arrange_tiles(true);
+            return;
+        }
+
+        // First we need to first the closest tile.
+        let (cursor_x, cursor_y) = cursor_position.into();
+        let (closest_idx, closest_tile) = self
+            .tiles
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, tile)| {
+                let (tile_x, tile_y) = tile.geometry().center().into();
+                i32::isqrt((tile_x - cursor_x).pow(2) + (tile_y - cursor_y).pow(2))
+            })
+            .expect("Should not be empty");
+        // Now, based on which quadrant of the closest tile we are in, we determine where to insert
+        // the final tile. So you can place the tile between two files, for example.
+        let cursor_position_in_tile = (cursor_position - closest_tile.location()).to_f64();
+        let size = tile.size().to_f64();
+        let mut edges = ResizeEdge::empty();
+        if cursor_position_in_tile.x < size.w / 3. {
+            edges |= ResizeEdge::LEFT;
+        } else if 2. * size.w / 3. < cursor_position_in_tile.x {
+            edges |= ResizeEdge::RIGHT;
+        }
+        if cursor_position_in_tile.y < size.h / 3. {
+            edges |= ResizeEdge::TOP;
+        } else if 2. * size.h / 3. < cursor_position_in_tile.y {
+            edges |= ResizeEdge::BOTTOM;
+        }
+
+        // The actual handling depends on the layout.
+        match self.current_layout() {
+            WorkspaceLayout::Tile => {
+                // In the master layout, there are the following cases:
+                // - Insert the tile in the slave stack
+                // - Insert the tile in the master stack, and incrementing nmaster by one.
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this master window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Then swap the closest one.
+                        self.tiles.swap(closest_idx + 1, previous_idx);
+                    }
+                } else {
+                    if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this stack window.
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this stack window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Then swap the closest one.
+                        self.tiles.swap(closest_idx + 1, previous_idx);
+                    }
+                }
+
+                self.arrange_tiles(true);
+            }
+            WorkspaceLayout::BottomStack => todo!(),
+            WorkspaceLayout::CenteredMaster => todo!(),
+            WorkspaceLayout::Floating => {
+                // Just insert it, who cares really.
+                self.tiles.push(tile);
+            }
+        }
+
         self.arrange_tiles(true);
     }
 
@@ -1387,13 +1465,11 @@ impl Workspace {
     /// Start an interactive swap grab.
     ///
     /// Returns [`true`] if the grab was successfully registered.
-    pub fn start_interactive_swap(&mut self, window: &Window) -> Option<Tile> {
+    pub(super) fn start_interactive_swap(&mut self, window: &Window) -> Option<(usize, Tile)> {
         let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
             // Can't find the adequate tile
             return None;
         };
-
-        let tile = &self.tiles[idx];
 
         // FIXME: Perhaps handle better maximized/fullscreen?
         // Would be janky though.
@@ -1402,8 +1478,11 @@ impl Workspace {
         }
 
         let tile = self.tiles.remove(idx);
+        if idx < self.nmaster {
+            self.nmaster = (self.nmaster - 1).max(1);
+        }
         self.arrange_tiles(true);
-        Some(tile)
+        Some((idx, tile))
     }
 
     /// Start an interactive resize grab.
