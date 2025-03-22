@@ -28,6 +28,7 @@ pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
+use crate::utils::RectCenterExt;
 use crate::window::Window;
 
 mod closing_tile;
@@ -368,6 +369,16 @@ impl Space {
 
     /// Get the [`Window`] with this [`WlSurface`] as its toplevel surface
     pub fn find_window(&self, surface: &WlSurface) -> Option<Window> {
+        // First check for the window
+        if let Some(window) = self
+            .interactive_swap
+            .as_ref()
+            .filter(|swap| swap.tile.window().wl_surface().as_deref() == Some(surface))
+            .map(|swap| swap.tile.window().clone())
+        {
+            return Some(window);
+        }
+
         for monitor in &self.monitors {
             for workspace in monitor.workspaces() {
                 for tile in workspace.tiles() {
@@ -442,6 +453,20 @@ impl Space {
 
     /// Get the [`Output`] holding this window.
     pub fn output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+        if let Some(swap) = self
+            .interactive_swap
+            .as_ref()
+            .filter(|swap| swap.tile.window().wl_surface().as_deref() == Some(surface))
+        {
+            // HACK: I really don't know how to handle this properly
+            // For now we just use the output that has the tile center.
+            let tile_center = swap.tile.geometry().center();
+            return swap
+                .overlap_outputs
+                .iter()
+                .find(|output| output.geometry().contains(tile_center));
+        }
+
         for monitor in &self.monitors {
             for workspace in monitor.workspaces() {
                 for tile in workspace.tiles() {
