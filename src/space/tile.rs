@@ -605,7 +605,7 @@ impl Tile {
         &self,
         renderer: &mut R,
         scale: i32,
-        alpha: f32,
+        mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
         active: bool,
@@ -640,6 +640,9 @@ impl Tile {
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
+            // Only include alpha now to render the inner window with full alpha.
+            // The texture will lower the opacity of that, but for the rest we gotta account for it.
+            alpha *= (progress as f32).clamp(0., 1.);
 
             tile_geometry = {
                 let mut geo = render_geo;
@@ -676,7 +679,7 @@ impl Tile {
                     texture,
                     scale,
                     Transform::Normal,
-                    Some(alpha * progress.clamp(0., 1.) as f32),
+                    Some(alpha),
                     None,
                     None,
                     None,
@@ -823,7 +826,7 @@ impl Tile {
         renderer: &mut R,
         visual_location: Point<i32, Logical>,
         scale: i32,
-        alpha: f32,
+        mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
         active: bool,
@@ -858,6 +861,9 @@ impl Tile {
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
+            // Only include alpha now to render the inner window with full alpha.
+            // The texture will lower the opacity of that, but for the rest we gotta account for it.
+            alpha *= (progress as f32).clamp(0., 1.);
 
             tile_geometry = {
                 let mut geo = render_geo;
