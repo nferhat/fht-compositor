@@ -1118,6 +1118,13 @@ impl Workspace {
                     }
                 }
             }
+            WorkspaceLayout::BinarySpace => {
+                let unconfigured_size = Size::from((
+                    work_area.size.w / 2 - (2 * border_width),
+                    work_area.size.h / 2 - (2 * border_width),
+                ));
+                unconfigured_window.request_size(unconfigured_size);
+            }
             WorkspaceLayout::Floating => {}
         }
     }
@@ -1377,6 +1384,85 @@ impl Workspace {
                     let geo = Rectangle::new(right_geo.loc, (right_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
+                }
+            }
+            WorkspaceLayout::BinarySpace => {
+                if tiles.is_empty() {
+                    return;
+                }
+
+                let mut areas = Vec::with_capacity(tiles.len());
+
+                areas.push(work_area);
+
+                fn split_area(
+                    area: Rectangle<i32, Logical>,
+                    split_horizontal: bool,
+                    split_ratio: f64,
+                    inner_gaps: i32,
+                ) -> (Rectangle<i32, Logical>, Rectangle<i32, Logical>) {
+                    if split_horizontal {
+                        let width1 = (area.size.w as f64 * split_ratio) as i32;
+                        let width2 = area.size.w - width1 - inner_gaps;
+
+                        let area1 = Rectangle::new(
+                            area.loc,
+                            (width1, area.size.h).into(),
+                        );
+
+                        let area2 = Rectangle::new(
+                            Point::from((area.loc.x + width1 + inner_gaps, area.loc.y)),
+                            (width2, area.size.h).into(),
+                        );
+
+                        (area1, area2)
+                    } else {
+                        let height1 = (area.size.h as f64 * split_ratio) as i32;
+                        let height2 = area.size.h - height1 - inner_gaps;
+
+                        let area1 = Rectangle::new(
+                            area.loc,
+                            (area.size.w, height1).into(),
+                        );
+
+                        let area2 = Rectangle::new(
+                            Point::from((area.loc.x, area.loc.y + height1 + inner_gaps)),
+                            (area.size.w, height2).into(),
+                        );
+
+                        (area1, area2)
+                    }
+                }
+
+                // For each additional tile, we split an existing area in half
+                // This can get stupidly inefficient with many windows, but who cares
+                for i in 1..tiles.len() {
+                    let split_idx = areas
+                        .iter()
+                        .enumerate()
+                        .take(i)
+                        .max_by_key(|(_, area)| area.size.w.max(area.size.h))
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(0);
+
+                    let area_to_split = areas[split_idx];
+
+                    let split_horizontal = area_to_split.size.w >= area_to_split.size.h;
+
+                    let split_ratio = self.mwfact;
+
+                    let (area1, area2) = split_area(area_to_split, split_horizontal, split_ratio, inner_gaps);
+
+                    areas[split_idx] = area1;
+
+                    areas.push(area2);
+                }
+
+                for (idx, (tile, area)) in tiles.into_iter().zip(areas.iter()).enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        continue;
+                    }
+                    tile.set_geometry(*area, animate);
                 }
             }
             WorkspaceLayout::Floating => {}
