@@ -569,6 +569,7 @@ pub enum WorkspaceLayout {
     BottomStack,
     CenteredMaster,
     Floating,
+    BinarySpace,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
