@@ -736,7 +736,68 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::BottomStack => todo!(),
+            WorkspaceLayout::BottomStack => {
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::BOTTOM) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +---------+----------+
+                        // |         |          |
+                        // |         |          |
+                        // |         |          |
+                        // |XXXXXXXXX|XXXXXXXXXX|
+                        // |XXXXXXXXX|XXXXXXXXXX|
+                        // +---------+----------+
+                        //
+                        // In this case we want to create a stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::RIGHT) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::LEFT) {
+                        // Insert before this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Then swap the closest one.
+                        self.tiles.swap(closest_idx + 1, previous_idx);
+                    }
+                } else {
+                    if edges.intersects(ResizeEdge::RIGHT) {
+                        // Insert after this stack window.
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::LEFT) {
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this stack window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Then swap the closest one.
+                        self.tiles.swap(closest_idx + 1, previous_idx);
+                    }
+                }
+
+                self.arrange_tiles(true);
+            }
             WorkspaceLayout::CenteredMaster => todo!(),
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
