@@ -104,7 +104,11 @@ impl XdgShellHandler for State {
         };
 
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
-            if self.fht.space.start_interactive_swap(&window) {
+            if self
+                .fht
+                .space
+                .start_interactive_swap(&window, start_data.location.to_i32_round())
+            {
                 let grab = SwapTileGrab { window, start_data };
                 pointer.set_grab(self, grab, serial, Focus::Clear);
                 self.fht

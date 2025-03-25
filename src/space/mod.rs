@@ -64,12 +64,6 @@ pub struct Space {
 struct InteractiveSwap {
     /// The tile currently being swapped around.
     tile: tile::Tile,
-    /// The previous index the tile was inserted at in the workspace.
-    previous_idx: usize,
-    /// The initial tile geometry.
-    initial_geometry: Rectangle<i32, Logical>,
-    /// The current tile location with pointer movement applied.
-    current_location: Point<i32, Logical>,
     /// We need to track on which outputs the tile is visible on, to render it accordingly.
     overlap_outputs: Vec<Output>,
 }
@@ -135,8 +129,9 @@ impl Space {
         }) = &mut self.interactive_swap
         {
             if overlap_outputs.contains(output) {
-                tile.advance_animations(target_presentation_time);
-                ongoing = true;
+                if tile.advance_animations(target_presentation_time) {
+                    ongoing = true;
+                }
             }
         }
 
@@ -770,29 +765,37 @@ impl Space {
     /// Start an interactive swap in the [`Workspace`] of this [`Window`].
     ///
     /// Returns [`true`] if the grab got started inside the [`Workspace`].
-    pub fn start_interactive_swap(&mut self, window: &Window) -> bool {
+    pub fn start_interactive_swap(
+        &mut self,
+        window: &Window,
+        pointer_loc: Point<i32, Logical>,
+    ) -> bool {
         if self.interactive_swap.is_some() {
             return false;
         }
 
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if let Some((idx, mut tile)) = workspace.start_interactive_swap(window) {
-                    // Make the tile slightly smaller, just for aesthetic purposes and give a visual
+                if let Some(mut tile) = workspace.start_interactive_swap(window) {
+                    // First move the tile instantly to global space
+                    tile.set_location(
+                        tile.location() + workspace.output().current_location(),
+                        false,
+                    );
+
+                    // Make the tile slightly smaller, just for aesthetic urposes and give a visual
                     // clue that we grabbed it and is not in a swap state.
                     if tile.window().tiled() {
-                        tile.set_size(tile.size().to_f64().upscale(0.8).to_i32_round(), true);
+                        let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
+                        let new_loc = pointer_loc - new_size.downscale(2);
+                        tile.set_geometry(Rectangle::new(new_loc, new_size), true);
+                    } else {
+                        tile.set_location(pointer_loc - tile.size().downscale(2), true);
                     }
 
                     let output = workspace.output().clone();
-                    let mut initial_geometry = tile.geometry();
-                    // Must convert location to global coordinates for this to work properly.
-                    initial_geometry.loc += output.current_location();
                     self.interactive_swap = Some(InteractiveSwap {
                         tile,
-                        previous_idx: idx,
-                        initial_geometry,
-                        current_location: initial_geometry.loc,
                         overlap_outputs: vec![output],
                     });
                     return true;
@@ -809,7 +812,7 @@ impl Space {
     pub fn handle_interactive_swap_motion(
         &mut self,
         window: &Window,
-        delta: Point<i32, Logical>,
+        pointer_loc: Point<i32, Logical>,
     ) -> bool {
         let Some(interactive_swap) = &mut self.interactive_swap else {
             return false;
@@ -819,9 +822,8 @@ impl Space {
             return false;
         }
 
-        let new_location = interactive_swap.initial_geometry.loc + delta;
+        let new_location = pointer_loc - interactive_swap.tile.visual_size().downscale(2);
         interactive_swap.tile.set_location(new_location, false);
-        interactive_swap.current_location = new_location;
 
         // Now, update the outputs the tile is overlapping with.
         let new_geometry = interactive_swap.tile.geometry();
@@ -867,12 +869,11 @@ impl Space {
         // break, since handle_interactive_swap_motion sets the absolute position
         interactive_swap
             .tile
-            .set_location(interactive_swap.current_location - output_loc, false);
+            .set_location(interactive_swap.tile.visual_location() - output_loc, false);
         monitor_under
             .active_workspace_mut()
             .insert_tile_with_cursor_position(
                 interactive_swap.tile,
-                interactive_swap.previous_idx,
                 cursor_position.to_i32_round() - output_loc,
             );
         self.active_idx = monitor_under_idx;
@@ -897,7 +898,7 @@ impl Space {
             .tile
             .render_for_interactive_grab(
                 renderer,
-                interactive_swap.current_location - output.current_location(),
+                interactive_swap.tile.visual_location() - output.current_location(),
                 scale,
                 1.0,
                 output,
