@@ -632,6 +632,18 @@ impl Workspace {
             return;
         }
 
+        if let Some(_) = self
+            .fullscreened_tile_idx
+            .and_then(|idx| self.tiles.get(idx))
+        {
+            let idx = self.fullscreened_tile_idx.unwrap();
+            // If there's a fullscreened tile, just insert it and unfullscreen
+            self.remove_current_fullscreen();
+            self.tiles.insert(idx, tile);
+
+            return;
+        }
+
         // First we need to first the closest tile.
         let (cursor_x, cursor_y) = cursor_position.into();
         let (closest_idx, closest_tile) = self
