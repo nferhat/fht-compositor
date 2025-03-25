@@ -798,7 +798,57 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::CenteredMaster => todo!(),
+            WorkspaceLayout::CenteredMaster => {
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        //
+                        // In this case we want to create a stack stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this master window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Then swap the closest one.
+                        self.tiles.swap(closest_idx + 1, previous_idx);
+                    }
+                } else {
+                    // Centered master layout is way too confusing to get something that works right
+                    // with the dynamic layout system. Sooo, I am just not bothering for the slave
+                    // stack.
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                    self.tiles.swap(closest_idx + 1, previous_idx);
+                }
+
+                self.arrange_tiles(true);
+            }
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
