@@ -622,7 +622,6 @@ impl Workspace {
     pub(super) fn insert_tile_with_cursor_position(
         &mut self,
         tile: Tile,
-        previous_idx: usize,
         cursor_position: Point<i32, Logical>,
     ) {
         if self.tiles.is_empty() || !tile.window().tiled() {
@@ -710,8 +709,6 @@ impl Workspace {
                         // First insert the grabbed tile.
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
-                        // Then swap the closest one.
-                        self.tiles.swap(closest_idx + 1, previous_idx);
                     }
                 } else {
                     if edges.intersects(ResizeEdge::BOTTOM) {
@@ -729,8 +726,6 @@ impl Workspace {
                         // First insert the grabbed tile.
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
-                        // Then swap the closest one.
-                        self.tiles.swap(closest_idx + 1, previous_idx);
                     }
                 }
 
@@ -772,8 +767,6 @@ impl Workspace {
                         // First insert the grabbed tile.
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
-                        // Then swap the closest one.
-                        self.tiles.swap(closest_idx + 1, previous_idx);
                     }
                 } else {
                     if edges.intersects(ResizeEdge::RIGHT) {
@@ -791,8 +784,6 @@ impl Workspace {
                         // First insert the grabbed tile.
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
-                        // Then swap the closest one.
-                        self.tiles.swap(closest_idx + 1, previous_idx);
                     }
                 }
 
@@ -835,8 +826,6 @@ impl Workspace {
                         // First insert the grabbed tile.
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
-                        // Then swap the closest one.
-                        self.tiles.swap(closest_idx + 1, previous_idx);
                     }
                 } else {
                     // Centered master layout is way too confusing to get something that works right
@@ -844,7 +833,6 @@ impl Workspace {
                     // stack.
                     self.active_tile_idx = Some(closest_idx);
                     self.tiles.insert(closest_idx, tile);
-                    self.tiles.swap(closest_idx + 1, previous_idx);
                 }
 
                 self.arrange_tiles(true);
@@ -1603,7 +1591,7 @@ impl Workspace {
     /// Start an interactive swap grab.
     ///
     /// Returns [`true`] if the grab was successfully registered.
-    pub(super) fn start_interactive_swap(&mut self, window: &Window) -> Option<(usize, Tile)> {
+    pub(super) fn start_interactive_swap(&mut self, window: &Window) -> Option<Tile> {
         let Some(idx) = self.tiles.iter().position(|tile| tile.window() == window) else {
             // Can't find the adequate tile
             return None;
@@ -1620,7 +1608,7 @@ impl Workspace {
             self.nmaster = (self.nmaster - 1).max(1);
         }
         self.arrange_tiles(true);
-        Some((idx, tile))
+        Some(tile)
     }
 
     /// Start an interactive resize grab.
