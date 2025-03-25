@@ -6,7 +6,6 @@ use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Point, Rectangle, Serial};
-use smithay::wayland::seat::WaylandFocus;
 
 use super::swap_tile_grab::SwapTileGrab;
 use crate::focus_target::PointerFocusTarget;
@@ -508,12 +507,6 @@ impl State {
                 if let Some((PointerFocusTarget::Window(window), _)) =
                     self.fht.focus_target_under(pointer_loc)
                 {
-                    let output = self
-                        .fht
-                        .space
-                        .output_for_surface(&*window.wl_surface().unwrap())
-                        .unwrap()
-                        .clone();
                     let pointer = self.fht.pointer.clone();
                     let start_data = pointer::GrabStartData {
                         focus: None,
@@ -522,11 +515,7 @@ impl State {
                     };
 
                     if self.fht.space.start_interactive_swap(&window) {
-                        let grab = SwapTileGrab {
-                            window,
-                            output,
-                            start_data,
-                        };
+                        let grab = SwapTileGrab { window, start_data };
                         pointer.set_grab(self, grab, serial, Focus::Clear);
                         self.fht
                             .cursor_theme_manager

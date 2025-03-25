@@ -4,11 +4,9 @@ use smithay::input::pointer::{
     GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
     MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
 };
-use smithay::output::Output;
 use smithay::utils::{Logical, Point};
 
 use crate::focus_target::PointerFocusTarget;
-use crate::output::OutputExt;
 use crate::state::State;
 use crate::window::Window;
 
@@ -18,7 +16,6 @@ use crate::window::Window;
 // process is only between tiled windows.
 pub struct SwapTileGrab {
     pub window: Window,
-    pub output: Output,
     pub start_data: GrabStartData<State>,
 }
 
