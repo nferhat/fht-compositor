@@ -407,27 +407,14 @@ impl Tile {
     }
 
     /// Take a snapshot for running a [`ClosingTile`].
-    pub fn prepare_close_animation_if_needed(
-        &mut self,
-        output: &Output,
-        renderer: &mut GlowRenderer,
-        scale: i32,
-    ) {
+    pub fn prepare_close_animation_if_needed(&mut self, renderer: &mut GlowRenderer, scale: i32) {
         if self.close_animation_snapshot.is_some() {
             return;
         }
 
         // FIXME: Blur with closing tiles is kinda wonky, but you shouldn't notice it unless
         // you have a *very* slow closing animation
-        let elements = self.render_inner(
-            renderer,
-            (0, 0).into(),
-            scale,
-            1.0,
-            output,
-            (0, 0).into(),
-            false,
-        );
+        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0);
         self.close_animation_snapshot = Some(elements);
     }
 
@@ -450,14 +437,10 @@ impl Tile {
         location: Point<i32, Logical>,
         scale: i32,
         alpha: f32,
-        output: &Output,
-        render_offset: Point<i32, Logical>,
-        active: bool,
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
         let rules = self.window.rules();
-        let is_floating = !self.window.tiled();
         let is_fullscreen = self.window.fullscreen();
 
         let alpha = if is_fullscreen {
@@ -467,14 +450,6 @@ impl Tile {
         };
 
         let border = self.config.border.with_overrides(&rules.border);
-        let shadow = self
-            .config
-            .shadow
-            .map(|cfg| cfg.with_overrides(&rules.shadow));
-        let (blur, blur_optimized) = (
-            self.config.blur.with_overrides(&rules.blur),
-            rules.blur.optimized,
-        );
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
@@ -484,7 +459,6 @@ impl Tile {
         drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
-        let has_opening_animation = self.opening_animation.is_some();
         let tile_geometry = Rectangle::new(location, self.visual_size());
         let window_geometry = Rectangle::new(
             location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
@@ -621,99 +595,6 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        if !blur.disabled() && self.has_transparent_region() {
-            // Optimized blur uses a pre-blurred texture containing background and bottom
-            // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
-            // window.
-            //
-            // When a window is tiled, it will most likely only display the background, IE there
-            // are no windows behind it, so we win quit a lot of performance when enabling optimized
-            // blur here since tiled windows are *huge*
-            //
-            // Floating windows on the other hand might have other windows below it, so they don't
-            // use optimized. They are also (in comparaison) relatively small, so its even better
-            let optimized = blur_optimized.unwrap_or_else(|| {
-                let mut optimized = !is_floating;
-                if has_opening_animation {
-                    // One exception is made for opening animations. Since we pre-render the window
-                    // inside a texture, there's nothing for us to sample from, so we must use
-                    // optimized in order to get a blur effect going on.
-                    optimized = true;
-                }
-
-                optimized
-            });
-
-            // Since tile_geometry and window_geometry are dependent on what we are rendering for
-            // (opening animation, size animation) we use data gathered from self instead
-            //
-            // render_offset is from the workspace, to account for switching animations
-            let sample_area = Rectangle::new(
-                self.visual_location() + self.window_loc() + render_offset,
-                window_geometry.size,
-            );
-
-            let blur_element = BlurElement::new(
-                renderer,
-                output,
-                sample_area,
-                window_geometry.loc.to_physical(scale),
-                border_radius,
-                optimized,
-                scale,
-                alpha,
-                blur,
-            );
-            elements.push(blur_element.into());
-        }
-
-        if border_thickness != 0 {
-            elements.push(
-                super::decorations::draw_border(
-                    renderer,
-                    scale,
-                    alpha,
-                    tile_geometry,
-                    border_thickness as f64,
-                    border_radius as f64,
-                    if active {
-                        border.focused_color
-                    } else {
-                        border.normal_color
-                    },
-                )
-                .into(),
-            );
-        }
-
-        if let Some(shadow_config) = &shadow {
-            let should_draw = if shadow_config.disable {
-                false
-            } else {
-                match shadow_config.floating_only {
-                    true => is_floating,
-                    // NOTE: For now we draw shadows by default.
-                    // Maybe reconsider this?
-                    false => true,
-                }
-            };
-
-            if !is_fullscreen && shadow_config.color[3] > 0.0 && should_draw {
-                elements.push(
-                    super::decorations::draw_shadow(
-                        renderer,
-                        alpha,
-                        scale,
-                        window_geometry,
-                        shadow_config.sigma,
-                        border_radius,
-                        shadow_config.color,
-                    )
-                    .into(),
-                );
-            }
-        }
-
         elements
     }
 
@@ -724,7 +605,7 @@ impl Tile {
         &self,
         renderer: &mut R,
         scale: i32,
-        alpha: f32,
+        mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
         active: bool,
@@ -734,39 +615,43 @@ impl Tile {
         let mut opening_element = None;
         let mut normal_elements = vec![];
 
+        // Rendering tile goes through the following phases.
+        //
+        // 1. Tile::render_inner renders the tile's window and popups, and applies the resize the
+        //    current size_animation if any to the main window surface(s) and rounded corners
+        //
+        // 2. If there's a resize animation ongoing, we draw the generated render elements into a
+        //    texture and draw it with a custom size and rescale it.
+        //
+        // 3. We draw additional decorations: blur, shadow, border, etc.
+        //
+        // FIXME: Redundant calculations here and and in render_inner, but compiler should optimize
+        // them away (hopefully)? Either way they are not too expensive.
+
+        let tile_geometry;
+
         if let Some(animation) = self.opening_animation.as_ref() {
-            let render_geo = self.visual_geometry().to_physical_precise_round(scale);
+            let render_geo = self.visual_geometry();
             let progress = *animation.value();
+            let opening_animation_scale = opening_animation_progress_to_scale(progress);
 
             let glow_renderer = renderer.glow_renderer_mut();
-
-            // Account for the shadow else it will get cut short.
-            let mut shadow_offset = Point::default();
-            let rules = self.window.rules();
-            if let Some(shadow) = self
-                .config
-                .shadow
-                .map(|shadow| shadow.with_overrides(&rules.shadow))
-            {
-                let scaled_sigma = (shadow.sigma / scale as f32).round() as i32;
-                shadow_offset = Point::from((scaled_sigma, scaled_sigma));
-            }
-            drop(rules);
-
-            // NOTE: We use the border thickness as the location to actually include it with the
-            // render elements, otherwise it would be clipped out of the tile.
-            let elements = self.render_inner(
-                glow_renderer,
-                shadow_offset,
-                scale,
-                alpha,
-                output,
-                render_offset,
-                active,
-            );
+            let elements = self.render_inner(glow_renderer, Point::default(), scale, alpha);
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
+            // Only include alpha now to render the inner window with full alpha.
+            // The texture will lower the opacity of that, but for the rest we gotta account for it.
+            alpha *= (progress as f32).clamp(0., 1.);
+
+            tile_geometry = {
+                let mut geo = render_geo;
+                let center = geo.center();
+                geo.loc -= center;
+                geo = geo.to_f64().upscale(opening_animation_scale).to_i32_round();
+                geo.loc += center;
+                geo
+            };
 
             opening_element = render_to_texture(
                 glow_renderer,
@@ -790,7 +675,228 @@ impl Tile {
                 let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     glow_renderer.id(),
-                    render_geo.loc.to_f64() - shadow_offset.to_f64().to_physical(scale as f64),
+                    render_geo.to_physical(scale).loc.to_f64(),
+                    texture,
+                    scale,
+                    Transform::Normal,
+                    Some(alpha),
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                )
+                .into();
+                self.window.set_offscreen_element_id(Some(element_id));
+
+                let origin = render_geo.to_physical(scale).center();
+                let rescale =
+                    RescaleRenderElement::from_element(texture, origin, opening_animation_scale);
+
+                TileRenderElement::<R>::Opening(rescale)
+            });
+        } else {
+            self.window.set_offscreen_element_id(None);
+            tile_geometry = self.visual_geometry();
+            normal_elements = self.render_inner(renderer, self.visual_location(), scale, alpha)
+        }
+
+        let is_fullscreen = self.window.fullscreen();
+        let is_floating = !self.window.tiled();
+        let rules = self.window.rules();
+        let border = self.config.border.with_overrides(&rules.border);
+        let (border_thickness, border_radius) = if is_fullscreen {
+            (0, 0.0)
+        } else {
+            (border.thickness, border.radius)
+        };
+        let (blur, optimized_blur) = (
+            self.config.blur.with_overrides(&rules.blur),
+            rules.blur.optimized,
+        );
+        let shadow = self
+            .config
+            .shadow
+            .as_ref()
+            .map(|shadow| shadow.with_overrides(&rules.shadow));
+
+        drop(rules);
+
+        let window_geometry = Rectangle::new(
+            tile_geometry.loc + Point::<i32, Logical>::from((border_thickness, border_thickness)),
+            tile_geometry.size - Size::from((border_thickness, border_thickness)).upscale(2),
+        );
+
+        let border_element = (border_thickness != 0)
+            .then(|| {
+                super::decorations::draw_border(
+                    renderer,
+                    scale,
+                    alpha,
+                    tile_geometry,
+                    border_thickness as f64,
+                    border_radius as f64,
+                    if active {
+                        border.focused_color
+                    } else {
+                        border.normal_color
+                    },
+                )
+                .into()
+            })
+            .into_iter();
+
+        let blur_element = (!blur.disabled() && self.has_transparent_region())
+            .then(|| {
+                // Optimized blur uses a pre-blurred texture containing background and bottom
+                // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
+                // window.
+                //
+                // When a window is tiled, it will most likely only display the background, IE there
+                // are no windows behind it, so we win quit a lot of performance when enabling
+                // optimized blur here since tiled windows are *huge*
+                //
+                // Floating windows on the other hand might have other windows below it, so they
+                // don't use optimized. They are also (in comparaison) relatively
+                // small, so its even better
+                let optimized = optimized_blur.unwrap_or_else(|| is_floating);
+
+                // render_offset is from the workspace, to account for switching animations
+                let sample_area =
+                    Rectangle::new(window_geometry.loc + render_offset, window_geometry.size);
+
+                BlurElement::new(
+                    renderer,
+                    output,
+                    sample_area,
+                    window_geometry.loc.to_physical(scale),
+                    border_radius,
+                    optimized,
+                    scale,
+                    alpha,
+                    blur,
+                )
+                .into()
+            })
+            .into_iter();
+
+        let shadow_element = shadow
+            .and_then(|shadow| {
+                let should_draw = if shadow.disable {
+                    false
+                } else {
+                    match shadow.floating_only {
+                        true => is_floating,
+                        false => true,
+                    }
+                };
+
+                if !is_fullscreen && shadow.color[3] > 0.0 && should_draw {
+                    Some(
+                        super::decorations::draw_shadow(
+                            renderer,
+                            alpha,
+                            scale,
+                            window_geometry,
+                            shadow.sigma,
+                            border_radius,
+                            shadow.color,
+                        )
+                        .into(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .into_iter();
+
+        opening_element
+            .into_iter()
+            .chain(normal_elements)
+            .chain(border_element)
+            .chain(blur_element)
+            .chain(shadow_element)
+    }
+
+    /// Custom render function used only in the context of rendering a tile when its being grabbed
+    /// and dragged accross different outputs. Only used for the SwapTileGrab.
+    ///
+    /// You should **NOT** be using this.
+    pub(super) fn render_for_interactive_grab<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        visual_location: Point<i32, Logical>,
+        scale: i32,
+        mut alpha: f32,
+        output: &Output,
+        render_offset: Point<i32, Logical>,
+        active: bool,
+    ) -> impl Iterator<Item = TileRenderElement<R>> {
+        crate::profile_function!();
+        let fractional_scale = Scale::from(scale as f64);
+        let mut opening_element = None;
+        let mut normal_elements = vec![];
+
+        // Rendering tile goes through the following phases.
+        //
+        // 1. Tile::render_inner renders the tile's window and popups, and applies the resize the
+        //    current size_animation if any to the main window surface(s) and rounded corners
+        //
+        // 2. If there's a resize animation ongoing, we draw the generated render elements into a
+        //    texture and draw it with a custom size and rescale it.
+        //
+        // 3. We draw additional decorations: blur, shadow, border, etc.
+        //
+        // FIXME: Redundant calculations here and and in render_inner, but compiler should optimize
+        // them away (hopefully)? Either way they are not too expensive.
+
+        let tile_geometry;
+
+        if let Some(animation) = self.opening_animation.as_ref() {
+            let render_geo = Rectangle::new(visual_location, self.visual_size());
+            let progress = *animation.value();
+            let opening_animation_scale = opening_animation_progress_to_scale(progress);
+
+            let glow_renderer = renderer.glow_renderer_mut();
+            let elements = self.render_inner(glow_renderer, Point::default(), scale, alpha);
+            let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
+                acc.merge(e.geometry(fractional_scale))
+            });
+            // Only include alpha now to render the inner window with full alpha.
+            // The texture will lower the opacity of that, but for the rest we gotta account for it.
+            alpha *= (progress as f32).clamp(0., 1.);
+
+            tile_geometry = {
+                let mut geo = render_geo;
+                let center = geo.center();
+                geo.loc -= center;
+                geo = geo.to_f64().upscale(opening_animation_scale).to_i32_round();
+                geo.loc += center;
+                geo
+            };
+
+            opening_element = render_to_texture(
+                glow_renderer,
+                rec.size,
+                fractional_scale,
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                elements.into_iter().rev(),
+            )
+            .map_err(|err| {
+                warn!(
+                    ?err,
+                    "Failed to render window elements to texture for open animation!"
+                )
+            })
+            .ok()
+            .map(|(texture, _sync_point)| {
+                let glow_renderer = renderer.glow_renderer_mut();
+
+                let element_id = Id::new();
+                let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
+                    element_id.clone(),
+                    glow_renderer.id(),
+                    render_geo.to_physical(scale).loc.to_f64(),
                     texture,
                     scale,
                     Transform::Normal,
@@ -803,31 +909,133 @@ impl Tile {
                 .into();
                 self.window.set_offscreen_element_id(Some(element_id));
 
-                let origin = render_geo.center();
-                let rescale = RescaleRenderElement::from_element(
-                    texture,
-                    origin,
-                    opening_animation_progress_to_scale(progress),
-                );
+                let origin = render_geo.to_physical(scale).center();
+                let rescale =
+                    RescaleRenderElement::from_element(texture, origin, opening_animation_scale);
 
                 TileRenderElement::<R>::Opening(rescale)
             });
-        };
-
-        if opening_element.is_none() {
+        } else {
             self.window.set_offscreen_element_id(None);
-            normal_elements = self.render_inner(
-                renderer,
-                self.visual_location(),
-                scale,
-                alpha,
-                output,
-                render_offset,
-                active,
-            )
+            tile_geometry = Rectangle::new(visual_location, self.visual_size());
+            normal_elements = self.render_inner(renderer, visual_location, scale, alpha)
         }
 
-        opening_element.into_iter().chain(normal_elements)
+        let is_fullscreen = self.window.fullscreen();
+        let is_floating = !self.window.tiled();
+        let rules = self.window.rules();
+        let border = self.config.border.with_overrides(&rules.border);
+        let (border_thickness, border_radius) = if is_fullscreen {
+            (0, 0.0)
+        } else {
+            (border.thickness, border.radius)
+        };
+        let (blur, optimized_blur) = (
+            self.config.blur.with_overrides(&rules.blur),
+            rules.blur.optimized,
+        );
+        let shadow = self
+            .config
+            .shadow
+            .as_ref()
+            .map(|shadow| shadow.with_overrides(&rules.shadow));
+
+        drop(rules);
+
+        let window_geometry = Rectangle::new(
+            tile_geometry.loc + Point::<i32, Logical>::from((border_thickness, border_thickness)),
+            tile_geometry.size - Size::from((border_thickness, border_thickness)).upscale(2),
+        );
+
+        let border_element = (border_thickness != 0)
+            .then(|| {
+                super::decorations::draw_border(
+                    renderer,
+                    scale,
+                    alpha,
+                    tile_geometry,
+                    border_thickness as f64,
+                    border_radius as f64,
+                    if active {
+                        border.focused_color
+                    } else {
+                        border.normal_color
+                    },
+                )
+                .into()
+            })
+            .into_iter();
+
+        let blur_element = (!blur.disabled() && self.has_transparent_region())
+            .then(|| {
+                // Optimized blur uses a pre-blurred texture containing background and bottom
+                // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
+                // window.
+                //
+                // When a window is tiled, it will most likely only display the background, IE there
+                // are no windows behind it, so we win quit a lot of performance when enabling
+                // optimized blur here since tiled windows are *huge*
+                //
+                // Floating windows on the other hand might have other windows below it, so they
+                // don't use optimized. They are also (in comparaison) relatively
+                // small, so its even better
+                let optimized = optimized_blur.unwrap_or_else(|| is_floating);
+
+                // render_offset is from the workspace, to account for switching animations
+                let sample_area =
+                    Rectangle::new(window_geometry.loc + render_offset, window_geometry.size);
+
+                BlurElement::new(
+                    renderer,
+                    output,
+                    sample_area,
+                    window_geometry.loc.to_physical(scale),
+                    border_radius,
+                    optimized,
+                    scale,
+                    alpha,
+                    blur,
+                )
+                .into()
+            })
+            .into_iter();
+
+        let shadow_element = shadow
+            .and_then(|shadow| {
+                let should_draw = if shadow.disable {
+                    false
+                } else {
+                    match shadow.floating_only {
+                        true => is_floating,
+                        false => true,
+                    }
+                };
+
+                if !is_fullscreen && shadow.color[3] > 0.0 && should_draw {
+                    Some(
+                        super::decorations::draw_shadow(
+                            renderer,
+                            alpha,
+                            scale,
+                            window_geometry,
+                            shadow.sigma,
+                            border_radius,
+                            shadow.color,
+                        )
+                        .into(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .into_iter();
+
+        opening_element
+            .into_iter()
+            .chain(normal_elements)
+            .chain(border_element)
+            .chain(blur_element)
+            .chain(shadow_element)
     }
 }
 

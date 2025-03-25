@@ -55,7 +55,7 @@ use crate::cursor::CursorRenderElement;
 use crate::handlers::session_lock::SessionLockRenderElement;
 use crate::layer::{layer_elements, LayerShellRenderElement};
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
-use crate::space::{MonitorRenderElement, MonitorRenderResult};
+use crate::space::{MonitorRenderElement, MonitorRenderResult, TileRenderElement};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
 
@@ -64,6 +64,7 @@ crate::fht_render_elements! {
         Cursor = CursorRenderElement<R>,
         ConfigUi = ConfigUiRenderElement,
         Monitor = MonitorRenderElement<R>,
+        Tile = TileRenderElement<R>, // Needed for interactive swap
         LayerShell = LayerShellRenderElement<R>,
         SessionLock = SessionLockRenderElement<R>,
         Debug = DebugRenderElement,
@@ -186,6 +187,11 @@ impl Fht {
         // Overlay layer shells are drawn above everything else, including fullscreen windows
         let overlay_elements = layer_elements(renderer, output, Layer::Overlay, &self.config);
         rv.elements.extend(overlay_elements);
+
+        // Interactive move tile goes above everything else
+        let interactive_move_elements = self.space.render_interactive_swap(renderer, output, scale);
+        rv.elements
+            .extend(interactive_move_elements.into_iter().map(Into::into));
 
         // Top layer shells sit between the normal windows and fullscreen windows.
         //
