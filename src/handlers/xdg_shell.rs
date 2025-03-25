@@ -3,7 +3,7 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, WindowSurfaceType,
 };
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
@@ -103,26 +103,14 @@ impl XdgShellHandler for State {
             return;
         };
 
-        let mut output = None;
-        if let Some((window, workspace)) = self
-            .fht
-            .space
-            .find_window_and_workspace_mut(surface.wl_surface())
-        {
-            // if workspace.start_interactive_swap(&window) {
-            //     let ws_output = workspace.output().clone();
-            //     output = Some(ws_output.clone()); // augh, the borrow checker
-            //     let grab = SwapTileGrab {
-            //         window,
-            //         output: ws_output,
-            //         start_data,
-            //     };
-            //     pointer.set_grab(self, grab, serial, Focus::Clear);
-            // }
-        }
-
-        if let Some(ref output) = output {
-            self.fht.queue_redraw(output);
+        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
+            if self.fht.space.start_interactive_swap(&window) {
+                let grab = SwapTileGrab { window, start_data };
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+                self.fht
+                    .cursor_theme_manager
+                    .set_image_status(CursorImageStatus::Named(CursorIcon::Grabbing));
+            }
         }
     }
 
