@@ -674,11 +674,26 @@ impl Workspace {
         // The actual handling depends on the layout.
         match self.current_layout() {
             WorkspaceLayout::Tile => {
-                // In the master layout, there are the following cases:
-                // - Insert the tile in the slave stack
-                // - Insert the tile in the master stack, and incrementing nmaster by one.
                 if closest_idx < self.nmaster {
-                    if edges.intersects(ResizeEdge::BOTTOM) {
+                    if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        //
+                        // In this case we want to create a stack stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::BOTTOM) {
                         // Insert after this master window.
                         self.nmaster += 1;
                         self.active_tile_idx = Some(closest_idx + 1);
