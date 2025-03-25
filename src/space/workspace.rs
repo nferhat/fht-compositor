@@ -658,7 +658,7 @@ impl Workspace {
         // Now, based on which quadrant of the closest tile we are in, we determine where to insert
         // the final tile. So you can place the tile between two files, for example.
         let cursor_position_in_tile = (cursor_position - closest_tile.location()).to_f64();
-        let size = tile.size().to_f64();
+        let size = closest_tile.size().to_f64();
         let mut edges = ResizeEdge::empty();
         if cursor_position_in_tile.x < size.w / 3. {
             edges |= ResizeEdge::LEFT;
