@@ -274,6 +274,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         })
         .expect("Failed to run the eventloop!");
 
+    // Stop the socket and remove it
+    if let Some(ipc_server) = state.fht.ipc_server.take() {
+        ipc_server.close(&loop_handle);
+    }
+
     std::mem::drop(event_loop);
     std::mem::drop(state);
 

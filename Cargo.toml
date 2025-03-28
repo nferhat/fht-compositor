@@ -14,10 +14,10 @@ repository = "https://github.com/nferhat/fht-compositor"
 
 [workspace.dependencies]
 anyhow = "1.0.79"
-# Basic logging setup
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-# Config file support
+serde_json = "1.0.134"
+serde = { version = "1.0.217", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
@@ -68,6 +68,7 @@ smithay = { workspace = true, features = [
     "backend_gbm",      # libgbm, needed for many things
     "backend_libinput", # Input handling
 ] }
+calloop = { version = "0.14.2", features = ["executor", "futures-io"] }
 smithay-drm-extras = { workspace = true, optional = true }
 bitflags = "2.6.0"
 thiserror = "1.0.61"
@@ -84,6 +85,9 @@ fht-compositor-config.path = "./fht-compositor-config"
 glam = "0.28.0"
 egui = "0.31"
 egui_glow = "0.31"
+serde.workspace = true
+serde_json.workspace = true
+fht-compositor-ipc.path = "./fht-compositor-ipc"
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0" }
 # FIXME: We use this instead of std::sync::MappedMutexGuard
 # SEE: tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
@@ -92,14 +96,13 @@ clap = { version = "4.5.18", features = ["derive", "string"] }
 async-channel = "2.3.1"
 async-io = "2.3.4"
 clap_complete = "4.5.38"
-serde_json = "1.0.134"
 xdg = "2.5.2"
-serde = { version = "1.0.217", features = ["derive"] }
 tracy-client = { version = "0.18.0", default-features = false }
 serde_repr = "0.1.20"
 libdisplay-info = "0.2.2"
 drm-ffi = "0.9.0"
 sd-notify = { version = "0.4.5", optional = true }
+futures-util = { version = "0.3.31", features = ["std", "io"] }
 
 [features]
 default = ["winit-backend", "udev-backend", "headless-backend", "all-portals"]
