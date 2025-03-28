@@ -13,7 +13,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
-use libc::SOCK_RDM;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
@@ -52,7 +51,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     //
     // We must have at least one backend, otherwise unmatched branches will occur.
     // This also must be at the very top of the crate so that it pops ups before anything.
-    #[cfg(all(not(feature = "udev-backend"), not(feature = "winit-backend")))]
+    #[cfg(all(
+        not(feature = "udev-backend"),
+        not(feature = "winit-backend"),
+        not(feature = "headless-backend")
+    ))]
     compile_error!("You must enable at least one backend: 'udev-backend' or 'winit-backend");
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {

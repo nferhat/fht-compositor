@@ -63,6 +63,9 @@ smithay = { workspace = true, features = [
     "backend_gbm",      # required for pipewire madness
     "use_system_lib",
     "backend_egl",      # EGL support for wayland
+    "use_system_lib",
+    "backend_egl",      # EGL support for wayland
+    "backend_gbm",      # libgbm, needed for many things
     "backend_libinput", # Input handling
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
@@ -99,7 +102,7 @@ drm-ffi = "0.9.0"
 sd-notify = { version = "0.4.5", optional = true }
 
 [features]
-default = ["winit-backend", "udev-backend", "all-portals"]
+default = ["winit-backend", "udev-backend", "headless-backend", "all-portals"]
 
 # Marker feature to enable D-Bus connectivity.
 #
@@ -133,6 +136,12 @@ udev-backend = [
     "smithay/backend_session_libseat",
     "smithay/renderer_multi",
 ]
+
+# A headless backend.
+# ---
+# This backend is for pure testing purposes. You are not expected to use this nor to compile this.
+# It's used when testing the IPC and stuff that doesn't require a graphical instance running
+headless-backend = []
 
 # Enable profiling with tracy
 #

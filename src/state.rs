@@ -113,6 +113,10 @@ impl State {
                 cli::BackendType::Udev => crate::backend::udev::UdevData::new(&mut fht)
                     .unwrap()
                     .into(),
+                #[cfg(feature = "headless-backend")]
+                cli::BackendType::Headless => {
+                    crate::backend::headless::HeadlessData::new(&mut fht).into()
+                }
             }
         } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
             info!("Detected (WAYLAND_)DISPLAY. Running in nested Winit window");
@@ -535,7 +539,8 @@ impl State {
 
             let render_formats = self
                 .backend
-                .with_renderer(|renderer| renderer.egl_context().dmabuf_render_formats().clone());
+                .with_renderer(|renderer| renderer.egl_context().dmabuf_render_formats().clone())
+                .expect("we should be in Udev backend when starting screencast");
 
             let (to_compositor, from_pw) = calloop::channel::channel();
             let token = self
