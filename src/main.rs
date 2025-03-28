@@ -13,6 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
+use libc::SOCK_RDM;
 use smithay::reexports::calloop::generic::{Generic, NoIoDrop};
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 use smithay::reexports::wayland_server::Display;
@@ -28,6 +29,7 @@ mod focus_target;
 mod frame_clock;
 mod handlers;
 mod input;
+mod ipc;
 mod layer;
 mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
@@ -127,11 +129,19 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         (dh, socket_name)
     };
 
+    // NOTE: For IPC we must start it **before** creating and spawning autostart to have ready state
+    // to replicate ASAP. This is needed if for example autostart/xdg-autostart has a dependency on
+    // the socket being present.
+    let ipc_server = ipc::start(&loop_handle, &socket_name)
+        .inspect_err(|err| error!(?err, "Failed to start IPC server"))
+        .ok();
+
     let mut state = State::new(
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
         cli.config_path,
+        ipc_server,
         cli.backend,
         socket_name.clone(),
     );
