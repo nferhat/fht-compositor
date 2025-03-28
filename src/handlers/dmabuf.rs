@@ -22,6 +22,11 @@ impl DmabufHandler for State {
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             crate::backend::Backend::Udev(ref mut data) => data.dmabuf_imported(dmabuf, notifier),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            crate::backend::Backend::Headless(_) => {
+                let _ = notifier.successful::<State>();
+            }
             _ => unreachable!(),
         };
     }

@@ -44,6 +44,9 @@ pub enum BackendType {
     #[cfg(feature = "udev-backend")]
     /// Use the Udev backend, using a libseat session.
     Udev,
+    #[cfg(feature = "headless-backend")]
+    /// Use the headless backend, only meant for testing.
+    Headless,
 }
 
 fn get_version_string() -> String {
