@@ -1,7 +1,7 @@
 # {{{ Workspace
 
 [workspace]
-members = ["fht-compositor-config"]
+members = ["fht-compositor-config", "fht-compositor-ipc"]
 resolver = "2"
 
 [workspace.package]
@@ -60,6 +60,7 @@ smithay = { workspace = true, features = [
     "desktop", "wayland_frontend",   # Provide abstractions for wayland stuff
     "renderer_glow",                 # Default renderer used everywhere
     "use_system_lib", "backend_egl", # EGL support for wayland
+    "backend_gbm",                   # libgbm, needed for many things
     "backend_libinput",              # Input handling
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
@@ -112,7 +113,7 @@ winit-backend = [
 ]
 
 # Enable the winit backend.
-# 
+#
 # This allows the compositor to run under a libseat session.
 udev-backend = [
     "smithay-drm-extras",
@@ -127,7 +128,7 @@ udev-backend = [
 ]
 
 # Enable profiling with tracy
-# 
+#
 # You should **NOT** enable this unless you want to profile compositor performance.
 # This will automatically stream compositor data to localhost:DEFAULT_PORT.
 profile-with-tracy = ["tracy-client/default"]
