@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
+use calloop::futures::{Executor, Scheduler};
 use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
@@ -20,7 +21,7 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
+use smithay::reexports::calloop::{self, LoopHandle, LoopSignal, RegistrationToken};
 use smithay::reexports::input::{self, DeviceCapability, SendEventsMode};
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
@@ -607,6 +608,7 @@ impl State {
 pub struct Fht {
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, State>,
+    pub scheduler: Scheduler<()>,
     pub loop_signal: LoopSignal,
     pub stop: bool,
 
@@ -695,6 +697,14 @@ impl Fht {
         ipc_server: Option<ipc::Server>,
         config_path: Option<std::path::PathBuf>,
     ) -> Self {
+        let (executor, scheduler) =
+            calloop::futures::executor().expect("Failed to create scheduler");
+        loop_handle
+            .insert_source(executor, |_, _, _| {
+                // This executor only lives to drive futures, we don't really care about the output.
+            })
+            .unwrap();
+
         let mut config_ui = config_ui::ConfigUi::new();
         let (config, paths) = match fht_compositor_config::load(config_path.clone()) {
             Ok((config, paths)) => (config, paths),
@@ -829,6 +839,8 @@ impl Fht {
         Self {
             display_handle: dh.clone(),
             loop_handle,
+            scheduler,
+
             loop_signal,
             stop: false,
 
