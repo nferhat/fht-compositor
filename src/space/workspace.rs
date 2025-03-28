@@ -1614,11 +1614,18 @@ impl Workspace {
             return None;
         };
 
-        // FIXME: Perhaps handle better maximized/fullscreen?
-        // Would be janky though.
-        if window.maximized() || window.fullscreen() {
-            return None;
+        if window.fullscreen() {
+            // Fullscreening should be exclusive.
+            assert_eq!(self.fullscreened_window().as_ref(), Some(window));
+            window.request_fullscreen(false);
+            self.fullscreened_tile_idx = None;
+            // Start fading in windows as we grab the fullscreened tile
+            self.start_fullscreen_fade_in(None);
         }
+
+        // Reset window state
+        window.request_fullscreen(false);
+        window.request_maximized(false);
 
         let tile = self.tiles.remove(idx);
         if idx < self.nmaster {

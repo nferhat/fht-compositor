@@ -1,0 +1,11 @@
+[package]
+name = "fht-compositor-ipc"
+version.workspace = true
+description.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true

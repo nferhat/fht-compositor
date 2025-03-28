@@ -65,7 +65,6 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
 
 use crate::backend::Backend;
-use crate::cli;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
 use crate::focus_target::PointerFocusTarget;
@@ -84,6 +83,7 @@ use crate::space::{Space, WorkspaceId};
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::{get_monotonic_time, RectCenterExt};
 use crate::window::Window;
+use crate::{cli, ipc};
 
 pub struct State {
     pub fht: Fht,
@@ -96,11 +96,12 @@ impl State {
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
         config_path: Option<std::path::PathBuf>,
+        ipc_server: Option<ipc::Server>,
         backend: Option<crate::cli::BackendType>,
         _socket_name: String,
     ) -> Self {
         #[allow(unused)]
-        let mut fht = Fht::new(dh, loop_handle, loop_signal, config_path);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, ipc_server, config_path);
         #[allow(unused)]
         let backend: crate::backend::Backend = if let Some(backend_type) = backend {
             match backend_type {
@@ -658,6 +659,12 @@ pub struct Fht {
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire: Option<PipeWire>,
 
+    // Inter-process communication.
+    //
+    // We keep the IPC server and listener state here. But the actual handling is done inside
+    // a Generic calloop source.
+    pub ipc_server: Option<ipc::Server>,
+
     pub compositor_state: CompositorState,
     pub data_control_state: DataControlState,
     pub data_device_state: DataDeviceState,
@@ -680,6 +687,7 @@ impl Fht {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        ipc_server: Option<ipc::Server>,
         config_path: Option<std::path::PathBuf>,
     ) -> Self {
         let mut config_ui = config_ui::ConfigUi::new();
@@ -853,6 +861,8 @@ impl Fht {
             pipewire_initialised: std::sync::Once::new(),
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire: None,
+
+            ipc_server,
 
             compositor_state,
             data_control_state,
