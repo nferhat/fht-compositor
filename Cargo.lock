@@ -437,7 +437,9 @@ version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10929724661d1c43856fd87c7a127ae944ec55579134fb485e4136fb6a46fdcb"
 dependencies = [
+ "async-task",
  "bitflags 2.9.0",
+ "futures-io",
  "polling",
  "rustix",
  "slab",
@@ -943,6 +945,7 @@ dependencies = [
  "async-channel",
  "async-io",
  "bitflags 2.9.0",
+ "calloop 0.14.2",
  "clap",
  "clap_complete",
  "drm-ffi",
@@ -950,6 +953,8 @@ dependencies = [
  "egui_glow",
  "fht-animation",
  "fht-compositor-config",
+ "fht-compositor-ipc",
+ "futures-util",
  "glam",
  "libc",
  "libdisplay-info",
@@ -992,6 +997,9 @@ name = "fht-compositor-ipc"
 version = "25.3.1"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
+ "smithay",
 ]
 
 [[package]]
@@ -1314,9 +1322,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
+checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "jni"
@@ -2297,9 +2305,9 @@ checksum = "f7c45b9784283f1b2e7fb61b42047c2fd678ef0960d4f6f1eba131594cc369d4"
 
 [[package]]
 name = "ryu"
-version = "1.0.19"
+version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ea1a2d0a644769cc99faa24c3ad26b379b786fe7c36fd3c546254801650e6dd"
+checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
 name = "same-file"
@@ -2359,9 +2367,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.139"
+version = "1.0.140"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44f86c3acccc9c65b153fe1b85a3be07fe5515274ec9f0653b4a0875731c72a6"
+checksum = "20068b6e96dc6c9bd23e01df8827e6c7e1f2fddd43c21810382803c136b99373"
 dependencies = [
  "itoa",
  "memchr",

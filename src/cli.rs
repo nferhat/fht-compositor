@@ -49,7 +49,7 @@ pub enum BackendType {
     Headless,
 }
 
-fn get_version_string() -> String {
+pub fn get_version_string() -> String {
     let major = env!("CARGO_PKG_VERSION_MAJOR");
     let minor = env!("CARGO_PKG_VERSION_MINOR");
     let patch = env!("CARGO_PKG_VERSION_PATCH");
