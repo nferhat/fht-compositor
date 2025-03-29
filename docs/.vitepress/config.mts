@@ -9,8 +9,8 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: "Home", link: "/" },
-      { text: "Getting started", link: "/getting-started" },
-      { text: "Configuration", link: "/configuration" },
+      { text: "Getting started", link: "/getting-started/introduction" },
+      { text: "Configuration", link: "/configuration/introduction" },
     ],
 
     sidebar: [
@@ -61,7 +61,11 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/vuejs/vitepress" },
+      { icon: "github", link: "https://github.com/nferhat/fht-compositor" },
+      {
+        icon: "matrix",
+        link: "https://matrix.to/#/#fht-compositor:matrix.org",
+      },
     ],
   },
   markdown: {
@@ -69,4 +73,5 @@ export default defineConfig({
       md.use(tabsMarkdownPlugin);
     },
   },
+  base: "/fht-comopsitor/",
 });
