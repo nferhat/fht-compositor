@@ -1,9 +1,13 @@
 /target
 # Useless log files in the repo
 std*
-# mdbook generated files for serving into HTML
-docs/book
 # when building with nix
 /result
 # direnv cache
 /.direnv
+
+# Documentation/wiki, generated with vitepress
+# cache and dist are used when building/previewing the site
+docs/node_modules
+docs/.vitepress/cache
+docs/.vitepress/dist

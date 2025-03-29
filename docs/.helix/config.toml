@@ -1,5 +1,0 @@
-editor.text-width = 100
-[editor.soft-wrap]
-enable = true
-wrap-at-text-width = true
-wrap-indicator = ""
