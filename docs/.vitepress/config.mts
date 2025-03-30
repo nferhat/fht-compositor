@@ -50,7 +50,6 @@ export default defineConfig({
           { text: "Input", link: "/configuration/input" },
           { text: "Keybindings", link: "/configuration/keybindings" },
           { text: "Mousebindings", link: "/configuration/Mousebindings" },
-          { text: "Input", link: "/configuration/input" },
           { text: "Window rules", link: "/configuration/window-rules" },
           { text: "Layer rules", link: "/configuration/layer-rules" },
           { text: "Outputs", link: "/configuration/outputs" },
