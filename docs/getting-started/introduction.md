@@ -9,6 +9,8 @@ Windows in the workspace are arranged using a *dynamic layout* in order to maxim
 in two stacks: The master and slave stack. Different parameters can be adjusted at runtime to adapt the different
 dynamic layouts to your needs.
 
+![Preview image](/assets/preview.png)
+
 ---
 
 If this is your first time with the compositor, please head to the [install guide](/getting-started/install) to take
