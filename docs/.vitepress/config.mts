@@ -37,7 +37,7 @@ export default defineConfig({
           { text: "Workspaces", link: "/usage/workspaces" },
           { text: "Layouts", link: "/usage/layouts" },
           { text: "XWayland", link: "/usage/xwayland" },
-          { text: "IPC" },
+          { text: "IPC", link: "/usage/ipc" },
         ],
       },
 
