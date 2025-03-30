@@ -15,8 +15,13 @@ Different variables control the layout at runtime.
 - **Number of master clients** (`nmaster`): The number of master clients in the master stack. Must always be >= 1
 - **Master width factor** (`mwfact`): The proportion of screen space the master stack takes up relative to the slave stack. It
   in `[0.01, 0.99]`
+
+![Master width factor changes diagram](/assets/mwfact.svg)
+
 - **Per-window proportion**: (`proportion`) The proportion control how much space a window takes relative to other windows in its
   stack.
+
+![Proportion changes example diagram](/assets/proportion-changes.svg)
 
 By default, when you open a window in a workspace, it gets inserted as tiled at the *end* of the slave stack. The layout will
 dynamically resize the other windows to share the screen space with the newly opened window.
