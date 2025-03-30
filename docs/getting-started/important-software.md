@@ -24,8 +24,10 @@ do that, so you are **very strongly** recommended to read this page.
   applications in a safe and controlled manner. Refer to the
   [Arch Linux wiki page](https://wiki.archlinux.org/title/Polkit#Authentication_agents)
   on the topic and install the one you prefer.<br>
-  If you are using the [Nix flake](../nix/flake.md), `polkit-gnome` has already been installed
-  and should be autostarted with the session.
+
+> [!TIP] NixOS module
+> If you use the NixOS module provided by the Nix flake, setting `programs.fht-compositor.enable`
+> will automatically enable `polkit-gnome`!
 
 - **XDG desktop portal**: The compositor binary itself will start a session d-bus connection and
   expose the `ScreenCast` interfaces. However, other interfaces are **NOT** implemented, this is why
