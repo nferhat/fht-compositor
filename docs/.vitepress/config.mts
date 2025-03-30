@@ -35,7 +35,7 @@ export default defineConfig({
         text: "Usage",
         items: [
           { text: "Workspaces", link: "/usage/workspaces" },
-          { text: "Layouts", link: "/usage/layouts" },
+          { text: "Dynamic layouts", link: "/usage/layouts" },
           { text: "XWayland", link: "/usage/xwayland" },
           { text: "IPC", link: "/usage/ipc" },
         ],
