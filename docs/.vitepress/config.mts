@@ -55,7 +55,7 @@ export default defineConfig({
           { text: "Outputs", link: "/configuration/outputs" },
           { text: "Cursor theme", link: "/configuration/cursor" },
           { text: "Decorations", link: "/configuration/decorations" },
-          { text: "Animations", link: "/getting-started/animations" },
+          { text: "Animations", link: "/configuration/animations" },
         ],
       },
     ],
