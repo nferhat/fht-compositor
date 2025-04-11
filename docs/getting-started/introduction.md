@@ -13,7 +13,7 @@ dynamic layouts to your needs.
 
 ---
 
-If this is your first time with the compositor, please head to the [install guide](/getting-started/install) to take
+If this is your first time with the compositor, please head to the [install guide](./installing) to take
 the [guided tour](/getting-started/guided-tour.md) in order to get up and running with the compositor!
 
 > [!WARNING]
