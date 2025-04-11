@@ -9,7 +9,7 @@ carousel of 9 workspaces, displaying only one at a time.
 
 When connecting outputs, the compositor will create a fresh set of workspaces for each one of them. When
 disconnecting an output, all its windows will get inserted into the respective workspaces of the *primary output*
-(most likely the first output you inserted, but this can be [configured]())
+(most likely the first output you inserted, but this can be [configured](/configuration/outputs))
 
 Compared to other wayland compositor/tiling window managers, workspaces **can not** be moved across outputs,
 instead you move individual windows from/to workspaces or outputs.

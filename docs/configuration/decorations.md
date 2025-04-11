@@ -4,7 +4,7 @@
 still enhance the looks of the desktop session
 
 > [!TIP] Window rules
-> All the decorations values can be overriden for specific windows using [window rules](/config/window-rules)!
+> All the decorations values can be overriden for specific windows using [window rules](/configuration/window-rules)!
 
 ## Borders
 

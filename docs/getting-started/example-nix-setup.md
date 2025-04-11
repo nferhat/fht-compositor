@@ -6,7 +6,7 @@ flakes, NixOS, and home-manager. You can obviously adapt the following to suit y
 The setup includes `fht-compositor` itself, PipeWire for sound and screencast portal, GDM, and
 shows you how to create user services that startup with the session using home-manager.
 
-1. Add the [flake](../nix/flake.md) to your inputs.
+1. Add the [flake](../usage/nix.md) to your inputs.
 
 2. NixOS part: You want to include the provided module `inputs.fht-compositor.nixosModules.default`
   and enable the following:

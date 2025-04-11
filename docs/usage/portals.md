@@ -1,7 +1,8 @@
 # Portals in `fht-compositor`
 
-[XDG desktop portals]() are a core component of any Wayland desktop session. They allow user programs and applications to
-interact with other components of the system (like the compositor) in a safe and secure way through D-Bus.
+[XDG desktop portals](https://flatpak.github.io/xdg-desktop-portal/) are a core component of any Wayland desktop session.
+They allow user programs and applications to interact with other components of the system (like the compositor) in a
+safe and secure way through D-Bus.
 
 The default recommended portal for `fht-compositor` desktop sessions is [xdg-desktop-portal-gtk](http://github.com/flatpak/xdg-desktop-portal-gtk),
 it provides all the basics needed (file picker, accounts, settings, etc.). `gnome-keyring` can be added to have `Secrets` portal
