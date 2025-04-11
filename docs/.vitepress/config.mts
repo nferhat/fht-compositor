@@ -38,6 +38,7 @@ export default defineConfig({
           { text: "Dynamic layouts", link: "/usage/layouts" },
           { text: "XWayland", link: "/usage/xwayland" },
           { text: "Nix modules", link: "/usage/nix" },
+          { text: "Portals", link: "/usage/portals" },
           { text: "IPC", link: "/usage/ipc" },
         ],
       },
