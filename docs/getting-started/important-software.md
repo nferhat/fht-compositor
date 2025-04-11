@@ -1,4 +1,4 @@
-# Recommended software
+# Important software
 
 To get the best experience with the compositor, you should install additional services and tools to
 get a more complete desktop session. Most importantly, you should have a terminal (of your choice
@@ -8,9 +8,6 @@ a text editor of your choice, and an app launcher.
 Desktops environments like GNOME/KDE have all of these bundled together, `fht-compositor` does not
 do that, so you are **very strongly** recommended to read this page.
 
-- [Must-have Services](#must-have-services)
-- [Desktop shell](#desktop-shell)
-- [Nice to have](#nice-to-have)
 
 ## Must-have services
 
@@ -27,8 +24,10 @@ do that, so you are **very strongly** recommended to read this page.
   applications in a safe and controlled manner. Refer to the
   [Arch Linux wiki page](https://wiki.archlinux.org/title/Polkit#Authentication_agents)
   on the topic and install the one you prefer.<br>
-  If you are using the [Nix flake](../nix/flake.md), `polkit-gnome` has already been installed
-  and should be autostarted with the session.
+
+> [!TIP] NixOS module
+> If you use the NixOS module provided by the Nix flake, setting `programs.fht-compositor.enable`
+> will automatically enable `polkit-gnome`!
 
 - **XDG desktop portal**: The compositor binary itself will start a session d-bus connection and
   expose the `ScreenCast` interfaces. However, other interfaces are **NOT** implemented, this is why
@@ -45,7 +44,7 @@ you are used to will work fine!
   or [wbg](https://codeberg.org/dnkl/wbg) will work fine.
 
 - **App launcher**: [wofi](https://hg.sr.ht/~scoopta/wofi),
-  [bemenu](https://github.com/Cloudef/bemenu), [fuzzel](https://codeberg.org/dnkl/fuzzel)
+  [bemenu](https://github.com/Cloudef/bemenu), [fuzzel](https://codeberg.org/dnkl/fuzzel),
   [Anyrun](https://github.com/anyrun-org/anyrun), are all fine.
 
 - **Desktop shell**:
@@ -59,7 +58,7 @@ you are used to will work fine!
     your desktop with QML.
   - [**Waybar**](https://github.com/Alexays/Waybar): Good'ol waybar, nothing fancy, but gets the
     job done fast and easy.
- 
+
 ## Nice to have
 
 While these are not required, the following tools are compatible with `fht-compositor` and provide
@@ -68,6 +67,6 @@ extra functionality that is *nice to have*.
 - [**swayidle**](https://github.com/swaywm/swayidle): An idle management daemon, IE. run commands
   after idling for a while, for example turning off your screen after 10 minutes.
 - [**cliphist**](https://github.com/sentriz/cliphist): A very simple clipboard manager for Wayland
-  sessions.  
+  sessions.
 - [**wl-clip-persist**](https://github.com/Linus789/wl-clip-persist): Make selections from an
   application persist even after closing it.

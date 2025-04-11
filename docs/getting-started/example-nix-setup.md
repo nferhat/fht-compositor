@@ -1,4 +1,4 @@
-# Example setup with Nix
+# Example setup with Nix Flakes
 
 The following page will describe to you how you can setup a good Wayland desktop session with Nix
 flakes, NixOS, and home-manager. You can obviously adapt the following to suit your needs.

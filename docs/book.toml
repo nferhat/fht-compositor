@@ -1,6 +1,0 @@
-[book]
-authors = ["nferhat"]
-language = "en"
-multilingual = false
-src = "src"
-title = "fht-compositor documentation"

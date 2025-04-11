@@ -166,6 +166,7 @@
               pkgs.tracy-wayland # profiler
               pkgs.alejandra # for formatting this flake if needed
               pkgs.nodePackages.prettier # formatting documentation
+              pkgs.nodejs # vitepress for docs
             ];
 
             inherit (fht-compositor) buildInputs nativeBuildInputs;
