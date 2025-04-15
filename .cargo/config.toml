@@ -1,6 +1,0 @@
-# NOTE: Use -Zcodegen-backend
-# [unstable]
-# codegen-backend = true
-
-[profile.dev]
-codegen-backend = "cranelift"

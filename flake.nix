@@ -176,7 +176,7 @@
               # in the package expression
               #
               # This should only be set with `CARGO_BUILD_RUSTFLAGS="$CARGO_BUILD_RUSTFLAGS -C your-flags"`
-              CARGO_BUILD_RUSTFLAGS = fht-compositor.RUSTFLAGS;
+              CARGO_BUILD_RUSTFLAGS = "${fht-compositor.RUSTFLAGS} -Zcodegen-backend=cranelift";
             };
           };
       };
