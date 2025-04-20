@@ -25,7 +25,7 @@ First, get the latest Rust available through your preferred means.
 
 > [!NOTE] Minimum supported rust version
 > The MSRV of `fht-compositor` is mostly tied to [Smithay](https://github.com/smithay)'s MSRV.<br>
-> As of writing this it's currently `1.80`
+> As of writing this it's currently `1.84`
 
 You will need the following system dependencies. Depending on your distribution, you might want to install the
 `-dev` or `-devel` or `-headers` variant to get developement headers that are required to build.
