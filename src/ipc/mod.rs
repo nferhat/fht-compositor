@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 
+use anyhow::Context;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -47,7 +48,7 @@ pub fn start(
                 error!(?err, "Failed to handle IPC client request");
             }
         })
-        .map_err(|err| anyhow::anyhow!("Failed to insert calloop channel for IPC server: {err}"));
+        .map_err(|err| anyhow::anyhow!("Failed to insert calloop channel for IPC server: {err}"))?;
 
     let pid = std::process::id();
 
@@ -130,7 +131,7 @@ async fn handle_new_client(
     let response = match request {
         Ok(req) => handle_request(req, to_compositor)
             .await
-            .map_err(ToString::to_string),
+            .map_err(|err| err.to_string()),
         Err(err) => Err(err.to_string()), // Just write an error string;
     };
 
@@ -148,7 +149,7 @@ enum ClientRequest {
 async fn handle_request(
     req: fht_compositor_ipc::Request,
     to_compositor: calloop::channel::Sender<ClientRequest>,
-) -> Result<Response, &'static str> {
+) -> anyhow::Result<Response> {
     match req {
         fht_compositor_ipc::Request::Version => {
             Ok(Response::Version(crate::cli::get_version_string()))
@@ -161,7 +162,7 @@ async fn handle_request(
             let outputs = rx
                 .recv()
                 .await
-                .map_err(|_| "Failed to retreive output information")?;
+                .context("Failed to retreive output information")?;
 
             Ok(Response::Outputs(outputs))
         }
