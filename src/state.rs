@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
-use calloop::futures::{Executor, Scheduler};
+use calloop::futures::Scheduler;
 use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
