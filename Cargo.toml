@@ -14,6 +14,7 @@ repository = "https://github.com/nferhat/fht-compositor"
 
 [workspace.dependencies]
 anyhow = "1.0.79"
+clap = { version = "4.5.18", features = ["derive", "string"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 serde_json = "1.0.134"
@@ -87,14 +88,14 @@ egui = "0.31"
 egui_glow = "0.31"
 serde.workspace = true
 serde_json.workspace = true
-fht-compositor-ipc.path = "./fht-compositor-ipc"
+fht-compositor-ipc = { path = "./fht-compositor-ipc", features = ["clap"] }
 fht-animation = { git = "https://github.com/nferhat/fht-animation", version = "0.1.0" }
 # FIXME: We use this instead of std::sync::MappedMutexGuard
 # SEE: tracking issue for nightly flag: https://github.com/rust-lang/rust/issues/117108
 owning_ref = "0.4.1"
-clap = { version = "4.5.18", features = ["derive", "string"] }
 async-channel = "2.3.1"
 async-io = "2.3.4"
+clap.workspace = true
 clap_complete = "4.5.38"
 xdg = "2.5.2"
 tracy-client = { version = "0.18.0", default-features = false }

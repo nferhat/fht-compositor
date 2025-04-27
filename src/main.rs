@@ -76,6 +76,14 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             clap_complete::generate(shell, &mut command, name, &mut std::io::stdout());
             std::process::exit(0); // we just want to generate completions, nothing much
         }
+        Some(cli::Command::Ipc { request, json }) => {
+            if let Err(err) = ipc::client::make_request(request, json) {
+                error!(?err, "Failed to execute IPC client request");
+                std::process::exit(-1);
+            }
+
+            std::process::exit(0);
+        }
         _ => (),
     }
     // Start tracy client now since everything before is just basic setup or command handling.
