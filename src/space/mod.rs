@@ -296,6 +296,16 @@ impl Space {
         active_workspace.active_window()
     }
 
+    /// Get the active [`Monitor`] index of this [`Space`]
+    pub fn active_monitor_idx(&self) -> usize {
+        self.active_idx
+    }
+
+    /// Get the primary [`Monitor`] index of this [`Space`]
+    pub fn primary_monitor_idx(&self) -> usize {
+        self.primary_idx
+    }
+
     /// Get the active [`Window`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]

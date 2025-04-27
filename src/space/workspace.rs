@@ -40,6 +40,12 @@ impl std::fmt::Debug for WorkspaceId {
         write!(f, "workspace-{}", self.0)
     }
 }
+impl std::ops::Deref for WorkspaceId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug)]
 struct InteractiveResize {
@@ -1001,6 +1007,11 @@ impl Workspace {
         }
     }
 
+    /// Get the current fullscreened [`Tile`] index.
+    pub fn fullscreened_tile_idx(&self) -> Option<usize> {
+        self.fullscreened_tile_idx
+    }
+
     /// Get the current fullscreened [`Window`]
     pub fn fullscreened_window(&self) -> Option<Window> {
         self.tiles
@@ -1058,11 +1069,21 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// The master width factor of this [`Workspace`].
+    pub fn mwfact(&self) -> f64 {
+        self.mwfact
+    }
+
     /// Change the master width factor of this [`Workspace`].
     pub fn change_mwfact(&mut self, delta: f64, animate: bool) {
         self.has_transient_layout_changes = true;
         self.mwfact = (self.mwfact + delta).clamp(0.01, 0.99);
         self.arrange_tiles(animate);
+    }
+
+    /// The number of master windows factor of this [`Workspace`].
+    pub fn nmaster(&self) -> usize {
+        self.nmaster
     }
 
     /// Change the number of master windows of this [`Workspace`].

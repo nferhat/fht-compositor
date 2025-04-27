@@ -50,6 +50,10 @@ pub enum Request {
     Version,
     /// Request information about the connected outputs.
     Outputs,
+    /// Request information about all mapped windows.
+    Windows,
+    /// Request information about the workspace system.
+    Space,
 }
 
 /// A respose from the compositor.
@@ -60,6 +64,12 @@ pub enum Response {
     Version(String),
     /// Output information.
     Outputs(HashMap<String, Output>),
+    /// All windows information.
+    Windows(Vec<Window>),
+    /// Space information.
+    Space(Space),
+    /// Noop, for requests that do not need a result/output.
+    Noop,
 }
 
 /// A single output.
@@ -137,4 +147,128 @@ impl From<smithay::utils::Transform> for OutputTransform {
             smithay::utils::Transform::Flipped270 => OutputTransform::Flipped270,
         }
     }
+}
+
+/// A single window.
+///
+/// A window is a mapped onto the screen inside a [`Workspace`]. A [`Workspace`] is managed inside a
+/// [`Monitor`]. A window can't exist on two workspaces/monitors at the same time.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Window {
+    /// The unique ID of this window. It is used to make requests regarding this specific window.
+    pub id: usize,
+    /// The title of this window. The title is an optional short string of text describing the
+    /// window contents, or the window application title.
+    pub title: Option<String>,
+    /// The application ID of this window. An app-id lets you know what application is running. For
+    /// example:
+    /// - Alacritty windows will always have the app-id: `Alacritty`
+    /// - GNOME apps will take the pattern: `org.gnome.*`
+    ///
+    /// It is **not** unique! And you should make no assumptions about its contents.
+    pub app_id: Option<String>,
+    /// The output this window is on.
+    pub output: String,
+    /// The workspace index this window is on.
+    pub workspace_idx: usize,
+    /// The workspace ID this window is on.
+    pub workspace_id: usize,
+    /// The size of this window.
+    ///
+    /// This is the effective size of the window, not the animated one.
+    pub size: (u32, u32),
+    /// The position of this window relative to the [`Monitor`]/[`Workspace`] its mapped onto. It
+    /// does not represent the window position when actually being rendered!
+    ///
+    /// This is the effective location of the window, not the animated one.
+    pub location: (i32, i32),
+    /// Whether this window is fullscreened.
+    pub fullscreened: bool,
+    /// Whether this window is maximized.
+    pub maximized: bool,
+    /// Whether this window is tiled.
+    pub tiled: bool,
+    /// Whether this window is activated. This does not mean that this window is the *focused* one.
+    /// There can be multiple activated windows on different workspaces, but there's can be at
+    /// most only one focused window.
+    pub activated: bool,
+    /// Whether this window is focused. This means that the window is currently receiving keyboard
+    /// input. Make sure to read [`Window::activated`].
+    pub focused: bool,
+}
+
+/// A single workspace.
+///
+/// A workspace is a container of windows. It manages them and organizes them.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Workspace {
+    /// The unique ID of this workspace. It is used to make requests regarding this specific
+    /// workspace.
+    pub id: usize,
+    /// The [`Output`] this workspace belongs to.
+    pub output: String,
+    /// The [`Window`] list of this workspace.
+    pub windows: Vec<Window>,
+    /// The active window index.
+    ///
+    /// If there's a fullscreened window,
+    /// [`Workspace::active_window_index`] will be equal to
+    /// [`Workspace::fullscreen_window_idx`]
+    ///
+    /// If this is `None`, there are no [`Window`]s in this workspace.
+    pub active_window_idx: Option<usize>,
+    /// The fullscreened window index
+    ///
+    /// If this is `None`, there is no fullscreened [`Window`]s in this workspace.
+    pub fullscreen_window_idx: Option<usize>,
+    /// The master width factor.
+    ///
+    /// It is used in order to determine how much screen real estate should the master take up,
+    /// relative to the slave stack.
+    pub mwfact: f64,
+    /// The number of clients in the master stack.
+    ///
+    /// This must NEVER be 0.
+    pub nmaster: usize,
+}
+
+const WORKSPACE_COUNT: usize = 9;
+
+/// A single monitor.
+///
+/// A monitor is a representation of an [`Output`] in the [`Workspace`] system. Each monitor is a
+/// view onto a single workspace at a time.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Monitor {
+    /// The output associated with this monitor.
+    pub output: String,
+    /// The workspaces associated with this monitor.
+    pub workspaces: [Workspace; WORKSPACE_COUNT],
+    /// The active workspace index.
+    pub active_workspace_idx: usize,
+    /// Whether this monitor is the active/focused monitor.
+    pub active: bool,
+}
+
+/// Space information.
+///
+/// The space is the area containing all [`Monitor`] that organizes and orders them. When something
+/// mentions "global coordinates", it means the *logical* coordinate space inside this space.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Space {
+    /// The [`Monitor`]s tracked by the [`Space`]
+    pub monitors: Vec<Monitor>,
+    /// The index of the primary [`Monitor`].
+    ///
+    /// Usually this is the first added [`Monitor`]. In case the primary [`Monitor`] gets removed,
+    /// this index is incremented by one.
+    pub primary_idx: usize,
+    /// The index of the active [`Monitor`].
+    ///
+    /// This should be the monitor that has the pointer cursor in its bounds.
+    pub active_idx: usize,
 }

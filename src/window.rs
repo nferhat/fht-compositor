@@ -63,6 +63,13 @@ impl WindowId {
     }
 }
 
+impl std::ops::Deref for WindowId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
 struct WindowInner {
     id: WindowId,
