@@ -34,6 +34,14 @@ pub enum Command {
     CheckConfiguration,
     /// Generate shell completions for shell
     GenerateCompletions { shell: clap_complete::Shell },
+    /// Execute an IPC [`Request`].
+    Ipc {
+        #[command(subcommand)]
+        request: fht_compositor_ipc::Request,
+        /// Enable JSON output formatting
+        #[arg(short, long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

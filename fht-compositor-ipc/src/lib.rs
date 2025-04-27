@@ -44,6 +44,7 @@ pub fn connect() -> anyhow::Result<(std::path::PathBuf, UnixStream)> {
 
 /// A request you send to the compositor.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::Subcommand))]
 #[serde(rename_all = "kebab-case")]
 pub enum Request {
     /// Request the version information of the running `fht-compositor` instance.
@@ -209,8 +210,8 @@ pub struct Workspace {
     pub id: usize,
     /// The [`Output`] this workspace belongs to.
     pub output: String,
-    /// The [`Window`] list of this workspace.
-    pub windows: Vec<Window>,
+    /// The [`Window`] IDs on this workspace.
+    pub windows: Vec<usize>,
     /// The active window index.
     ///
     /// If there's a fullscreened window,
