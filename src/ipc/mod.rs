@@ -11,7 +11,9 @@ use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
 };
 
+use crate::focus_target::KeyboardFocusTarget;
 use crate::output::OutputExt;
+use crate::space::Workspace;
 use crate::state::State;
 
 /// The compositor IPC server.
@@ -144,6 +146,8 @@ async fn handle_new_client(
 
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
+    Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
+    Space(async_channel::Sender<fht_compositor_ipc::Space>),
 }
 
 async fn handle_request(
@@ -165,6 +169,30 @@ async fn handle_request(
                 .context("Failed to retreive output information")?;
 
             Ok(Response::Outputs(outputs))
+        }
+        fht_compositor_ipc::Request::Windows => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Windows(tx))
+                .context("IPC communication channel closed")?;
+            let windows = rx
+                .recv()
+                .await
+                .context("Failed to retreive output information")?;
+
+            Ok(Response::Windows(windows))
+        }
+        fht_compositor_ipc::Request::Space => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Space(tx))
+                .context("IPC communication channel closed")?;
+            let space = rx
+                .recv()
+                .await
+                .context("Failed to retreive output information")?;
+
+            Ok(Response::Space(space))
         }
     }
 }
@@ -228,8 +256,94 @@ impl State {
                     .collect();
                 tx.send_blocking(outputs)?
             }
+            ClientRequest::Windows(tx) => {
+                let focus = self.fht.keyboard.current_focus();
+                let windows = self
+                    .fht
+                    .space
+                    .monitors()
+                    .flat_map(|mon| {
+                        mon.workspaces()
+                            .flat_map(|ws| workspace_windows(ws, focus.as_ref()))
+                    })
+                    .collect();
+
+                tx.send_blocking(windows)?;
+            }
+            ClientRequest::Space(tx) => {
+                let keyboard_focus = self.fht.keyboard.current_focus();
+                let monitors = self
+                    .fht
+                    .space
+                    .monitors()
+                    .map(|mon| fht_compositor_ipc::Monitor {
+                        output: mon.output().name(),
+                        workspaces: mon
+                            .workspaces()
+                            .map(|workspace| {
+                                let workspace_id = *workspace.id();
+
+                                fht_compositor_ipc::Workspace {
+                                    output: mon.output().name(),
+                                    id: workspace_id,
+                                    active_window_idx: workspace.active_tile_idx(),
+                                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                                    mwfact: workspace.mwfact(),
+                                    nmaster: workspace.nmaster(),
+                                    windows: workspace_windows(workspace, keyboard_focus.as_ref()),
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .expect("workspace number is always 9"),
+                        active: mon.active(),
+                        active_workspace_idx: mon.active_workspace_idx(),
+                    })
+                    .collect();
+
+                tx.send_blocking(fht_compositor_ipc::Space {
+                    monitors,
+                    active_idx: self.fht.space.active_monitor_idx(),
+                    primary_idx: self.fht.space.primary_monitor_idx(),
+                })?;
+            }
         }
 
         Ok(())
     }
+}
+
+fn workspace_windows(
+    workspace: &Workspace,
+    keyboard_focus: Option<&KeyboardFocusTarget>,
+) -> Vec<fht_compositor_ipc::Window> {
+    let mut windows = Vec::with_capacity(workspace.windows().len());
+    let is_focused = move |window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
+    let output = workspace.output().name();
+    let workspace_id = *workspace.id();
+    let active_tile_idx = workspace.active_tile_idx();
+
+    for (tile_idx, tile) in workspace.tiles().enumerate() {
+        let window = tile.window();
+        let location = tile.location() + tile.window_loc();
+        let size = window.size();
+
+        windows.push(fht_compositor_ipc::Window {
+            id: *window.id(),
+            title: window.title(),
+            app_id: window.app_id(),
+            output: output.clone(),
+            workspace_idx: workspace.index(),
+            workspace_id,
+            size: (size.w as u32, size.h as u32),
+            location: location.into(),
+            fullscreened: window.fullscreen(),
+            maximized: window.maximized(),
+            tiled: window.tiled(),
+            activated: Some(tile_idx) == active_tile_idx,
+            focused: is_focused(window),
+        });
+    }
+
+    windows
 }
