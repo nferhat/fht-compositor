@@ -9,9 +9,13 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smithay.workspace = true
+
+[features]
+clap = []
 
 [[bin]]
 name = "test_client"

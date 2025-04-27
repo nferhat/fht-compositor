@@ -15,6 +15,9 @@ use crate::focus_target::KeyboardFocusTarget;
 use crate::output::OutputExt;
 use crate::space::Workspace;
 use crate::state::State;
+use crate::window::Window;
+
+pub mod client;
 
 /// The compositor IPC server.
 pub struct Server {
@@ -271,7 +274,6 @@ impl State {
                 tx.send_blocking(windows)?;
             }
             ClientRequest::Space(tx) => {
-                let keyboard_focus = self.fht.keyboard.current_focus();
                 let monitors = self
                     .fht
                     .space
@@ -290,7 +292,11 @@ impl State {
                                     fullscreen_window_idx: workspace.fullscreened_tile_idx(),
                                     mwfact: workspace.mwfact(),
                                     nmaster: workspace.nmaster(),
-                                    windows: workspace_windows(workspace, keyboard_focus.as_ref()),
+                                    windows: workspace
+                                        .windows()
+                                        .map(Window::id)
+                                        .map(|id| *id)
+                                        .collect(),
                                 }
                             })
                             .collect::<Vec<_>>()

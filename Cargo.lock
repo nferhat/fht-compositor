@@ -990,6 +990,7 @@ name = "fht-compositor-ipc"
 version = "25.3.1"
 dependencies = [
  "anyhow",
+ "clap",
  "serde",
  "serde_json",
  "smithay",
