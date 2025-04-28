@@ -27,7 +27,13 @@ pub fn make_request(request: fht_compositor_ipc::Request, json: bool) -> anyhow:
     };
 
     if json {
-        let json_buffer = serde_json::to_string(&response)?;
+        let json_buffer = match response {
+            fht_compositor_ipc::Response::Version(version) => serde_json::to_string(&version),
+            fht_compositor_ipc::Response::Outputs(hash_map) => serde_json::to_string(&hash_map),
+            fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
+            fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
+            fht_compositor_ipc::Response::Noop => return Ok(()),
+        }?;
         println!("{}", json_buffer);
         Ok(())
     } else {
