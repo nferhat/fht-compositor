@@ -53,11 +53,11 @@ pub enum KeyActionType {
 #[derive(Debug, Clone)]
 pub struct KeyAction {
     /// The type of the [`KeyAction`], I.E what to do.
-    r#type: KeyActionType,
+    pub r#type: KeyActionType,
     /// Whether we should allow this [`KeyAction`] to be executed while the compositor is locked.
-    allow_while_locked: bool,
+    pub allow_while_locked: bool,
     /// Whether we should repeat this key binding.
-    repeat: bool,
+    pub repeat: bool,
 }
 
 impl KeyAction {

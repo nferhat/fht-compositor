@@ -43,8 +43,7 @@ pub fn connect() -> anyhow::Result<(std::path::PathBuf, UnixStream)> {
 }
 
 /// A request you send to the compositor.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "clap", derive(clap::Subcommand))]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Request {
     /// Request the version information of the running `fht-compositor` instance.
@@ -55,6 +54,8 @@ pub enum Request {
     Windows,
     /// Request information about the workspace system.
     Space,
+    /// Request the compositor to execute an action.
+    Action(Action),
 }
 
 /// A respose from the compositor.
@@ -69,6 +70,8 @@ pub enum Response {
     Windows(Vec<Window>),
     /// Space information.
     Space(Space),
+    /// There was an error handling the request.
+    Error(String),
     /// Noop, for requests that do not need a result/output.
     Noop,
 }
@@ -272,4 +275,282 @@ pub struct Space {
     ///
     /// This should be the monitor that has the pointer cursor in its bounds.
     pub active_idx: usize,
+}
+
+/// An action to execute. This enum includes all possible key actions found in
+/// fht-compositor-config, and additional ones that are more specific.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+#[cfg_attr(feature = "clap", command(subcommand_value_name = "ACTION"))]
+#[cfg_attr(feature = "clap", command(subcommand_help_heading = "Actions"))]
+#[serde(rename_all = "kebab-case")]
+pub enum Action {
+    /// Exit the compositor.
+    Quit,
+    /// Reload compositor configuration.
+    ReloadConfig,
+    /// Select the next available layout in a [`Workspace`]
+    SelectNextLayout {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Select the next available layout in a [`Workspace`]
+    SelectPreviousLayout {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Set the maximized state of a window.
+    MaximizeWindow {
+        /// The state to set. Leave as `None` to toggle.
+        #[cfg_attr(feature = "clap", arg(long))]
+        state: Option<bool>,
+        /// The [`Window::id`] to toggle maximized on. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+    },
+    /// Set the fullscreen state of a window.
+    FullscreenWindow {
+        /// The state to set. Leave as `None` to toggle.
+        #[cfg_attr(feature = "clap", arg(long))]
+        state: Option<bool>,
+        /// The [`Window::id`] to toggle fullscreen on. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+    },
+    /// Set the floating state of a window.
+    FloatWindow {
+        /// The state to set. Leave as `None` to toggle.
+        #[cfg_attr(feature = "clap", arg(long))]
+        state: Option<bool>,
+        /// The [`Window::id`] to toggle floating on. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+    },
+    /// Center a floating window. If the window is tiled, this does nothing.
+    CenterFloatingWindow {
+        /// The [`Window::id`] to center on. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+    },
+    /// Move a floating window. If the window is tiled, this does nothing.
+    MoveFloatingWindow {
+        /// The [`Window::id`] to move. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+        // The location change to apply.
+        #[cfg_attr(feature = "clap", command(subcommand))]
+        change: WindowLocationChange,
+    },
+    /// Resize a floating window. If the window is tiled, this does nothing.
+    ResizeFloatingWindow {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+        // The size change to apply.
+        #[cfg_attr(feature = "clap", command(subcommand))]
+        change: WindowSizeChange,
+    },
+    /// Focus a window. This will focus the [`Monitor`] and [`Workspace`] that hold this window,
+    /// and force-change keyboard focus to it (unless there's a session lock active).
+    FocusWindow {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: usize,
+    },
+    /// Focus the next window in a [`Workspace`].
+    FocusNextWindow {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Focus the previous window in a [`Workspace`].
+    FocusPreviousWindow {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Swap thee currently focused window with the next window in a [`Workspace`].
+    SwapWithNextWindow {
+        /// Whether we should keep the currently focused window as is, or
+        #[cfg_attr(feature = "clap", arg(long, default_value_t = true))]
+        keep_focus: bool,
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Swap thee currently focused window with the previous window in a [`Workspace`].
+    SwapWithPreviousWindow {
+        /// Whether we should keep the currently focused window as is, or
+        #[cfg_attr(feature = "clap", arg(long, default_value_t = true))]
+        keep_focus: bool,
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+    },
+    /// Focus a given output.
+    FocusOutput {
+        /// The [`Output::name`] to focus.
+        output: String,
+    },
+    /// Focus the next output relative to the current one. Output order can be retreived using
+    /// [`Request::Outputs`]
+    FocusNextOutput,
+    /// Focus the previous output relative to the current one. Output order can be retreived using
+    /// [`Request::Outputs`]
+    FocusPreviousOutput,
+    /// Focus a given [`Workspace`]
+    FocusWorkspace {
+        /// The [`Workspace`] to focus.
+        workspace_id: usize,
+    },
+    /// Focus a given [`Workspace`] using an index.
+    FocusWorkspaceByIndex {
+        /// The [`Workspace`] to focus, referenced by index.
+        workspace_idx: usize,
+        /// The [`Monitor`] to change the focused [`Workspace`] on. Leave as `None` for the active
+        /// one.
+        output: Option<String>,
+    },
+    /// Focus the next workspace relative to the current one.
+    FocusNextWorkspace {
+        /// The [`Output`] to execute this action on. Leave as `None` for the active one.
+        output: Option<String>,
+    },
+    /// Focus the next workspace relative to the current one.
+    FocusPreviousWorkspace {
+        /// The [`Output`] to execute this action on. Leave as `None` for the active one.
+        output: Option<String>,
+    },
+    /// Close a [`Window`]
+    CloseWindow {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+        /// Whether to force-kill the window.
+        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = false))]
+        kill: bool,
+    },
+    /// Change the master width factor on a [`Workspace`]
+    ChangeMwfact {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+        /// The mwfact change to apply.
+        #[cfg_attr(feature = "clap", command(subcommand))]
+        change: MwfactChange,
+    },
+    /// Change the number of master clients on a [`Workspace`]
+    ChangeNmaster {
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: Option<usize>,
+        /// The nmaster change to apply.
+        #[cfg_attr(feature = "clap", command(subcommand))]
+        change: NmasterChange,
+    },
+    /// Change [`Window::proportion`] of a window.
+    ChangeWindowProportion {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+        /// The window proportion change to apply.
+        #[cfg_attr(feature = "clap", command(subcommand))]
+        change: WindowProportionChange,
+    },
+    /// Send a [`Window`] to a [`Workspace`].
+    SendWindowToWorkspace {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        window_id: Option<usize>,
+        /// The [`Workspace`] to send the window to.
+        #[cfg_attr(feature = "clap", arg(long))]
+        workspace_id: usize,
+    },
+}
+
+/// A window location change.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+pub enum WindowLocationChange {
+    /// Add this amount to the window location.
+    Change {
+        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        dx: Option<i32>,
+        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        dy: Option<i32>,
+    },
+    /// Set the window location to this value.
+    Set {
+        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        x: Option<i32>,
+        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        y: Option<i32>,
+    },
+}
+
+/// A window size change.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+pub enum WindowSizeChange {
+    /// Add this amount to the current window size. Clamps at (20, 20) for the minimum.
+    Change {
+        #[cfg_attr(feature = "clap", arg(long, allow_negative_numbers = true))]
+        dx: Option<i32>,
+        #[cfg_attr(feature = "clap", arg(long, allow_negative_numbers = true))]
+        dy: Option<i32>,
+    },
+    /// Set the window size to this value.
+    Set {
+        #[cfg_attr(feature = "clap", arg(long, allow_negative_numbers = true))]
+        x: Option<u32>,
+        #[cfg_attr(feature = "clap", arg(long, allow_negative_numbers = true))]
+        y: Option<u32>,
+    },
+}
+
+/// A window proportion change.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+pub enum WindowProportionChange {
+    /// Add this amount to the current window proportion.
+    Change {
+        #[cfg_attr(feature = "clap", arg(allow_negative_numbers = true))]
+        delta: f64,
+    },
+    /// Set the window size to this value.
+    Set {
+        #[cfg_attr(feature = "clap", arg(allow_negative_numbers = true))]
+        value: f64,
+    },
+}
+
+/// A master width factor change.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+pub enum MwfactChange {
+    /// Add this amount to the master width factor. Clamps inside [0.01, 0.99].
+    Change {
+        #[cfg_attr(feature = "clap", arg(allow_negative_numbers = true))]
+        delta: f64,
+    },
+    /// Set the mwfact to this value.
+    Set {
+        #[cfg_attr(feature = "clap", arg(allow_negative_numbers = true))]
+        value: f64,
+    },
+}
+
+/// A number of master clients change.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "clap", derive(clap::Parser))]
+pub enum NmasterChange {
+    /// Add this amount to the number of master clients. Clamps at min=1.
+    Change {
+        #[cfg_attr(feature = "clap", arg(allow_negative_numbers = true))]
+        delta: i32,
+    },
+    /// Set the nmaster to this value. Clamps at min=1.
+    Set { value: usize },
 }

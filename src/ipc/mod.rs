@@ -10,12 +10,17 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
 };
+use smithay::reexports::rustix;
+use smithay::utils::{Point, Size};
+use smithay::wayland::seat::WaylandFocus;
 
 use crate::focus_target::KeyboardFocusTarget;
+use crate::input::KeyAction;
 use crate::output::OutputExt;
-use crate::space::Workspace;
+use crate::space::{Workspace, WorkspaceId};
 use crate::state::State;
-use crate::window::Window;
+use crate::utils::get_credentials_for_surface;
+use crate::window::{Window, WindowId};
 
 pub mod client;
 
@@ -151,6 +156,10 @@ enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
     Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
+    Action(
+        fht_compositor_ipc::Action,
+        async_channel::Sender<anyhow::Result<()>>,
+    ),
 }
 
 async fn handle_request(
@@ -196,6 +205,17 @@ async fn handle_request(
                 .context("Failed to retreive output information")?;
 
             Ok(Response::Space(space))
+        }
+        fht_compositor_ipc::Request::Action(action) => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Action(action, tx))
+                .context("IPC communication channel closed")?;
+            let result = rx.recv().await.context("Failed to receive action result")?;
+            match result {
+                Ok(()) => Ok(Response::Noop),
+                Err(err) => Ok(Response::Error(err.to_string())),
+            }
         }
     }
 }
@@ -312,6 +332,558 @@ impl State {
                     active_idx: self.fht.space.active_monitor_idx(),
                     primary_idx: self.fht.space.primary_monitor_idx(),
                 })?;
+            }
+            ClientRequest::Action(action, tx) => {
+                tx.send_blocking(self.handle_ipc_action(action))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_ipc_action(&mut self, action: fht_compositor_ipc::Action) -> anyhow::Result<()> {
+        match action {
+            fht_compositor_ipc::Action::Quit => self.fht.stop = true,
+            fht_compositor_ipc::Action::ReloadConfig => self.reload_config(),
+            fht_compositor_ipc::Action::SelectNextLayout { workspace_id } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.select_next_layout(true);
+            }
+            fht_compositor_ipc::Action::SelectPreviousLayout { workspace_id } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.select_previous_layout(true);
+            }
+            fht_compositor_ipc::Action::MaximizeWindow { state, window_id } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_window() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let new_state = match state {
+                    Some(s) => s,
+                    None => !window.maximized(),
+                };
+                self.fht.space.maximize_window(&window, new_state, true);
+            }
+            fht_compositor_ipc::Action::FullscreenWindow { state, window_id } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_window() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let new_state = match state {
+                    Some(s) => s,
+                    None => !window.fullscreen(),
+                };
+                if new_state {
+                    self.fht.space.fullscreen_window(&window, true);
+                } else {
+                    window.request_fullscreen(false);
+                }
+            }
+            fht_compositor_ipc::Action::FloatWindow { state, window_id } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_window() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let new_state = match state {
+                    Some(s) => s, /* we invert since we set whether the window is tiled, not */
+                    // floating
+                    None => window.tiled(),
+                };
+                self.fht.space.float_window(&window, new_state, true);
+            }
+            fht_compositor_ipc::Action::CenterFloatingWindow { window_id } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    None => {
+                        if let Some(tile) = self.fht.space.active_window() {
+                            tile
+                        } else {
+                            // If there's no active window, we just silently return
+                            return Ok(());
+                        }
+                    }
+                };
+
+                if window.tiled() {
+                    // FIXME: Figure out whether we should error or actually tell the user about
+                    // the fact the window is not floating? Key-actions just ignore silently
+                    return Ok(());
+                }
+
+                self.fht.space.center_window(&window, true);
+            }
+            fht_compositor_ipc::Action::MoveFloatingWindow { window_id, change } => {
+                let tile = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .tiles_mut()
+                        .find(|tile| tile.window().id() == WindowId(id))
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_tile_mut() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                if tile.window().tiled() {
+                    // FIXME: Figure out whether we should error or actually tell the user about
+                    // the fact the window is not floating? Key-actions just ignore silently
+                    return Ok(());
+                }
+
+                let new_loc = match change {
+                    fht_compositor_ipc::WindowLocationChange::Change { dx, dy } => {
+                        let change = Point::from((dx.unwrap_or(0), dy.unwrap_or(0)));
+                        tile.location() + change
+                    }
+                    fht_compositor_ipc::WindowLocationChange::Set { x, y } => {
+                        let prev = tile.location();
+                        Point::from((x.unwrap_or(prev.x), y.unwrap_or(prev.y)))
+                    }
+                };
+                tile.set_location(new_loc, true);
+            }
+            fht_compositor_ipc::Action::ResizeFloatingWindow { window_id, change } => {
+                let tile = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .tiles_mut()
+                        .find(|tile| tile.window().id() == WindowId(id))
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_tile_mut() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                if tile.window().tiled() {
+                    // FIXME: Figure out whether we should error or actually tell the user about
+                    // the fact the window is not floating? Key-actions just ignore silently
+                    return Ok(());
+                }
+
+                let new_size = match change {
+                    fht_compositor_ipc::WindowSizeChange::Change { dx, dy } => {
+                        let change = Size::from((dx.unwrap_or(0), dy.unwrap_or(0)));
+                        tile.size() + change
+                    }
+                    fht_compositor_ipc::WindowSizeChange::Set { x, y } => {
+                        let prev = tile.size();
+                        Size::from((
+                            x.unwrap_or(prev.w as u32) as i32,
+                            y.unwrap_or(prev.h as u32) as i32,
+                        ))
+                    }
+                };
+
+                let new_size = Size::from((new_size.w.max(20), new_size.h.max(20)));
+                tile.set_size(new_size, true);
+            }
+            fht_compositor_ipc::Action::FocusWindow { window_id } => {
+                let window_id = WindowId(window_id);
+                let mut window = None;
+
+                for monitor in self.fht.space.monitors_mut() {
+                    let mut workspace_idx = None;
+                    for (ws_idx, workspace) in monitor.workspaces_mut().enumerate() {
+                        let mut tile_idx = None;
+                        if let Some((found_idx, tile)) = workspace
+                            .tiles()
+                            .enumerate()
+                            .find(|(_, tile)| tile.window().id() == window_id)
+                        {
+                            window = Some(tile.window().clone());
+                            tile_idx = Some(found_idx);
+                        }
+
+                        if let Some(idx) = tile_idx {
+                            workspace.set_active_tile_idx(idx);
+                            workspace.arrange_tiles(true);
+                            workspace_idx = Some(ws_idx);
+                            break;
+                        }
+                    }
+
+                    if let Some(idx) = workspace_idx {
+                        monitor.set_active_workspace_idx(idx, true);
+                        break;
+                    }
+                }
+
+                if let Some(window) = window {
+                    self.set_keyboard_focus(Some(window));
+                    return Ok(());
+                }
+
+                anyhow::bail!("No window with matching ID")
+            }
+            fht_compositor_ipc::Action::FocusNextWindow { workspace_id } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.activate_next_tile(true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::FocusPreviousWindow { workspace_id } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.activate_previous_tile(true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::SwapWithNextWindow {
+                keep_focus,
+                workspace_id,
+            } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.swap_active_tile_with_next(keep_focus, true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::SwapWithPreviousWindow {
+                keep_focus,
+                workspace_id,
+            } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.swap_active_tile_with_previous(keep_focus, true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::FocusOutput { output } => {
+                let output = self
+                    .fht
+                    .space
+                    .outputs()
+                    .find(|o| o.name() == output)
+                    .cloned()
+                    .context("No output matching name")?;
+                self.fht.focus_output(&output);
+            }
+            fht_compositor_ipc::Action::FocusNextOutput => {
+                self.process_key_action(
+                    KeyAction {
+                        r#type: crate::input::KeyActionType::FocusNextOutput,
+                        allow_while_locked: false,
+                        repeat: false,
+                    },
+                    // We dont really care about the key pattern since its only used for
+                    // key-repeating, which is turned off above.
+                    Default::default(),
+                );
+            }
+            fht_compositor_ipc::Action::FocusPreviousOutput => {
+                self.process_key_action(
+                    KeyAction {
+                        r#type: crate::input::KeyActionType::FocusNextOutput,
+                        allow_while_locked: false,
+                        repeat: false,
+                    },
+                    // We dont really care about the key pattern since its only used for
+                    // key-repeating, which is turned off above.
+                    Default::default(),
+                );
+            }
+            fht_compositor_ipc::Action::FocusWorkspace { workspace_id } => {
+                let mut output = None;
+                for monitor in self.fht.space.monitors_mut() {
+                    let mut idx = None;
+                    for (ws_idx, workspace) in monitor.workspaces().enumerate() {
+                        if workspace.id() == WorkspaceId(workspace_id) {
+                            idx = Some(ws_idx);
+                            break;
+                        }
+                    }
+
+                    if let Some(idx) = idx {
+                        monitor.set_active_workspace_idx(idx, true);
+                        output = Some(monitor.output().clone());
+                        break;
+                    }
+                }
+
+                let output = output.context("No workspace with matching ID")?;
+                self.fht.focus_output(&output);
+            }
+            fht_compositor_ipc::Action::FocusWorkspaceByIndex {
+                workspace_idx,
+                output,
+            } => {
+                let monitor = match output {
+                    None => self.fht.space.active_monitor_mut(),
+                    Some(name) => self
+                        .fht
+                        .space
+                        .monitors_mut()
+                        .find(|mon| mon.output().name() == name)
+                        .context("No output matching name")?,
+                };
+
+                anyhow::ensure!((0..9).contains(&workspace_idx), "Invalid workspace index");
+
+                monitor.set_active_workspace_idx(workspace_idx, true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::FocusNextWorkspace { output } => {
+                let monitor = match output {
+                    None => self.fht.space.active_monitor_mut(),
+                    Some(name) => self
+                        .fht
+                        .space
+                        .monitors_mut()
+                        .find(|mon| mon.output().name() == name)
+                        .context("No output matching name")?,
+                };
+
+                let idx = (monitor.active_workspace_idx() + 1).clamp(0, 8);
+                monitor.set_active_workspace_idx(idx, true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::FocusPreviousWorkspace { output } => {
+                let monitor = match output {
+                    None => self.fht.space.active_monitor_mut(),
+                    Some(name) => self
+                        .fht
+                        .space
+                        .monitors_mut()
+                        .find(|mon| mon.output().name() == name)
+                        .context("No output matching name")?,
+                };
+
+                let idx = monitor.active_workspace_idx().saturating_sub(1);
+                monitor.set_active_workspace_idx(idx, true);
+                self.update_keyboard_focus();
+            }
+            fht_compositor_ipc::Action::CloseWindow { window_id, kill } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    None => {
+                        if let Some(tile) = self.fht.space.active_window() {
+                            tile
+                        } else {
+                            // If there's no active window, we just silently return
+                            return Ok(());
+                        }
+                    }
+                };
+
+                match kill {
+                    false => window.toplevel().send_close(),
+                    true => {
+                        // Figure out the PID from credentials
+                        let credentials =
+                            get_credentials_for_surface(window.wl_surface().as_deref().unwrap())
+                                .context("Failed to get wl_surface credentials")?;
+                        rustix::process::kill_process(
+                            rustix::process::Pid::from_raw(credentials.pid).unwrap(),
+                            rustix::process::Signal::Kill,
+                        )
+                        .context("Failed to kill window process")?;
+                    }
+                }
+            }
+            fht_compositor_ipc::Action::ChangeMwfact {
+                workspace_id,
+                change,
+            } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                match change {
+                    fht_compositor_ipc::MwfactChange::Change { delta } => {
+                        workspace.change_mwfact(delta, true)
+                    }
+                    fht_compositor_ipc::MwfactChange::Set { value } => {
+                        workspace.set_mwfact(value, true)
+                    }
+                }
+            }
+            fht_compositor_ipc::Action::ChangeNmaster {
+                workspace_id,
+                change,
+            } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                match change {
+                    fht_compositor_ipc::NmasterChange::Change { delta } => {
+                        workspace.change_nmaster(delta, true)
+                    }
+                    fht_compositor_ipc::NmasterChange::Set { value } => {
+                        workspace.set_nmaster(value, true)
+                    }
+                }
+            }
+            fht_compositor_ipc::Action::ChangeWindowProportion { window_id, change } => {
+                let tile = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .tiles_mut()
+                        .find(|tile| tile.window().id() == WindowId(id))
+                        .context("No window with matching ID")?,
+                    // If there's no active window, we just silently return
+                    None => {
+                        if let Some(window) = self.fht.space.active_tile_mut() {
+                            window
+                        } else {
+                            return Ok(());
+                        }
+                    }
+                };
+
+                match change {
+                    fht_compositor_ipc::WindowProportionChange::Change { delta } => {
+                        let new_value = tile.proportion() + delta;
+                        tile.set_proportion(new_value);
+                    }
+                    fht_compositor_ipc::WindowProportionChange::Set { value } => {
+                        tile.set_proportion(value)
+                    }
+                }
+            }
+            fht_compositor_ipc::Action::SendWindowToWorkspace {
+                window_id,
+                workspace_id,
+            } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == WindowId(id))
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    None => {
+                        if let Some(tile) = self.fht.space.active_window() {
+                            tile
+                        } else {
+                            // If there's no active window, we just silently return
+                            return Ok(());
+                        }
+                    }
+                };
+
+                self.fht
+                    .space
+                    .move_window_to_workspace(&window, WorkspaceId(workspace_id), true);
             }
         }
 
