@@ -30,7 +30,7 @@ use crate::output::OutputExt;
 use crate::state::State;
 
 impl State {
-    fn update_keyboard_focus(&mut self) {
+    pub fn update_keyboard_focus(&mut self) {
         crate::profile_function!();
         let keyboard = self.fht.keyboard.clone();
         let pointer = self.fht.pointer.clone();
