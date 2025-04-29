@@ -4,6 +4,9 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use smithay::reexports::rustix;
+use smithay::reexports::wayland_server::backend::Credentials;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::{DisplayHandle, Resource};
 use smithay::utils::{Coordinate, Point, Rectangle};
 
 #[cfg(feature = "xdg-screencast-portal")]
@@ -85,6 +88,13 @@ pub fn spawn(cmd: &str) {
     if let Err(err) = res {
         warn!(?err, "Failed to create command spawner for command")
     }
+}
+
+pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {
+    let handle = surface.handle().upgrade()?;
+    let dh = DisplayHandle::from(handle);
+    let client = dh.get_client(surface.id()).ok()?;
+    client.get_credentials(&dh).ok()
 }
 
 pub trait RectCenterExt<C: Coordinate, Kind> {

@@ -1,12 +1,21 @@
 use std::io::{Read, Write as _};
 
+use crate::cli;
+
 /// Make a single request to the running `fht-compositor` IPC server.
 ///
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
-pub fn make_request(request: fht_compositor_ipc::Request, json: bool) -> anyhow::Result<()> {
+pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
+    let request = match request {
+        cli::Request::Version => fht_compositor_ipc::Request::Version,
+        cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
+        cli::Request::Windows => fht_compositor_ipc::Request::Windows,
+        cli::Request::Space => fht_compositor_ipc::Request::Space,
+        cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
+    };
+
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
     // handling for error logging yada-yada
-
     let (_, mut stream) = fht_compositor_ipc::connect()?;
     stream.set_nonblocking(false)?;
 
@@ -32,6 +41,9 @@ pub fn make_request(request: fht_compositor_ipc::Request, json: bool) -> anyhow:
             fht_compositor_ipc::Response::Outputs(hash_map) => serde_json::to_string(&hash_map),
             fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
             fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
+            fht_compositor_ipc::Response::Error(err) => {
+                anyhow::bail!("Failed to handle IPC request: {err:?}")
+            }
             fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
         println!("{}", json_buffer);
@@ -42,7 +54,7 @@ pub fn make_request(request: fht_compositor_ipc::Request, json: bool) -> anyhow:
     }
 }
 
-fn print_formatted(res: &fht_compositor_ipc::Response) -> std::io::Result<()> {
+fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
     let mut writer = std::io::BufWriter::new(std::io::stdout());
     match res {
         fht_compositor_ipc::Response::Version(version) => println!("{version}"),
@@ -160,6 +172,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> std::io::Result<()> {
             }
             //
         }
+        fht_compositor_ipc::Response::Error(err) => anyhow::bail!(err.clone()),
         fht_compositor_ipc::Response::Noop => (),
     }
 

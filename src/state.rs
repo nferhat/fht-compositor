@@ -953,6 +953,21 @@ impl Fht {
         }
     }
 
+    pub fn focus_output(&mut self, output: &Output) {
+        if let Some(window) = self.space.set_active_output(output) {
+            self.loop_handle.insert_idle(move |state| {
+                state.set_keyboard_focus(Some(window));
+            });
+
+            if self.config.general.cursor_warps {
+                let center = output.geometry().center();
+                self.loop_handle.insert_idle(move |state| {
+                    state.move_pointer(center.to_f64());
+                });
+            }
+        }
+    }
+
     pub fn output_resized(&mut self, output: &Output) {
         crate::profile_function!();
 
