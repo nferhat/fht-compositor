@@ -28,7 +28,7 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-#[derive(Debug, Clone, Copy, clap::Subcommand)]
+#[derive(Debug, Clone, clap::Subcommand)]
 pub enum Command {
     /// Check the compositor configuration for any errors.
     CheckConfiguration,
@@ -37,10 +37,28 @@ pub enum Command {
     /// Execute an IPC [`Request`].
     Ipc {
         #[command(subcommand)]
-        request: fht_compositor_ipc::Request,
+        request: Request,
         /// Enable JSON output formatting
         #[arg(short, long)]
         json: bool,
+    },
+}
+
+/// A request you send to the compositor.
+#[derive(Debug, Clone, PartialEq, clap::Subcommand)]
+pub enum Request {
+    /// Request the version information of the running `fht-compositor` instance.
+    Version,
+    /// Request information about the connected outputs.
+    Outputs,
+    /// Request information about all mapped windows.
+    Windows,
+    /// Request information about the workspace system.
+    Space,
+    /// Request the compositor to execute an action.
+    Action {
+        #[command(subcommand)]
+        action: fht_compositor_ipc::Action,
     },
 }
 

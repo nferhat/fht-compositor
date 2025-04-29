@@ -26,7 +26,7 @@ static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
 /// Identifier of a [`Workspace`].
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct WorkspaceId(usize);
+pub struct WorkspaceId(pub usize);
 impl WorkspaceId {
     /// Create a unique [`WorkspaceId`].
     ///
@@ -1081,6 +1081,13 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// Set the master width factor of this [`Workspace`].
+    pub fn set_mwfact(&mut self, value: f64, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.mwfact = value.clamp(0.01, 0.99);
+        self.arrange_tiles(animate);
+    }
+
     /// The number of master windows factor of this [`Workspace`].
     pub fn nmaster(&self) -> usize {
         self.nmaster
@@ -1090,6 +1097,13 @@ impl Workspace {
     pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
         self.has_transient_layout_changes = true;
         self.nmaster = self.nmaster.saturating_add_signed(delta as isize).max(1);
+        self.arrange_tiles(animate);
+    }
+
+    /// Set the number of master windows of this [`Workspace`].
+    pub fn set_nmaster(&mut self, value: usize, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.nmaster = value.max(1);
         self.arrange_tiles(animate);
     }
 
