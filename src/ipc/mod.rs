@@ -6,6 +6,7 @@ use anyhow::Context;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use smithay::desktop::layer_map_for_output;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
@@ -155,6 +156,7 @@ async fn handle_new_client(
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
     Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
+    LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
     Action(
         fht_compositor_ipc::Action,
@@ -193,6 +195,18 @@ async fn handle_request(
                 .context("Failed to retreive output information")?;
 
             Ok(Response::Windows(windows))
+        }
+        fht_compositor_ipc::Request::LayerShells => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::LayerShells(tx))
+                .context("IPC communication channel closed")?;
+            let layer_shells = rx
+                .recv()
+                .await
+                .context("Failed to retreive layer-shell information")?;
+
+            Ok(Response::LayerShells(layer_shells))
         }
         fht_compositor_ipc::Request::Space => {
             let (tx, rx) = async_channel::bounded(1);
@@ -292,6 +306,28 @@ impl State {
                     .collect();
 
                 tx.send_blocking(windows)?;
+            }
+            ClientRequest::LayerShells(tx) => {
+                let mut layers = Vec::new();
+                for output in self.fht.space.outputs() {
+                    let layer_map = layer_map_for_output(output);
+                    let output_name = output.name();
+                    for layer_surface in layer_map.layers() {
+                        layers.push(fht_compositor_ipc::LayerShell {
+                            namespace: layer_surface.namespace().to_string(),
+                            output: output_name.clone(),
+                            // SAFETY: We know that all the enum variants are the same
+                            layer: unsafe { std::mem::transmute(layer_surface.layer()) },
+                            keyboard_interactivity: unsafe {
+                                std::mem::transmute(
+                                    layer_surface.cached_state().keyboard_interactivity,
+                                )
+                            },
+                        })
+                    }
+                }
+
+                tx.send_blocking(layers)?;
             }
             ClientRequest::Space(tx) => {
                 let monitors = self
