@@ -325,7 +325,12 @@ impl Space {
         self.primary_idx
     }
 
-    /// Get the active [`Window`] of this [`Space`], if any.
+    /// Get the active [`Monitor`] of this [`Space`], if any.
+    pub fn active_monitor(&self) -> &Monitor {
+        &self.monitors[self.active_idx]
+    }
+
+    /// Get the active [`Monitor`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]
     }

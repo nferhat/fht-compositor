@@ -55,6 +55,10 @@ pub enum Request {
     Windows,
     /// Request information about the workspace system.
     Space,
+    /// Request information about the focused window.
+    FocusedWindow,
+    /// Request information about the focused workspace.
+    FocusedWorkspace,
     /// Request information about all layer-shells.
     LayerShells,
     /// Request the compositor to execute an action.
