@@ -158,6 +158,8 @@ enum ClientRequest {
     Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
     LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
+    FocusedWindow(async_channel::Sender<Option<fht_compositor_ipc::Window>>),
+    FocusedWorkspace(async_channel::Sender<fht_compositor_ipc::Workspace>),
     Action(
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
@@ -219,6 +221,30 @@ async fn handle_request(
                 .context("Failed to retreive output information")?;
 
             Ok(Response::Space(space))
+        }
+        fht_compositor_ipc::Request::FocusedWindow => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::FocusedWindow(tx))
+                .context("IPC communication channel closed")?;
+            let space = rx
+                .recv()
+                .await
+                .context("Failed to retreive focused window information")?;
+
+            Ok(Response::FocusedWindow(space))
+        }
+        fht_compositor_ipc::Request::FocusedWorkspace => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::FocusedWorkspace(tx))
+                .context("IPC communication channel closed")?;
+            let space = rx
+                .recv()
+                .await
+                .context("Failed to retreive focused workspace information")?;
+
+            Ok(Response::FocusedWorkspace(space))
         }
         fht_compositor_ipc::Request::Action(action) => {
             let (tx, rx) = async_channel::bounded(1);
@@ -367,6 +393,48 @@ impl State {
                     monitors,
                     active_idx: self.fht.space.active_monitor_idx(),
                     primary_idx: self.fht.space.primary_monitor_idx(),
+                })?;
+            }
+            ClientRequest::FocusedWindow(tx) => {
+                let monitor = self.fht.space.active_monitor();
+                let output = monitor.output().name();
+                let workspace = monitor.active_workspace();
+                let window = workspace.active_tile().map(|tile| {
+                    let window = tile.window();
+                    let location = tile.location() + tile.window_loc();
+                    let size = window.size();
+
+                    fht_compositor_ipc::Window {
+                        id: *window.id(),
+                        title: window.title(),
+                        app_id: window.app_id(),
+                        output: output.clone(),
+                        workspace_idx: workspace.index(),
+                        workspace_id: *workspace.id(),
+                        size: (size.w as u32, size.h as u32),
+                        location: location.into(),
+                        fullscreened: window.fullscreen(),
+                        maximized: window.maximized(),
+                        tiled: window.tiled(),
+                        // NOTE: We can hardcode these two
+                        activated: true,
+                        focused: true,
+                    }
+                });
+
+                tx.send_blocking(window)?;
+            }
+            ClientRequest::FocusedWorkspace(tx) => {
+                let monitor = self.fht.space.active_monitor();
+                let workspace = monitor.active_workspace();
+                tx.send_blocking(fht_compositor_ipc::Workspace {
+                    output: monitor.output().name(),
+                    id: *workspace.id(),
+                    active_window_idx: workspace.active_tile_idx(),
+                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                    mwfact: workspace.mwfact(),
+                    nmaster: workspace.nmaster(),
+                    windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
                 })?;
             }
             ClientRequest::Action(action, tx) => {

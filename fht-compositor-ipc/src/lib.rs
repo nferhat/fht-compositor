@@ -56,6 +56,10 @@ pub enum Request {
     LayerShells,
     /// Request information about the workspace system.
     Space,
+    /// Request information about the focused window.
+    FocusedWindow,
+    /// Request information about the focused workspace.
+    FocusedWorkspace,
     /// Request the compositor to execute an action.
     Action(Action),
 }
@@ -74,6 +78,10 @@ pub enum Response {
     LayerShells(Vec<LayerShell>),
     /// Space information.
     Space(Space),
+    /// Focused window information.
+    FocusedWindow(Option<Window>),
+    /// Focused workspace information.
+    FocusedWorkspace(Workspace),
     /// There was an error handling the request.
     Error(String),
     /// Noop, for requests that do not need a result/output.
