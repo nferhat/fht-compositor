@@ -56,6 +56,8 @@ pub enum Request {
     Windows,
     /// Request information about the workspace system.
     Space,
+    /// Request information about all layer-shells.
+    LayerShells,
     /// Request the compositor to execute an action.
     Action {
         #[command(subcommand)]

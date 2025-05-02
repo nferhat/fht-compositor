@@ -10,6 +10,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
         cli::Request::Windows => fht_compositor_ipc::Request::Windows,
+        cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
         cli::Request::Space => fht_compositor_ipc::Request::Space,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
     };
@@ -40,6 +41,9 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             fht_compositor_ipc::Response::Version(version) => serde_json::to_string(&version),
             fht_compositor_ipc::Response::Outputs(hash_map) => serde_json::to_string(&hash_map),
             fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
+            fht_compositor_ipc::Response::LayerShells(layer_shells) => {
+                serde_json::to_string(&layer_shells)
+            }
             fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
             fht_compositor_ipc::Response::Error(err) => {
                 anyhow::bail!("Failed to handle IPC request: {err:?}")
@@ -138,6 +142,20 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
                 writeln!(&mut writer, "\tTiled: {}", window.tiled)?;
                 writeln!(&mut writer, "\tActivated: {}", window.activated)?;
                 writeln!(&mut writer, "\tFocused: {}", window.focused)?;
+                writeln!(&mut writer, "---")?;
+            }
+        }
+        fht_compositor_ipc::Response::LayerShells(layer_shells) => {
+            for (idx, layer_shell) in layer_shells.iter().enumerate() {
+                writeln!(&mut writer, "Layer Shell #{idx}")?;
+                writeln!(&mut writer, "\tOutput: {}", layer_shell.output)?;
+                writeln!(&mut writer, "\tNamespace: {}", layer_shell.namespace)?;
+                writeln!(&mut writer, "\tLayer: {:?}", layer_shell.layer)?;
+                writeln!(
+                    &mut writer,
+                    "\tKeyboard Interactivity: {:?}",
+                    layer_shell.keyboard_interactivity
+                )?;
                 writeln!(&mut writer, "---")?;
             }
         }

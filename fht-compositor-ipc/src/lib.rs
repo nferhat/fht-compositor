@@ -52,6 +52,8 @@ pub enum Request {
     Outputs,
     /// Request information about all mapped windows.
     Windows,
+    /// Request information about all layer-shells.
+    LayerShells,
     /// Request information about the workspace system.
     Space,
     /// Request the compositor to execute an action.
@@ -68,6 +70,8 @@ pub enum Response {
     Outputs(HashMap<String, Output>),
     /// All windows information.
     Windows(Vec<Window>),
+    /// All layer-shells information.
+    LayerShells(Vec<LayerShell>),
     /// Space information.
     Space(Space),
     /// There was an error handling the request.
@@ -275,6 +279,48 @@ pub struct Space {
     ///
     /// This should be the monitor that has the pointer cursor in its bounds.
     pub active_idx: usize,
+}
+
+/// A single layer-shell.
+///
+/// A layer-shell represents a component of your desktop interface. They can be for example your
+/// notification popup, a bar, or some fancy widget you created.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LayerShell {
+    /// The namespace of this layer-shell. It is used to define the purpose of this layer-shell.
+    pub namespace: String,
+    /// The [`Output::name`] this layer-shell is mapped onto.
+    pub output: String,
+    /// The layer this layer-shell is mapped onto.
+    pub layer: Layer,
+    /// The keyboard interactivity of this layer-shell.
+    pub keyboard_interactivity: KeyboardInteractivity,
+}
+
+/// Types of keyboard interaction possible for a layer shell surface.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum KeyboardInteractivity {
+    /// No keyboard focus is possible.
+    None = 0,
+    /// The layer-shell requests exclusive keyboard focus.
+    Exclusive,
+    /// The layer-shell requests regular keyboard focus.
+    ///
+    /// This tells the compositor that the layer-surface can accept keyboard input. The user can
+    /// focus the layer-shell by clicking on it.
+    OnDemand,
+}
+
+/// Available layers for surfaces
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Layer {
+    Background = 0,
+    Bottom,
+    Top,
+    Overlay,
 }
 
 /// An action to execute. This enum includes all possible key actions found in
