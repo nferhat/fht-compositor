@@ -140,10 +140,12 @@ async fn handle_new_client(
     let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
 
     let response = match request {
-        Ok(req) => handle_request(req, to_compositor)
-            .await
-            .map_err(|err| err.to_string()),
-        Err(err) => Err(err.to_string()), // Just write an error string;
+        Ok(req) => match handle_request(req, to_compositor).await {
+            Ok(res) => res,
+            // We transform the Result::Err into a Response::Error
+            Err(err) => Response::Error(err.to_string()),
+        },
+        Err(err) => Response::Error(err.to_string()), // Just write an error string;
     };
 
     let mut response_str = serde_json::to_string(&response)?;
