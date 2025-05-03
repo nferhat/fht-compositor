@@ -24,18 +24,15 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 
     let mut req = serde_json::to_string(&request).unwrap();
     req.push('\n'); // it is required to append a newline.
-    let size = stream.write(req.as_bytes()).unwrap();
-    anyhow::ensure!(req.len() == size);
+    _ = stream.write(req.as_bytes())?;
 
     let mut res_buf = String::new();
-    let size = stream.read_to_string(&mut res_buf).unwrap();
-    anyhow::ensure!(res_buf.len() == size);
+    _ = stream.read_to_string(&mut res_buf)?;
 
-    let response: Result<fht_compositor_ipc::Response, String> =
-        serde_json::de::from_str(&res_buf)?;
+    let response = serde_json::de::from_str(&res_buf)?;
     let response = match response {
-        Ok(res) => res,
-        Err(err) => anyhow::bail!("IPC error: {err}"),
+        fht_compositor_ipc::Response::Error(err) => anyhow::bail!("IPC error: {err}"),
+        res => res,
     };
 
     if json {
