@@ -7,21 +7,45 @@ use smithay::utils::{Logical, Point};
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraintsHandler};
 use smithay::wayland::seat::WaylandFocus;
 
-use crate::state::State;
+use crate::state::{Fht, State};
+
+impl Fht {
+    /// Activate the pointer constraint associated with the currently focused surface, if any.
+    pub fn activate_pointer_constraint(&mut self) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let pointer_loc = pointer.current_location();
+
+        let Some((under, surface_loc)) = self.focus_target_under(pointer_loc) else {
+            return;
+        };
+        let Some(surface) = under.wl_surface() else {
+            return;
+        };
+
+        with_pointer_constraint(&surface, &pointer, |constraint| {
+            let Some(constraint) = constraint else { return };
+
+            if constraint.is_active() {
+                return;
+            }
+
+            // Constraint does not apply if not within region.
+            if let Some(region) = constraint.region() {
+                let pos_within_surface = pointer_loc - surface_loc.to_f64();
+                if !region.contains(pos_within_surface.to_i32_round()) {
+                    return;
+                }
+            }
+
+            constraint.activate();
+        });
+    }
+}
 
 impl PointerConstraintsHandler for State {
-    fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
-        if pointer
-            .current_focus()
-            .and_then(|x| x.wl_surface().map(|s| s.into_owned()))
-            .is_some_and(|s| s == *surface)
-        {
-            return;
-        }
-
-        with_pointer_constraint(surface, pointer, |constraint| {
-            constraint.unwrap().activate();
-        })
+    fn new_constraint(&mut self, _: &WlSurface, _: &PointerHandle<Self>) {
+        self.update_pointer_focus();
+        self.fht.activate_pointer_constraint();
     }
 
     fn cursor_position_hint(
