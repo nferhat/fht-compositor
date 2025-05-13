@@ -618,7 +618,7 @@ impl Space {
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.
     ///
     /// `point` is expected to be in global coordinate space.
-    pub fn fullscreened_window(
+    pub fn fullscreened_window_under(
         &self,
         point: Point<f64, Logical>,
     ) -> Option<(Window, Point<i32, Logical>)> {
