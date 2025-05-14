@@ -1,17 +1,18 @@
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
-    PopupKind, PopupPointerGrab, PopupUngrabStrategy, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface,
+    PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::ConstraintAdjustment;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, WmCapabilities,
 };
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::Serial;
+use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
 };
@@ -24,6 +25,7 @@ use crate::focus_target::KeyboardFocusTarget;
 use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
+use crate::space::Workspace;
 use crate::state::{Fht, State, UnmappedWindow};
 use crate::window::Window;
 
@@ -361,37 +363,88 @@ impl Fht {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some((window, workspace)) = self.space.find_window_and_workspace(&root) else {
+
+        if let Some((window, workspace)) = self.space.find_window_and_workspace(&root) {
+            self.unconstrain_window_popup(popup, window, workspace);
+        } else if let Some((layer_surface, output)) = self.space.outputs().find_map(|o| {
+            let layer_map = layer_map_for_output(o);
+            let layer_surface = layer_map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)?;
+            Some((layer_surface.clone(), o.clone()))
+        }) {
+            self.unconstrain_layer_popup(popup, &layer_surface, &output);
+        };
+    }
+
+    pub fn unconstrain_window_popup(
+        &self,
+        popup: &PopupSurface,
+        window: Window,
+        workspace: &Workspace,
+    ) {
+        // we constrain the popup inside the output the window is, to avoid overflows
+        let mut target = workspace.output().geometry();
+        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+        target.loc -= workspace.window_location(&window).unwrap();
+
+        self.place_popup_inside(popup, target);
+    }
+
+    pub fn unconstrain_layer_popup(
+        &self,
+        popup: &PopupSurface,
+        layer_surface: &LayerSurface,
+        output: &Output,
+    ) {
+        let output_geo = output.geometry();
+        let map = layer_map_for_output(output);
+        let Some(layer_geo) = map.layer_geometry(layer_surface) else {
             return;
         };
 
-        // The target (aka the popup) geometry should be relative to the parent (aka the window's)
-        // geometry, based on the xdg_shell protocol requirements.
-        let window_loc = workspace.window_location(&window).unwrap();
-        let mut target = workspace.output().geometry();
+        // The target geometry for the positioner should be relative to its parent's geometry, so
+        // we will compute that here.
+        let mut target = Rectangle::from_size(output_geo.size);
+        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
+        target.loc -= layer_geo.loc;
 
-        let parent_surface = popup.get_parent_surface();
+        self.place_popup_inside(popup, target);
+    }
 
-        if let Some(parent) = parent_surface {
-            if parent != root {
-                let parent_popup_kind = self.popups.find_popup(&parent);
-                if let Some(PopupKind::Xdg(parent_popup)) = parent_popup_kind {
-                    let parent_toplevel_coords =
-                        get_popup_toplevel_coords(&PopupKind::Xdg(parent_popup.clone()));
-
-                    target.loc = window_loc + parent_toplevel_coords;
-
-                    popup.with_pending_state(|state| {
-                        state.geometry = state.positioner.get_unconstrained_geometry(target);
-                    });
-                    return;
-                }
-            }
-        }
-
-        target.loc = window_loc + get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-
+    pub fn place_popup_inside(&self, popup: &PopupSurface, target: Rectangle<i32, Logical>) {
         popup.with_pending_state(|state| {
+            // We try to unconstrain with some padding, but, we can do without
+            const PADDING: i32 = 10;
+            let mut padded = target;
+            if PADDING * 2 < padded.size.w {
+                padded.loc.x += PADDING;
+                padded.size.w -= PADDING * 2;
+            }
+            if PADDING * 2 < padded.size.h {
+                padded.loc.y += PADDING;
+                padded.size.h -= PADDING * 2;
+            }
+
+            if padded == target {
+                // We couldn't add padding, so just unconstrain as usual
+                state.geometry = state.positioner.get_unconstrained_geometry(target);
+                return;
+            }
+
+            // Do not try to resize to fit the padded target rectangle.
+            let mut no_resize = state.positioner;
+            no_resize
+                .constraint_adjustment
+                .remove(ConstraintAdjustment::ResizeX);
+            no_resize
+                .constraint_adjustment
+                .remove(ConstraintAdjustment::ResizeY);
+
+            let geo = no_resize.get_unconstrained_geometry(padded);
+            if padded.contains_rect(geo) {
+                state.geometry = geo;
+            }
+
+            // Could not unconstrain into the padded target, so resort to the regular one.
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
     }

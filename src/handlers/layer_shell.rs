@@ -83,12 +83,13 @@ impl WlrLayerShellHandler for State {
             let layer_map = layer_map_for_output(output);
             let layer = layer_map
                 .layers()
-                .find(|layer| layer.layer_surface() == &parent);
-            layer.cloned()
+                .find(|layer| layer.layer_surface() == &parent)?;
+            Some((layer.clone(), output.clone()))
         });
 
-        if let Some(parent_layer) = desktop_layer {
-            self.fht.unconstrain_layer_popup(&parent_layer, &popup);
+        if let Some((parent_layer, output)) = desktop_layer {
+            self.fht
+                .unconstrain_layer_popup(&popup, &parent_layer, &output);
             if let Err(err) = self.fht.popups.track_popup(PopupKind::from(popup)) {
                 tracing::warn!(?err, "Failed to track layer shell popup!");
             }

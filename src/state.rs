@@ -1784,49 +1784,6 @@ impl Fht {
             };
         });
     }
-
-    pub fn unconstrain_layer_popup(&self, parent: &LayerSurface, popup: &PopupSurface) {
-        let output = self.space.outputs().find(|output| {
-            let layer_map = layer_map_for_output(output);
-            layer_map
-                .layer_for_surface(parent.wl_surface(), WindowSurfaceType::TOPLEVEL)
-                .is_some()
-        });
-
-        let Some(output) = output else {
-            return;
-        };
-
-        let layer_map = layer_map_for_output(output);
-        let Some(layer_geo) = layer_map.layer_geometry(parent) else {
-            return;
-        };
-
-        let mut target = output.geometry();
-        target.loc = layer_geo.loc;
-
-        let parent_surface = popup.get_parent_surface();
-        if let Some(parent_wl_surface) = parent_surface {
-            if &parent_wl_surface != parent.wl_surface() {
-                let parent_popup_kind = self.popups.find_popup(&parent_wl_surface);
-                if let Some(PopupKind::Xdg(parent_popup)) = parent_popup_kind {
-                    let mut nested_target = target;
-
-                    let parent_loc = parent_popup.with_pending_state(|state| state.geometry.loc);
-                    nested_target.loc = nested_target.loc + parent_loc;
-
-                    popup.with_pending_state(|state| {
-                        state.geometry = state.positioner.get_unconstrained_geometry(nested_target);
-                    });
-                    return;
-                }
-            }
-        }
-
-        popup.with_pending_state(|state| {
-            state.geometry = state.positioner.get_unconstrained_geometry(target);
-        });
-    }
 }
 
 /// Function to send frame callbacks for a single [`Window`] on the [`Output`].
