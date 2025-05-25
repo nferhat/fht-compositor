@@ -300,7 +300,6 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         projection_matrix,
                         *scale,
                         &vbos,
-                        debug,
                         supports_instancing,
                         dst,
                     )
