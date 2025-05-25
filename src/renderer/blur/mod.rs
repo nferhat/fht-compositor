@@ -266,7 +266,7 @@ fn render_blur_pass_with_frame(
     renderer: &mut GlowRenderer,
     sample_buffer: &GlesTexture,
     render_buffer: &mut GlesTexture,
-    blur_program: &shader::BlurShader,
+    program: &shader::BlurShader,
     half_pixel: [f32; 2],
     config: &fht_compositor_config::Blur,
 ) -> anyhow::Result<()> {
@@ -336,18 +336,6 @@ fn render_blur_pass_with_frame(
         };
 
         mat *= projection;
-
-        // SAFETY: internal texture should always have a format
-        // We also use Abgr8888 which is known and confirmed
-        let (internal_format, _, _) =
-            fourcc_to_gl_formats(sample_buffer.format().unwrap()).unwrap();
-        let variant = blur_program.variant_for_format(Some(internal_format), false);
-
-        let program = if debug {
-            &variant.debug
-        } else {
-            &variant.normal
-        };
 
         gl.ActiveTexture(ffi::TEXTURE0);
         gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
@@ -433,7 +421,6 @@ fn render_blur_pass_with_frame(
 unsafe fn render_blur_pass_with_gl(
     gl: &ffi::Gles2,
     vbos: &[u32; 2],
-    debug: bool,
     supports_instancing: bool,
     projection_matrix: Mat3,
     // The buffers used for blurring
@@ -441,7 +428,7 @@ unsafe fn render_blur_pass_with_gl(
     render_buffer: &mut GlesTexture,
     scale: i32,
     // The current blur program + config
-    blur_program: &shader::BlurShader,
+    program: &shader::BlurShader,
     half_pixel: [f32; 2],
     config: &fht_compositor_config::Blur,
     // dst is the region that should have blur
@@ -515,18 +502,6 @@ unsafe fn render_blur_pass_with_gl(
             }
 
             1
-        };
-
-        // SAFETY: internal texture should always have a format
-        // We also use Abgr8888 which is known and confirmed
-        let (internal_format, _, _) =
-            fourcc_to_gl_formats(sample_buffer.format().unwrap()).unwrap();
-        let variant = blur_program.variant_for_format(Some(internal_format), false);
-
-        let program = if debug {
-            &variant.debug
-        } else {
-            &variant.normal
         };
 
         gl.ActiveTexture(ffi::TEXTURE0);
@@ -610,7 +585,6 @@ pub(super) unsafe fn get_main_buffer_blur(
     projection_matrix: Mat3,
     scale: i32,
     vbos: &[u32; 2],
-    debug: bool,
     supports_instancing: bool,
     // dst is the region that we want blur on
     dst: Rectangle<i32, Physical>,
@@ -688,7 +662,6 @@ pub(super) unsafe fn get_main_buffer_blur(
             render_blur_pass_with_gl(
                 gl,
                 vbos,
-                debug,
                 supports_instancing,
                 projection_matrix,
                 sample_buffer,
@@ -712,7 +685,6 @@ pub(super) unsafe fn get_main_buffer_blur(
             render_blur_pass_with_gl(
                 gl,
                 &vbos,
-                debug,
                 supports_instancing,
                 projection_matrix,
                 sample_buffer,
