@@ -44,8 +44,7 @@ impl SessionLockHandler for State {
             let _ = output_state.lock_surface.take();
         }
         // Reset focus
-        let active_window = self.fht.space.active_window();
-        self.set_keyboard_focus(active_window);
+        self.update_keyboard_focus();
     }
 
     fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {

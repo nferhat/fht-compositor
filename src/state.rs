@@ -191,10 +191,9 @@ impl State {
             state => state,
         };
 
-        // Must refresh these two after checking and clearing session lock surfaces.
-        // Otherwise we might focus a dead surface and require the user to hit a keybind/move the
-        // mouse to reset the keyboard focus.
-        self.update_keyboard_focus();
+        // NOTE: If we cleared lock surface, `SessionLockHandler::unlock` will call
+        // `State::update_keyboard_focus` to appropriatly update the focus of the keyboard.
+        // This is done only to keep pointer contents updated.
         self.update_pointer_focus();
 
         {
