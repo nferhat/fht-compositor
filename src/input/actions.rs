@@ -425,8 +425,9 @@ impl State {
                 }
             }
             KeyActionType::FocusWorkspace(idx) => {
+                let idx = (*idx).clamp(0, 8);
                 let mon = self.fht.space.active_monitor_mut();
-                if let Some(window) = mon.set_active_workspace_idx(*idx, true) {
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
                     self.set_keyboard_focus(Some(window));
                 }
             }
