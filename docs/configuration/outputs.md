@@ -10,6 +10,11 @@ You refer by outputs using their connector names, for example `eDP-1` is your la
 
 You configure outputs by using the `outputs.{connector-name}` table.
 
+> [!NOTE] Output management tools
+> The compositor supports the `wlr-output-management-v1` protool, allowing you to use tools like [wlr-randr](https://sr.ht/~emersion/wlr-randr/)
+> or any GUI equivalent to manage the outputs at runtime. Be aware that the output configuration will be *reset* if you change the
+> output configuration!
+
 ---
 
 #### `disable`
