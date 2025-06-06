@@ -15,9 +15,7 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, under_from_surface_tree,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{
-    layer_map_for_output, LayerSurface, PopupKind, PopupManager, WindowSurfaceType,
-};
+use smithay::desktop::{layer_map_for_output, PopupManager, WindowSurfaceType};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -56,7 +54,7 @@ use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::dialog::XdgDialogState;
-use smithay::wayland::shell::xdg::{PopupSurface, XdgShellState};
+use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::tablet_manager::TabletManagerState;

@@ -519,7 +519,6 @@ impl State {
                     }
                 }
 
-                let pointer_loc = pointer.current_location();
                 pointer.button(
                     self,
                     &ButtonEvent {
