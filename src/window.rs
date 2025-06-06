@@ -269,6 +269,11 @@ impl Window {
         });
     }
 
+    pub fn activated(&self) -> bool {
+        self.toplevel()
+            .with_pending_state(|state| state.states.contains(State::Activated))
+    }
+
     // NOTE: Tiled implementation can vastly different by the client, since we have 4 possible
     // states to toggle on for tiling, and a client can check for any of these to determine whether
     // they are tiled.

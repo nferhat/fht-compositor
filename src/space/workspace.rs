@@ -209,7 +209,7 @@ impl Workspace {
         // Reload the shared Rcs with workspace system config.
         self.config = Rc::clone(config);
         for tile in &mut self.tiles {
-            tile.config = Rc::clone(config);
+            tile.reload_config(Rc::clone(config))
         }
 
         // Workspace-specific layout changes.
@@ -291,12 +291,8 @@ impl Workspace {
             .as_ref()
             .map(|&idx| &mut self.tiles[idx])
         {
-            Self::refresh_window(
-                &self.output,
-                output_geometry,
-                fullscreened_tile,
-                true, // Fullscreen window gets exclusive activation and focus.
-            );
+            // Fullscreen window gets exclusive activation and focus.
+            fullscreened_tile.refresh(true, &self.output, output_geometry);
         }
 
         // let _ = self.interactive_swap.take_if(|swap| {
@@ -333,36 +329,12 @@ impl Workspace {
         }
 
         for (idx, tile) in self.tiles.iter_mut().enumerate() {
-            Self::refresh_window(
+            tile.refresh(
+                Some(idx) == self.active_tile_idx,
                 &self.output,
                 output_geometry,
-                tile,
-                Some(idx) == self.active_tile_idx,
             );
         }
-    }
-
-    /// Handle a refresh for a window.
-    fn refresh_window(
-        output: &Output,
-        output_geometry: Rectangle<i32, Logical>,
-        tile: &mut Tile,
-        active: bool,
-    ) {
-        crate::profile_function!();
-        let window = tile.window();
-        window.request_activated(active);
-
-        let mut bbox = window.bbox();
-        bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
-        if let Some(mut overlap) = output_geometry.intersection(bbox) {
-            // overlap must be in window-local coordinates.
-            overlap.loc -= bbox.loc;
-            window.enter_output(output, overlap);
-        }
-
-        window.send_pending_configure();
-        window.refresh();
     }
 
     /// Get the [`Workspace`]'s active [`Tile`] index, if any.
@@ -1849,7 +1821,7 @@ impl Workspace {
             let tile = &self.tiles[fullscreen_idx];
 
             let fullscreen_elements = tile
-                .render(renderer, scale, 1.0, &self.output, render_offset, true)
+                .render(renderer, scale, 1.0, &self.output, render_offset)
                 .map(|element| {
                     RelocateRenderElement::from_element(
                         element,
@@ -1885,7 +1857,7 @@ impl Workspace {
 
             // Active gets rendered above others.
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
                     .map(|element| {
                         RelocateRenderElement::from_element(
                             element,
@@ -1911,7 +1883,7 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, false)
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
                     .map(|element| {
                         RelocateRenderElement::from_element(
                             element,
