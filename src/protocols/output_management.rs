@@ -96,6 +96,7 @@ pub enum OutputConfiguration {
         position: Option<Point<i32, Logical>>,
         transform: Option<Transform>,
         scale: Option<f64>,
+        #[allow(dead_code)] // FIXME: We don't support VRR yet
         adaptive_sync: Option<bool>,
     },
 }
