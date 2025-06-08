@@ -209,6 +209,111 @@ impl Border {
     }
 }
 
+/// A drop shadow around a tile.
+///
+/// The shadow uses a [`FhtPixelShaderElement`] under the hood to do the drawing. The given
+/// rectangle will receive a drop shadow *around it*, so it doesn't account for the actual shadow
+/// geometry
+#[derive(Debug)]
+pub struct Shadow {
+    /// The underlying [`PixelShaderElement`] that draws the border.
+    // Use a OnceCell to not require a `impl FhtRenderer` for creating Tiles
+    element: OnceCell<FhtPixelShaderElement>,
+    /// The rectangle we want to draw a shadow around.
+    rectangle: Rectangle<i32, Logical>,
+    /// The configuration of the shadow.
+    config: fht_compositor_config::Shadow,
+    /// The corner radius of the shadow.
+    corner_radius: f32,
+}
+
+impl Shadow {
+    /// Create a new [`Shadow`] for a tile.
+    pub fn new(
+        rectangle: Rectangle<i32, Logical>,
+        corner_radius: f32,
+        config: fht_compositor_config::Shadow,
+    ) -> Self {
+        Self {
+            element: OnceCell::new(),
+            rectangle,
+            config,
+            corner_radius,
+        }
+    }
+
+    /// Set the rectangle to draw the shadow around.
+    pub fn set_rectangle(&mut self, rectangle: Rectangle<i32, Logical>) {
+        self.rectangle = rectangle;
+        if let Some(element) = self.element.get_mut() {
+            let mut element_geometry = rectangle;
+            let sigma = self.config.sigma.ceil() as i32;
+            element_geometry.loc -= Point::from((sigma, sigma));
+            element_geometry.size += Size::from((sigma, sigma)).upscale(2);
+
+            element.resize(element_geometry, None);
+        }
+    }
+
+    /// Update the parameters of this [`Shadow`]
+    pub fn update_parameters(&mut self, config: fht_compositor_config::Shadow, corner_radius: f32) {
+        if self.config != config || self.corner_radius != corner_radius {
+            self.corner_radius = corner_radius;
+            self.config = config;
+            self.update_uniforms();
+        }
+    }
+
+    /// Generate uniform values from the current state of this [`Shadow`]
+    fn get_uniforms(&self) -> Vec<Uniform<'static>> {
+        vec![
+            Uniform::new("shadow_color", self.config.color),
+            Uniform::new("blur_sigma", self.config.sigma),
+            Uniform::new("corner_radius", self.corner_radius),
+        ]
+    }
+
+    /// Update the uniform values passed into the [`FhtPixelShaderElement`].
+    fn update_uniforms(&mut self) {
+        let uniforms = self.get_uniforms();
+        if let Some(element) = self.element.get_mut() {
+            element.update_uniforms(uniforms);
+        }
+    }
+
+    /// Get a render element for this [`Shadow`]
+    pub fn render(
+        &self,
+        renderer: &mut impl FhtRenderer,
+        is_floating: bool,
+    ) -> Option<FhtPixelShaderElement> {
+        if self.config.disable || self.config.floating_only && !is_floating {
+            return None;
+        }
+
+        let element = self
+            .element
+            .get_or_init(|| {
+                let program = Shaders::get(renderer.glow_renderer()).box_shadow.clone();
+                let uniforms = self.get_uniforms();
+                let mut element_geometry = self.rectangle;
+                let sigma = self.config.sigma.ceil() as i32;
+                element_geometry.loc -= Point::from((sigma, sigma));
+                element_geometry.size += Size::from((sigma, sigma)).upscale(2);
+
+                FhtPixelShaderElement::new(
+                    program,
+                    element_geometry,
+                    1.0,
+                    uniforms,
+                    Kind::Unspecified,
+                )
+            })
+            .clone();
+        Some(element)
+    }
+}
+
 // Shadow drawing shader using the following article code:
 // https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/
 pub fn draw_shadow(

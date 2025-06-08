@@ -673,7 +673,7 @@ const fn default_shadow_color() -> [f32; 4] {
     [0.0, 0.0, 0.0, 0.75]
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Shadow {
     pub disable: bool,
