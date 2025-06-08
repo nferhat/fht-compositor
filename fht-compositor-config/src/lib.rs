@@ -870,7 +870,7 @@ impl fht_animation::Animable for Color {
                     // Slowly transition from the gradient to solid
                     start: <_>::lerp(start, target_start, progress),
                     end: <_>::lerp(end, target_end, progress),
-                    angle: dbg!(f32::lerp(dbg!(angle), dbg!(target_angle), dbg!(progress))),
+                    angle: f32::lerp(angle, target_angle, progress),
                 }
             }
         }
