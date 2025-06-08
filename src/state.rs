@@ -241,6 +241,7 @@ impl State {
 
     pub fn redraw(&mut self, output: Output) {
         crate::profile_function!();
+
         // Verify our invariant.
         let output_state = self.fht.output_state.get_mut(&output).unwrap();
         assert!(output_state.redraw_state.is_queued());
@@ -1009,6 +1010,7 @@ impl Fht {
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
         self.loop_handle.insert_idle(move |state| {
+            #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             if let Backend::Udev(udev) = &mut state.backend {
                 udev.reload_output_configuration(&mut state.fht, force);

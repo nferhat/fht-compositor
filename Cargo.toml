@@ -57,18 +57,25 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 smithay = { workspace = true, features = [
-    "desktop", "wayland_frontend",   # Provide abstractions for wayland stuff
-    "renderer_glow",                 # Default renderer used everywhere
-    "use_system_lib", "backend_egl", # EGL support for wayland
-    "backend_libinput",              # Input handling
+    "desktop",
+    "wayland_frontend", # Provide abstractions for wayland stuff
+    "renderer_glow",    # Default renderer used everywhere
+    "backend_gbm",      # required for pipewire madness
+    "use_system_lib",
+    "backend_egl",      # EGL support for wayland
+    "backend_libinput", # Input handling
 ] }
 smithay-drm-extras = { workspace = true, optional = true }
 bitflags = "2.6.0"
 thiserror = "1.0.61"
 libc = "0.2.155"
 zbus = { version = "5.5.0", optional = true }
-zvariant = { version = "5.4.0", features = ["option-as-array"], optional = true }
-pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = ["v0_3_33"] }
+zvariant = { version = "5.4.0", features = [
+    "option-as-array",
+], optional = true }
+pipewire = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", optional = true, features = [
+    "v0_3_33",
+] }
 xcursor = "0.3.5"
 fht-compositor-config.path = "./fht-compositor-config"
 glam = "0.28.0"
@@ -94,16 +101,16 @@ drm-ffi = "0.9.0"
 default = ["winit-backend", "udev-backend", "all-portals"]
 
 # Marker feature to enable D-Bus connectivity.
-# 
+#
 # You should not enable this yourself, this is meant to be used by compositor
 # feature dependencies.
 dbus = ["zbus", "zvariant"]
 
 # Enable the winit backend.
-# 
+#
 # This allows the compositor to run under a winit window.
-# 
-# NOTE: Although this backend works, it's not explicity supported, since its only here for 
+#
+# NOTE: Although this backend works, it's not explicity supported, since its only here for
 # developement. For all regular usage, please use the udev backend.
 winit-backend = [
     "smithay/backend_winit",
@@ -112,7 +119,7 @@ winit-backend = [
 ]
 
 # Enable the winit backend.
-# 
+#
 # This allows the compositor to run under a libseat session.
 udev-backend = [
     "smithay-drm-extras",
@@ -127,7 +134,7 @@ udev-backend = [
 ]
 
 # Enable profiling with tracy
-# 
+#
 # You should **NOT** enable this unless you want to profile compositor performance.
 # This will automatically stream compositor data to localhost:DEFAULT_PORT.
 profile-with-tracy = ["tracy-client/default"]
