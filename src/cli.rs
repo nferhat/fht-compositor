@@ -29,12 +29,44 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-#[derive(Debug, Clone, Copy, clap::Subcommand)]
+#[derive(Debug, Clone, clap::Subcommand)]
 pub enum Command {
     /// Check the compositor configuration for any errors.
     CheckConfiguration,
     /// Generate shell completions for shell
     GenerateCompletions { shell: clap_complete::Shell },
+    /// Execute an IPC [`Request`].
+    Ipc {
+        #[command(subcommand)]
+        request: Request,
+        /// Enable JSON output formatting
+        #[arg(short, long)]
+        json: bool,
+    },
+}
+
+/// A request you send to the compositor.
+#[derive(Debug, Clone, PartialEq, clap::Subcommand)]
+pub enum Request {
+    /// Request the version information of the running `fht-compositor` instance.
+    Version,
+    /// Request information about the connected outputs.
+    Outputs,
+    /// Request information about all mapped windows.
+    Windows,
+    /// Request information about the workspace system.
+    Space,
+    /// Request information about the focused window.
+    FocusedWindow,
+    /// Request information about the focused workspace.
+    FocusedWorkspace,
+    /// Request information about all layer-shells.
+    LayerShells,
+    /// Request the compositor to execute an action.
+    Action {
+        #[command(subcommand)]
+        action: fht_compositor_ipc::Action,
+    },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -45,9 +77,12 @@ pub enum BackendType {
     #[cfg(feature = "udev-backend")]
     /// Use the Udev backend, using a libseat session.
     Udev,
+    #[cfg(feature = "headless-backend")]
+    /// Use the headless backend, only meant for testing.
+    Headless,
 }
 
-fn get_version_string() -> String {
+pub fn get_version_string() -> String {
     let major = env!("CARGO_PKG_VERSION_MAJOR");
     let minor = env!("CARGO_PKG_VERSION_MINOR");
     let patch = env!("CARGO_PKG_VERSION_PATCH");

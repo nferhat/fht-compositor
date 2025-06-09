@@ -97,6 +97,11 @@ impl Monitor {
         &self.output
     }
 
+    /// Get whether this monitor is active
+    pub fn active(&self) -> bool {
+        self.is_active
+    }
+
     /// Get an iterator over the monitor's [`Workspace`]s.
     pub fn workspaces(&self) -> impl ExactSizeIterator<Item = &Workspace> {
         self.workspaces.iter()
