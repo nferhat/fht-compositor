@@ -198,7 +198,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
         },
         fht_compositor_ipc::Response::Workspace(workspace) => {
             let Some(workspace) = workspace else {
-                writeln!(&mut writer, "No workspace with given ID!");
+                writeln!(&mut writer, "No workspace with given ID!")?;
                 return Ok(());
             };
 
