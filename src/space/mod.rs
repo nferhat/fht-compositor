@@ -289,6 +289,12 @@ impl Space {
         self.monitors.iter().any(|mon| mon.output() == output)
     }
 
+    /// Get the active [`Workspace`].
+    pub fn active_workspace(&self) -> &Workspace {
+        let monitor = &self.monitors[self.active_idx];
+        monitor.active_workspace()
+    }
+
     /// Get the [`WorkspaceId`] of the active [`Workspace`].
     pub fn active_workspace_id(&self) -> WorkspaceId {
         let monitor = &self.monitors[self.active_idx];
@@ -353,6 +359,13 @@ impl Space {
     /// Get the primary [`Output`].
     pub fn primary_output(&self) -> &Output {
         self.monitors[self.primary_idx].output()
+    }
+
+    /// Get the [`Workspace`] associated with this [`WorkspaceId`].
+    pub fn workspace_for_id(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
+        self.monitors
+            .iter()
+            .find_map(|mon| mon.workspaces().find(|ws| ws.id() == workspace_id))
     }
 
     /// Get the [`Workspace`] associated with this [`WorkspaceId`].
