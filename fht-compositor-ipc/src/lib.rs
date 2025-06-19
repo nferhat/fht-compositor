@@ -60,6 +60,13 @@ pub enum Request {
     Window(usize),
     /// Request information about a workspace.
     Workspace(usize),
+    /// Get a workspace id from an output name and index.
+    GetWorkspace {
+        /// The output name to get the workspace on. If `None`, use the focused output.
+        output: Option<String>,
+        /// The workspace index to get.
+        index: usize,
+    },
     /// Request information about the focused window.
     FocusedWindow,
     /// Request information about the focused workspace.
