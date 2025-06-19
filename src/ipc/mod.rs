@@ -20,7 +20,7 @@ use crate::focus_target::KeyboardFocusTarget;
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
-use crate::space::{Workspace, WorkspaceId};
+use crate::space::{self, Workspace, WorkspaceId};
 use crate::state::State;
 use crate::utils::get_credentials_for_surface;
 use crate::window::{Window, WindowId};
@@ -172,6 +172,12 @@ enum ClientRequest {
         id: Option<usize>,
         sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
     },
+    WorkspaceByIndex {
+        /// When `output` is `None`, use the focused output.
+        output: Option<String>,
+        index: usize,
+        sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
+    },
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
     PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
     Action(
@@ -258,6 +264,24 @@ async fn handle_request(
                 id: Some(id),
                 sender: tx,
             };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let workspace = rx
+                .recv()
+                .await
+                .context("Failed to retreive focused workspace information")?;
+
+            Ok(Response::Workspace(workspace))
+        }
+        fht_compositor_ipc::Request::GetWorkspace { output, index } => {
+            let (tx, rx) = async_channel::bounded(1);
+            let req = ClientRequest::WorkspaceByIndex {
+                output,
+                index,
+                sender: tx,
+            };
+
             to_compositor
                 .send(req)
                 .context("IPC communication channel closed")?;
@@ -526,6 +550,49 @@ impl State {
                 });
 
                 sender.send_blocking(workspace)?;
+            }
+            ClientRequest::WorkspaceByIndex {
+                output,
+                index,
+                sender,
+            } => {
+                let monitor = match output {
+                    Some(name) => {
+                        let Some(mon) = self
+                            .fht
+                            .space
+                            .monitors()
+                            .find(|mon| mon.output().name() == name)
+                        else {
+                            sender.send_blocking(None)?;
+                            return Ok(());
+                        };
+
+                        mon
+                    }
+                    None => self.fht.space.active_monitor(),
+                };
+
+                // NOTE: For now we know that workspaces are static, but I do want to implement
+                // a way for the user to set a fixed number of workspaces. (perhaps "dynamic" ones)
+                // See #54
+                if index > monitor.workspaces.len() {
+                    sender.send_blocking(None)?;
+                    return Ok(());
+                }
+
+                let workspace = &monitor.workspaces[index];
+                let ipc_workspace = fht_compositor_ipc::Workspace {
+                    output: workspace.output().name(),
+                    id: *workspace.id(),
+                    active_window_idx: workspace.active_tile_idx(),
+                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                    mwfact: workspace.mwfact(),
+                    nmaster: workspace.nmaster(),
+                    windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
+                };
+
+                sender.send_blocking(Some(ipc_workspace))?;
             }
             ClientRequest::PickWindow(tx) => {
                 let start_data = GrabStartData {
