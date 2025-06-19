@@ -15,6 +15,9 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::Space => fht_compositor_ipc::Request::Space,
         cli::Request::Window { id } => fht_compositor_ipc::Request::Window(id),
         cli::Request::Workspace { id } => fht_compositor_ipc::Request::Workspace(id),
+        cli::Request::GetWorkspace { output, index } => {
+            fht_compositor_ipc::Request::GetWorkspace { output, index }
+        }
         cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
         cli::Request::FocusedWindow => fht_compositor_ipc::Request::FocusedWindow,
         cli::Request::FocusedWorkspace => fht_compositor_ipc::Request::FocusedWorkspace,

@@ -65,6 +65,15 @@ pub enum Request {
         #[arg(long)]
         id: usize,
     },
+    /// Get a workspace from an output name and index.
+    GetWorkspace {
+        /// The output name to get the workspace on. If not provided, use the focused output.
+        #[arg(long)]
+        output: Option<String>,
+        /// The workspace index to get.
+        #[arg(long)]
+        index: usize,
+    },
     /// Request information about the focused window.
     FocusedWindow,
     /// Request information about the focused workspace.
