@@ -56,6 +56,10 @@ pub enum Request {
     LayerShells,
     /// Request information about the workspace system.
     Space,
+    /// Request information about a window.
+    Window(usize),
+    /// Request information about a workspace.
+    Workspace(usize),
     /// Request information about the focused window.
     FocusedWindow,
     /// Request information about the focused workspace.
@@ -84,10 +88,10 @@ pub enum Response {
     LayerShells(Vec<LayerShell>),
     /// Space information.
     Space(Space),
-    /// Focused window information.
-    FocusedWindow(Option<Window>),
-    /// Focused workspace information.
-    FocusedWorkspace(Workspace),
+    /// Information about a window.
+    Window(Option<Window>),
+    /// Information about a workspace.
+    Workspace(Option<Workspace>),
     /// The picked window by the user.
     PickedWindow(PickWindowResult),
     /// The picked layer shell by the user.

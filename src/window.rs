@@ -69,6 +69,11 @@ impl std::ops::Deref for WindowId {
         &self.0
     }
 }
+impl PartialEq<usize> for WindowId {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 == *other
+    }
+}
 
 #[derive(Debug)]
 struct WindowInner {
