@@ -20,7 +20,7 @@ use crate::focus_target::KeyboardFocusTarget;
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
-use crate::space::{self, Workspace, WorkspaceId};
+use crate::space::{Workspace, WorkspaceId};
 use crate::state::State;
 use crate::utils::get_credentials_for_surface;
 use crate::window::{Window, WindowId};
@@ -32,8 +32,6 @@ pub struct Server {
     // The UnixSocket server that receives incoming clients
     listener_token: RegistrationToken,
     dispatcher: Dispatcher<'static, Generic<UnixListener>, State>,
-    // The calloop channel sender to communicate from/to the compositor.
-    to_compositor: calloop::channel::Sender<ClientRequest>,
 }
 
 impl Server {
@@ -124,7 +122,6 @@ pub fn start(
     Ok(Server {
         dispatcher,
         listener_token: token,
-        to_compositor,
     })
 }
 
