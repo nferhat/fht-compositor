@@ -60,6 +60,12 @@ pub enum Request {
     FocusedWindow,
     /// Request information about the focused workspace.
     FocusedWorkspace,
+    /// Request the user to pick a window. On the next click, the information of the window under
+    /// the pointer cursor will be sent back.
+    PickWindow,
+    /// Request the user to pick a layer-shell. On the next click, the information of the
+    /// layer-shell under the pointer cursor will be sent back, if any.
+    PickLayerShell,
     /// Request the compositor to execute an action.
     Action(Action),
 }
@@ -82,6 +88,10 @@ pub enum Response {
     FocusedWindow(Option<Window>),
     /// Focused workspace information.
     FocusedWorkspace(Workspace),
+    /// The picked window by the user.
+    PickedWindow(PickWindowResult),
+    /// The picked layer shell by the user.
+    PickedLayerShell(PickLayerShellResult),
     /// There was an error handling the request.
     Error(String),
     /// Noop, for requests that do not need a result/output.
@@ -607,4 +617,28 @@ pub enum NmasterChange {
     },
     /// Set the nmaster to this value. Clamps at min=1.
     Set { value: usize },
+}
+
+/// The result from picking a [`Window`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PickWindowResult {
+    /// The ID of the picked window
+    Some(usize),
+    /// The user clicked somewhere outside any window.
+    None,
+    /// The pick request was cancelled.
+    Cancelled,
+}
+
+/// The result from picking a [`LayerShell`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PickLayerShellResult {
+    /// The information of the picked layer-shell
+    Some(LayerShell),
+    /// The user clicked somewhere outside any layer-shell.
+    None,
+    /// The pick request was cancelled.
+    Cancelled,
 }
