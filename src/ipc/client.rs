@@ -1,5 +1,7 @@
 use std::io::{Read, Write as _};
 
+use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
+
 use crate::cli;
 
 /// Make a single request to the running `fht-compositor` IPC server.
@@ -13,6 +15,8 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
         cli::Request::FocusedWindow => fht_compositor_ipc::Request::FocusedWindow,
         cli::Request::FocusedWorkspace => fht_compositor_ipc::Request::FocusedWorkspace,
+        cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
+        cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Space => fht_compositor_ipc::Request::Space,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
     };
@@ -51,6 +55,18 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             fht_compositor_ipc::Response::Error(err) => {
                 anyhow::bail!("Failed to handle IPC request: {err:?}")
             }
+            fht_compositor_ipc::Response::PickedLayerShell(result) => match result {
+                PickLayerShellResult::Some(layer_shell) => serde_json::to_string(&layer_shell),
+                PickLayerShellResult::None | PickLayerShellResult::Cancelled => {
+                    Ok(serde_json::json!(null).to_string())
+                }
+            },
+            fht_compositor_ipc::Response::PickedWindow(result) => match result {
+                PickWindowResult::Some(window) => serde_json::to_string(&window),
+                PickWindowResult::None | PickWindowResult::Cancelled => {
+                    Ok(serde_json::json!(null).to_string())
+                }
+            },
             fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
         println!("{}", json_buffer);
@@ -179,6 +195,34 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
                 workspace.nmaster
             )?;
         }
+        fht_compositor_ipc::Response::PickedLayerShell(result) => match result {
+            PickLayerShellResult::Some(layer_shell) => {
+                writeln!(&mut writer, "\tOutput: {}", layer_shell.output)?;
+                writeln!(&mut writer, "\tNamespace: {}", layer_shell.namespace)?;
+                writeln!(&mut writer, "\tLayer: {:?}", layer_shell.layer)?;
+                writeln!(
+                    &mut writer,
+                    "\tKeyboard Interactivity: {:?}",
+                    layer_shell.keyboard_interactivity
+                )?;
+            }
+            PickLayerShellResult::None => writeln!(
+                &mut writer,
+                "User picked something that is not a layer-shell"
+            )?,
+            PickLayerShellResult::Cancelled => {
+                writeln!(&mut writer, "Pick layer-shell request was cancelled")?
+            }
+        },
+        fht_compositor_ipc::Response::PickedWindow(result) => match result {
+            PickWindowResult::Some(window) => writeln!(&mut writer, "Picked window ID: {window}")?,
+            PickWindowResult::None => {
+                writeln!(&mut writer, "User picked something that is not a window")?
+            }
+            PickWindowResult::Cancelled => {
+                writeln!(&mut writer, "Pick window request was cancelled")?
+            }
+        },
         fht_compositor_ipc::Response::Error(err) => anyhow::bail!(err.clone()),
         fht_compositor_ipc::Response::Noop => (),
     }

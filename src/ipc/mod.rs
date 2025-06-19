@@ -7,15 +7,17 @@ use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use smithay::desktop::layer_map_for_output;
+use smithay::input::pointer::{Focus, GrabStartData};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
 };
 use smithay::reexports::rustix;
-use smithay::utils::{Point, Size};
+use smithay::utils::{Point, Size, SERIAL_COUNTER};
 use smithay::wayland::seat::WaylandFocus;
 
 use crate::focus_target::KeyboardFocusTarget;
+use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
 use crate::space::{Workspace, WorkspaceId};
@@ -162,6 +164,8 @@ enum ClientRequest {
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
     FocusedWindow(async_channel::Sender<Option<fht_compositor_ipc::Window>>),
     FocusedWorkspace(async_channel::Sender<fht_compositor_ipc::Workspace>),
+    PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
+    PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
     Action(
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
@@ -247,6 +251,25 @@ async fn handle_request(
                 .context("Failed to retreive focused workspace information")?;
 
             Ok(Response::FocusedWorkspace(space))
+        }
+        fht_compositor_ipc::Request::PickWindow => {
+            let (tx, rx) = async_channel::bounded(1024);
+            to_compositor
+                .send(ClientRequest::PickWindow(tx))
+                .context("IPC communication channel closed")?;
+            let result = rx.recv().await.context("Failed to receive picked window")?;
+            Ok(Response::PickedWindow(result))
+        }
+        fht_compositor_ipc::Request::PickLayerShell => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::PickLayerShell(tx))
+                .context("IPC communication channel closed")?;
+            let result = rx
+                .recv()
+                .await
+                .context("Failed to receive picked layer-shell")?;
+            Ok(Response::PickedLayerShell(result))
         }
         fht_compositor_ipc::Request::Action(action) => {
             let (tx, rx) = async_channel::bounded(1);
@@ -438,6 +461,36 @@ impl State {
                     nmaster: workspace.nmaster(),
                     windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
                 })?;
+            }
+            ClientRequest::PickWindow(tx) => {
+                let start_data = GrabStartData {
+                    focus: None,
+                    location: self.fht.pointer.current_location(),
+                    button: 0,
+                };
+                // The previous grab will automatically be cancelled and the Cancelled result will
+                // be sent when PickSurfaceGrab::unset handler is ran.
+                let grab = PickSurfaceGrab {
+                    target: PickSurfaceTarget::Window(tx),
+                    start_data,
+                };
+                let pointer = self.fht.pointer.clone();
+                pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
+            }
+            ClientRequest::PickLayerShell(tx) => {
+                let start_data = GrabStartData {
+                    focus: None,
+                    location: self.fht.pointer.current_location(),
+                    button: 0,
+                };
+                // The previous grab will automatically be cancelled and the Cancelled result will
+                // be sent when PickSurfaceGrab::unset handler is ran.
+                let grab = PickSurfaceGrab {
+                    target: PickSurfaceTarget::LayerSurface(tx),
+                    start_data,
+                };
+                let pointer = self.fht.pointer.clone();
+                pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
             }
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;

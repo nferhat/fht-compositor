@@ -61,6 +61,12 @@ pub enum Request {
     FocusedWorkspace,
     /// Request information about all layer-shells.
     LayerShells,
+    /// Request the user to pick a window. On the next click, the information of the window under
+    /// the pointer cursor will be sent back.
+    PickWindow,
+    /// Request the user to pick a layer-shell. On the next click, the information of the
+    /// layer-shell under the pointer cursor will be sent back, if any.
+    PickLayerShell,
     /// Request the compositor to execute an action.
     Action {
         #[command(subcommand)]

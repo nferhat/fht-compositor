@@ -21,7 +21,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
-pub use tile::TileRenderElement;
+pub use tile::{Tile, TileRenderElement};
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
