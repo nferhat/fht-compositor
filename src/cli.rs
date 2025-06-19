@@ -55,6 +55,16 @@ pub enum Request {
     Windows,
     /// Request information about the workspace system.
     Space,
+    /// Request information about a window.
+    Window {
+        #[arg(long)]
+        id: usize,
+    },
+    /// Request information about a workspace.
+    Workspace {
+        #[arg(long)]
+        id: usize,
+    },
     /// Request information about the focused window.
     FocusedWindow,
     /// Request information about the focused workspace.

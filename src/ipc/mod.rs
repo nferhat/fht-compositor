@@ -162,8 +162,16 @@ enum ClientRequest {
     Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
     LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
-    FocusedWindow(async_channel::Sender<Option<fht_compositor_ipc::Window>>),
-    FocusedWorkspace(async_channel::Sender<fht_compositor_ipc::Workspace>),
+    Window {
+        /// When `id` is `None`, request the focused window.
+        id: Option<usize>,
+        sender: async_channel::Sender<Option<fht_compositor_ipc::Window>>,
+    },
+    Workspace {
+        /// When `id` is `None`, request the focused workspace.
+        id: Option<usize>,
+        sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
+    },
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
     PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
     Action(
@@ -228,29 +236,69 @@ async fn handle_request(
 
             Ok(Response::Space(space))
         }
-        fht_compositor_ipc::Request::FocusedWindow => {
+        fht_compositor_ipc::Request::Window(id) => {
             let (tx, rx) = async_channel::bounded(1);
+            let req = ClientRequest::Window {
+                id: Some(id),
+                sender: tx,
+            };
             to_compositor
-                .send(ClientRequest::FocusedWindow(tx))
+                .send(req)
                 .context("IPC communication channel closed")?;
             let space = rx
                 .recv()
                 .await
                 .context("Failed to retreive focused window information")?;
 
-            Ok(Response::FocusedWindow(space))
+            Ok(Response::Window(space))
         }
-        fht_compositor_ipc::Request::FocusedWorkspace => {
+        fht_compositor_ipc::Request::Workspace(id) => {
             let (tx, rx) = async_channel::bounded(1);
+            let req = ClientRequest::Workspace {
+                id: Some(id),
+                sender: tx,
+            };
             to_compositor
-                .send(ClientRequest::FocusedWorkspace(tx))
+                .send(req)
                 .context("IPC communication channel closed")?;
-            let space = rx
+            let workspace = rx
                 .recv()
                 .await
                 .context("Failed to retreive focused workspace information")?;
 
-            Ok(Response::FocusedWorkspace(space))
+            Ok(Response::Workspace(workspace))
+        }
+        fht_compositor_ipc::Request::FocusedWindow => {
+            let (tx, rx) = async_channel::bounded(1);
+            let req = ClientRequest::Window {
+                id: None,
+                sender: tx,
+            };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let space = rx
+                .recv()
+                .await
+                .context("Failed to retreive focused window information")?;
+
+            Ok(Response::Window(space))
+        }
+        fht_compositor_ipc::Request::FocusedWorkspace => {
+            let (tx, rx) = async_channel::bounded(1);
+            let req = ClientRequest::Workspace {
+                id: None,
+                sender: tx,
+            };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let workspace = rx
+                .recv()
+                .await
+                .context("Failed to retreive focused workspace information")?;
+
+            Ok(Response::Workspace(workspace))
         }
         fht_compositor_ipc::Request::PickWindow => {
             let (tx, rx) = async_channel::bounded(1024);
@@ -420,11 +468,23 @@ impl State {
                     primary_idx: self.fht.space.primary_monitor_idx(),
                 })?;
             }
-            ClientRequest::FocusedWindow(tx) => {
-                let monitor = self.fht.space.active_monitor();
-                let output = monitor.output().name();
-                let workspace = monitor.active_workspace();
-                let window = workspace.active_tile().map(|tile| {
+            ClientRequest::Window { id, sender } => {
+                let res = match id {
+                    Some(id) => self.fht.space.monitors().find_map(|mon| {
+                        mon.workspaces().find_map(|ws| {
+                            ws.tiles()
+                                .find(|tile| tile.window().id() == id)
+                                .map(|tile| (tile, ws))
+                        })
+                    }),
+                    None => {
+                        let monitor = self.fht.space.active_monitor();
+                        let workspace = monitor.active_workspace();
+                        workspace.active_tile().map(|tile| (tile, workspace))
+                    }
+                };
+
+                let window = res.map(|(tile, workspace)| {
                     let window = tile.window();
                     let location = tile.location() + tile.window_loc();
                     let size = window.size();
@@ -433,7 +493,7 @@ impl State {
                         id: *window.id(),
                         title: window.title(),
                         app_id: window.app_id(),
-                        output: output.clone(),
+                        output: workspace.output().name(),
                         workspace_idx: workspace.index(),
                         workspace_id: *workspace.id(),
                         size: (size.w as u32, size.h as u32),
@@ -447,20 +507,25 @@ impl State {
                     }
                 });
 
-                tx.send_blocking(window)?;
+                sender.send_blocking(window)?;
             }
-            ClientRequest::FocusedWorkspace(tx) => {
-                let monitor = self.fht.space.active_monitor();
-                let workspace = monitor.active_workspace();
-                tx.send_blocking(fht_compositor_ipc::Workspace {
-                    output: monitor.output().name(),
+            ClientRequest::Workspace { id, sender } => {
+                let workspace = match id {
+                    Some(id) => self.fht.space.workspace_for_id(WorkspaceId(id)),
+                    None => Some(self.fht.space.active_workspace()),
+                };
+
+                let workspace = workspace.map(|workspace| fht_compositor_ipc::Workspace {
+                    output: workspace.output().name(),
                     id: *workspace.id(),
                     active_window_idx: workspace.active_tile_idx(),
                     fullscreen_window_idx: workspace.fullscreened_tile_idx(),
                     mwfact: workspace.mwfact(),
                     nmaster: workspace.nmaster(),
                     windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
-                })?;
+                });
+
+                sender.send_blocking(workspace)?;
             }
             ClientRequest::PickWindow(tx) => {
                 let start_data = GrabStartData {

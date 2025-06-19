@@ -12,12 +12,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
         cli::Request::Windows => fht_compositor_ipc::Request::Windows,
+        cli::Request::Space => fht_compositor_ipc::Request::Space,
+        cli::Request::Window { id } => fht_compositor_ipc::Request::Window(id),
+        cli::Request::Workspace { id } => fht_compositor_ipc::Request::Workspace(id),
         cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
         cli::Request::FocusedWindow => fht_compositor_ipc::Request::FocusedWindow,
         cli::Request::FocusedWorkspace => fht_compositor_ipc::Request::FocusedWorkspace,
         cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
-        cli::Request::Space => fht_compositor_ipc::Request::Space,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
     };
 
@@ -47,9 +49,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             fht_compositor_ipc::Response::LayerShells(layer_shells) => {
                 serde_json::to_string(&layer_shells)
             }
-            fht_compositor_ipc::Response::FocusedWindow(window) => serde_json::to_string(&window),
-            fht_compositor_ipc::Response::FocusedWorkspace(workspace) => {
-                serde_json::to_string(&workspace)
+            fht_compositor_ipc::Response::Window(window) => serde_json::to_string(&window),
+            fht_compositor_ipc::Response::Workspace(workspace) => {
+                match &workspace {
+                    // We unwrap the Some case in case the user asked for the FocusedWorkspace,
+                    // which will always be present
+                    Some(workspace) => serde_json::to_string(workspace),
+                    none => serde_json::to_string(none),
+                }
             }
             fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
             fht_compositor_ipc::Response::Error(err) => {
@@ -181,11 +188,17 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
             }
             //
         }
-        fht_compositor_ipc::Response::FocusedWindow(window) => match window.as_ref() {
+
+        fht_compositor_ipc::Response::Window(window) => match window.as_ref() {
             Some(window) => print_window(&mut writer, window)?,
             None => println!("No focused window"),
         },
-        fht_compositor_ipc::Response::FocusedWorkspace(workspace) => {
+        fht_compositor_ipc::Response::Workspace(workspace) => {
+            let Some(workspace) = workspace else {
+                writeln!(&mut writer, "No workspace with given ID!");
+                return Ok(());
+            };
+
             writeln!(&mut writer, "ID: {}", workspace.id)?;
             writeln!(&mut writer, "Windows: {:?}", workspace.windows)?;
             writeln!(&mut writer, "Master width factor: {}", workspace.mwfact)?;
