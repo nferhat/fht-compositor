@@ -138,6 +138,7 @@ impl Backend {
             }
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.set_output_mode(fht, output, mode),
             #[cfg(feature = "headless-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Headless(_) => {
