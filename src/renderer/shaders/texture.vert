@@ -1,4 +1,3 @@
-
 #version 100
 
 uniform mat3 matrix;
@@ -9,7 +8,7 @@ attribute vec4 vert_position;
 
 varying vec2 v_coords;
 
-mat2 scale(vec2 scale_vec){
+mat2 scale(vec2 scale_vec) {
     return mat2(
         scale_vec.x, 0.0,
         0.0, scale_vec.y
