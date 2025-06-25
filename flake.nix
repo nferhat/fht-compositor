@@ -324,16 +324,11 @@
               result = tomlFormat.generate name value;
               # Then we evaluate the result
               checkResult = pkgs.runCommand "fht-compositor-check-configuration" {} ''
-                mkdir -p $out;
-                ${cfg.package}/bin/fht-compositor --config-path ${result} check-configuration > $out/stdout
-                echo $? > $out/exit-code
+                ${cfg.package}/bin/fht-compositor --config-path ${result} check-configuration
+                ln -s ${result} $out
               '';
-
-              exitCode = lib.strings.toInt (builtins.readFile "${checkResult}/exit-code");
             in
-              if exitCode == 0
-              then result
-              else throw (builtins.readFile "${checkResult}/stdout");
+              checkResult;
           };
         in {
           options.programs.fht-compositor = {
