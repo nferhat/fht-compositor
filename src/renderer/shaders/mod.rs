@@ -12,9 +12,20 @@ const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
 const BLUR_FINISH_SRC: &str = include_str!("./blur-finish.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
+const ROUNDED_CORNERS_SRC: &str = include_str!("./rounded-corners.glsl");
 pub(super) const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
 pub(super) const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
 pub(super) const VERTEX_SRC: &str = include_str!("./texture.vert");
+
+/// Preprocess shaders to handle includes.
+fn preprocess_shader_source(source: &str) -> String {
+    let mut ret = source.to_string();
+    const INCLUDES: &[(&str, &str)] = &[("rounded-corners.glsl", ROUNDED_CORNERS_SRC)];
+    for (file_path, replace_with) in INCLUDES {
+        ret = ret.replace(&format!(r#"#include "{file_path}""#), replace_with);
+    }
+    ret
+}
 
 pub struct Shaders {
     pub border: GlesPixelProgram,
@@ -34,7 +45,7 @@ impl Shaders {
 
         let rounded_window = renderer
             .compile_custom_texture_shader(
-                ROUNDED_WINDOW_SRC,
+                preprocess_shader_source(ROUNDED_WINDOW_SRC),
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
@@ -55,7 +66,7 @@ impl Shaders {
 
         let resizing_texture = renderer
             .compile_custom_texture_shader(
-                RESIZING_TEXTURE_SRC,
+                preprocess_shader_source(RESIZING_TEXTURE_SRC),
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
                     // the size of the window texture we sampled from
@@ -66,7 +77,7 @@ impl Shaders {
             .expect("Shader source should always compile!");
         let border = renderer
             .compile_custom_pixel_shader(
-                BORDER_SRC,
+                preprocess_shader_source(BORDER_SRC),
                 &[
                     UniformName::new("v_start_color", UniformType::_4f),
                     UniformName::new("v_end_color", UniformType::_4f),

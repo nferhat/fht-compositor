@@ -1,3 +1,13 @@
+//! Texture shader to draw a shadow. The actual shadow will be drawn around a rectangle, shrunk by
+//! the value of `blur_sigma` (see uniforms down below)
+//!
+//! Credits: <https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/>
+//!
+//! ## Uniforms
+//! - corner_radius: The corner radius to apply.
+//! - blur_sigma: The shadow blur radii/sigma.
+//! - shadow_color: The shadow color.
+
 precision mediump float;
 
 uniform vec4 shadow_color;
@@ -8,19 +18,14 @@ uniform vec2 size;
 uniform float alpha;
 varying vec2 v_coords;
 
-// The shader code is from here
-// https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/
-
 // A standard gaussian function, used for weighting samples
-float gaussian(float x, float sigma)
-{
+float gaussian(float x, float sigma) {
     const float pi = 3.141592653589793;
     return exp(-(x * x) / (2.0 * sigma * sigma)) / (sqrt(2.0 * pi) * sigma);
 }
 
 // This approximates the error function, needed for the gaussian integral
-vec2 erf(vec2 x)
-{
+vec2 erf(vec2 x) {
     vec2 s = sign(x), a = abs(x);
     x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
     x *= x;
@@ -28,8 +33,7 @@ vec2 erf(vec2 x)
 }
 
 // Return the blurred mask along the x dimension
-float rounded_box_shadow_x(float x, float y, float sigma, float corner, vec2 halfSize)
-{
+float rounded_box_shadow_x(float x, float y, float sigma, float corner, vec2 halfSize) {
     float delta = min(halfSize.y - corner - abs(y), 0.0);
     float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
     vec2 integral = 0.5 + 0.5 * erf((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
@@ -37,8 +41,7 @@ float rounded_box_shadow_x(float x, float y, float sigma, float corner, vec2 hal
 }
 
 // Return the mask for the shadow of a box from lower to upper
-float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner)
-{
+float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner) {
     // Center everything to make the math easier
     vec2 center = (lower + upper) * 0.5;
     vec2 halfSize = (upper - lower) * 0.5;
@@ -64,22 +67,21 @@ float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float 
 }
 
 // per-pixel "random" number between 0 and 1
-float random()
-{
+float random() {
     return fract(sin(dot(vec2(12.9898, 78.233), gl_FragCoord.xy)) * 43758.5453);
 }
 
-// simple rounded box sdf to check that we are inside
-// https://iquilezles.org/articles/distfunctions2d/
-float rounded_box_sdf(vec2 pos, vec4 rect, float corner_radius)
-{
+// Simple rounded box sdf to check that we are inside. We do not make use the of the more
+// advanced rounding_alpha code since we just need a rough estimate of our position.
+// --
+// Credits: <https://iquilezles.org/articles/distfunctions2d/>
+float rounded_box_sdf(vec2 pos, vec4 rect, float corner_radius) {
     vec2 half_size = (rect.zw) * 0.5;
     vec2 q = abs(pos - rect.xy - half_size) - half_size + corner_radius;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - corner_radius;
 }
 
-void main()
-{
+void main() {
     // the shader's element size will always fit the blur sigma / 2
     vec4 rect = vec4(vec2(blur_sigma), size.x - (2. * blur_sigma), size.y - (2. * blur_sigma));
     vec2 pos = v_coords * size;
