@@ -66,6 +66,20 @@ take a toll on your device performance.
 
 ---
 
+#### `border`
+
+Animation for border state transitions. Thickness, border radius, and color are all affected.
+
+Default curve:
+
+```toml
+[animations.border]
+curve = "ease-in-out"
+duration = 175
+```
+
+---
+
 #### `window-geometry`
 
 Animation settings used for window geometry changes: both *location* and *size* are animated.

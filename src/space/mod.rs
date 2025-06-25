@@ -89,24 +89,11 @@ impl Space {
             tile,
             overlap_outputs,
             ..
-        }) = &self.interactive_swap
+        }) = &mut self.interactive_swap
         {
-            tile.window().request_activated(true);
-            let bbox = tile.window().bbox();
-
-            for output in overlap_outputs {
-                let output_geometry = output.geometry();
-                let mut bbox = bbox;
-                bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
-                if let Some(mut overlap) = output_geometry.intersection(bbox) {
-                    // overlap must be in window-local coordinates.
-                    overlap.loc -= bbox.loc;
-                    tile.window().enter_output(output, overlap);
-                }
-            }
-
-            tile.window().send_pending_configure();
-            tile.window().refresh();
+            // FIXME: Apply overlap on all outputs
+            let output = &mut overlap_outputs[0];
+            tile.refresh(true, output, output.geometry());
         }
 
         for (idx, monitor) in self.monitors.iter_mut().enumerate() {
@@ -876,12 +863,12 @@ impl Space {
 
     /// Renders the tile affected by the current interactive swap.
     pub fn render_interactive_swap<R: FhtRenderer>(
-        &self,
+        &mut self,
         renderer: &mut R,
         output: &Output,
         scale: i32,
     ) -> Vec<TileRenderElement<R>> {
-        let Some(interactive_swap) = self.interactive_swap.as_ref() else {
+        let Some(interactive_swap) = self.interactive_swap.as_mut() else {
             return vec![];
         };
 
@@ -898,7 +885,6 @@ impl Space {
                 1.0,
                 output,
                 Point::default(),
-                true,
             )
             .collect()
     }
@@ -968,7 +954,8 @@ pub struct Config {
     )>,
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
-    pub shadow: Option<fht_compositor_config::Shadow>,
+    pub border_animation: Option<AnimationConfig>,
+    pub shadow: fht_compositor_config::Shadow,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
     pub border: fht_compositor_config::Border,
     pub layouts: Vec<fht_compositor_config::WorkspaceLayout>,
@@ -1012,7 +999,12 @@ impl Config {
                 config.animations.window_open_close.curve,
                 !config.animations.disable && !config.animations.window_open_close.disable,
             ),
-            shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
+            border_animation: AnimationConfig::new(
+                config.animations.border.duration,
+                config.animations.border.curve,
+                !config.animations.disable && !config.animations.border.disable,
+            ),
+            shadow: config.decorations.shadow,
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),
@@ -1032,6 +1024,11 @@ pub struct AnimationConfig {
 }
 
 impl AnimationConfig {
+    const DISABLED: AnimationConfig = AnimationConfig {
+        curve: AnimationCurve::Simple(fht_animation::curve::Easing::Linear),
+        duration: Duration::ZERO,
+    };
+
     pub fn new(duration: Duration, curve: AnimationCurve, enable: bool) -> Option<Self> {
         enable.then_some(Self { duration, curve })
     }

@@ -11,6 +11,8 @@ still enhance the looks of the desktop session
 Borders are an outline drawn around windows in a workspace. The focused window will get a different border color to indicate that it is focused and that
 it has active keyboard focus. Borders can also apply rounded corner radius aroud windows.
 
+The border values are all smoothly transitioned using an animation, see [`animations.border`](/configuration/animations#border)..
+
 #### `border.focused-color`, `border.normal-color`
 
 The border color for the focused and unfocused windows. The compositor optionally supports gradient borders, akin to CSS' `linear-gradient`, taking a

@@ -19,6 +19,7 @@ use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
 use super::closing_tile::ClosingTile;
+use super::decorations::{Border, Shadow};
 use super::Config;
 use crate::egui::EguiRenderElement;
 use crate::renderer::blur::element::BlurElement;
@@ -63,6 +64,12 @@ pub struct Tile {
     /// The animation value's (if any) is the visual size we should display the [`Tile`] with.
     size_animation: Option<Animation<[i32; 2]>>,
 
+    /// The [`Border`] drawn around the [`Tile::window`]
+    border: Border,
+
+    /// The [`Shadow`] drawn around the [`Tile::window`]
+    shadow: Shadow,
+
     /// Extra damage bag to apply when the tile corners are being rounded.
     /// This is due to an implementation detail of [`RoundedWindowElement`]
     extra_damage: ExtraDamage,
@@ -98,7 +105,11 @@ crate::fht_render_elements! {
 impl Tile {
     /// Create a new [`Tile`] from this window.
     pub fn new(window: Window, config: Rc<Config>) -> Self {
-        let proportion = window.rules().proportion.unwrap_or(1.0);
+        let rules = window.rules();
+        let border = config.border.with_overrides(&rules.border);
+        let shadow = config.shadow.with_overrides(&rules.shadow);
+        let proportion = rules.proportion.unwrap_or(1.0);
+        drop(rules);
         let size = window.size();
 
         Self {
@@ -108,10 +119,114 @@ impl Tile {
             location_animation: None,
             size_animation: None,
             opening_animation: None,
+            border: Border::new(
+                Rectangle::from_size(size),
+                border.radius,
+                border.thickness,
+                border.normal_color,
+                config.border_animation.as_ref(),
+            ),
+            shadow: Shadow::new(Rectangle::from_size(size), border.radius, shadow),
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             config,
         }
+    }
+
+    /// Update the configuration of this [`Tile`]
+    pub fn reload_config(&mut self, config: Rc<Config>) {
+        self.config = config;
+        self.border
+            .update_config(self.config.border_animation.as_ref());
+
+        let shadow_config = self
+            .config
+            .shadow
+            .with_overrides(&self.window.rules().shadow);
+        self.shadow
+            .update_parameters(shadow_config, self.border.corner_radius());
+    }
+
+    /// Update the inner state of this [`Tile`] and its [`Window`].
+    ///
+    /// You should call this periodically in order to keep everything up-to-date, preferably once
+    /// every main loop cycle
+    pub fn refresh(
+        &mut self,
+        active: bool,
+        output: &Output,
+        output_geometry: Rectangle<i32, Logical>,
+    ) {
+        // First notify the window about activation status.
+        self.window.request_activated(active);
+        // Then calculate intersection with the output
+        self.window.refresh(); // update bbox first
+        let mut bbox = self.window.bbox();
+        bbox.loc = self.location() + self.window_loc() + output_geometry.loc;
+        if let Some(mut overlap) = output_geometry.intersection(bbox) {
+            // overlap must be in window-local coordinates.
+            overlap.loc -= bbox.loc;
+            self.window.enter_output(output, overlap);
+        }
+        // And send everything off
+        self.window.send_pending_configure();
+
+        // Then update tile's decorations which depend on active state and animations
+        self.update_decorations();
+    }
+
+    /// Update the [`Tile::border`] and [`Tile::shadow`]
+    fn update_decorations(&mut self) {
+        let active = self.window.activated();
+        let rules = self.window().rules();
+        let border = self.config.border.with_overrides(&rules.border);
+        let shadow = self.config.shadow.with_overrides(&rules.shadow);
+        drop(rules);
+
+        // Update the border to reflect current state
+        let mut visual_geometry = self.visual_geometry();
+        let mut color = if active {
+            border.focused_color
+        } else {
+            border.normal_color
+        };
+        // Account for opening animation
+        if let Some(&progress) = self.opening_animation.as_ref().map(Animation::value) {
+            let scale = opening_animation_progress_to_scale(progress);
+            visual_geometry = {
+                let mut geo = visual_geometry;
+                let center = geo.center();
+                geo.loc -= center;
+                geo = geo.to_f64().upscale(scale).to_i32_round();
+                geo.loc += center;
+                geo
+            };
+
+            match &mut color {
+                fht_compositor_config::Color::Solid(color) => color[3] *= progress as f32,
+                fht_compositor_config::Color::Gradient { start, end, .. } => {
+                    start[3] *= progress as f32;
+                    end[3] *= progress as f32;
+                }
+            }
+        }
+
+        self.border
+            .update_parameters(border.radius, border.thickness, color);
+        self.shadow
+            .update_parameters(shadow, self.border.corner_radius());
+
+        // We draw the shadow directly around the window, not around the tile
+        self.border.set_geometry(visual_geometry);
+        // But the shadow is drawn around the tile's window. This allows for setups where the
+        // border color can be transparent, and the border only drawn around focused windows, for
+        // example
+        let thickness = self.border.thickness(); // use the animated value
+        let window_geometry = Rectangle::new(
+            visual_geometry.loc + Point::from((thickness, thickness)),
+            visual_geometry.size - Size::from((thickness, thickness)).upscale(2),
+        );
+        self.shadow.set_rectangle(window_geometry);
     }
 
     /// Get a reference to the [`Window`] of this [`Tile`].
@@ -198,6 +313,10 @@ impl Tile {
     pub fn set_geometry(&mut self, new_geometry: Rectangle<i32, Logical>, animate: bool) {
         self.set_location(new_geometry.loc, animate);
         self.set_size(new_geometry.size, animate);
+        if !animate {
+            // We don't animate, update the border immediatly.
+            self.border.set_geometry(new_geometry);
+        }
     }
 
     /// Get this [`Tile`]'s geometry, in other words its effective [`Rectangle`] in [`Workspace`]
@@ -243,7 +362,7 @@ impl Tile {
                 );
             }
         } else if self.location != new_location {
-            self.location = new_location
+            self.location = new_location;
         }
     }
 
@@ -284,8 +403,7 @@ impl Tile {
         let border_thickness = if self.window.fullscreen() {
             0 // No border is drawn when the window is fullscreened.
         } else {
-            let rules = self.window.rules();
-            self.config.border.with_overrides(&rules.border).thickness
+            self.border.thickness()
         };
 
         Size::from((ww + 2 * border_thickness, wh + 2 * border_thickness))
@@ -324,8 +442,7 @@ impl Tile {
         }
 
         self.extra_damage.set_size(new_size);
-        let rules = self.window.rules();
-        let mut border_thickness = self.config.border.with_overrides(&rules.border).thickness;
+        let mut border_thickness = self.border.thickness();
         if self.window.fullscreen() {
             // When we have a fullscreen window, no border is drawn
             border_thickness = 0;
@@ -392,6 +509,16 @@ impl Tile {
             animation.tick(target_presentation_time);
         }
 
+        if self.border.advance_animations(target_presentation_time) {
+            animations_ongoing = true;
+        }
+
+        if animations_ongoing {
+            // Update the border if any soft of animation is taking place since it needs to keep
+            // track of the visual size and opening animation progress
+            self.update_decorations();
+        }
+
         animations_ongoing
     }
 
@@ -440,23 +567,23 @@ impl Tile {
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
-        let rules = self.window.rules();
         let is_fullscreen = self.window.fullscreen();
 
         let alpha = if is_fullscreen {
             alpha
         } else {
-            alpha * rules.opacity.unwrap_or(1.0)
+            alpha * self.window.rules().opacity.unwrap_or(1.0)
         };
 
-        let border = self.config.border.with_overrides(&rules.border);
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
-            (border.thickness, border.radius)
+            let thickness = self.border.thickness();
+            // We use the inner radius here since the edge of the tile will meet
+            // with the border's inner edge.
+            let radius = (self.border.corner_radius() - thickness as f32).max(0.0);
+            (thickness, radius)
         };
-
-        drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
         let tile_geometry = Rectangle::new(location, self.visual_size());
@@ -468,14 +595,6 @@ impl Tile {
             )
                 .into(),
         );
-
-        // https://drafts.csswg.org/css-backgrounds/#corner-overlap
-        let reduction = f32::min(
-            tile_geometry.size.w as f32 / (2. * border_radius),
-            tile_geometry.size.h as f32 / (2. * border_radius),
-        );
-        let reduction = f32::min(1.0, reduction);
-        let border_radius = border_radius * reduction;
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
@@ -556,7 +675,6 @@ impl Tile {
             }
         } else {
             // FIXME: Why divide by scale to get proper rounding?
-            let border_radius = border_radius / scale as f32;
             let window_elements = self
                 .window
                 .render_toplevel_elements(
@@ -608,7 +726,6 @@ impl Tile {
         mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
-        active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
         let fractional_scale = Scale::from(scale as f64);
@@ -703,22 +820,15 @@ impl Tile {
         let is_fullscreen = self.window.fullscreen();
         let is_floating = !self.window.tiled();
         let rules = self.window.rules();
-        let border = self.config.border.with_overrides(&rules.border);
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
-            (border.thickness, border.radius)
+            (self.border.thickness(), self.border.corner_radius())
         };
         let (blur, optimized_blur) = (
             self.config.blur.with_overrides(&rules.blur),
             rules.blur.optimized,
         );
-        let shadow = self
-            .config
-            .shadow
-            .as_ref()
-            .map(|shadow| shadow.with_overrides(&rules.shadow));
-
         drop(rules);
 
         let window_geometry = Rectangle::new(
@@ -727,22 +837,7 @@ impl Tile {
         );
 
         let border_element = (border_thickness != 0)
-            .then(|| {
-                super::decorations::draw_border(
-                    renderer,
-                    scale,
-                    alpha,
-                    tile_geometry,
-                    border_thickness as f64,
-                    border_radius as f64,
-                    if active {
-                        border.focused_color
-                    } else {
-                        border.normal_color
-                    },
-                )
-                .into()
-            })
+            .then(|| self.border.render(renderer).into())
             .into_iter();
 
         let blur_element = (!blur.disabled() && self.has_transparent_region())
@@ -779,35 +874,11 @@ impl Tile {
             })
             .into_iter();
 
-        let shadow_element = shadow
-            .and_then(|shadow| {
-                let should_draw = if shadow.disable {
-                    false
-                } else {
-                    match shadow.floating_only {
-                        true => is_floating,
-                        false => true,
-                    }
-                };
-
-                if !is_fullscreen && shadow.color[3] > 0.0 && should_draw {
-                    Some(
-                        super::decorations::draw_shadow(
-                            renderer,
-                            alpha,
-                            scale,
-                            window_geometry,
-                            shadow.sigma,
-                            border_radius,
-                            shadow.color,
-                        )
-                        .into(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .into_iter();
+        let shadow_element = self
+            .shadow
+            .render(renderer, is_floating)
+            .into_iter()
+            .map(Into::into);
 
         opening_element
             .into_iter()
@@ -822,14 +893,13 @@ impl Tile {
     ///
     /// You should **NOT** be using this.
     pub(super) fn render_for_interactive_grab<R: FhtRenderer>(
-        &self,
+        &mut self,
         renderer: &mut R,
         visual_location: Point<i32, Logical>,
         scale: i32,
         mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
-        active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
         let fractional_scale = Scale::from(scale as f64);
@@ -924,22 +994,15 @@ impl Tile {
         let is_fullscreen = self.window.fullscreen();
         let is_floating = !self.window.tiled();
         let rules = self.window.rules();
-        let border = self.config.border.with_overrides(&rules.border);
         let (border_thickness, border_radius) = if is_fullscreen {
             (0, 0.0)
         } else {
-            (border.thickness, border.radius)
+            (self.border.thickness(), self.border.corner_radius())
         };
         let (blur, optimized_blur) = (
             self.config.blur.with_overrides(&rules.blur),
             rules.blur.optimized,
         );
-        let shadow = self
-            .config
-            .shadow
-            .as_ref()
-            .map(|shadow| shadow.with_overrides(&rules.shadow));
-
         drop(rules);
 
         let window_geometry = Rectangle::new(
@@ -949,20 +1012,8 @@ impl Tile {
 
         let border_element = (border_thickness != 0)
             .then(|| {
-                super::decorations::draw_border(
-                    renderer,
-                    scale,
-                    alpha,
-                    tile_geometry,
-                    border_thickness as f64,
-                    border_radius as f64,
-                    if active {
-                        border.focused_color
-                    } else {
-                        border.normal_color
-                    },
-                )
-                .into()
+                self.border.set_geometry(tile_geometry); // FIXME: Not really good for damage but I digress.
+                self.border.render(renderer).into()
             })
             .into_iter();
 
@@ -1000,35 +1051,11 @@ impl Tile {
             })
             .into_iter();
 
-        let shadow_element = shadow
-            .and_then(|shadow| {
-                let should_draw = if shadow.disable {
-                    false
-                } else {
-                    match shadow.floating_only {
-                        true => is_floating,
-                        false => true,
-                    }
-                };
-
-                if !is_fullscreen && shadow.color[3] > 0.0 && should_draw {
-                    Some(
-                        super::decorations::draw_shadow(
-                            renderer,
-                            alpha,
-                            scale,
-                            window_geometry,
-                            shadow.sigma,
-                            border_radius,
-                            shadow.color,
-                        )
-                        .into(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .into_iter();
+        let shadow_element = self
+            .shadow
+            .render(renderer, is_floating)
+            .into_iter()
+            .map(Into::into);
 
         opening_element
             .into_iter()

@@ -2,14 +2,15 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
-use smithay::backend::renderer::utils::{CommitCounter, DamageSet};
+use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 
-#[derive(Debug)]
-pub struct FhtPixelShaderElement(PixelShaderElement, Option<DamageSet<i32, Logical>>);
+/// A newtype wrapper around [`PixelShaderElement`] to allow drawing with our [`UdevRenderer`].
+#[derive(Clone, Debug)]
+pub struct FhtPixelShaderElement(PixelShaderElement);
 
 impl FhtPixelShaderElement {
     /// Create a new [`FhtPixelShaderElement`].
@@ -20,12 +21,23 @@ impl FhtPixelShaderElement {
         geometry: Rectangle<i32, Logical>,
         alpha: f32,
         additional_uniforms: Vec<Uniform<'static>>,
-        damage: Option<&[Rectangle<i32, Logical>]>,
         kind: Kind,
     ) -> Self {
         let inner =
             PixelShaderElement::new(program, geometry, None, alpha, additional_uniforms, kind);
-        Self(inner, damage.map(DamageSet::from_slice))
+        Self(inner)
+    }
+}
+
+impl std::ops::Deref for FhtPixelShaderElement {
+    type Target = PixelShaderElement;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for FhtPixelShaderElement {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -59,17 +71,7 @@ impl Element for FhtPixelShaderElement {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> smithay::backend::renderer::utils::DamageSet<i32, Physical> {
-        match &self.1 {
-            // If we have custom damage, use that. Otherwise pixel shader element uses full
-            // area. FIXME: Maybe avoid the allocation, but this should live on the stack
-            Some(damage) => DamageSet::from_iter(
-                damage
-                    .iter()
-                    .copied()
-                    .map(|rect| rect.to_physical_precise_round(scale)),
-            ),
-            None => self.0.damage_since(scale, commit),
-        }
+        self.0.damage_since(scale, commit)
     }
 
     fn opaque_regions(
