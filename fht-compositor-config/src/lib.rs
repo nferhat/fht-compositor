@@ -673,7 +673,7 @@ const fn default_shadow_color() -> [f32; 4] {
     [0.0, 0.0, 0.0, 0.75]
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Shadow {
     pub disable: bool,
@@ -827,6 +827,56 @@ pub enum Color {
     },
 }
 
+impl fht_animation::Animable for Color {
+    fn lerp(start: &Self, end: &Self, progress: f64) -> Self {
+        match (start, end) {
+            (Color::Solid(start), Color::Solid(end)) => {
+                Color::Solid(<_>::lerp(start, end, progress))
+            }
+            (
+                Color::Solid(start_solid),
+                Color::Gradient {
+                    start: target_start,
+                    end: target_end,
+                    angle,
+                },
+            ) => Color::Gradient {
+                start: <_>::lerp(start_solid, target_start, progress),
+                end: <_>::lerp(start_solid, target_end, progress),
+                angle: *angle,
+            },
+            (Color::Gradient { start, end, angle }, Color::Solid(target)) => {
+                if progress == 1.0 {
+                    // We are done
+                    Color::Solid(*target)
+                } else {
+                    Color::Gradient {
+                        // Slowly transition from the gradient to solid
+                        start: <_>::lerp(start, target, progress),
+                        end: <_>::lerp(end, target, progress),
+                        angle: *angle,
+                    }
+                }
+            }
+            (
+                Color::Gradient { start, end, angle },
+                Color::Gradient {
+                    start: target_start,
+                    end: target_end,
+                    angle: target_angle,
+                },
+            ) => {
+                Color::Gradient {
+                    // Slowly transition from the gradient to solid
+                    start: <_>::lerp(start, target_start, progress),
+                    end: <_>::lerp(end, target_end, progress),
+                    angle: f32::lerp(angle, target_angle, progress),
+                }
+            }
+        }
+    }
+}
+
 impl Color {
     pub fn components(&self) -> [f32; 4] {
         match self {
@@ -850,6 +900,7 @@ pub struct Animations {
     pub workspace_switch: WorkspaceSwitchAnimation,
     pub window_open_close: WindowOpenCloseAnimation,
     pub window_geometry: WindowGeometryAnimation,
+    pub border: BorderAnimation,
 }
 
 const fn default_workspace_switch_animation_duration() -> Duration {
@@ -949,6 +1000,39 @@ impl Default for WindowGeometryAnimation {
             disable: false,
             curve: default_window_animation_curve(),
             duration: default_window_animation_duration(),
+        }
+    }
+}
+
+const fn default_border_animation_curve() -> fht_animation::AnimationCurve {
+    AnimationCurve::Simple(fht_animation::curve::Easing::EaseInOutExpo)
+}
+
+const fn default_border_animation_duration() -> Duration {
+    Duration::from_millis(300)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct BorderAnimation {
+    #[serde(default = "default_false")]
+    pub disable: bool,
+    #[serde(default = "default_window_animation_curve")]
+    pub curve: AnimationCurve,
+    #[serde(
+        default = "default_window_animation_duration",
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration_millis"
+    )]
+    pub duration: Duration,
+}
+
+impl Default for BorderAnimation {
+    fn default() -> Self {
+        Self {
+            disable: false,
+            curve: default_border_animation_curve(),
+            duration: default_border_animation_duration(),
         }
     }
 }

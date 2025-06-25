@@ -26,7 +26,7 @@ static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
 /// Identifier of a [`Workspace`].
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct WorkspaceId(usize);
+pub struct WorkspaceId(pub usize);
 impl WorkspaceId {
     /// Create a unique [`WorkspaceId`].
     ///
@@ -38,6 +38,12 @@ impl WorkspaceId {
 impl std::fmt::Debug for WorkspaceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "workspace-{}", self.0)
+    }
+}
+impl std::ops::Deref for WorkspaceId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -209,7 +215,7 @@ impl Workspace {
         // Reload the shared Rcs with workspace system config.
         self.config = Rc::clone(config);
         for tile in &mut self.tiles {
-            tile.config = Rc::clone(config);
+            tile.reload_config(Rc::clone(config))
         }
 
         // Workspace-specific layout changes.
@@ -291,12 +297,8 @@ impl Workspace {
             .as_ref()
             .map(|&idx| &mut self.tiles[idx])
         {
-            Self::refresh_window(
-                &self.output,
-                output_geometry,
-                fullscreened_tile,
-                true, // Fullscreen window gets exclusive activation and focus.
-            );
+            // Fullscreen window gets exclusive activation and focus.
+            fullscreened_tile.refresh(true, &self.output, output_geometry);
         }
 
         // let _ = self.interactive_swap.take_if(|swap| {
@@ -333,36 +335,12 @@ impl Workspace {
         }
 
         for (idx, tile) in self.tiles.iter_mut().enumerate() {
-            Self::refresh_window(
+            tile.refresh(
+                Some(idx) == self.active_tile_idx,
                 &self.output,
                 output_geometry,
-                tile,
-                Some(idx) == self.active_tile_idx,
             );
         }
-    }
-
-    /// Handle a refresh for a window.
-    fn refresh_window(
-        output: &Output,
-        output_geometry: Rectangle<i32, Logical>,
-        tile: &mut Tile,
-        active: bool,
-    ) {
-        crate::profile_function!();
-        let window = tile.window();
-        window.request_activated(active);
-
-        let mut bbox = window.bbox();
-        bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
-        if let Some(mut overlap) = output_geometry.intersection(bbox) {
-            // overlap must be in window-local coordinates.
-            overlap.loc -= bbox.loc;
-            window.enter_output(output, overlap);
-        }
-
-        window.send_pending_configure();
-        window.refresh();
     }
 
     /// Get the [`Workspace`]'s active [`Tile`] index, if any.
@@ -984,6 +962,11 @@ impl Workspace {
         }
     }
 
+    /// Get the current fullscreened [`Tile`] index.
+    pub fn fullscreened_tile_idx(&self) -> Option<usize> {
+        self.fullscreened_tile_idx
+    }
+
     /// Get the current fullscreened [`Window`]
     pub fn fullscreened_window(&self) -> Option<Window> {
         self.tiles
@@ -1041,6 +1024,11 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// The master width factor of this [`Workspace`].
+    pub fn mwfact(&self) -> f64 {
+        self.mwfact
+    }
+
     /// Change the master width factor of this [`Workspace`].
     pub fn change_mwfact(&mut self, delta: f64, animate: bool) {
         self.has_transient_layout_changes = true;
@@ -1048,10 +1036,29 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// Set the master width factor of this [`Workspace`].
+    pub fn set_mwfact(&mut self, value: f64, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.mwfact = value.clamp(0.01, 0.99);
+        self.arrange_tiles(animate);
+    }
+
+    /// The number of master windows factor of this [`Workspace`].
+    pub fn nmaster(&self) -> usize {
+        self.nmaster
+    }
+
     /// Change the number of master windows of this [`Workspace`].
     pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
         self.has_transient_layout_changes = true;
         self.nmaster = self.nmaster.saturating_add_signed(delta as isize).max(1);
+        self.arrange_tiles(animate);
+    }
+
+    /// Set the number of master windows of this [`Workspace`].
+    pub fn set_nmaster(&mut self, value: usize, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.nmaster = value.max(1);
         self.arrange_tiles(animate);
     }
 
@@ -1597,11 +1604,18 @@ impl Workspace {
             return None;
         };
 
-        // FIXME: Perhaps handle better maximized/fullscreen?
-        // Would be janky though.
-        if window.maximized() || window.fullscreen() {
-            return None;
+        if window.fullscreen() {
+            // Fullscreening should be exclusive.
+            assert_eq!(self.fullscreened_window().as_ref(), Some(window));
+            window.request_fullscreen(false);
+            self.fullscreened_tile_idx = None;
+            // Start fading in windows as we grab the fullscreened tile
+            self.start_fullscreen_fade_in(None);
         }
+
+        // Reset window state
+        window.request_fullscreen(false);
+        window.request_maximized(false);
 
         let tile = self.tiles.remove(idx);
         if idx < self.nmaster {
@@ -1849,7 +1863,7 @@ impl Workspace {
             let tile = &self.tiles[fullscreen_idx];
 
             let fullscreen_elements = tile
-                .render(renderer, scale, 1.0, &self.output, render_offset, true)
+                .render(renderer, scale, 1.0, &self.output, render_offset)
                 .map(|element| {
                     RelocateRenderElement::from_element(
                         element,
@@ -1885,7 +1899,7 @@ impl Workspace {
 
             // Active gets rendered above others.
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, true)
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
                     .map(|element| {
                         RelocateRenderElement::from_element(
                             element,
@@ -1911,7 +1925,7 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset, false)
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
                     .map(|element| {
                         RelocateRenderElement::from_element(
                             element,

@@ -89,24 +89,11 @@ impl Space {
             tile,
             overlap_outputs,
             ..
-        }) = &self.interactive_swap
+        }) = &mut self.interactive_swap
         {
-            tile.window().request_activated(true);
-            let bbox = tile.window().bbox();
-
-            for output in overlap_outputs {
-                let output_geometry = output.geometry();
-                let mut bbox = bbox;
-                bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
-                if let Some(mut overlap) = output_geometry.intersection(bbox) {
-                    // overlap must be in window-local coordinates.
-                    overlap.loc -= bbox.loc;
-                    tile.window().enter_output(output, overlap);
-                }
-            }
-
-            tile.window().send_pending_configure();
-            tile.window().refresh();
+            // FIXME: Apply overlap on all outputs
+            let output = &mut overlap_outputs[0];
+            tile.refresh(true, output, output.geometry());
         }
 
         for (idx, monitor) in self.monitors.iter_mut().enumerate() {
@@ -162,6 +149,11 @@ impl Space {
         self.monitors.iter()
     }
 
+    /// Get a mutable iterator over the [`Space`]'s tracked [`Monitor`](s)
+    pub fn monitors_mut(&mut self) -> impl ExactSizeIterator<Item = &mut Monitor> {
+        self.monitors.iter_mut()
+    }
+
     /// Get the [`Monitor`] associated with this [`Output`].
     pub fn monitor_for_output(&self, output: &Output) -> Option<&Monitor> {
         self.monitors.iter().find(|mon| mon.output() == output)
@@ -206,12 +198,19 @@ impl Space {
     }
 
     /// Get an iterator of all the [`Windows`]s managed by this [`Space`].
-    #[allow(unused)]
     pub fn windows(&self) -> impl Iterator<Item = &Window> {
         self.monitors
             .iter()
             .flat_map(Monitor::workspaces)
             .flat_map(Workspace::windows)
+    }
+
+    /// Get a mutable iterator of all the [`Tile`]s managed by this [`Space`].
+    pub fn tiles_mut(&mut self) -> impl Iterator<Item = &mut tile::Tile> {
+        self.monitors
+            .iter_mut()
+            .flat_map(Monitor::workspaces_mut)
+            .flat_map(Workspace::tiles_mut)
     }
 
     /// Add an [`Output`] to this [`Space`].
@@ -276,6 +275,12 @@ impl Space {
         self.monitors.iter().any(|mon| mon.output() == output)
     }
 
+    /// Get the active [`Workspace`].
+    pub fn active_workspace(&self) -> &Workspace {
+        let monitor = &self.monitors[self.active_idx];
+        monitor.active_workspace()
+    }
+
     /// Get the [`WorkspaceId`] of the active [`Workspace`].
     pub fn active_workspace_id(&self) -> WorkspaceId {
         let monitor = &self.monitors[self.active_idx];
@@ -295,7 +300,29 @@ impl Space {
         active_workspace.active_window()
     }
 
-    /// Get the active [`Window`] of this [`Space`], if any.
+    /// Get a mutable reference to the active [`Tile`] of this [`Space`], if any.
+    pub fn active_tile_mut(&mut self) -> Option<&mut tile::Tile> {
+        let active_monitor = &mut self.monitors[self.active_idx];
+        let active_workspace = active_monitor.active_workspace_mut();
+        active_workspace.active_tile_mut()
+    }
+
+    /// Get the active [`Monitor`] index of this [`Space`]
+    pub fn active_monitor_idx(&self) -> usize {
+        self.active_idx
+    }
+
+    /// Get the primary [`Monitor`] index of this [`Space`]
+    pub fn primary_monitor_idx(&self) -> usize {
+        self.primary_idx
+    }
+
+    /// Get the active [`Monitor`] of this [`Space`], if any.
+    pub fn active_monitor(&self) -> &Monitor {
+        &self.monitors[self.active_idx]
+    }
+
+    /// Get the active [`Monitor`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]
     }
@@ -318,6 +345,13 @@ impl Space {
     /// Get the primary [`Output`].
     pub fn primary_output(&self) -> &Output {
         self.monitors[self.primary_idx].output()
+    }
+
+    /// Get the [`Workspace`] associated with this [`WorkspaceId`].
+    pub fn workspace_for_id(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
+        self.monitors
+            .iter()
+            .find_map(|mon| mon.workspaces().find(|ws| ws.id() == workspace_id))
     }
 
     /// Get the [`Workspace`] associated with this [`WorkspaceId`].
@@ -584,6 +618,29 @@ impl Space {
         false
     }
 
+    /// Float the [`Tile`] associated with this [`Window`].
+    pub fn float_window(&mut self, window: &Window, floating: bool, animate: bool) -> bool {
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                let mut arrange = false;
+                for tile in workspace.tiles_mut() {
+                    if tile.window() == window {
+                        window.request_tiled(!floating);
+                        arrange = true;
+                        break;
+                    }
+                }
+
+                if arrange {
+                    workspace.arrange_tiles(animate);
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Fullscreen the [`Tile`] associated with this [`Window`].
     pub fn fullscreen_window(&mut self, window: &Window, animate: bool) -> bool {
         for monitor in &mut self.monitors {
@@ -661,6 +718,48 @@ impl Space {
         let active = target_monitor.active_workspace_mut();
         active.insert_window(window.clone(), animate);
     }
+
+    /// Move this [`Window`] to a given [`Workspace`].
+    pub fn move_window_to_workspace(
+        &mut self,
+        window: &Window,
+        workspace_id: WorkspaceId,
+        animate: bool,
+    ) {
+        // If we try to add the window back into its original workspace.
+        let mut original_workspace_id = None;
+        'monitors: for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                if workspace.remove_window(window, true) {
+                    // We successfully removed the window,
+                    // Stop checking for other monitors
+                    original_workspace_id = Some(workspace.id());
+                    break 'monitors;
+                }
+            }
+        }
+        let Some(original_workspace_id) = original_workspace_id else {
+            // We did not find the window!? Do not proceed.
+            return;
+        };
+
+        let Some(target_workspace) = self
+            .monitors
+            .iter_mut()
+            .find_map(|mon| mon.workspaces_mut().find(|ws| ws.id() == workspace_id))
+        else {
+            // No matching monitor, insert back
+            let original_workspace = self
+                .workspace_mut_for_id(original_workspace_id)
+                .expect("original_workspace_id should always be valid");
+            original_workspace.insert_window(window.clone(), animate);
+            return;
+        };
+
+        target_workspace.insert_window(window.clone(), animate);
+    }
+
+    /// Get the fullscreen [`Window`] under the `point`, and its position in global space.
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.
     ///
@@ -744,6 +843,33 @@ impl Space {
                     if tile.window() == window {
                         let proportion = (tile.proportion() + delta).max(0.01);
                         tile.set_proportion(proportion);
+                        arrange = true;
+                        break;
+                    }
+                }
+
+                if arrange {
+                    workspace.arrange_tiles(animate);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Center a given window.
+    pub fn center_window(&mut self, window: &Window, animate: bool) {
+        if window.tiled() {
+            return;
+        }
+
+        for monitor in &mut self.monitors {
+            for workspace in monitor.workspaces_mut() {
+                let mut arrange = false;
+                let output_geometry = workspace.output().geometry();
+                for tile in workspace.tiles_mut() {
+                    if tile.window() == window {
+                        let size = tile.size();
+                        tile.set_location(output_geometry.center() - size.downscale(2), animate);
                         arrange = true;
                         break;
                     }
@@ -876,12 +1002,12 @@ impl Space {
 
     /// Renders the tile affected by the current interactive swap.
     pub fn render_interactive_swap<R: FhtRenderer>(
-        &self,
+        &mut self,
         renderer: &mut R,
         output: &Output,
         scale: i32,
     ) -> Vec<TileRenderElement<R>> {
-        let Some(interactive_swap) = self.interactive_swap.as_ref() else {
+        let Some(interactive_swap) = self.interactive_swap.as_mut() else {
             return vec![];
         };
 
@@ -898,7 +1024,6 @@ impl Space {
                 1.0,
                 output,
                 Point::default(),
-                true,
             )
             .collect()
     }
@@ -968,7 +1093,8 @@ pub struct Config {
     )>,
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
-    pub shadow: Option<fht_compositor_config::Shadow>,
+    pub border_animation: Option<AnimationConfig>,
+    pub shadow: fht_compositor_config::Shadow,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
     pub border: fht_compositor_config::Border,
     pub layouts: Vec<fht_compositor_config::WorkspaceLayout>,
@@ -1012,7 +1138,12 @@ impl Config {
                 config.animations.window_open_close.curve,
                 !config.animations.disable && !config.animations.window_open_close.disable,
             ),
-            shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
+            border_animation: AnimationConfig::new(
+                config.animations.border.duration,
+                config.animations.border.curve,
+                !config.animations.disable && !config.animations.border.disable,
+            ),
+            shadow: config.decorations.shadow,
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),
@@ -1032,6 +1163,11 @@ pub struct AnimationConfig {
 }
 
 impl AnimationConfig {
+    const DISABLED: AnimationConfig = AnimationConfig {
+        curve: AnimationCurve::Simple(fht_animation::curve::Easing::Linear),
+        duration: Duration::ZERO,
+    };
+
     pub fn new(duration: Duration, curve: AnimationCurve, enable: bool) -> Option<Self> {
         enable.then_some(Self { duration, curve })
     }
