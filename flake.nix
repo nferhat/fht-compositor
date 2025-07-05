@@ -339,6 +339,42 @@
               default = pkgs.callPackage fht-compositor-package {};
             };
 
+            systemd = {
+              enable =
+                lib.mkEnableOption null
+                // {
+                  default = true;
+                  description = ''
+                    Whether to enable {file}`fht-compositor.target` on startup.
+                    It is important to note that this will add important varibales
+                    to the systemd and dbus environment such as `WAYLAND_DISPLAY`
+                    and `XDG_CURRENT_DESKTOP`.
+                  '';
+                };
+
+              variables = lib.mkOption {
+                type = with lib.types; listOf str;
+                default = [
+                  "WAYLAND_DISPLAY"
+                  "XDG_CURRENT_DESKTOP"
+                ];
+                example = ["--all"];
+                description = ''
+                  Environment variables to be imported in the systemd & D-Bus user
+                  environment.
+                '';
+              };
+
+              extraCommands = lib.mkOption {
+                type = with lib.types; listOf str;
+                default = [
+                  "systemctl --user stop fht-compositor-session.target"
+                  "systemctl --user start fht-compositor-session.target"
+                ];
+                description = "Extra commands to be run after D-Bus activation.";
+              };
+            };
+
             settings = lib.mkOption {
               type = configFormat.type;
               default = {};
@@ -379,6 +415,25 @@
             xdg.configFile.fht-compositor-config = lib.mkIf (cfg.settings != {}) {
               target = "fht/compositor.toml";
               source = configFormat.generate "fht-compositor-config" cfg.settings;
+            };
+
+            programs.fht-compositor.settings = lib.mkIf cfg.systemd.enable {
+              autostart = let
+                vars = lib.concatStringsSep " " cfg.systemd.variables;
+                extraCmds = lib.concatMapStringsSep " " (cmd: "&& ${cmd}") cfg.systemd.extraCommands;
+              in [
+                "${pkgs.dbus}/bin/dbus-update-activation-environment --systemd ${vars} ${extraCmds}"
+              ];
+            };
+
+            systemd.user.targets.fht-compositor-session = lib.mkIf cfg.systemd.enable {
+              Unit = {
+                Description = "fht-compositor session";
+                Documentation = ["man:systemd.special(7)"];
+                BindsTo = ["graphical-session.target"];
+                Wants = ["graphical-session-pre.target"];
+                After = ["graphical-session-pre.target"];
+              };
             };
           };
         };
