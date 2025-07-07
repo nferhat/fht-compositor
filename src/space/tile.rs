@@ -23,9 +23,8 @@ use super::Config;
 use crate::egui::EguiRenderElement;
 use crate::renderer::blur::element::BlurElement;
 use crate::renderer::extra_damage::ExtraDamage;
-use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_window::RoundedWindowElement;
-use crate::renderer::shaders::Shaders;
+use crate::renderer::shaders::{ShaderElement, Shaders};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
 use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
@@ -88,7 +87,7 @@ crate::fht_render_elements! {
         RoundedSurface = RoundedWindowElement<R>,
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
-        Decoration = FhtPixelShaderElement,
+        Decoration = ShaderElement,
         Blur = BlurElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,

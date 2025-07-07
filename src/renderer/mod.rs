@@ -9,7 +9,6 @@
 pub mod blur;
 mod data;
 pub mod extra_damage;
-pub mod pixel_shader_element;
 pub mod render_elements;
 pub mod rounded_window;
 pub mod shaders;

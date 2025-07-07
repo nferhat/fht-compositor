@@ -1,5 +1,7 @@
+mod element;
 use std::borrow::BorrowMut;
 
+pub use element::ShaderElement;
 use smithay::backend::renderer::gles::{
     GlesFrame, GlesPixelProgram, GlesRenderer, GlesTexProgram, UniformName, UniformType,
 };
