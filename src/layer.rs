@@ -11,8 +11,8 @@ use smithay::output::Output;
 use smithay::wayland::shell::wlr_layer;
 
 use crate::renderer::blur::element::BlurElement;
-use crate::renderer::pixel_shader_element::FhtPixelShaderElement;
 use crate::renderer::rounded_window::RoundedWindowElement;
+use crate::renderer::shaders::ShaderElement;
 use crate::renderer::{has_transparent_region, FhtRenderer};
 use crate::state::Fht;
 
@@ -264,6 +264,6 @@ crate::fht_render_elements! {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedWindowElement<R>,
         Blur = BlurElement,
-        Shadow = FhtPixelShaderElement,
+        Shadow = ShaderElement,
     }
 }
