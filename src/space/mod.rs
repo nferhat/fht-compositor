@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use fht_animation::AnimationCurve;
 pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -880,7 +881,7 @@ impl Space {
         renderer: &mut R,
         output: &Output,
         scale: i32,
-    ) -> Vec<TileRenderElement<R>> {
+    ) -> Vec<RelocateRenderElement<TileRenderElement<R>>> {
         let Some(interactive_swap) = self.interactive_swap.as_ref() else {
             return vec![];
         };
@@ -889,17 +890,21 @@ impl Space {
             return vec![];
         }
 
+        // Usually, the tile's location is local, but in our case it is global due to how
+        // Space::handle_interactive_swap_motion is done.
+        // We just have to offset by the output location to render it accurately.
+        let output_loc = output.current_location().to_physical(scale);
+
         interactive_swap
             .tile
-            .render_for_interactive_grab(
-                renderer,
-                interactive_swap.tile.visual_location() - output.current_location(),
-                scale,
-                1.0,
-                output,
-                Point::default(),
-                true,
-            )
+            .render(renderer, scale, 1.0, output, Point::default(), false)
+            .map(|element| {
+                RelocateRenderElement::from_element(
+                    element,
+                    output_loc.upscale(-1),
+                    Relocate::Relative,
+                )
+            })
             .collect()
     }
 

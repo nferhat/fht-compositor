@@ -24,6 +24,7 @@ use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
+use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
@@ -63,7 +64,7 @@ crate::fht_render_elements! {
         Cursor = CursorRenderElement<R>,
         ConfigUi = ConfigUiRenderElement,
         Monitor = MonitorRenderElement<R>,
-        Tile = TileRenderElement<R>, // Needed for interactive swap
+        InteractiveSwapTile = RelocateRenderElement<TileRenderElement<R>>,
         LayerShell = LayerShellRenderElement<R>,
         SessionLock = SessionLockRenderElement<R>,
         Debug = DebugRenderElement,
