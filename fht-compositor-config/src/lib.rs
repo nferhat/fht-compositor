@@ -357,7 +357,12 @@ pub enum MouseAction {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Input {
     pub keyboard: Keyboard,
+    /// Configuration for generic mice.
     pub mouse: Mouse,
+    /// Configuration for touchpads.
+    pub touchpad: Mouse,
+    /// Configuration for trackpoints, usually found on thinkpads.
+    pub trackpoint: Mouse,
     pub per_device: HashMap<String, PerDeviceInput>,
 }
 
