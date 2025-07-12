@@ -28,8 +28,13 @@ Default settings are `repeat-rate=25`, `repeat-delay=250`
 
 ## Mouse settings
 
-Mouse settings are appliewd for regular mice, touchpads, trackballs, etc. The compositor (and libinput) will figure out automatically
-which setting should be applied or not, and whether the connected mouse type supports a given feature.
+Mouse settings. The compositor (libinput) will figure out automatically which setting should be applied or not,
+and whether the connected mouse type supports a given feature.
+
+Depending on your mouse type, you can use:
+- `mouse`: For generic mice
+- `touchpad`: For laptop touchpads
+- `trackpoint`: For trackpoint (usually found on Thinkpads)
 
 > [!NOTE] Default mouse settings
 > If an option does not have a default specified, it is up to the device driver (IE. libinput) to choose one.
@@ -140,4 +145,4 @@ libinput list-devices | grep Device:
 ---
 
 - `disable`: Whether to completely disable this device.
-- `mouse`: Same as `input.mouse`, but for this device only.
+- `mouse`: Same as `input.mouse/touchpad/trackpoint`, but for this device only.

@@ -1631,7 +1631,29 @@ impl Fht {
             // the pointer capability:
             // https://github.com/hyprwm/aquamarine/blob/752d0fbd141fabb5a1e7f865199b80e6e76f8d8e/src/backend/Session.cpp#L826
             if device.has_capability(DeviceCapability::Pointer) {
-                let mouse_config = per_device_config.map_or(&input_config.mouse, |c| &c.mouse);
+                // A pointer with a size is a touchpad
+                let is_touchpad = device.size().is_some_and(|(w, h)| w != 0. && h != 0.);
+                // Trackpoints are reported as pointingsticks in udev
+                // https://wayland.freedesktop.org/libinput/doc/latest/trackpoint-configuration.html
+                // And based on udev source, here's the property value we must search for
+                // https://github.com/systemd/systemd/blob/d38dd7d17a67fda3257905fa32f254cd7b7d5b83/src/udev/udev-builtin-input_id.c#L315
+                let is_trackpoint = unsafe { device.udev_device() }.is_some_and(|device| {
+                    device.property_value("ID_INPUT_POINTINGSTICK").is_some()
+                });
+
+                let mouse_config = per_device_config.map_or_else(
+                    || match (is_touchpad, is_trackpoint) {
+                        // Not a touchpad and not a trackpoint is just a generic mouse.
+                        (false, false) => &input_config.mouse,
+                        (true, false) => &input_config.touchpad,
+                        (false, true) => &input_config.trackpoint,
+                        _ => unreachable!(),
+                    },
+                    |cfg|
+                    // In the case we use the per-device config, the user already knows what device he's modifying,
+                    // so we just use the mouse attribute.
+                    &cfg.mouse,
+                );
 
                 if let Some(click_method) = mouse_config.click_method {
                     let _ = device.config_click_set_method(click_method.into());
