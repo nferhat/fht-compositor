@@ -4,15 +4,16 @@ Before launching the compositor, you are recommended to install [Alacritty](http
 [wofi](https://hg.sr.ht/~scoopta/wofi) since the default configuration makes use of them.
 
 ::: tabs
-== systemd (with UWSM)
-- **Login managers**: You should use the `fht-compositor (UWSM)`
-- **From a TTY**: Run `uwsm start fht-compositor-uwsm.desktop`
+== systemd
+- **Login managers**: You should use the `fht-compositor` option
+- **From a TTY**: Run `fht-compositor-session` from your TTY
 
-== non-systemd (or without UWSM)
+== non-systemd
 ```sh
 # While you can run without D-Bus, many things like the ScreenCast portal will not work!
-dbus-run-session fht-compositor
+dbus-run-session fht-compositor --session
 ```
+
 :::
 
 On startup, the compositor will try to generate a default configuration file inside `~/.config/fht/compositor.toml`.

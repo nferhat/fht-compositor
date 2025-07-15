@@ -44,7 +44,7 @@ to get that error in your terminal.
 Command lines to run whenever the compositor starts up. Each line is evaluated using `/bin/sh -c "<command line>"`, meaning you have
 access to shell-expansions like using variables, or exapding of `~` to `$HOME`
 
-> [!TIP] Autostart with UWSM
+> [!TIP] Autostart with systemd units
 > While using this approach for autostart can work, using systemd user services are a much better! You benefit from having
 > logs using `journalctl -xeu --user {user-service}`, restart-on-failure, and bind them to specific targets.
 

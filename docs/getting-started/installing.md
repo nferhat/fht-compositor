@@ -44,27 +44,33 @@ git clone https://github.com/nferhat/fht-compositor/ && cd fht-compositor
 
 # If you are not under systemd
 cargo build --profile opt
-# If you are under systemd, highly recommended
-# See below the note on UWSM
-cargo build --profile opt --features uwsm
+# Integrate with systemd for user session
+cargo build --profile opt --features systemd
 # You can copy it to /usr/local/bin or ~/.local/bin, make sure its in $PATH though!
 cp target/opt/fht-compositor /somewhere/inside/PATH
-
-# Wayland session desktop files
-install -Dm644 res/fht-compositor.desktop -t /usr/share/wayland-sessions # generic
-# See below the note on UWSM, highly recommended
-install -Dm644 res/fht-compositor-uwsm.desktop -t /usr/share/wayland-sessions
 ```
+
+Now install the required files in the appropriate locations
+
+::: tabs
+== With Systemd
+```sh
+install -Dm755 res/systemd/fht-compositor-session         -t /somewhere/inside/PATH
+install -Dm644 res/systemd/fht-compositor.desktop         -t /usr/share/wayland-sessions
+install -Dm644 res/systemd/fht-compositor.service         -t /etc/systemd/user
+install -Dm644 res/systemd/fht-compositor-shutdown.target -t /etc/systemd/user
+```
+
+== Generic (without systemd)
+```sh
+install -Dm644 res/fht-compositor.desktop -t /usr/share/wayland-sessions
+```
+
+:::
 
 > [!CAUTION] Build features
 > Do **not** compile the compositor with `--all-features` as some of these are reserved for dev/testing purposes (for exxample
 > enabling profiling). Always refer to the `Cargo.toml` file before enabling features
-
-> [!TIP] Using Universal Wayland Session Manager
-> If you are using a systemd distribution, you are *highlighy* recommended to install [UWSM](https://github.com/Vladimir-csp/uwsm)
-> to launch the compositor session as it will bind many systemd targets to make the overall compositor experience better.
->
-> To do so, install UWSM with your favourite package manager and enable the `uwsm` feature at build time.
 
 > [!NOTE] Portals
 > Refer to the [portals](/usage/portals) page if you want the included portal (you most likely want to)
