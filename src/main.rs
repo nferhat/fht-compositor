@@ -7,6 +7,8 @@
 extern crate tracing;
 
 use std::error::Error;
+use std::io::Write;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -155,31 +157,97 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         }
     }
 
-    for cmd in &state.fht.config.autostart {
-        utils::spawn(cmd);
-    }
+    // Before starting the compositor, we export the environment to systemd and the dbus activation
+    // environment, and before spawning our programs and services that rely on it.
+    //
+    // FIXME: More system manaagers support, I heard dinit and OpenRC got their user-services
+    // implemented now. For now we only support systemd, but keep this in the back of our head
+    // for the future.
+    if cli.session {
+        let vars = [
+            "WAYLAND_DISPLAY",
+            "XDG_CURRENT_DESKTOP",
+            "XDG_SESSION_TYPE",
+            "MOZ_ENABLE_WAYLAND",
+            "_JAVA_AWT_NONREPARENTING",
+        ];
+        let vars_str = vars.join(" ");
 
-    #[cfg(feature = "uwsm")]
-    if cli.uwsm {
-        // Run "uwsm finalize" in order to export environment to systemd activation
-        // This will also signal that the compositor has started up and is ready to go
-        match std::process::Command::new("uwsm")
-            .arg("finalize")
-            // Also include XDG_CURRENT_DESKTOP since apparently uwsm doesn't pick it up by default
-            // and causes the provided .desktop file in the NixOS module to have the wrong value
-            // set
-            .args(["XDG_CURRENT_DESKTOP", "MOZ_ENABLE_WAYLAND"])
-            .spawn()
-        {
+        let system_manager_cmd = if cfg!(feature = "systemd") {
+            format!("systemctl --user import-environment {vars_str}")
+        } else {
+            // No system manager integration
+            String::new()
+        };
+
+        let import_cmd = format!(
+            "
+                {system_manager_cmd} 2>&1;
+                dbus-update-activation-environment --systemd {vars_str};
+            "
+        );
+        let rv = Command::new("/bin/sh").args(["-c", &import_cmd]).spawn();
+        match rv {
             Ok(mut child) => match child.wait() {
                 Ok(status) if !status.success() => {
-                    warn!("uwsm finalize process exited unsuccessfully")
+                    warn!(?status, "Import environment variables command exited")
                 }
-                Err(err) => warn!(?err, "Failed to wait for uwsm child"),
-                _ => (),
+                Err(err) => {
+                    warn!(?err, "Import environment variable command failed with")
+                }
+                _ => (), // success continue
             },
-            Err(err) => warn!(?err, "Failed to spawn uwsm finalize child"),
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "Failed to spawn shell for importing environment variables"
+                )
+            }
         }
+
+        #[cfg(feature = "systemd")]
+        {
+            use std::env;
+            use std::io::Write;
+            use std::os::fd::FromRawFd;
+
+            // Notify systemd about ready status
+            if let Err(err) = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]) {
+                warn!(
+                    ?err,
+                    "Failed to notify systemd about ready status through sd-notify"
+                );
+            }
+            // Also support NOTIFY_FD, in case we are not using socket-based communication with
+            // systemd
+            let notify_fd_result = (|| -> anyhow::Result<()> {
+                let fd = match env::var("NOTIFY_FD") {
+                    Ok(value) => value.parse()?,
+                    // Don't do anything if it's not advertised.
+                    Err(env::VarError::NotPresent) => return Ok(()),
+                    Err(err) => anyhow::bail!(err),
+                };
+                let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+                file.write_all(b"READY=1\n")?;
+                Ok(())
+            })();
+
+            if let Err(err) = notify_fd_result {
+                warn!(
+                    ?err,
+                    "Failed to notify systemd about ready status through NOTIFY_FD"
+                )
+            }
+        }
+    }
+
+    // We also spawn programs before running the event loop, but after setting up the environment
+    // and notifying the system manager about ready status.
+    //
+    // Since we are already listening on a socket, so they can connect to the compositor, and will
+    // be ready (hopefully) on the first rendered frame.
+    for cmd in &state.fht.config.autostart {
+        utils::spawn(cmd);
     }
 
     event_loop
