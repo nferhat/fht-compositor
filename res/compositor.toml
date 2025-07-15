@@ -8,7 +8,7 @@
 # Autostart
 # Command lines that are executed with `/bin/sh -c "<autostart string>"`
 # ---
-# NOTE: If you are on systemd with UWSM you should not use this and instead bind
+# NOTE: If you are on systemd you should not use this and instead bind
 # whatever you need to service files instead! This will provide many niceties like
 # logging and restart-on-failure
 autostart = []

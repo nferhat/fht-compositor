@@ -35,7 +35,6 @@ This module lets you enable `fht-compositor` and expose it to display managers l
 - A [polkit agent](https://wiki.archlinux.org/title/Polkit#Authentication_agents): `polkit-gnome` to be exact
 - [GNOME keyring](https://wiki.gnome.org/Projects/GnomeKeyring): Authentification agent
 - [xdg-desktop-portal-gtk](https://github.com/flatpak/xdg-desktop-portal-gtk): Fallback portal
-- [UWSM](https://github.com/Vladimir-csp/uwsm) session script.
 
 To enable it, include it `inputs.fht-compositor.nixosModules.default`
 
@@ -52,14 +51,6 @@ Whether to enable `fht-compositor`
 The `fht-compositor` package to use.
 
 Default: `<fht-compositor-flake>.packages.${pkgs.system}.fht-compositor`
-
----
-
-#### `programs.fht-compositor.withUWSM`
-
-Launch the fht-compositor session with UWSM (Universal Wayland Session Manager). Using this is highly recommended since it
-improves fht-compositor's systemd support by binding appropriate targets like `graphical-session.target`,
-`wayland-session@fht-compositor.target`, etc. for a regular desktop session.
 
 ## home-manager module
 

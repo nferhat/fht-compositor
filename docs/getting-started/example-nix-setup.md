@@ -19,9 +19,8 @@ shows you how to create user services that startup with the session using home-m
 
   programs = {
     dconf.enable = true; # required for dbus and GTK theming
-    # Enabling the compositor here will ensure that the .desktop files are correctly created
-    # and a UWSM session is instanciated. You'll find it with the name 'fht-compositor (UWSM)'
-    fht-compositor = { enable = true; withUWSM = true; };
+    # Enabling the compositor here will ensure that the .desktop files are correctly created.
+    fht-compositor = { enable = true; };
   };
 
   services = {
