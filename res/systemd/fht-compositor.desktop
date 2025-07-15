@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=fht-compositor
 Comment=A dynamic tiling Wayland compositor
-Exec=fht-compositor
+Exec=fht-compositor-session
 Type=Application
 DesktopNames=fht-compositor

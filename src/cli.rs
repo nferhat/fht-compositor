@@ -21,10 +21,9 @@ pub struct Cli {
     /// The configuration path to use.
     #[arg(short, long, value_name = "PATH")]
     pub config_path: Option<PathBuf>,
-    /// Whether to run `uwsm` to finalize the compositor environment.
+    /// Whether to run fht-compositor as a session
     #[arg(long)]
-    #[cfg(feature = "uwsm")]
-    pub uwsm: bool,
+    pub session: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
