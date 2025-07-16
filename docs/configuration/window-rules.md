@@ -133,6 +133,15 @@ is-focused = false
 opacity = 0.95 # lesser visible non-focused windows
 ```
 
+---
+
+#### `is-floating`
+
+Match on the floating window(s). This rule does not match all the windows if the workspace layout is
+set to floating, instead, it matches depending on the [`floating`](#maximized-fullscreen-floating-centered)
+property, or when you float a window using the
+[`float-focused-window`](/configuration/keybindings#maximize-focused-window-fullscreen-focused-window-float-focused-window)
+
 ## Window properties
 
 #### `open-on-output`, `open-on-workspace`
@@ -209,4 +218,15 @@ They are self-explainatory. Example window rule making all GNOME apps open float
 centered = true
 floating = true
 match-app-id = ["^(org.gnome.*)$"]
+```
+
+---
+
+#### `ontop`
+
+Whether to place this window above all other windows. This only applies for floating windows.
+
+```toml
+[[rules]]
+is-floating = true
 ```

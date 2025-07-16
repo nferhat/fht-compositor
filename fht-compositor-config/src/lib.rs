@@ -984,6 +984,7 @@ pub struct WindowRule {
     pub on_output: Option<String>,
     pub on_workspace: Option<usize>,
     pub is_focused: Option<bool>,
+    pub is_floating: Option<bool>,
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
@@ -996,6 +997,7 @@ pub struct WindowRule {
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
     pub floating: Option<bool>,
+    pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
 }
 
