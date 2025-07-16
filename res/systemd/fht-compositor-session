@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# fht-compositor-session <.> User session script for systemd-based sessions
+# ---
+# You should not be using this directly, rather, use the fht-compositor.desktop
+# option in your login manager.
+
+# Documented from here
+# - https://unix.stackexchange.com/questions/735746/how-to-start-weston-as-user-in-a-systemd-service
+# - https://systemd.io/DESKTOP_ENVIRONMENTS/
+
+if hash systemctl >/dev/null 2>&1; then
+  if systemctl --user -q is-active fht-compositor.service; then
+    echo "You can't run two fht-compositor sessions at once!"
+    exit 1
+  fi
+
+  # Reset user session environment
+  systemctl --user reset-failed
+  systemctl --user import-environment
+  # Apparently you have to run this separatly or portals and some other D-Bus
+  # activated services are totally oblivious to the environment variables set
+  # by the compositor.
+  dbus-update-activation-environment --all
+
+  # Now start the compositor and wait for it to exit
+  systemctl --user --wait start fht-compositor.service
+else
+  echo "Seems like you are not running using a systemd session, you might have installed the wrong session script!"
+  echo "You can run 'fht-compositor --session' from your TTY instead."
+fi

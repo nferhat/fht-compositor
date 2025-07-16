@@ -1,0 +1,34 @@
+# Documented from here
+# - https://unix.stackexchange.com/questions/735746/how-to-start-weston-as-user-in-a-systemd-service
+# - https://github.com/Vladimir-csp/uwsm/blob/b6e8a89b63fa46ef114226d6e9270504e54a2255/systemd/user/wayland-wm%40.service.in#L9
+# - https://systemd.io/DESKTOP_ENVIRONMENTS/
+
+[Unit]
+Description=A dynamic tiling Wayland compositor
+Documentation=https://nferhat.github.io/fht-compositor
+
+# We want to insert ourselves as the graphical session unit.
+# But we should start before it reaches the target, so that we are ready before
+# user services that bind to it (think for example your wallpaper)
+BindsTo=graphical-session.target
+Before=graphical-session.target
+
+# We have to first wait for graphical-session-pre,
+# so that setup services from our user/system finish preparing.
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+
+# Force-shutdown after we are done with the session
+OnSuccess=fht-compositor-shutdown.target
+OnSuccessJobMode=replace-irreversibly
+OnFailure=fht-compositor-shutdown.target
+OnFailureJobMode=replace-irreversibly
+
+[Service]
+# The compositor is essential for the user session, right?
+Slice=session.slice
+# The compositor will notify systemd that we successfully started.
+# This avoids stuff like hangs or crashes.
+Type=notify
+# And tell the compositor to start as a service to export env vars
+ExecStart=/usr/bin/fht-compositor --session
