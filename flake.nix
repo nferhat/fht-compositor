@@ -353,6 +353,12 @@
             xdg.configFile.fht-compositor-config = lib.mkIf (cfg.settings != {}) {
               target = "fht/compositor.toml";
               source = configFormat.generate "fht-compositor-config" cfg.settings;
+              onChange = ''
+                (
+                  export FHTC_SOCKET_PATH=$(find /run/user/$(id -u) -type s -name 'fhtc-*-wayland-*.socket' -print -quit)
+                  ${lib.getExe cfg.package} ipc action reload-config
+                )
+              '';
             };
           };
         };
