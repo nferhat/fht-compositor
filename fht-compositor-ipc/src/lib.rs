@@ -377,12 +377,14 @@ pub enum Action {
     SelectNextLayout {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Select the next available layout in a [`Workspace`]
     SelectPreviousLayout {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Set the maximized state of a window.
@@ -392,6 +394,7 @@ pub enum Action {
         state: Option<bool>,
         /// The [`Window::id`] to toggle maximized on. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
     },
     /// Set the fullscreen state of a window.
@@ -401,6 +404,7 @@ pub enum Action {
         state: Option<bool>,
         /// The [`Window::id`] to toggle fullscreen on. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
     },
     /// Set the floating state of a window.
@@ -410,18 +414,21 @@ pub enum Action {
         state: Option<bool>,
         /// The [`Window::id`] to toggle floating on. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
     },
     /// Center a floating window. If the window is tiled, this does nothing.
     CenterFloatingWindow {
         /// The [`Window::id`] to center on. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
     },
     /// Move a floating window. If the window is tiled, this does nothing.
     MoveFloatingWindow {
         /// The [`Window::id`] to move. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
         // The location change to apply.
         #[cfg_attr(feature = "clap", command(subcommand))]
@@ -431,6 +438,7 @@ pub enum Action {
     ResizeFloatingWindow {
         /// The [`Window::id`] to resize. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
         // The size change to apply.
         #[cfg_attr(feature = "clap", command(subcommand))]
@@ -441,18 +449,21 @@ pub enum Action {
     FocusWindow {
         /// The [`Window::id`] to resize. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: usize,
     },
     /// Focus the next window in a [`Workspace`].
     FocusNextWindow {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Focus the previous window in a [`Workspace`].
     FocusPreviousWindow {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Swap thee currently focused window with the next window in a [`Workspace`].
@@ -462,6 +473,7 @@ pub enum Action {
         keep_focus: bool,
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Swap thee currently focused window with the previous window in a [`Workspace`].
@@ -471,6 +483,7 @@ pub enum Action {
         keep_focus: bool,
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
     /// Focus a given output.
@@ -487,11 +500,13 @@ pub enum Action {
     /// Focus a given [`Workspace`]
     FocusWorkspace {
         /// The [`Workspace`] to focus.
+        #[serde(rename = "workspace-id")]
         workspace_id: usize,
     },
     /// Focus a given [`Workspace`] using an index.
     FocusWorkspaceByIndex {
-        /// The [`Workspace`] to focus, referenced by index.
+        /// The [`Workspace`] to focus, r
+        /// #[serde(rename = "workspace-ideferenced by index.
         workspace_idx: usize,
         /// The [`Monitor`] to change the focused [`Workspace`] on. Leave as `None` for the active
         /// one.
@@ -511,6 +526,7 @@ pub enum Action {
     CloseWindow {
         /// The [`Window::id`] to resize. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
         /// Whether to force-kill the window.
         #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = false))]
@@ -520,6 +536,7 @@ pub enum Action {
     ChangeMwfact {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
         /// The mwfact change to apply.
         #[cfg_attr(feature = "clap", command(subcommand))]
@@ -529,6 +546,7 @@ pub enum Action {
     ChangeNmaster {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
         /// The nmaster change to apply.
         #[cfg_attr(feature = "clap", command(subcommand))]
@@ -538,6 +556,7 @@ pub enum Action {
     ChangeWindowProportion {
         /// The [`Window::id`] to resize. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
         /// The window proportion change to apply.
         #[cfg_attr(feature = "clap", command(subcommand))]
@@ -547,9 +566,11 @@ pub enum Action {
     SendWindowToWorkspace {
         /// The [`Window::id`] to resize. Leave as `None` for the focused one.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
         window_id: Option<usize>,
         /// The [`Workspace`] to send the window to.
         #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
         workspace_id: usize,
     },
 }
