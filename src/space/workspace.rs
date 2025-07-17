@@ -26,7 +26,7 @@ static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
 /// Identifier of a [`Workspace`].
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct WorkspaceId(usize);
+pub struct WorkspaceId(pub usize);
 impl WorkspaceId {
     /// Create a unique [`WorkspaceId`].
     ///
@@ -38,6 +38,12 @@ impl WorkspaceId {
 impl std::fmt::Debug for WorkspaceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "workspace-{}", self.0)
+    }
+}
+impl std::ops::Deref for WorkspaceId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -1001,6 +1007,11 @@ impl Workspace {
         }
     }
 
+    /// Get the current fullscreened [`Tile`] index.
+    pub fn fullscreened_tile_idx(&self) -> Option<usize> {
+        self.fullscreened_tile_idx
+    }
+
     /// Get the current fullscreened [`Window`]
     pub fn fullscreened_window(&self) -> Option<Window> {
         self.tiles
@@ -1058,6 +1069,11 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// The master width factor of this [`Workspace`].
+    pub fn mwfact(&self) -> f64 {
+        self.mwfact
+    }
+
     /// Change the master width factor of this [`Workspace`].
     pub fn change_mwfact(&mut self, delta: f64, animate: bool) {
         self.has_transient_layout_changes = true;
@@ -1065,10 +1081,29 @@ impl Workspace {
         self.arrange_tiles(animate);
     }
 
+    /// Set the master width factor of this [`Workspace`].
+    pub fn set_mwfact(&mut self, value: f64, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.mwfact = value.clamp(0.01, 0.99);
+        self.arrange_tiles(animate);
+    }
+
+    /// The number of master windows factor of this [`Workspace`].
+    pub fn nmaster(&self) -> usize {
+        self.nmaster
+    }
+
     /// Change the number of master windows of this [`Workspace`].
     pub fn change_nmaster(&mut self, delta: i32, animate: bool) {
         self.has_transient_layout_changes = true;
         self.nmaster = self.nmaster.saturating_add_signed(delta as isize).max(1);
+        self.arrange_tiles(animate);
+    }
+
+    /// Set the number of master windows of this [`Workspace`].
+    pub fn set_nmaster(&mut self, value: usize, animate: bool) {
+        self.has_transient_layout_changes = true;
+        self.nmaster = value.max(1);
         self.arrange_tiles(animate);
     }
 
@@ -1614,11 +1649,18 @@ impl Workspace {
             return None;
         };
 
-        // FIXME: Perhaps handle better maximized/fullscreen?
-        // Would be janky though.
-        if window.maximized() || window.fullscreen() {
-            return None;
+        if window.fullscreen() {
+            // Fullscreening should be exclusive.
+            assert_eq!(self.fullscreened_window().as_ref(), Some(window));
+            window.request_fullscreen(false);
+            self.fullscreened_tile_idx = None;
+            // Start fading in windows as we grab the fullscreened tile
+            self.start_fullscreen_fade_in(None);
         }
+
+        // Reset window state
+        window.request_fullscreen(false);
+        window.request_maximized(false);
 
         let tile = self.tiles.remove(idx);
         if idx < self.nmaster {

@@ -28,6 +28,7 @@ mod focus_target;
 mod frame_clock;
 mod handlers;
 mod input;
+mod ipc;
 mod layer;
 mod output;
 #[cfg(any(feature = "xdg-screencast-portal"))]
@@ -50,7 +51,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     //
     // We must have at least one backend, otherwise unmatched branches will occur.
     // This also must be at the very top of the crate so that it pops ups before anything.
-    #[cfg(all(not(feature = "udev-backend"), not(feature = "winit-backend")))]
+    #[cfg(all(
+        not(feature = "udev-backend"),
+        not(feature = "winit-backend"),
+        not(feature = "headless-backend")
+    ))]
     compile_error!("You must enable at least one backend: 'udev-backend' or 'winit-backend");
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -70,6 +75,14 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             let name = command.get_name().to_string();
             clap_complete::generate(shell, &mut command, name, &mut std::io::stdout());
             std::process::exit(0); // we just want to generate completions, nothing much
+        }
+        Some(cli::Command::Ipc { request, json }) => {
+            if let Err(err) = ipc::client::make_request(request, json) {
+                error!(?err, "Failed to execute IPC client request");
+                std::process::exit(-1);
+            }
+
+            std::process::exit(0);
         }
         _ => (),
     }
@@ -127,11 +140,19 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         (dh, socket_name)
     };
 
+    // NOTE: For IPC we must start it **before** creating and spawning autostart to have ready state
+    // to replicate ASAP. This is needed if for example autostart/xdg-autostart has a dependency on
+    // the socket being present.
+    let ipc_server = ipc::start(&loop_handle, &socket_name)
+        .inspect_err(|err| error!(?err, "Failed to start IPC server"))
+        .ok();
+
     let mut state = State::new(
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
         cli.config_path,
+        ipc_server,
         cli.backend,
         socket_name.clone(),
     );
@@ -169,6 +190,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             "XDG_CURRENT_DESKTOP",
             "XDG_SESSION_TYPE",
             "MOZ_ENABLE_WAYLAND",
+            "FHTC_SOCKET_PATH",
             "_JAVA_AWT_NONREPARENTING",
         ];
         let vars_str = vars.join(" ");
@@ -260,6 +282,11 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             state.dispatch().unwrap();
         })
         .expect("Failed to run the eventloop!");
+
+    // Stop the socket and remove it
+    if let Some(ipc_server) = state.fht.ipc_server.take() {
+        ipc_server.close(&loop_handle);
+    }
 
     std::mem::drop(event_loop);
     std::mem::drop(state);

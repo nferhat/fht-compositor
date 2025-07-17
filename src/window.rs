@@ -56,10 +56,22 @@ impl IsAlive for Window {
 
 static WINDOW_IDS: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct WindowId(usize);
+pub struct WindowId(pub usize);
 impl WindowId {
     pub fn unique() -> Self {
         Self(WINDOW_IDS.fetch_add(1, Ordering::SeqCst))
+    }
+}
+
+impl std::ops::Deref for WindowId {
+    type Target = usize;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl PartialEq<usize> for WindowId {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 == *other
     }
 }
 

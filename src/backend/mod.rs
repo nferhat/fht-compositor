@@ -5,6 +5,8 @@ use smithay::output::Output;
 
 use crate::state::Fht;
 
+#[cfg(feature = "headless-backend")]
+pub mod headless;
 #[cfg(feature = "udev-backend")]
 pub mod udev;
 #[cfg(feature = "winit-backend")]
@@ -15,6 +17,8 @@ pub enum Backend {
     Winit(winit::WinitData),
     #[cfg(feature = "udev-backend")]
     Udev(udev::UdevData),
+    #[cfg(feature = "headless-backend")]
+    Headless(headless::HeadlessData),
 }
 
 #[cfg(feature = "winit-backend")]
@@ -28,6 +32,13 @@ impl From<winit::WinitData> for Backend {
 impl From<udev::UdevData> for Backend {
     fn from(value: udev::UdevData) -> Self {
         Self::Udev(value)
+    }
+}
+
+#[cfg(feature = "headless-backend")]
+impl From<headless::HeadlessData> for Backend {
+    fn from(value: headless::HeadlessData) -> Self {
+        Self::Headless(value)
     }
 }
 
@@ -59,10 +70,21 @@ impl Backend {
         match self {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::Winit(data) => data.render(fht),
+            Self::Winit(data) => {
+                _ = output;
+                _ = target_presentation_time;
+                data.render(fht)
+            }
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.render(fht, output, target_presentation_time),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(data) => {
+                _ = target_presentation_time;
+                _ = output;
+                data.render(fht)
+            }
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
         }
@@ -71,11 +93,11 @@ impl Backend {
     pub fn with_renderer<T>(
         &mut self,
         #[allow(unused)] f: impl FnOnce(&mut GlowRenderer) -> T,
-    ) -> T {
+    ) -> Option<T> {
         match self {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            Self::Winit(ref mut data) => f(data.renderer()),
+            Self::Winit(ref mut data) => Some(f(data.renderer())),
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => {
@@ -84,7 +106,15 @@ impl Backend {
                     .single_renderer(&data.primary_gpu)
                     .expect("No primary gpu");
                 use crate::renderer::AsGlowRenderer;
-                f(renderer.glow_renderer_mut())
+                Some(f(renderer.glow_renderer_mut()))
+            }
+            #[allow(unreachable_patterns)]
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => {
+                // No renderer, nothing todo with the closure
+                let _ = f;
+                None
             }
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
@@ -100,11 +130,25 @@ impl Backend {
         match self {
             #[cfg(feature = "winit-backend")]
             #[allow(irrefutable_let_patterns)]
-            // winit who cares
-            Self::Winit(_) => Ok(()),
+            Self::Winit(_) => {
+                _ = fht;
+                _ = output;
+                _ = mode;
+                Ok(())
+            }
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]
             Self::Udev(data) => data.set_output_mode(fht, output, mode),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => {
+                _ = fht;
+                _ = output;
+                _ = mode;
+                Ok(())
+            }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
         }
     }
 }

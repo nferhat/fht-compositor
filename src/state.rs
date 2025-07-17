@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
+use calloop::futures::Scheduler;
 use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
@@ -20,7 +21,7 @@ use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
-use smithay::reexports::calloop::{LoopHandle, LoopSignal, RegistrationToken};
+use smithay::reexports::calloop::{self, LoopHandle, LoopSignal, RegistrationToken};
 use smithay::reexports::input::{self, DeviceCapability, SendEventsMode};
 use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
@@ -65,7 +66,6 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
 
 use crate::backend::Backend;
-use crate::cli;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
 use crate::focus_target::PointerFocusTarget;
@@ -84,6 +84,7 @@ use crate::space::{Space, WorkspaceId};
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::{get_monotonic_time, RectCenterExt};
 use crate::window::Window;
+use crate::{cli, ipc};
 
 pub struct State {
     pub fht: Fht,
@@ -96,11 +97,12 @@ impl State {
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
         config_path: Option<std::path::PathBuf>,
+        ipc_server: Option<ipc::Server>,
         backend: Option<crate::cli::BackendType>,
         _socket_name: String,
     ) -> Self {
         #[allow(unused)]
-        let mut fht = Fht::new(dh, loop_handle, loop_signal, config_path);
+        let mut fht = Fht::new(dh, loop_handle, loop_signal, ipc_server, config_path);
         #[allow(unused)]
         let backend: crate::backend::Backend = if let Some(backend_type) = backend {
             match backend_type {
@@ -112,6 +114,10 @@ impl State {
                 cli::BackendType::Udev => crate::backend::udev::UdevData::new(&mut fht)
                     .unwrap()
                     .into(),
+                #[cfg(feature = "headless-backend")]
+                cli::BackendType::Headless => {
+                    crate::backend::headless::HeadlessData::new(&mut fht).into()
+                }
             }
         } else if std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok() {
             info!("Detected (WAYLAND_)DISPLAY. Running in nested Winit window");
@@ -534,7 +540,8 @@ impl State {
 
             let render_formats = self
                 .backend
-                .with_renderer(|renderer| renderer.egl_context().dmabuf_render_formats().clone());
+                .with_renderer(|renderer| renderer.egl_context().dmabuf_render_formats().clone())
+                .expect("we should be in Udev backend when starting screencast");
 
             let (to_compositor, from_pw) = calloop::channel::channel();
             let token = self
@@ -601,6 +608,7 @@ impl State {
 pub struct Fht {
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, State>,
+    pub scheduler: Scheduler<()>,
     pub loop_signal: LoopSignal,
     pub stop: bool,
 
@@ -658,6 +666,12 @@ pub struct Fht {
     #[cfg(feature = "xdg-screencast-portal")]
     pub pipewire: Option<PipeWire>,
 
+    // Inter-process communication.
+    //
+    // We keep the IPC server and listener state here. But the actual handling is done inside
+    // a Generic calloop source.
+    pub ipc_server: Option<ipc::Server>,
+
     pub compositor_state: CompositorState,
     pub data_control_state: DataControlState,
     pub data_device_state: DataDeviceState,
@@ -680,8 +694,17 @@ impl Fht {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
+        ipc_server: Option<ipc::Server>,
         config_path: Option<std::path::PathBuf>,
     ) -> Self {
+        let (executor, scheduler) =
+            calloop::futures::executor().expect("Failed to create scheduler");
+        loop_handle
+            .insert_source(executor, |_, _, _| {
+                // This executor only lives to drive futures, we don't really care about the output.
+            })
+            .unwrap();
+
         let mut config_ui = config_ui::ConfigUi::new();
         let (config, paths) = match fht_compositor_config::load(config_path.clone()) {
             Ok((config, paths)) => (config, paths),
@@ -816,6 +839,8 @@ impl Fht {
         Self {
             display_handle: dh.clone(),
             loop_handle,
+            scheduler,
+
             loop_signal,
             stop: false,
 
@@ -853,6 +878,8 @@ impl Fht {
             pipewire_initialised: std::sync::Once::new(),
             #[cfg(feature = "xdg-screencast-portal")]
             pipewire: None,
+
+            ipc_server,
 
             compositor_state,
             data_control_state,
@@ -923,6 +950,21 @@ impl Fht {
         // the output is gone.
         for layer in layer_map_for_output(output).layers() {
             layer.layer_surface().send_close()
+        }
+    }
+
+    pub fn focus_output(&mut self, output: &Output) {
+        if let Some(window) = self.space.set_active_output(output) {
+            self.loop_handle.insert_idle(move |state| {
+                state.set_keyboard_focus(Some(window));
+            });
+
+            if self.config.general.cursor_warps {
+                let center = output.geometry().center();
+                self.loop_handle.insert_idle(move |state| {
+                    state.move_pointer(center.to_f64());
+                });
+            }
         }
     }
 

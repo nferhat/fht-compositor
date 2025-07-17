@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod pick_surface_grab;
 pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
@@ -49,7 +50,6 @@ impl State {
 
         let output = &self.fht.space.active_output().clone();
         let output_loc = output.current_location();
-
         let pointer_loc = pointer.current_location();
 
         if self.fht.is_locked() {
