@@ -91,6 +91,9 @@ pub enum Request {
         #[command(subcommand)]
         action: fht_compositor_ipc::Action,
     },
+    /// Print the JSON schema for the IPC [`Request`](fht_compositor_ipc::Request) type. You can
+    /// feed this schema into generators to integrate with other languages.
+    PrintSchema,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
