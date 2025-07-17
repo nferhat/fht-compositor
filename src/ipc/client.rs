@@ -24,6 +24,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
+        cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error

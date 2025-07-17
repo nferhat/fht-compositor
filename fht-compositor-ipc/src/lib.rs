@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
 
 use anyhow::Context;
+use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 const SOCKET_DEFAULT_ENV: &'static str = "FHTC_SOCKET_PATH";
@@ -42,8 +43,16 @@ pub fn connect() -> anyhow::Result<(std::path::PathBuf, UnixStream)> {
     Ok((socket_path, socket))
 }
 
+/// Print the schema of the [`Request`] type.
+pub fn print_schema() -> anyhow::Result<()> {
+    let schema = schema_for!(Request);
+    let schema_string = serde_json::to_string_pretty(&schema)?;
+    println!("{}", schema_string);
+    Ok(())
+}
+
 /// A request you send to the compositor.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Request {
     /// Request the version information of the running `fht-compositor` instance.
@@ -82,7 +91,7 @@ pub enum Request {
 }
 
 /// A respose from the compositor.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Response {
     /// Version information about the running `fht-compositor` instance.
@@ -110,7 +119,7 @@ pub enum Response {
 }
 
 /// A single output.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Output {
     /// Name of the output.
@@ -138,7 +147,7 @@ pub struct Output {
 }
 
 /// Output mode.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct OutputMode {
     /// The dimensions in physical pixels.
@@ -149,7 +158,7 @@ pub struct OutputMode {
     pub preferred: bool,
 }
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum OutputTransform {
     #[default]
@@ -190,7 +199,7 @@ impl From<smithay::utils::Transform> for OutputTransform {
 ///
 /// A window is a mapped onto the screen inside a [`Workspace`]. A [`Workspace`] is managed inside a
 /// [`Monitor`]. A window can't exist on two workspaces/monitors at the same time.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Window {
     /// The unique ID of this window. It is used to make requests regarding this specific window.
@@ -238,7 +247,7 @@ pub struct Window {
 /// A single workspace.
 ///
 /// A workspace is a container of windows. It manages them and organizes them.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Workspace {
     /// The unique ID of this workspace. It is used to make requests regarding this specific
@@ -277,7 +286,7 @@ const WORKSPACE_COUNT: usize = 9;
 ///
 /// A monitor is a representation of an [`Output`] in the [`Workspace`] system. Each monitor is a
 /// view onto a single workspace at a time.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Monitor {
     /// The output associated with this monitor.
@@ -294,7 +303,7 @@ pub struct Monitor {
 ///
 /// The space is the area containing all [`Monitor`] that organizes and orders them. When something
 /// mentions "global coordinates", it means the *logical* coordinate space inside this space.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Space {
     /// The [`Monitor`]s tracked by the [`Space`]
@@ -314,7 +323,7 @@ pub struct Space {
 ///
 /// A layer-shell represents a component of your desktop interface. They can be for example your
 /// notification popup, a bar, or some fancy widget you created.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LayerShell {
     /// The namespace of this layer-shell. It is used to define the purpose of this layer-shell.
@@ -328,7 +337,7 @@ pub struct LayerShell {
 }
 
 /// Types of keyboard interaction possible for a layer shell surface.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum KeyboardInteractivity {
     /// No keyboard focus is possible.
@@ -343,7 +352,7 @@ pub enum KeyboardInteractivity {
 }
 
 /// Available layers for surfaces
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Layer {
     Background = 0,
@@ -354,7 +363,7 @@ pub enum Layer {
 
 /// An action to execute. This enum includes all possible key actions found in
 /// fht-compositor-config, and additional ones that are more specific.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 #[cfg_attr(feature = "clap", command(subcommand_value_name = "ACTION"))]
 #[cfg_attr(feature = "clap", command(subcommand_help_heading = "Actions"))]
@@ -546,7 +555,7 @@ pub enum Action {
 }
 
 /// A window location change.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum WindowLocationChange {
     /// Add this amount to the window location.
@@ -566,7 +575,7 @@ pub enum WindowLocationChange {
 }
 
 /// A window size change.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum WindowSizeChange {
     /// Add this amount to the current window size. Clamps at (20, 20) for the minimum.
@@ -586,7 +595,7 @@ pub enum WindowSizeChange {
 }
 
 /// A window proportion change.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum WindowProportionChange {
     /// Add this amount to the current window proportion.
@@ -602,7 +611,7 @@ pub enum WindowProportionChange {
 }
 
 /// A master width factor change.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum MwfactChange {
     /// Add this amount to the master width factor. Clamps inside [0.01, 0.99].
@@ -618,7 +627,7 @@ pub enum MwfactChange {
 }
 
 /// A number of master clients change.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[cfg_attr(feature = "clap", derive(clap::Parser))]
 pub enum NmasterChange {
     /// Add this amount to the number of master clients. Clamps at min=1.
@@ -631,7 +640,7 @@ pub enum NmasterChange {
 }
 
 /// The result from picking a [`Window`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PickWindowResult {
     /// The ID of the picked window
@@ -643,7 +652,7 @@ pub enum PickWindowResult {
 }
 
 /// The result from picking a [`LayerShell`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PickLayerShellResult {
     /// The information of the picked layer-shell
