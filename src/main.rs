@@ -190,6 +190,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             "XDG_CURRENT_DESKTOP",
             "XDG_SESSION_TYPE",
             "MOZ_ENABLE_WAYLAND",
+            "FHTC_SOCKET_PATH",
             "_JAVA_AWT_NONREPARENTING",
         ];
         let vars_str = vars.join(" ");
