@@ -46,7 +46,12 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 
     if json {
         let json_buffer = match response {
-            fht_compositor_ipc::Response::Version(version) => serde_json::to_string(&version),
+            fht_compositor_ipc::Response::Version(version) => {
+                serde_json::to_string(&serde_json::json!({
+                    "compositor": version,
+                    "cli": crate::cli::get_version_string(),
+                }))
+            }
             fht_compositor_ipc::Response::Outputs(hash_map) => serde_json::to_string(&hash_map),
             fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
             fht_compositor_ipc::Response::LayerShells(layer_shells) => {
@@ -90,7 +95,10 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
     let mut writer = std::io::BufWriter::new(std::io::stdout());
     match res {
-        fht_compositor_ipc::Response::Version(version) => println!("{version}"),
+        fht_compositor_ipc::Response::Version(version) => {
+            println!("Compositor: {version}");
+            println!("CLI: {}", crate::cli::get_version_string())
+        }
         fht_compositor_ipc::Response::Outputs(outputs) => {
             for (idx, output) in outputs.values().enumerate() {
                 writeln!(&mut writer, "Output #{idx}: {}", output.name)?;
