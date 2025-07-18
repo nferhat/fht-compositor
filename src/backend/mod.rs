@@ -151,4 +151,35 @@ impl Backend {
             _ => unreachable!(),
         }
     }
+
+    pub fn update_output_vrr(
+        &mut self,
+        fht: &mut Fht,
+        output: &Output,
+        vrr: bool,
+    ) -> anyhow::Result<()> {
+        match self {
+            #[cfg(feature = "winit-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Winit(_) => {
+                _ = fht;
+                _ = output;
+                _ = vrr;
+                Ok(())
+            }
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.update_output_vrr(fht, output, vrr),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => {
+                _ = fht;
+                _ = output;
+                _ = vrr;
+                Ok(())
+            }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
+        }
+    }
 }
