@@ -1672,9 +1672,14 @@ impl Fht {
                 // https://wayland.freedesktop.org/libinput/doc/latest/trackpoint-configuration.html
                 // And based on udev source, here's the property value we must search for
                 // https://github.com/systemd/systemd/blob/d38dd7d17a67fda3257905fa32f254cd7b7d5b83/src/udev/udev-builtin-input_id.c#L315
+                #[cfg(feature = "udev-backend")]
                 let is_trackpoint = unsafe { device.udev_device() }.is_some_and(|device| {
                     device.property_value("ID_INPUT_POINTINGSTICK").is_some()
                 });
+                #[cfg(not(feature = "udev-backend"))]
+                // When we are with winit backend, who cares, this function won't be called anyway
+                // since there won't be any sort of libinput devices registered
+                let is_trackpoint = false;
 
                 let mouse_config = per_device_config.map_or_else(
                     || match (is_touchpad, is_trackpoint) {
