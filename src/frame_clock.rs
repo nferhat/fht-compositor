@@ -13,22 +13,33 @@ pub struct FrameClock {
     // This can be None for winit, since it does not have a set refresh time.
     refresh_interval_ns: Option<NonZero<u64>>,
     last_presentation_time: Option<Duration>,
+    vrr: bool,
 }
 
 impl FrameClock {
-    pub fn new(refresh_interval: Option<Duration>) -> Self {
+    pub fn new(refresh_interval: Option<Duration>, vrr: bool) -> Self {
         Self {
             refresh_interval_ns: refresh_interval.map(|interval| {
                 NonZero::new(interval.subsec_nanos().into())
                     .expect("refresh internal should never be zero")
             }),
             last_presentation_time: None,
+            vrr,
         }
     }
 
     pub fn refresh_interval(&self) -> Option<Duration> {
         self.refresh_interval_ns
             .map(|r| Duration::from_nanos(r.get()))
+    }
+
+    pub fn set_vrr(&mut self, vrr: bool) {
+        if self.vrr == vrr {
+            return;
+        }
+
+        self.vrr = vrr;
+        self.last_presentation_time = None;
     }
 
     /// Mark the latest presentation time `now` in the [`FrameClock`].
@@ -89,6 +100,11 @@ impl FrameClock {
                     as u64, // FIXME: can overflow, but we dont care about it
             );
             next_presentation_time = now - current_phase + refresh_interval;
+        } else {
+            // If we are enabled VRR and more than one frame has passed, we must present immediatly.
+            if self.vrr {
+                return now;
+            }
         }
 
         // time_since_last_next_presentation_time_us =
