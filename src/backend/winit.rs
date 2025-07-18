@@ -107,7 +107,7 @@ impl WinitData {
 
         output.change_current_state(Some(mode), Some(Transform::Flipped180), new_scale, None);
         output.set_preferred(mode);
-        fht.add_output(output.clone(), None);
+        fht.add_output(output.clone(), None, false);
 
         crate::renderer::blur::EffectsFramebuffers::init_for_output(&output, backend.renderer());
 
