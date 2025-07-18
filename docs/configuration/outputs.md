@@ -44,7 +44,7 @@ The *integer scale* of the output. There's currently no support for fractional s
 
 ---
 
-#### `position`
+#### `position.x`, `position.y`
 
 The position of the *top-left corner*. The output space is absolute.
 

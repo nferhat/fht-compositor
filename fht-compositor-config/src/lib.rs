@@ -1211,6 +1211,13 @@ impl Into<SmithayTransform> for OutputTransform {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct OutputPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
 #[derive(Default, Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Output {
@@ -1221,7 +1228,7 @@ pub struct Output {
     pub mode: Option<(u16, u16, Option<f64>)>,
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
-    pub position: Option<[i32; 2]>,
+    pub position: Option<OutputPosition>,
 }
 
 fn default_disable_10bit() -> bool {

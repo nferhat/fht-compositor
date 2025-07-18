@@ -1073,7 +1073,9 @@ impl Fht {
                     .outputs
                     .get(&o.name())
                     .and_then(|c| c.position)
-                    .map(|[x, y]| Point::<i32, Logical>::from((x, y)));
+                    .map(|fht_compositor_config::OutputPosition { x, y }| {
+                        Point::<i32, Logical>::from((x, y))
+                    });
                 (o, current_pos, config_pos)
             })
             .collect::<Vec<_>>();
