@@ -1089,21 +1089,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn check_invariants(config: &fht_compositor_config::Config) -> anyhow::Result<()> {
-        if config.general.nmaster == 0 {
-            anyhow::bail!("general.nmaster cannot be zero!");
-        }
-        if config.general.mwfact < 0.01 || config.general.mwfact > 0.99 {
-            anyhow::bail!("general.mwfact must be between 0.01 and 0.99")
-        }
-        if config.general.layouts.is_empty() {
-            anyhow::bail!("general.layouts must never be empty!");
-        }
-        Ok(())
-    }
-
     fn new(config: &fht_compositor_config::Config) -> anyhow::Result<Self> {
-        Self::check_invariants(config)?;
         Ok(Self {
             workspace_switch_animation: AnimationConfig::new(
                 config.animations.workspace_switch.duration,
@@ -1125,7 +1111,7 @@ impl Config {
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),
-            nmaster: config.general.nmaster,
+            nmaster: config.general.nmaster.get(),
             gaps: (config.general.outer_gaps, config.general.inner_gaps),
             mwfact: config.general.mwfact,
             border: config.decorations.border,

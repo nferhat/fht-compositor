@@ -5,6 +5,7 @@
 extern crate tracing;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
+use std::num::NonZero;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, path};
@@ -370,12 +371,12 @@ fn default_keyboard_layout() -> String {
     "us".to_string()
 }
 
-const fn default_repeat_rate() -> i32 {
-    25
+const fn default_repeat_rate() -> NonZero<i32> {
+    unsafe { NonZero::new_unchecked(25) }
 }
 
-const fn default_repeat_delay() -> i32 {
-    250
+const fn default_repeat_delay() -> NonZero<u64> {
+    unsafe { NonZero::new_unchecked(250) }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -388,9 +389,9 @@ pub struct Keyboard {
     pub variant: String,
     pub options: String,
     #[serde(default = "default_repeat_delay")]
-    pub repeat_delay: i32,
+    pub repeat_delay: NonZero<u64>,
     #[serde(default = "default_repeat_rate")]
-    pub repeat_rate: i32,
+    pub repeat_rate: NonZero<i32>,
 }
 
 impl Default for Keyboard {
@@ -402,7 +403,6 @@ impl Default for Keyboard {
             layout: default.layout.to_string(),
             variant: default.variant.to_string(),
             options: default.options.unwrap_or_default(),
-
             repeat_delay: default_repeat_delay(),
             repeat_rate: default_repeat_rate(),
         }
@@ -517,8 +517,8 @@ fn default_layouts() -> Vec<WorkspaceLayout> {
     vec![WorkspaceLayout::Tile]
 }
 
-const fn default_nmaster() -> usize {
-    1
+const fn default_nmaster() -> NonZero<usize> {
+    unsafe { NonZero::new_unchecked(1) }
 }
 
 const fn default_mwfact() -> f64 {
@@ -527,6 +527,32 @@ const fn default_mwfact() -> f64 {
 
 const fn default_gaps() -> i32 {
     8
+}
+
+fn deserialize_layouts<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<WorkspaceLayout>, D::Error> {
+    let value = Vec::<WorkspaceLayout>::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::invalid_value(
+            Unexpected::Seq,
+            &"Non-empty list",
+        ));
+    }
+
+    Ok(value)
+}
+
+fn deserialize_mwfact<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    let value = f64::deserialize(deserializer)?;
+    if !(1e-3..=0.999).contains(&value) {
+        return Err(serde::de::Error::invalid_value(
+            Unexpected::Float(value),
+            &"A value in 1e-3..=0.999",
+        ));
+    }
+
+    Ok(value)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -539,11 +565,11 @@ pub struct General {
     #[serde(default = "default_false")]
     pub focus_follows_mouse: bool,
     pub insert_window_strategy: InsertWindowStrategy,
-    #[serde(default = "default_layouts")]
+    #[serde(default = "default_layouts", deserialize_with = "deserialize_layouts")]
     pub layouts: Vec<WorkspaceLayout>,
     #[serde(default = "default_nmaster")]
-    pub nmaster: usize,
-    #[serde(default = "default_mwfact")]
+    pub nmaster: NonZero<usize>,
+    #[serde(default = "default_mwfact", deserialize_with = "deserialize_mwfact")]
     pub mwfact: f64,
     #[serde(default = "default_gaps")]
     pub outer_gaps: i32,
@@ -559,8 +585,8 @@ impl Default for General {
             focus_follows_mouse: false,
             insert_window_strategy: InsertWindowStrategy::default(),
             layouts: default_layouts(),
-            nmaster: 1,
-            mwfact: 0.5,
+            nmaster: default_nmaster(),
+            mwfact: default_mwfact(),
             outer_gaps: default_gaps(),
             inner_gaps: default_gaps(),
         }

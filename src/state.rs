@@ -352,13 +352,6 @@ impl State {
             return;
         }
 
-        // NOTE: A tricky problem here is that a workspace set *can* apply the configuration just
-        // file but then one after it fails to apply it. Really confusing behaviour.
-        //
-        // Maybe we need to store the last working config if this happens
-        if let Err(err) = crate::space::Config::check_invariants(&config) {
-            error!(?err, "Failed to apply configuration");
-        }
         self.fht.space.reload_config(&config);
 
         self.fht
@@ -801,8 +794,8 @@ impl Fht {
         let keyboard_config = &config.input.keyboard;
         let res = seat.add_keyboard(
             keyboard_config.xkb_config(),
-            keyboard_config.repeat_delay,
-            keyboard_config.repeat_rate,
+            keyboard_config.repeat_delay.get() as i32,
+            keyboard_config.repeat_rate.get(),
         );
         let keyboard = match res {
             Ok(k) => k,
@@ -813,8 +806,8 @@ impl Fht {
                 );
                 seat.add_keyboard(
                     XkbConfig::default(),
-                    keyboard_config.repeat_delay,
-                    keyboard_config.repeat_rate,
+                    keyboard_config.repeat_delay.get() as i32,
+                    keyboard_config.repeat_rate.get(),
                 )
                 .expect("The keyboard is not keyboarding")
             }
@@ -1658,8 +1651,8 @@ impl Fht {
             .or_else(|| input_config.per_device.get(device.sysname()));
 
         self.keyboard.change_repeat_info(
-            input_config.keyboard.repeat_rate,
-            input_config.keyboard.repeat_delay,
+            input_config.keyboard.repeat_rate.get() as i32,
+            input_config.keyboard.repeat_delay.get() as i32,
         );
 
         let disable = per_device_config.is_some_and(|c| c.disable);
