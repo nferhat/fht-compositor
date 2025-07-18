@@ -7,7 +7,6 @@
 extern crate tracing;
 
 use std::error::Error;
-use std::io::Write;
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;

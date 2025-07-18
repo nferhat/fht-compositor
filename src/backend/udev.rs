@@ -313,8 +313,8 @@ impl UdevData {
             let keyboard_config = &state.config.input.keyboard;
             let res = new_seat.add_keyboard(
                 keyboard_config.xkb_config(),
-                keyboard_config.repeat_delay,
-                keyboard_config.repeat_rate,
+                keyboard_config.repeat_delay.get() as i32,
+                keyboard_config.repeat_rate.get(),
             );
             let keyboard = match res {
                 Ok(k) => k,
@@ -323,8 +323,8 @@ impl UdevData {
                     new_seat
                         .add_keyboard(
                             XkbConfig::default(),
-                            keyboard_config.repeat_delay,
-                            keyboard_config.repeat_rate,
+                            keyboard_config.repeat_delay.get() as i32,
+                            keyboard_config.repeat_rate.get(),
                         )
                         .expect("The keyboard is not keyboarding")
                 }

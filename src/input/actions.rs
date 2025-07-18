@@ -476,8 +476,8 @@ impl State {
                 ..
             } = self.fht.config.input.keyboard;
             // repeat_rate is the frequency at which we repeat the keys, invert to get the duration
-            let repeat_duration = Duration::from_secs_f64(1. / f64::from(repeat_rate));
-            let repeat_timer = Timer::from_duration(Duration::from_millis(repeat_delay as u64));
+            let repeat_duration = Duration::from_secs_f64(1. / f64::from(repeat_rate.get()));
+            let repeat_timer = Timer::from_duration(Duration::from_millis(repeat_delay.get()));
 
             let action = action.clone();
             let keysym = key_pattern.1;
