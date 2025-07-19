@@ -230,3 +230,11 @@ Whether to place this window above all other windows. This only applies for floa
 [[rules]]
 is-floating = true
 ```
+
+---
+
+#### `vrr`
+
+Whether this window can trigger on-demand [VRR](/configuration/outputs#vrr). This window rule will
+only trigger if the window is scanned out on the primary plane (which most likely means the window
+is fullscreened)

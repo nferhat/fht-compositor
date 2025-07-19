@@ -51,3 +51,20 @@ The position of the *top-left corner*. The output space is absolute.
 > [!NOTE] Overlapping output geometries
 > If your configuration contains two overlapping outputs, `fht-compositor` will resort to the default output arragement seen
 > at the top of this page. It will also print out a warning message in the logs
+
+----
+
+#### `vrr`
+
+Whether to enable Variable Refresh Rate mode. This is called NVidia GSync or AMD FreeSync by manufacturers. In short,
+it allows the display to adapt its refresh rate to the content being displayed, allowing for smooth presentation.
+
+It's very useful in games for example, where you can't reach your target display FPS.
+
+There are three modes available:
+- `"on"`: Always enable VRR
+- `"off"`: Always disable VRR
+- `"on-demand"`: Enable VRR only if
+  * A window has been marked with the rule [vrr](/configuration/window-rules#vrr)
+  * The window is scanned out to the primary plane (which most likely means having
+  the window fullscreen with no other layer-shells displayed above it)
