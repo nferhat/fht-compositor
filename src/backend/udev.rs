@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use fht_compositor_config::VrrMode;
 use libc::dev_t;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
@@ -13,7 +14,7 @@ use smithay::backend::drm::compositor::{FrameFlags, PrimaryPlaneElement, RenderF
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
-    DrmNode, DrmSurface, NodeType,
+    DrmNode, DrmSurface, NodeType, VrrSupport,
 };
 use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
@@ -700,21 +701,25 @@ impl UdevData {
         let mut custom_mode = None;
         let fallback_mode = get_default_mode(modes);
         let mut requested_mode = fallback_mode;
+        let output_config = fht
+            .config
+            .outputs
+            .get(&output_name)
+            .cloned()
+            .unwrap_or_default();
 
-        if let Some(output_config) = fht.config.outputs.get(&output_name) {
-            if let Some((width, height, refresh)) = output_config.mode {
-                requested_mode =
-                    get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
-                custom_mode = get_custom_mode(width, height, refresh);
-            }
+        if let Some((width, height, refresh)) = output_config.mode {
+            requested_mode =
+                get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
+            custom_mode = get_custom_mode(width, height, refresh);
+        }
 
-            if let Some(transform) = output_config.transform {
-                new_transform = Some(transform.into());
-            }
+        if let Some(transform) = output_config.transform {
+            new_transform = Some(transform.into());
+        }
 
-            if let Some(scale) = output_config.scale {
-                new_scale = Some(smithay::output::Scale::Integer(scale));
-            }
+        if let Some(scale) = output_config.scale {
+            new_scale = Some(smithay::output::Scale::Integer(scale));
         }
 
         // Create the output object and expose it's wl_output global to clients
@@ -847,7 +852,40 @@ impl UdevData {
 
         // SAFETY: If there was any issue up to here we would have already returned
         let (drm_output, refresh_interval) = drm_output.unwrap();
-        fht.add_output(output.clone(), Some(refresh_interval));
+
+        // We check for vrr now, since we need a DrmOutput to access the compositor.
+        let vrr_enabled = drm_output.with_compositor(|compositor| {
+            match compositor.vrr_supported(connector.handle()) {
+                Ok(VrrSupport::NotSupported) => {
+                    if matches!(output_config.vrr, VrrMode::On | VrrMode::OnDemand) {
+                        warn!("Cannot enable VRR on output since its not supported!");
+                    }
+                    let _ = compositor.use_vrr(false);
+                    false
+                }
+                Ok(VrrSupport::Supported | VrrSupport::RequiresModeset) => {
+                    // If on demand we only enable when we have a window exported to primary
+                    // plane, otherwise keep don't enable it now.
+                    let enable = output_config.vrr == VrrMode::On;
+                    if let Err(err) = compositor.use_vrr(enable) {
+                        warn!(
+                            ?err,
+                            vrr = enable,
+                            "Couldn't update VRR property on new output"
+                        );
+                    }
+
+                    compositor.vrr_enabled()
+                }
+
+                Err(err) => {
+                    warn!(?err, "Failed to query VRR support for output");
+                    false
+                }
+            }
+        });
+
+        fht.add_output(output.clone(), Some(refresh_interval), vrr_enabled);
 
         // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
         // to avoid noise and pollution from other outputs leaking into eachother
@@ -1379,10 +1417,17 @@ impl UdevData {
 
                 let new_mode = custom_mode.unwrap_or(requested_mode);
 
-                if surface
-                    .drm_output
-                    .with_compositor(|compositor| compositor.pending_mode() == new_mode)
-                    && !force
+                if surface.drm_output.with_compositor(|compositor| {
+                    let mode_changed = compositor.pending_mode() == new_mode;
+
+                    let vrr_enabled = compositor.vrr_enabled();
+                    let mut vrr_changed = false;
+                    // if we are OnDemand we wait for redraw to update.
+                    vrr_changed |= output_config.vrr == VrrMode::On && !vrr_enabled;
+                    vrr_changed |= output_config.vrr == VrrMode::Off && vrr_enabled;
+
+                    mode_changed || vrr_changed
+                }) && !force
                 {
                     // Mode didn't change, there's nothing else to change.
                     continue;
@@ -1431,7 +1476,10 @@ impl UdevData {
                 let output_state = fht.output_state.get_mut(&surface.output).unwrap();
                 let refresh_interval =
                     Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
-                output_state.frame_clock = FrameClock::new(Some(refresh_interval));
+                let vrr_enabled = surface
+                    .drm_output
+                    .with_compositor(|compositor| compositor.vrr_enabled());
+                output_state.frame_clock = FrameClock::new(Some(refresh_interval), vrr_enabled);
                 fht.output_resized(&surface.output);
             }
 
@@ -1580,7 +1628,47 @@ impl UdevData {
         let output_state = fht.output_state.get_mut(&surface.output).unwrap();
         let refresh_interval =
             Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
-        output_state.frame_clock = FrameClock::new(Some(refresh_interval));
+        let vrr_enabled = surface
+            .drm_output
+            .with_compositor(|compositor| compositor.vrr_enabled());
+        output_state.frame_clock = FrameClock::new(Some(refresh_interval), vrr_enabled);
+
+        Ok(())
+    }
+
+    /// Update the Variable Refresh rate state of an output.
+    pub fn update_output_vrr(
+        &mut self,
+        fht: &mut Fht,
+        output: &Output,
+        vrr: bool,
+    ) -> anyhow::Result<()> {
+        crate::profile_function!();
+
+        for device in self.devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                if surface.output != *output {
+                    continue;
+                }
+
+                if let Err(err) = surface
+                    .drm_output
+                    .with_compositor(|compositor| compositor.use_vrr(vrr))
+                {
+                    warn!(
+                        ?err,
+                        ?vrr,
+                        output = output.name(),
+                        "Failed to update output VRR state"
+                    );
+                }
+
+                let data = fht.output_state.get_mut(output).unwrap();
+                let vrr_enabled = surface.drm_output.with_compositor(|c| c.vrr_enabled());
+                data.frame_clock.set_vrr(vrr_enabled);
+                return Ok(());
+            }
+        }
 
         Ok(())
     }
