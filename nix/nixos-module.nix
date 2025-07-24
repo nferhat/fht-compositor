@@ -1,7 +1,6 @@
 {
-  self',
+  self,
   inputs,
-  inputs',
   ...
 }: {
   flake.nixosModules = rec {
@@ -13,9 +12,9 @@
       pkgs,
       ...
     }: let
+      inherit (pkgs) system;
       cfg = config.programs.fht-compositor;
-      fht-share-picker-pkg = inputs'.fht-share-picker.packages.default;
-      inherit (self'.packages) fht-compositor;
+      inherit (self.packages.${system}) fht-compositor fht-share-picker;
 
       # wayland-session.nix setups some basic stuff that is technically optional but really good
       # to have in a Wayland session. All major compositor include it with their modules.
@@ -78,7 +77,7 @@
           (lib.mkIf (builtins.elem "xdg-screencast-portal" cfg.package.buildFeatures) {
             # Install the share-picker application in order to select what to screencast.
             # NOTE: the wayland-session.nix included in nixpkgs provides us with GTK and dconf
-            environment.systemPackages = [fht-share-picker-pkg];
+            environment.systemPackages = [fht-share-picker];
             xdg.portal.configPackages = [cfg.package];
           })
 

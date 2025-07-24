@@ -156,26 +156,23 @@ impl Portal {
                 CursorMode::HIDDEN
             });
 
-        let base_directories = xdg::BaseDirectories::new().unwrap();
-        let output_path = base_directories
-            .place_runtime_file("fht-compositor/screencast-output.json")
-            .unwrap();
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&output_path)
-            .unwrap();
-
         let exit_status = std::process::Command::new("fht-share-picker")
-            .arg(&output_path)
             .spawn()
-            .and_then(|mut child| child.wait());
-        match exit_status {
-            Ok(status) if status.success() => (),
-            Ok(status) => {
+            .and_then(|child| child.wait_with_output());
+        let source = match exit_status {
+            Ok(output) if output.status.success() => {
+                // Parse stdout into our structure
+                match serde_json::from_slice(&output.stdout) {
+                    Ok(source) => source,
+                    Err(err) => {
+                        warn!(?err, "Failed to deserialize fht-share-picker output");
+                        return (PortalResponse::Error, HashMap::new());
+                    }
+                }
+            }
+            Ok(output) => {
                 warn!(
-                    code = status.code(),
+                    code = output.status.code(),
                     "fht-share-picker exited unsuccessfully"
                 );
 
@@ -187,25 +184,8 @@ impl Portal {
                 let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
-        }
+        };
 
-        let mut buf = String::new();
-        match file.read_to_string(&mut buf) {
-            Ok(_) => (),
-            Err(err) => {
-                warn!(?err, "Failed to read fht-share-picker results");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return (PortalResponse::Error, HashMap::new());
-            }
-        }
-        if buf.is_empty() {
-            // The user didnt select anything
-            let _ = session.closed(&signal_emitter, HashMap::new()).await;
-            return (PortalResponse::Cancelled, HashMap::new());
-        }
-
-        let source =
-            serde_json::de::from_str(&buf).expect("fht-share-picker should give valid JSON!");
         session.with_data(|data| {
             data.source = Some(source);
             data.cursor_mode = Some(cursor_mode)
@@ -332,10 +312,10 @@ pub struct StreamMetadata {
 }
 
 // This enum is taken straight from fht-share-picker
-// SEE: https://github.com/nferhat/fht-share-picker
+// SEE: [`./fht-share-picker`]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScreencastSource {
-    Window { foreign_toplevel_handle: String },
+    Window { id: usize },
     Workspace { output: String, idx: usize },
     Output { name: String },
 }

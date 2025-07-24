@@ -484,15 +484,10 @@ impl State {
                         false,
                     )
                 }
-                ScreencastSource::Window {
-                    foreign_toplevel_handle,
-                } => {
+                ScreencastSource::Window { id } => {
                     let mut cast_window = None;
                     for window in self.fht.space.windows() {
-                        if window
-                            .foreign_toplevel_handle()
-                            .is_some_and(|handle| handle.identifier() == *foreign_toplevel_handle)
-                        {
+                        if window.id() == *id {
                             cast_window = Some(window.clone());
                             break;
                         }
