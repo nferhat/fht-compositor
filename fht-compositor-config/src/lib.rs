@@ -1025,6 +1025,7 @@ pub struct WindowRule {
     pub floating: Option<bool>,
     pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
+    pub vrr: Option<bool>,      // only effective when the window is on the primary plane
 }
 
 // NOTE: For layer shells we by default disable blur and shadow
@@ -1212,6 +1213,15 @@ impl Into<SmithayTransform> for OutputTransform {
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum VrrMode {
+    On,
+    #[default]
+    Off,
+    OnDemand,
+}
+
+#[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct OutputPosition {
     pub x: i32,
@@ -1229,6 +1239,7 @@ pub struct Output {
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
     pub position: Option<OutputPosition>,
+    pub vrr: VrrMode,
 }
 
 fn default_disable_10bit() -> bool {

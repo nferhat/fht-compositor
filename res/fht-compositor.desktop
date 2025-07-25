@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=fht-compositor
-Comment=A dynamic tiling Wayland compositor
-Exec=fht-compositor
-Type=Application
-DesktopNames=fht-compositor

@@ -301,6 +301,13 @@ impl State {
             }
         }
 
+        // Update vrr state after rendering.
+        //
+        // By now, all the surfaces on the output will have their primary scanout output decided,
+        // and the planes should have been assigned and scanned out by now. We can proceed to update
+        // VRR state now.
+        self.fht.output_update_vrr(&output);
+
         // Send frame callbacks
         self.fht.send_frames(&output);
     }
@@ -887,7 +894,12 @@ impl Fht {
         }
     }
 
-    pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>) {
+    pub fn add_output(
+        &mut self,
+        output: Output,
+        refresh_interval: Option<Duration>,
+        vrr_enabled: bool,
+    ) {
         assert!(
             !self.space.has_output(&output),
             "Tried to add an output twice!"
@@ -898,7 +910,7 @@ impl Fht {
 
         let state = output::OutputState {
             redraw_state: output::RedrawState::Idle,
-            frame_clock: FrameClock::new(refresh_interval),
+            frame_clock: FrameClock::new(refresh_interval, vrr_enabled),
             animations_running: false,
             current_frame_sequence: 0u32,
             pending_screencopies: vec![],
@@ -1132,6 +1144,40 @@ impl Fht {
 
             arranged_outputs.push(output);
         }
+    }
+
+    pub fn output_update_vrr(&mut self, output: &Output) {
+        crate::profile_function!();
+        let name = output.name();
+        let Some(config) = self.config.outputs.get(&name) else {
+            return; // no config, VRR disabled by default.
+        };
+
+        let new_state = match config.vrr {
+            fht_compositor_config::VrrMode::OnDemand => {
+                // We only enable VRR when there's a window scanned out to the prmiary plane
+                // with the vrr rule enabled.
+                self.space.windows_on_output(output).any(|window| {
+                    if window.rules().vrr != Some(true) {
+                        return false;
+                    }
+
+                    // FIXME: Should we check for subsurfaces too?
+                    let wl_surface = window.wl_surface().unwrap();
+                    with_states(&wl_surface, |states| {
+                        surface_primary_scanout_output(&wl_surface, states).as_ref() == Some(output)
+                    })
+                })
+            }
+            _ => return, // Not ondemand, keep it as-is.
+        };
+
+        let output = output.clone();
+        self.loop_handle.insert_idle(move |state| {
+            _ = state
+                .backend
+                .update_output_vrr(&mut state.fht, &output, new_state);
+        });
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
@@ -1985,6 +2031,7 @@ pub struct ResolvedWindowRules {
     pub ontop: Option<bool>,
     pub centered: Option<bool>,
     pub centered_in_parent: Option<bool>,
+    pub vrr: Option<bool>,
 }
 
 impl ResolvedWindowRules {
@@ -2059,6 +2106,10 @@ impl ResolvedWindowRules {
 
             if let Some(ontop) = rule.ontop {
                 resolved_rules.ontop = Some(ontop);
+            }
+
+            if let Some(vrr) = rule.vrr {
+                resolved_rules.vrr = Some(vrr);
             }
         }
 
