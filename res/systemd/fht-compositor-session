@@ -25,6 +25,8 @@ if hash systemctl >/dev/null 2>&1; then
 
   # Now start the compositor and wait for it to exit
   systemctl --user --wait start fht-compositor.service
+  # And remove environment variables we're imported to the activation environment.
+  systemctl --user unset-environment WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP FHTC_SOCKET_PATH MOZ_ENABLE_WAYLAND _JAVA_AWT_NONREPARENTING
 else
   echo "Seems like you are not running using a systemd session, you might have installed the wrong session script!"
   echo "You can run 'fht-compositor --session' from your TTY instead."

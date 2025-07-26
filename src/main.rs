@@ -95,6 +95,24 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         "Starting fht-compositor."
     );
 
+    // If we are starting in a session, this means we are starting as a systemd unit
+    // These variables should not be present, but you don't know how people mess with their system
+    // soo...
+    if cli.session {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            warn!("Running as a session but WAYLAND_DISPLAY is set, removing");
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+        if std::env::var_os("DISPLAY").is_some() {
+            warn!("Running as a session but DISPLAY is set, removing");
+            std::env::remove_var("DISPLAY");
+        }
+        if std::env::var_os("WAYLAND_SOCKET").is_some() {
+            warn!("Running as a session but WAYLAND_SOCKET is set, removing");
+            std::env::remove_var("WAYLAND_SOCKET");
+        }
+    }
+
     // EventLoop + Wayland UNIX socket source so we can listen to clients
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     let loop_handle = event_loop.handle();
@@ -159,9 +177,16 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // SAFETY: We do not access these environment variables during these writes/set_var calls,
     // so the race-condition concerns should be non-existent.
     unsafe {
+        // Inform child processes of ours (from autostart or run-command) to which socket they
+        // should connect to.
         std::env::set_var("WAYLAND_DISPLAY", &socket_name);
+        // XDG_CURRENT_DESKTOP is required for portals to work properly, and also changes how
+        // programs detect the desktop (so it will display fht-compositor correctly)
         std::env::set_var("XDG_CURRENT_DESKTOP", "fht-compositor");
+        // XDG_SESSION_TYPE is inferred by many applications to enable wayland support
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
+        // Some other programs are just annoying and need a separate variable
+        // FIXME: Document this and let the user enable these themselves?
         std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
         std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
 
