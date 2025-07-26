@@ -523,7 +523,7 @@ impl Tile {
                 let element_id = Id::new();
                 let tex = TextureRenderElement::from_static_texture(
                     element_id.clone(),
-                    renderer.id(),
+                    renderer.context_id(),
                     window_geometry.loc.to_physical(scale).to_f64(),
                     tex,
                     scale,
@@ -673,7 +673,7 @@ impl Tile {
                 let element_id = Id::new();
                 let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
-                    glow_renderer.id(),
+                    glow_renderer.context_id(),
                     render_geo.to_physical(scale).loc.to_f64(),
                     texture,
                     scale,

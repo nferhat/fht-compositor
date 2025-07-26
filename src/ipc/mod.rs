@@ -1069,7 +1069,7 @@ impl State {
                                 .context("Failed to get wl_surface credentials")?;
                         rustix::process::kill_process(
                             rustix::process::Pid::from_raw(credentials.pid).unwrap(),
-                            rustix::process::Signal::Kill,
+                            rustix::process::Signal::KILL,
                         )
                         .context("Failed to kill window process")?;
                     }

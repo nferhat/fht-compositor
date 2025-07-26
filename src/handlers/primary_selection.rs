@@ -5,9 +5,9 @@ use crate::state::State;
 
 impl PrimarySelectionHandler for State {
     fn primary_selection_state(
-        &self,
-    ) -> &smithay::wayland::selection::primary_selection::PrimarySelectionState {
-        &self.fht.primary_selection_state
+        &mut self,
+    ) -> &mut smithay::wayland::selection::primary_selection::PrimarySelectionState {
+        &mut self.fht.primary_selection_state
     }
 }
 

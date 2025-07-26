@@ -5,6 +5,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, Unde
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::backend::renderer::Renderer as _;
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
@@ -73,9 +74,10 @@ impl BlurElement {
         let texture = fbs.optimized_blur.clone();
 
         if optimized {
+            let renderer: &mut GlesRenderer = renderer.glow_renderer_mut().borrow_mut();
             let texture = TextureRenderElement::from_static_texture(
                 Id::new(),
-                renderer.id(),
+                renderer.context_id(),
                 loc.to_f64(),
                 texture,
                 scale,

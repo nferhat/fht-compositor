@@ -5,9 +5,9 @@ use crate::state::State;
 
 impl DataControlHandler for State {
     fn data_control_state(
-        &self,
-    ) -> &smithay::wayland::selection::wlr_data_control::DataControlState {
-        &self.fht.data_control_state
+        &mut self,
+    ) -> &mut smithay::wayland::selection::wlr_data_control::DataControlState {
+        &mut self.fht.data_control_state
     }
 }
 

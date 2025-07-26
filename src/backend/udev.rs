@@ -11,6 +11,7 @@ use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::compositor::{FrameFlags, PrimaryPlaneElement, RenderFrameError};
+use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
@@ -235,6 +236,7 @@ impl UdevData {
                         // we will try to reset the state when trying to queue a frame.
                         device
                             .drm_output_manager
+                            .lock()
                             .activate(false)
                             .expect("Failed to activate DRM!");
                         if let Some(leasing_state) = device.lease_state.as_mut() {
@@ -426,6 +428,8 @@ impl UdevData {
             .add_node(render_node, gbm.clone())
             .context("Failed to add GBM device to GPU manager!")?;
 
+        let exporter = GbmFramebufferExporter::new(gbm.clone(), render_node.into());
+
         let color_formats = if fht.config.debug.disable_10bit {
             SUPPORTED_FORMATS_8BIT_ONLY
         } else {
@@ -445,7 +449,7 @@ impl UdevData {
         let drm_output_manager = DrmOutputManager::new(
             drm,
             allocator,
-            gbm.clone(),
+            exporter,
             Some(gbm.clone()),
             color_formats.iter().copied(),
             render_formats,
@@ -795,6 +799,7 @@ impl UdevData {
         if let Some(custom_mode) = custom_mode {
             match device
                 .drm_output_manager
+                .lock()
                 .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
                     crtc,
                     custom_mode,
@@ -828,6 +833,7 @@ impl UdevData {
             // - There was an error with custom mode, we try creating here.
             match device
                 .drm_output_manager
+                .lock()
                 .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
                     crtc,
                     requested_mode,
@@ -974,6 +980,7 @@ impl UdevData {
             .unwrap();
         let _ = device
             .drm_output_manager
+            .lock()
             .try_to_restore_modifiers::<_, FhtRenderElement<UdevRenderer<'_>>>(
                 &mut renderer,
                 // FIXME: For a flicker free operation we should return the actual elements for
@@ -1681,7 +1688,7 @@ pub struct Device {
     pub active_leases: Vec<DrmLease>,
     pub drm_output_manager: DrmOutputManager<
         GbmAllocator<DrmDeviceFd>,
-        GbmDevice<DrmDeviceFd>,
+        GbmFramebufferExporter<DrmDeviceFd>,
         OutputPresentationFeedback,
         DrmDeviceFd,
     >,
@@ -1699,7 +1706,7 @@ pub struct Surface {
     connector: ConnectorHandle,
     drm_output: DrmOutput<
         GbmAllocator<DrmDeviceFd>,
-        GbmDevice<DrmDeviceFd>,
+        GbmFramebufferExporter<DrmDeviceFd>,
         OutputPresentationFeedback,
         DrmDeviceFd,
     >,
