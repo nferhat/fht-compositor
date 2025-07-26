@@ -12,7 +12,7 @@
       pkgs,
       ...
     }: let
-      inherit (pkgs) system;
+      inherit (pkgs.stdenv.hostPlatform) system;
       cfg = config.programs.fht-compositor;
       inherit (self.packages.${system}) fht-compositor fht-share-picker;
 

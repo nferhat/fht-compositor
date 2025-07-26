@@ -10,7 +10,7 @@
       pkgs,
       ...
     }: let
-      inherit (self.packages.${pkgs.system}) fht-compositor;
+      inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) fht-compositor;
       cfg = config.programs.fht-compositor;
       tomlFormat = pkgs.formats.toml {};
 
