@@ -1,4 +1,4 @@
-{self', ...}: {
+{self, ...}: {
   flake.homeModules = rec {
     default = fht-compositor;
     # NOTE: This module implementation is directly ripped from home-manager's helix module
@@ -10,7 +10,7 @@
       pkgs,
       ...
     }: let
-      inherit (self'.packages) fht-compositor;
+      inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) fht-compositor;
       cfg = config.programs.fht-compositor;
       tomlFormat = pkgs.formats.toml {};
 
