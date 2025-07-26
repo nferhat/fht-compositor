@@ -92,14 +92,15 @@ impl Portal {
             return (PortalResponse::Error, HashMap::new());
         };
 
-        let id = next_session_id();
         let session_data = SessionData {
-            id,
+            id: next_session_id(),
             to_compositor: self.to_compositor.clone(),
             cast_id: None,
             source: None,      // lazily created when receiving metadata
             cursor_mode: None, // ^^^^
         };
+        let session_id = format!("fht-compositor-screencast-{}", session_data.id);
+
         let session = ScreencastSession::new(
             session_handle.clone(),
             session_data,
@@ -124,9 +125,7 @@ impl Portal {
             return (PortalResponse::Error, HashMap::new());
         };
 
-        let session_id = format!("fht-compositor-screencast-{id}");
         let results = HashMap::from_iter([("session_id", session_id.into())]);
-
         (PortalResponse::Success, results)
     }
 
@@ -156,29 +155,23 @@ impl Portal {
                 CursorMode::HIDDEN
             });
 
-        let base_directories = xdg::BaseDirectories::new().unwrap();
-        let output_path = base_directories
-            .place_runtime_file("fht-compositor/screencast-output.json")
-            .unwrap();
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&output_path)
-            .unwrap();
-
         let exit_status = std::process::Command::new("fht-share-picker")
-            .arg(&output_path)
             .spawn()
-            .and_then(|mut child| child.wait());
-        match exit_status {
-            Ok(status) if status.success() => (),
-            Ok(status) => {
-                warn!(
-                    code = status.code(),
-                    "fht-share-picker exited unsuccessfully"
-                );
+            .and_then(|child| child.wait_with_output());
+        let source = match exit_status {
+            Ok(output) if output.status.success() => {
+                if output.stdout.is_empty() {
+                    // The user clicked exit, and thus doesn't want to screencast anymore.
+                    // No need to log anything.
+                    return (PortalResponse::Cancelled, HashMap::new());
+                }
 
+                // Read the standard output, decode the JSON out of it
+                serde_json::from_slice::<ScreencastSource>(&output.stdout).unwrap()
+            }
+            Ok(output) => {
+                let code = output.status.code();
+                warn!(?code, "fht-share-picker exited unsuccessfully");
                 let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
@@ -187,25 +180,8 @@ impl Portal {
                 let _ = session.closed(&signal_emitter, HashMap::new()).await;
                 return (PortalResponse::Error, HashMap::new());
             }
-        }
+        };
 
-        let mut buf = String::new();
-        match file.read_to_string(&mut buf) {
-            Ok(_) => (),
-            Err(err) => {
-                warn!(?err, "Failed to read fht-share-picker results");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return (PortalResponse::Error, HashMap::new());
-            }
-        }
-        if buf.is_empty() {
-            // The user didnt select anything
-            let _ = session.closed(&signal_emitter, HashMap::new()).await;
-            return (PortalResponse::Cancelled, HashMap::new());
-        }
-
-        let source =
-            serde_json::de::from_str(&buf).expect("fht-share-picker should give valid JSON!");
         session.with_data(|data| {
             data.source = Some(source);
             data.cursor_mode = Some(cursor_mode)
@@ -335,7 +311,7 @@ pub struct StreamMetadata {
 // SEE: https://github.com/nferhat/fht-share-picker
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScreencastSource {
-    Window { foreign_toplevel_handle: String },
+    Window { id: usize },
     Workspace { output: String, idx: usize },
     Output { name: String },
 }
