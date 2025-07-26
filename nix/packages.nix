@@ -6,7 +6,7 @@
   perSystem = {pkgs, ...}: {
     packages = rec {
       fht-compositor = pkgs.callPackage ../default.nix {
-        rev = self.shortRev or self.dirtyShortRev;
+        rev = self.shortRev or self.dirtyShortRev or "unknown";
       };
       default = fht-compositor;
       # This build is only for dev purposes to test the `nix build` output to see
