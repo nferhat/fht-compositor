@@ -94,10 +94,9 @@ fn rule_matches(
     let namespace = layer.namespace();
 
     if rule.match_all {
-        if !rule
+        if rule
             .on_output
-            .as_ref()
-            .is_some_and(|name| name != &output.name())
+            .as_ref().is_none_or(|name| name == &output.name())
         {
             return false;
         }

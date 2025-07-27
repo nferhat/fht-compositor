@@ -1,6 +1,9 @@
 //! Library for configuration types definitions and configuration file loading using [`toml`] and
 //! [`serde`]
 
+#![allow(clippy::from_over_into)] // we don't need the Into benefits for deserializing
+#![allow(clippy::derivable_impls)] // we prefer manual Default implementation for clarity
+
 #[macro_use]
 extern crate tracing;
 use std::collections::HashMap;
@@ -22,7 +25,7 @@ use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButt
 use smithay::utils::Transform as SmithayTransform;
 use toml::{Table, Value};
 
-static DEFAULT_CONFIG_CONTENTS: &'static str = include_str!("../../res/compositor.toml");
+static DEFAULT_CONFIG_CONTENTS: &str = include_str!("../../res/compositor.toml");
 
 const fn default_true() -> bool {
     true
@@ -410,6 +413,7 @@ impl Default for Keyboard {
 }
 
 impl Keyboard {
+    #[allow(mismatched_lifetime_syntaxes)]
     pub fn xkb_config(&self) -> XkbConfig {
         XkbConfig {
             rules: &self.rules,
@@ -1146,6 +1150,7 @@ impl ShadowOverrides {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn deserialize_output_mode<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<(u16, u16, Option<f64>)>, D::Error> {

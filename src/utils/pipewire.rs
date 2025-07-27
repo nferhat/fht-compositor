@@ -120,6 +120,7 @@ impl PipeWire {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start_cast(
         &mut self,
         // Information about the screencast request
@@ -144,7 +145,7 @@ impl PipeWire {
             active: true,
             node_id: None,
             dmabufs: HashMap::new(),
-            refresh: u32::try_from(refresh).unwrap(),
+            refresh,
             state: CastState::ResizePending { pending_size: size },
         }));
 
@@ -710,6 +711,7 @@ pub enum CastSource {
     Window(WeakWindow),
 }
 
+#[allow(clippy::large_enum_variant)] // we usually jump immediatly to Ready state
 enum CastState {
     /// A new size has been sent to the [`Stream`].
     ResizePending { pending_size: Size<u32, Physical> },
@@ -1035,7 +1037,7 @@ fn allocate_buffer(
     crate::profile_function!();
     let (w, h) = (size.w, size.h);
 
-    if modifiers == &[u64::from(Modifier::Invalid) as i64] {
+    if modifiers == [u64::from(Modifier::Invalid) as i64] {
         // modifier-less buffers.
         // The client only provided INVALID modifier with the format.
         let bo = gbm

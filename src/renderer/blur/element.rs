@@ -59,6 +59,7 @@ impl BlurElement {
     /// [`EffectsFramebuffers::update_optimized_blur_buffer`] this element will either
     /// - Display outdated/wrong contents
     /// - Not display anything since the buffer will be empty.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         renderer: &mut impl FhtRenderer,
         output: &Output,
@@ -296,7 +297,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 let blurred_texture = gles_frame.with_context(|gl| unsafe {
                     super::get_main_buffer_blur(
                         gl,
-                        &mut *fx_buffers,
+                        &mut fx_buffers,
                         &shaders,
                         blur_config,
                         projection_matrix,

@@ -1,0 +1,7 @@
+# These types don't get modified internally, since all hashing is done using
+# a unique ID or some other random properties.
+ignore-interior-mutability = [
+    "fht_compositor::window::Window",
+    "smithay::output::Output",
+    "wayland_server::backend::ClientId",
+]

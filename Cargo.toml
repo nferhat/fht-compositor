@@ -51,6 +51,7 @@ authors.workspace = true
 license.workspace = true
 edition.workspace = true
 repository.workspace = true
+lints.workspace = true
 readme = "README.md"
 
 [dependencies]
@@ -162,6 +163,42 @@ xdg-screencast-portal = ["pipewire", "dbus", "smithay/backend_gbm"]
 
 # Enable integration with systemd.
 systemd = ["dep:sd-notify"]
+
+# }}}
+
+# {{{ Lints
+
+# For the sake of code correctness, we force quite aggressive lints.
+# 
+# In the past I used to program without much though about this, but having lints to guide
+# your coding habits is quite necessary for such a large project.
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+missing_debug_implementations = "deny"
+mismatched_lifetime_syntaxes = "allow"
+
+[workspace.lints.clippy]
+pedantic = { level = "forbid", priority = -1 }
+ignored-unit-patterns = "allow"
+module-name-repetitions = "allow"
+too-many-lines = "allow"
+too-many-arguments = "allow"
+type-complexity = "allow"
+semicolon-if-nothing-returned = "deny"
+trivially-copy-pass-by-ref = "deny"
+default-trait-access = "deny"
+match-wildcard-for-single-variants = "deny"
+redundant-closure-for-method-calls = "deny"
+filter-map-next = "deny"
+manual-let-else = "deny"
+unused-async = "deny"
+from-over-into = "allow"
+needless-borrow = "deny"
+new-without-default = "deny"
+useless-conversion = "deny"
+redundant-static-lifetimes = "allow"
+missing-transmute-annotations = "allow" # we always do implicit transmutes
 
 # }}}
 

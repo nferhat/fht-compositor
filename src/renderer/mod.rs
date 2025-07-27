@@ -216,14 +216,9 @@ impl Fht {
             .extend(monitor_elements.into_iter().map(Into::into));
 
         // Finally we have background and bottom elements.
-        let background = layer_elements(renderer, output, Layer::Bottom, &self.config)
-            .into_iter()
-            .chain(layer_elements(
-                renderer,
-                output,
-                Layer::Background,
-                &self.config,
-            ));
+        let background = layer_elements(renderer, output, Layer::Bottom, &self.config).chain(
+            layer_elements(renderer, output, Layer::Background, &self.config),
+        );
         rv.elements.extend(background);
 
         // In case the optimized blur layer is dirty, re-render
@@ -723,6 +718,7 @@ pub fn render_elements<R: FhtRenderer>(
     frame.finish().context("error finishing frame")
 }
 
+#[allow(clippy::type_complexity)]
 fn render_screencopy_internal<'a, R: FhtRenderer>(
     screencopy: &ScreencopyFrame,
     damage_tracker: &'a mut Option<OutputDamageTracker>,
@@ -778,9 +774,9 @@ where
                 elements,
             )?;
 
-            let mut fb = renderer.bind(&mut tex)?;
+            let fb = renderer.bind(&mut tex)?;
             let mapping = renderer.copy_framebuffer(
-                &mut fb,
+                &fb,
                 region.to_logical(1).to_buffer(
                     1,
                     Transform::Normal,
@@ -925,7 +921,7 @@ fn build_texture_mat(
 pub fn has_transparent_region(surface: &WlSurface, surface_size: Size<i32, Logical>) -> bool {
     // Opaque regions are described in surface-local coordinates.
     let surface_geo = Rectangle::from_size(surface_size);
-    with_states(&surface, |data| {
+    with_states(surface, |data| {
         let renderer_data = data
             .data_map
             .get::<RendererSurfaceStateUserData>()

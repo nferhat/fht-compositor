@@ -46,6 +46,7 @@ pub enum Content {
 }
 
 #[derive(Debug, Default)]
+#[allow(clippy::large_enum_variant)]
 enum State {
     /// The [`ConfigUi`] is sliding in/out, from the top of the screen.
     Sliding {

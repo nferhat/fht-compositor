@@ -91,7 +91,6 @@ impl State {
             {
                 let fullscreen = fullscreen.clone();
                 self.set_keyboard_focus(Some(fullscreen));
-                return;
             }
         } else if let Some(layer) = layer_map.layer_under(Layer::Top, pointer_loc) {
             if layer.can_receive_keyboard_focus() {
@@ -104,7 +103,6 @@ impl State {
                     .is_some()
                 {
                     self.set_keyboard_focus(Some(layer.clone()));
-                    return;
                 }
             }
         } else if let Some((window, _)) = self.fht.space.window_under(pointer_loc) {
@@ -124,7 +122,6 @@ impl State {
                     .is_some()
                 {
                     self.set_keyboard_focus(Some(layer.clone()));
-                    return;
                 }
             }
         }
@@ -401,12 +398,10 @@ impl State {
                 }
 
                 let mut new_pos = pointer_location + event.delta();
-                if self
+                if !self
                     .fht
                     .space
-                    .outputs()
-                    .find(|o| o.geometry().to_f64().contains(pointer_location))
-                    .is_none()
+                    .outputs().any(|o| o.geometry().to_f64().contains(pointer_location))
                 {
                     // Clamp the pointer location to the previous output
                     let previous_output = self.fht.space.active_output().clone();

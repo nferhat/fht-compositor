@@ -415,7 +415,7 @@ impl State {
                     );
                     // If we errored out here we didn't send anything back to the portal yet.
                     // Sending None signifies that we got an error, and to drop the session.
-                    let _ = metadata_sender.send(None);
+                    let _ = metadata_sender.send_blocking(None);
                 }
             }
             screencast::Request::StopCast { cast_id } => {
@@ -943,7 +943,7 @@ impl Fht {
         self.space.remove_output(output);
         self.arrange_outputs(None);
         // wlr-output-management
-        self.output_management_manager_state.remove_head(&output);
+        self.output_management_manager_state.remove_head(output);
         self.output_management_manager_state.update::<State>();
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
@@ -1184,7 +1184,7 @@ impl Fht {
         if name == "active" {
             Some(self.space.active_output().clone())
         } else {
-            self.space.outputs().find(|o| &o.name() == name).cloned()
+            self.space.outputs().find(|o| o.name() == name).cloned()
         }
     }
 
@@ -1694,7 +1694,7 @@ impl Fht {
             .or_else(|| input_config.per_device.get(device.sysname()));
 
         self.keyboard.change_repeat_info(
-            input_config.keyboard.repeat_rate.get() as i32,
+            input_config.keyboard.repeat_rate.get(),
             input_config.keyboard.repeat_delay.get() as i32,
         );
 

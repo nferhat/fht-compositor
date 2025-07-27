@@ -29,7 +29,7 @@ use anyhow::Context;
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 
-const SOCKET_DEFAULT_ENV: &'static str = "FHTC_SOCKET_PATH";
+const SOCKET_DEFAULT_ENV: &str = "FHTC_SOCKET_PATH";
 
 /// Connect to the `fht-compositor` IPC socket.
 ///
@@ -38,7 +38,7 @@ const SOCKET_DEFAULT_ENV: &'static str = "FHTC_SOCKET_PATH";
 pub fn connect() -> anyhow::Result<(std::path::PathBuf, UnixStream)> {
     let socket_path = std::env::var(SOCKET_DEFAULT_ENV)
         .context("Missing FHTC_SOCKET_PATH environment variable")?;
-    let socket_path = std::path::PathBuf::try_from(socket_path).context("Invalid socket path")?;
+    let socket_path = std::path::PathBuf::from(socket_path);
     let socket = UnixStream::connect(&socket_path).context("Missing IPC socket")?;
     Ok((socket_path, socket))
 }

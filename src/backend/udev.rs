@@ -1879,12 +1879,8 @@ fn calculate_refresh_rate(mode: &drm::control::Mode) -> f64 {
     let vtotal = mode.vsync().2 as u64;
     let vscan = mode.vscan() as u64;
 
-    if htotal <= 0 || vtotal <= 0 {
-        return 0f64;
-    }
     let numerator = mode.clock() as u64 * 1_000_000;
     let denominator = vtotal * htotal * (if vscan > 1 { vscan } else { 1 });
-
     (numerator / denominator) as f64
 }
 
@@ -1986,7 +1982,7 @@ fn get_custom_mode(width: u16, height: u16, refresh: Option<f64>) -> Option<drm:
 
     let name = unsafe {
         let mut name = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
-        name.resize(32, ' ' as u8);
+        name.resize(32, b' ');
         let name = &*(name.as_slice() as *const [u8] as *const [i8]);
         name.try_into().ok()?
     };

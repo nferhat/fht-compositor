@@ -430,6 +430,7 @@ fn render_blur_pass_with_frame(
 // When rendering blur in real-time (for windows, for example) there should not be a wait for
 // fencing/finishing since this will be done when sending the fb to the output. Using a Frame
 // forces us to do that.
+#[allow(clippy::too_many_arguments)]
 unsafe fn render_blur_pass_with_gl(
     gl: &ffi::Gles2,
     vbos: &[u32; 2],
@@ -602,6 +603,7 @@ unsafe fn render_blur_pass_with_gl(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn get_main_buffer_blur(
     gl: &ffi::Gles2,
     fx_buffers: &mut EffectsFramebuffers,
@@ -711,7 +713,7 @@ pub(super) unsafe fn get_main_buffer_blur(
             let damage = dst_expanded.downscale(1 << (passes - 1 - i));
             render_blur_pass_with_gl(
                 gl,
-                &vbos,
+                vbos,
                 debug,
                 supports_instancing,
                 projection_matrix,

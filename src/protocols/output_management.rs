@@ -552,6 +552,7 @@ where
                 None => false,
             });
 
+        #[allow(clippy::mutable_key_type)]
         let heads = outputs
             .into_iter()
             .flat_map(|output| advertise_output::<D>(handle, &manager, &output))

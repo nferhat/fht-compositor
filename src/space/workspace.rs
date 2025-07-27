@@ -654,9 +654,9 @@ impl Workspace {
             return;
         }
 
-        if let Some(_) = self
+        if self
             .fullscreened_tile_idx
-            .and_then(|idx| self.tiles.get(idx))
+            .and_then(|idx| self.tiles.get(idx)).is_some()
         {
             let idx = self.fullscreened_tile_idx.unwrap();
             // If there's a fullscreened tile, just insert it and unfullscreen
@@ -733,23 +733,21 @@ impl Workspace {
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
                     }
+                } else if edges.intersects(ResizeEdge::BOTTOM) {
+                    // Insert after this stack window.
+                    self.active_tile_idx = Some(closest_idx + 1);
+                    self.tiles.insert(closest_idx + 1, tile);
+                } else if edges.intersects(ResizeEdge::TOP) {
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                    // Insert before this stack window.
                 } else {
-                    if edges.intersects(ResizeEdge::BOTTOM) {
-                        // Insert after this stack window.
-                        self.active_tile_idx = Some(closest_idx + 1);
-                        self.tiles.insert(closest_idx + 1, tile);
-                    } else if edges.intersects(ResizeEdge::TOP) {
-                        self.active_tile_idx = Some(closest_idx);
-                        self.tiles.insert(closest_idx, tile);
-                        // Insert before this stack window.
-                    } else {
-                        // Swap the closest window and the grabbed window.
-                        // FIXME: This becomes invalid if the number of windows changed
+                    // Swap the closest window and the grabbed window.
+                    // FIXME: This becomes invalid if the number of windows changed
 
-                        // First insert the grabbed tile.
-                        self.active_tile_idx = Some(closest_idx);
-                        self.tiles.insert(closest_idx, tile);
-                    }
+                    // First insert the grabbed tile.
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
                 }
 
                 self.arrange_tiles(true);
@@ -791,23 +789,21 @@ impl Workspace {
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
                     }
+                } else if edges.intersects(ResizeEdge::RIGHT) {
+                    // Insert after this stack window.
+                    self.active_tile_idx = Some(closest_idx + 1);
+                    self.tiles.insert(closest_idx + 1, tile);
+                } else if edges.intersects(ResizeEdge::LEFT) {
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                    // Insert before this stack window.
                 } else {
-                    if edges.intersects(ResizeEdge::RIGHT) {
-                        // Insert after this stack window.
-                        self.active_tile_idx = Some(closest_idx + 1);
-                        self.tiles.insert(closest_idx + 1, tile);
-                    } else if edges.intersects(ResizeEdge::LEFT) {
-                        self.active_tile_idx = Some(closest_idx);
-                        self.tiles.insert(closest_idx, tile);
-                        // Insert before this stack window.
-                    } else {
-                        // Swap the closest window and the grabbed window.
-                        // FIXME: This becomes invalid if the number of windows changed
+                    // Swap the closest window and the grabbed window.
+                    // FIXME: This becomes invalid if the number of windows changed
 
-                        // First insert the grabbed tile.
-                        self.active_tile_idx = Some(closest_idx);
-                        self.tiles.insert(closest_idx, tile);
-                    }
+                    // First insert the grabbed tile.
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
                 }
 
                 self.arrange_tiles(true);

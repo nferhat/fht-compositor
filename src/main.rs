@@ -1,6 +1,7 @@
 #![allow(clippy::ignored_unit_patterns)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::too_many_lines)]
+#![allow(mismatched_lifetime_syntaxes)]
 
 // Tracing since it's used project wide for logging
 #[macro_use]
@@ -30,7 +31,7 @@ mod input;
 mod ipc;
 mod layer;
 mod output;
-#[cfg(any(feature = "xdg-screencast-portal"))]
+#[cfg(feature = "xdg-screencast-portal")]
 mod portals;
 mod profiling;
 mod protocols;
@@ -195,7 +196,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         }
     }
 
-    #[cfg(any(feature = "xdg-screencast-portal"))]
+    #[cfg(feature = "xdg-screencast-portal")]
     if let Some(dbus_connection) = &state.fht.dbus_connection {
         if let Err(err) = portals::start(dbus_connection, &loop_handle) {
             error!(?err, "Failed to start XDG portals")

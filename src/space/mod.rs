@@ -129,10 +129,9 @@ impl Space {
             ..
         }) = &mut self.interactive_swap
         {
-            if overlap_outputs.contains(output) {
-                if tile.advance_animations(target_presentation_time) {
-                    ongoing = true;
-                }
+            if overlap_outputs.contains(output) && tile.advance_animations(target_presentation_time)
+            {
+                ongoing = true;
             }
         }
 
@@ -772,8 +771,6 @@ impl Space {
 
         target_workspace.insert_window(window.clone(), animate);
     }
-
-    /// Get the fullscreen [`Window`] under the `point`, and its position in global space.
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.
     ///

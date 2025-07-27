@@ -32,6 +32,7 @@ macro_rules! fht_render_elements {
     // names instead. Like this: $($name_R<SomeRenderer>)? $($name_no_R)? so only one is chosen.
     (@impl $name:ident ($($name_no_R:ident)?) ($($name_R:ident<$R:ident>)?) => { $($variant:ident = $type:ty),+ }) => {
         #[derive(Debug)]
+        #[allow(clippy::large_enum_variant)]
         pub enum $name$(<$R: $crate::renderer::FhtRenderer>)? {
             $($variant($type)),+
         }

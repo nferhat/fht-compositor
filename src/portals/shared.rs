@@ -18,6 +18,7 @@ use zbus::object_server::SignalEmitter;
 /// example communication channels to the compositor or portal state.
 pub struct Session<T: 'static> {
     data: Arc<Mutex<T>>,
+    #[allow(clippy::type_complexity)]
     on_destroy: Option<Box<dyn FnOnce(&T) + Send + Sync>>,
     handle: zvariant::OwnedObjectPath,
 }

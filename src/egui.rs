@@ -21,6 +21,7 @@ use crate::renderer::texture_element::FhtTextureElement;
 pub struct EguiElement {
     size: Size<i32, Logical>,
     ctx: egui::Context,
+    #[allow(clippy::type_complexity)]
     render_buffer: Arc<Mutex<Option<(i32, TextureRenderBuffer<GlesTexture>)>>>,
 }
 

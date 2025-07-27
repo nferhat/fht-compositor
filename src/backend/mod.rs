@@ -12,6 +12,7 @@ pub mod udev;
 #[cfg(feature = "winit-backend")]
 pub mod winit;
 
+#[allow(clippy::large_enum_variant)]
 pub enum Backend {
     #[cfg(feature = "winit-backend")]
     Winit(winit::WinitData),

@@ -3,7 +3,6 @@
 //! This file only handles D-Bus communication. For pipewire logic, see `src/pipewire/mod.rs`
 
 use std::collections::HashMap;
-use std::io::Read;
 use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
@@ -190,6 +189,7 @@ impl Portal {
         (PortalResponse::Success, HashMap::new())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn start(
         &self,
         request_handle: zvariant::ObjectPath<'_>,

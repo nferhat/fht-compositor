@@ -437,7 +437,9 @@ impl State {
                             namespace: layer_surface.namespace().to_string(),
                             output: output_name.clone(),
                             // SAFETY: We know that all the enum variants are the same
+                            #[allow(clippy::missing_transmute_annotations)]
                             layer: unsafe { std::mem::transmute(layer_surface.layer()) },
+                            #[allow(clippy::missing_transmute_annotations)]
                             keyboard_interactivity: unsafe {
                                 std::mem::transmute(
                                     layer_surface.cached_state().keyboard_interactivity,
