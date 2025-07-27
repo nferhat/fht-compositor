@@ -35,6 +35,7 @@ mod border;
 mod closing_tile;
 pub mod decorations;
 mod monitor;
+mod shadow;
 mod tile;
 mod workspace;
 
@@ -1076,7 +1077,7 @@ pub struct Config {
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
     pub border_animation: Option<AnimationConfig>,
-    pub shadow: Option<fht_compositor_config::Shadow>,
+    pub shadow: fht_compositor_config::Shadow,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
     pub border: fht_compositor_config::Border,
     pub layouts: Vec<fht_compositor_config::WorkspaceLayout>,
@@ -1111,7 +1112,7 @@ impl Config {
                 config.animations.border.curve,
                 !config.animations.disable && !config.animations.border.disable,
             ),
-            shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
+            shadow: config.decorations.shadow,
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
             layouts: config.general.layouts.clone(),

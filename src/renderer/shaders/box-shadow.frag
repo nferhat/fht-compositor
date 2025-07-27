@@ -88,10 +88,9 @@ void main() {
     if (rounded_box_sdf(pos, rect, corner_radius) < 0.0)
         discard; // we dont draw the shadow *inside* the rectangle
 
-    // First rounding pass is for outside radius
     float frag_alpha = shadow_color.a;
     frag_alpha *= rounded_box_shadow(rect.xy, rect.xy + rect.zw, v_coords * size, blur_sigma / 2., corner_radius);
-    frag_alpha += (random() - 0.5) / 128.0;
+    frag_alpha += (random() - 0.5) / 128.0; // breakup banding
 
     gl_FragColor = vec4(shadow_color.xyz * frag_alpha, frag_alpha) * alpha;
 }
