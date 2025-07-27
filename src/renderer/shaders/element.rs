@@ -11,7 +11,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesPixelProgram, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
-use smithay::utils::{Logical, Physical, Rectangle, Scale, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
@@ -98,6 +98,26 @@ impl ShaderElement {
             .map(|u| u.into_owned())
             .collect();
         self.commit_counter.increment();
+    }
+
+    /// Create a copy of this shader element with a given location.
+    pub fn with_location(&self, loc: Point<i32, Logical>) -> Self {
+        let mut ret = self.clone();
+        if ret.area.loc != loc {
+            ret.area.loc = loc;
+            ret.commit_counter.increment();
+        }
+        ret
+    }
+
+    /// Create a copy of this shader element with a given size.
+    pub fn with_size(&self, size: Size<i32, Logical>) -> Self {
+        let mut ret = self.clone();
+        if ret.area.size != size {
+            ret.area.size = size;
+            ret.commit_counter.increment();
+        }
+        ret
     }
 }
 

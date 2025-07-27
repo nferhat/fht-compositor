@@ -31,6 +31,7 @@ use crate::renderer::FhtRenderer;
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
+mod border;
 mod closing_tile;
 pub mod decorations;
 mod monitor;
@@ -978,12 +979,12 @@ impl Space {
 
     /// Renders the tile affected by the current interactive swap.
     pub fn render_interactive_swap<R: FhtRenderer>(
-        &self,
+        &mut self,
         renderer: &mut R,
         output: &Output,
         scale: i32,
     ) -> Vec<RelocateRenderElement<TileRenderElement<R>>> {
-        let Some(interactive_swap) = self.interactive_swap.as_ref() else {
+        let Some(interactive_swap) = self.interactive_swap.as_mut() else {
             return vec![];
         };
 
@@ -998,7 +999,7 @@ impl Space {
 
         interactive_swap
             .tile
-            .render(renderer, scale, 1.0, output, Point::default(), false)
+            .render(renderer, scale, 1.0, output, Point::default())
             .map(|element| {
                 RelocateRenderElement::from_element(
                     element,
@@ -1074,6 +1075,7 @@ pub struct Config {
     )>,
     pub window_geometry_animation: Option<AnimationConfig>,
     pub window_open_close_animation: Option<AnimationConfig>,
+    pub border_animation: Option<AnimationConfig>,
     pub shadow: Option<fht_compositor_config::Shadow>,
     pub insert_window_strategy: fht_compositor_config::InsertWindowStrategy,
     pub border: fht_compositor_config::Border,
@@ -1104,6 +1106,11 @@ impl Config {
                 config.animations.window_open_close.curve,
                 !config.animations.disable && !config.animations.window_open_close.disable,
             ),
+            border_animation: AnimationConfig::new(
+                config.animations.border.duration,
+                config.animations.border.curve,
+                !config.animations.disable && !config.animations.border.disable,
+            ),
             shadow: (!config.decorations.shadow.disable).then_some(config.decorations.shadow),
             insert_window_strategy: config.general.insert_window_strategy,
             focus_new_windows: config.general.focus_new_windows,
@@ -1124,6 +1131,11 @@ pub struct AnimationConfig {
 }
 
 impl AnimationConfig {
+    const DISABLED: Self = Self {
+        duration: Duration::ZERO,
+        curve: AnimationCurve::Simple(fht_animation::curve::Easing::Linear),
+    };
+
     pub fn new(duration: Duration, curve: AnimationCurve, enable: bool) -> Option<Self> {
         enable.then_some(Self { duration, curve })
     }

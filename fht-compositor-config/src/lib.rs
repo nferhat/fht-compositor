@@ -862,6 +862,56 @@ pub enum Color {
     },
 }
 
+impl fht_animation::Animable for Color {
+    fn lerp(start: &Self, end: &Self, progress: f64) -> Self {
+        match (start, end) {
+            // Two solid colors are the easy deal
+            (Self::Solid(start), Self::Solid(end)) => Self::Solid(<_>::lerp(start, end, progress)),
+            // If we are animating from any other state, the transition will always be a gradient
+            (
+                Self::Solid(solid),
+                Self::Gradient {
+                    start: gradient_start,
+                    end: gradient_end,
+                    angle,
+                },
+            ) => Self::Gradient {
+                start: <_>::lerp(solid, gradient_start, progress),
+                end: <_>::lerp(solid, gradient_end, progress),
+                angle: *angle,
+            },
+            (
+                Self::Gradient {
+                    start: gradient_start,
+                    end: gradient_end,
+                    angle,
+                },
+                Self::Solid(solid),
+            ) => Self::Gradient {
+                start: <_>::lerp(gradient_start, solid, progress),
+                end: <_>::lerp(gradient_end, solid, progress),
+                angle: *angle,
+            },
+            (
+                Self::Gradient {
+                    start: first_start,
+                    end: first_end,
+                    angle: first_angle,
+                },
+                Self::Gradient {
+                    start: second_start,
+                    end: second_end,
+                    angle: second_angle,
+                },
+            ) => Self::Gradient {
+                start: <_>::lerp(first_start, second_start, progress),
+                end: <_>::lerp(first_end, second_end, progress),
+                angle: <_>::lerp(first_angle, second_angle, progress),
+            },
+        }
+    }
+}
+
 impl Color {
     pub fn components(&self) -> [f32; 4] {
         match self {
@@ -885,6 +935,7 @@ pub struct Animations {
     pub workspace_switch: WorkspaceSwitchAnimation,
     pub window_open_close: WindowOpenCloseAnimation,
     pub window_geometry: WindowGeometryAnimation,
+    pub border: BorderAnimation,
 }
 
 const fn default_workspace_switch_animation_duration() -> Duration {
@@ -984,6 +1035,39 @@ impl Default for WindowGeometryAnimation {
             disable: false,
             curve: default_window_animation_curve(),
             duration: default_window_animation_duration(),
+        }
+    }
+}
+
+fn default_border_animation_curve() -> AnimationCurve {
+    fht_animation::SpringCurve::new(1.0, false, 1.0, 1.2, 800.0, Some(0.0001)).into()
+}
+
+fn default_border_animation_duration() -> Duration {
+    Duration::from_millis(450) // doesn't matter
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct BorderAnimation {
+    #[serde(default = "default_false")]
+    pub disable: bool,
+    #[serde(default = "default_border_animation_curve")]
+    pub curve: AnimationCurve,
+    #[serde(
+        default = "default_border_animation_duration",
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration_millis"
+    )]
+    pub duration: Duration,
+}
+
+impl Default for BorderAnimation {
+    fn default() -> Self {
+        Self {
+            disable: false,
+            curve: default_border_animation_curve(),
+            duration: default_border_animation_duration(),
         }
     }
 }

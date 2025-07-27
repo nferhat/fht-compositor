@@ -215,7 +215,7 @@ impl Workspace {
         // Reload the shared Rcs with workspace system config.
         self.config = Rc::clone(config);
         for tile in &mut self.tiles {
-            tile.config = Rc::clone(config);
+            tile.update_config(Rc::clone(config));
         }
 
         // Workspace-specific layout changes.
@@ -291,16 +291,13 @@ impl Workspace {
             arrange = true;
         }
 
-        let output_geometry = self.output.geometry();
         if let Some(fullscreened_tile) = self
             .fullscreened_tile_idx
             .as_ref()
             .map(|&idx| &mut self.tiles[idx])
         {
-            Self::refresh_window(
+            fullscreened_tile.refresh(
                 &self.output,
-                output_geometry,
-                fullscreened_tile,
                 true, // Fullscreen window gets exclusive activation and focus.
             );
         }
@@ -339,36 +336,8 @@ impl Workspace {
         }
 
         for (idx, tile) in self.tiles.iter_mut().enumerate() {
-            Self::refresh_window(
-                &self.output,
-                output_geometry,
-                tile,
-                Some(idx) == self.active_tile_idx,
-            );
+            tile.refresh(&self.output, Some(idx) == self.active_tile_idx);
         }
-    }
-
-    /// Handle a refresh for a window.
-    fn refresh_window(
-        output: &Output,
-        output_geometry: Rectangle<i32, Logical>,
-        tile: &mut Tile,
-        active: bool,
-    ) {
-        crate::profile_function!();
-        let window = tile.window();
-        window.request_activated(active);
-
-        let mut bbox = window.bbox();
-        bbox.loc = tile.location() + tile.window_loc() + output_geometry.loc;
-        if let Some(mut overlap) = output_geometry.intersection(bbox) {
-            // overlap must be in window-local coordinates.
-            overlap.loc -= bbox.loc;
-            window.enter_output(output, overlap);
-        }
-
-        window.send_pending_configure();
-        window.refresh();
     }
 
     /// Get the [`Workspace`]'s active [`Tile`] index, if any.
@@ -656,7 +625,8 @@ impl Workspace {
 
         if self
             .fullscreened_tile_idx
-            .and_then(|idx| self.tiles.get(idx)).is_some()
+            .and_then(|idx| self.tiles.get(idx))
+            .is_some()
         {
             let idx = self.fullscreened_tile_idx.unwrap();
             // If there's a fullscreened tile, just insert it and unfullscreen
@@ -1904,7 +1874,7 @@ impl Workspace {
             let tile = &self.tiles[fullscreen_idx];
 
             let fullscreen_elements = tile
-                .render(renderer, scale, 1.0, &self.output, render_offset, true)
+                .render(renderer, scale, 1.0, &self.output, render_offset)
                 .map(|element| {
                     RelocateRenderElement::from_element(
                         element,
@@ -1946,22 +1916,15 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(
-                    renderer,
-                    scale,
-                    alpha,
-                    &self.output,
-                    render_offset,
-                    Some(idx) == self.active_tile_idx,
-                )
-                .map(|element| {
-                    RelocateRenderElement::from_element(
-                        element,
-                        render_offset_physical,
-                        Relocate::Relative,
-                    )
-                    .into()
-                }),
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset_physical,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    }),
             );
         }
 
@@ -1974,22 +1937,15 @@ impl Workspace {
             };
 
             elements.extend(
-                tile.render(
-                    renderer,
-                    scale,
-                    alpha,
-                    &self.output,
-                    render_offset,
-                    Some(idx) == self.active_tile_idx,
-                )
-                .map(|element| {
-                    RelocateRenderElement::from_element(
-                        element,
-                        render_offset_physical,
-                        Relocate::Relative,
-                    )
-                    .into()
-                }),
+                tile.render(renderer, scale, alpha, &self.output, render_offset)
+                    .map(|element| {
+                        RelocateRenderElement::from_element(
+                            element,
+                            render_offset_physical,
+                            Relocate::Relative,
+                        )
+                        .into()
+                    }),
             );
         }
 

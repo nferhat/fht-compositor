@@ -81,9 +81,10 @@ impl Shaders {
             .compile_custom_pixel_shader(
                 preprocess_shader_source(BORDER_SRC),
                 &[
-                    UniformName::new("v_start_color", UniformType::_4f),
-                    UniformName::new("v_end_color", UniformType::_4f),
-                    UniformName::new("v_gradient_angle", UniformType::_1f),
+                    UniformName::new("color_start", UniformType::_4f),
+                    UniformName::new("color_end", UniformType::_4f),
+                    UniformName::new("color_angle", UniformType::_1f),
+                    UniformName::new("color_kind", UniformType::_1i),
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("thickness", UniformType::_1f),
                 ],

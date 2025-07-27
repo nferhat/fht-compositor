@@ -18,9 +18,11 @@ use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 use smithay::wayland::seat::WaylandFocus;
 
+use super::border::Border;
 use super::closing_tile::ClosingTile;
-use super::Config;
+use super::{border, Config};
 use crate::egui::EguiRenderElement;
+use crate::output::OutputExt;
 use crate::renderer::blur::element::BlurElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::rounded_window::RoundedWindowElement;
@@ -62,6 +64,9 @@ pub struct Tile {
     /// The animation value's (if any) is the visual size we should display the [`Tile`] with.
     size_animation: Option<Animation<[i32; 2]>>,
 
+    /// The border around this tile.
+    border: Border,
+
     /// Extra damage bag to apply when the tile corners are being rounded.
     /// This is due to an implementation detail of [`RoundedWindowElement`]
     extra_damage: ExtraDamage,
@@ -97,8 +102,23 @@ crate::fht_render_elements! {
 impl Tile {
     /// Create a new [`Tile`] from this window.
     pub fn new(window: Window, config: Rc<Config>) -> Self {
-        let proportion = window.rules().proportion.unwrap_or(1.0);
         let size = window.size();
+        let rules = window.rules();
+        let proportion = rules.proportion.unwrap_or(1.0);
+
+        // Compute initial border state
+        let border = config.border.with_overrides(&rules.border);
+        let border_parameters = super::border::Parameters {
+            color: border.normal_color,
+            corner_radius: border.radius,
+            thickness: border.thickness,
+        };
+        let border_geometry = Rectangle::from_size(Size::from((
+            size.w + border_parameters.thickness * 2,
+            size.h + border_parameters.thickness * 2,
+        )));
+
+        drop(rules);
 
         Self {
             window,
@@ -107,10 +127,73 @@ impl Tile {
             location_animation: None,
             size_animation: None,
             opening_animation: None,
+            border: Border::new(
+                border_geometry,
+                border_parameters,
+                config.border_animation.as_ref(),
+            ),
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             config,
         }
+    }
+
+    /// Refresh the internal state of this [`Tile`].
+    pub fn refresh(&mut self, output: &Output, active: bool) {
+        crate::profile_function!();
+        let output_geometry = output.geometry();
+        let window = &self.window;
+        window.request_activated(active);
+
+        let mut bbox = window.bbox();
+        bbox.loc = self.location() + self.window_loc() + output_geometry.loc;
+        if let Some(mut overlap) = output_geometry.intersection(bbox) {
+            // overlap must be in window-local coordinates.
+            overlap.loc -= bbox.loc;
+            window.enter_output(output, overlap);
+        }
+
+        window.send_pending_configure();
+        window.refresh();
+
+        // Update the decorations too.
+        self.update_decorations(active);
+    }
+
+    /// Update the configuration of this [`Tile`]
+    pub fn update_config(&mut self, config: Rc<Config>) {
+        self.config = config;
+        self.border
+            .update_config(self.config.border_animation.as_ref());
+    }
+
+    fn update_decorations(&mut self, active: bool) {
+        // FIXME: This might not be always accurate, to be exact, window rules must be
+        // refreshed inside Tile::refresh, but this could be really expensive
+        let rules = self.window.rules();
+        let mut border = self.config.border.with_overrides(&rules.border);
+        drop(rules);
+
+        let is_fullscreen = self.window.fullscreen();
+
+        if is_fullscreen {
+            // Disable border for fullscreened windos
+            border.thickness = 0;
+            border.radius = 0.0;
+        }
+
+        self.border.update_parameters(super::border::Parameters {
+            color: if active {
+                border.normal_color
+            } else {
+                border.focused_color
+            },
+            corner_radius: border.radius,
+            thickness: border.thickness,
+        });
+        // Keep the geometry updated, though if there's a mismatch the render function will handle
+        // that for us.
+        self.border.set_geometry(self.visual_geometry());
     }
 
     /// Get a reference to the [`Window`] of this [`Tile`].
@@ -214,9 +297,20 @@ impl Tile {
     ///
     /// The returned [`Rectangle`] is the geometry of the whole [`Tile`], including its border.
     ///
-    /// This accounts for any ongoing location animation.
+    /// This accounts for ongoing animations.
     pub fn visual_geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::new(self.visual_location(), self.visual_size())
+        let mut rect = Rectangle::new(self.visual_location(), self.visual_size());
+        if let Some(opening_animation) = self.opening_animation.as_ref() {
+            let progress = *opening_animation.value();
+            let scale = opening_animation_progress_to_scale(progress);
+            let center = rect.center();
+
+            rect.loc -= center;
+            rect = rect.to_f64().upscale(scale).to_i32_round();
+            rect.loc += center;
+        }
+
+        rect
     }
 
     /// Set this [`Tile`]'s location.
@@ -280,13 +374,7 @@ impl Tile {
     /// The returned value will the size of the whole [`Tile`], including its border.
     pub fn size(&self) -> Size<i32, Logical> {
         let Size { w: ww, h: wh, .. } = self.window.size();
-        let border_thickness = if self.window.fullscreen() {
-            0 // No border is drawn when the window is fullscreened.
-        } else {
-            let rules = self.window.rules();
-            self.config.border.with_overrides(&rules.border).thickness
-        };
-
+        let border_thickness = self.border.parameters().thickness;
         Size::from((ww + 2 * border_thickness, wh + 2 * border_thickness))
     }
 
@@ -295,15 +383,8 @@ impl Tile {
     /// A [`Tile`] can have a border around it, so the actual window will get rendered inside the
     /// border, and not at `self.location`.
     pub fn window_loc(&self) -> Point<i32, Logical> {
-        if self.window.fullscreen() {
-            // When we are fullscreened, we do not render the border
-            Point::default()
-        } else {
-            let rules = self.window.rules();
-            let fht_compositor_config::Border { thickness, .. } =
-                self.config.border.with_overrides(&rules.border);
-            Point::from((thickness, thickness))
-        }
+        let thickness = self.border.parameters().thickness;
+        Point::from((thickness, thickness))
     }
 
     /// Set this [`Tile`]'s size.
@@ -323,8 +404,7 @@ impl Tile {
         }
 
         self.extra_damage.set_size(new_size);
-        let rules = self.window.rules();
-        let mut border_thickness = self.config.border.with_overrides(&rules.border).thickness;
+        let mut border_thickness = self.border.parameters().thickness;
         if self.window.fullscreen() {
             // When we have a fullscreen window, no border is drawn
             border_thickness = 0;
@@ -391,6 +471,10 @@ impl Tile {
             animation.tick(target_presentation_time);
         }
 
+        if self.border.advance_animations(target_presentation_time) {
+            animations_ongoing = true;
+        }
+
         animations_ongoing
     }
 
@@ -439,8 +523,8 @@ impl Tile {
     ) -> Vec<TileRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
-        let rules = self.window.rules();
         let is_fullscreen = self.window.fullscreen();
+        let rules = self.window.rules();
 
         let alpha = if is_fullscreen {
             alpha
@@ -448,12 +532,11 @@ impl Tile {
             alpha * rules.opacity.unwrap_or(1.0)
         };
 
-        let border = self.config.border.with_overrides(&rules.border);
-        let (border_thickness, border_radius) = if is_fullscreen {
-            (0, 0.0)
-        } else {
-            (border.thickness, border.radius)
-        };
+        let border::Parameters {
+            thickness: border_thickness,
+            corner_radius: border_radius,
+            ..
+        } = self.border.current_parameters();
 
         drop(rules); // Avoid deadlock :skull:
 
@@ -468,13 +551,9 @@ impl Tile {
                 .into(),
         );
 
-        // https://drafts.csswg.org/css-backgrounds/#corner-overlap
-        let reduction = f32::min(
-            tile_geometry.size.w as f32 / (2. * border_radius),
-            tile_geometry.size.h as f32 / (2. * border_radius),
-        );
-        let reduction = f32::min(1.0, reduction);
-        let border_radius = border_radius * reduction;
+        // Use the inner radius here
+        let border_radius = (border_radius - border_thickness as f32).max(0.0);
+        let border_radius = border::fit_corner_radius_to_geometry(tile_geometry, border_radius);
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
@@ -594,6 +673,8 @@ impl Tile {
             elements.extend(window_elements);
         };
 
+        // elements.extend();
+
         elements
     }
 
@@ -607,7 +688,6 @@ impl Tile {
         mut alpha: f32,
         output: &Output,
         render_offset: Point<i32, Logical>,
-        active: bool,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
         let fractional_scale = Scale::from(scale as f64);
@@ -627,10 +707,9 @@ impl Tile {
         // FIXME: Redundant calculations here and and in render_inner, but compiler should optimize
         // them away (hopefully)? Either way they are not too expensive.
 
-        let tile_geometry;
+        let tile_geometry = self.visual_geometry();
 
         if let Some(animation) = self.opening_animation.as_ref() {
-            let render_geo = self.visual_geometry();
             let progress = *animation.value();
             let opening_animation_scale = opening_animation_progress_to_scale(progress);
 
@@ -642,15 +721,6 @@ impl Tile {
             // Only include alpha now to render the inner window with full alpha.
             // The texture will lower the opacity of that, but for the rest we gotta account for it.
             alpha *= (progress as f32).clamp(0., 1.);
-
-            tile_geometry = {
-                let mut geo = render_geo;
-                let center = geo.center();
-                geo.loc -= center;
-                geo = geo.to_f64().upscale(opening_animation_scale).to_i32_round();
-                geo.loc += center;
-                geo
-            };
 
             opening_element = render_to_texture(
                 glow_renderer,
@@ -674,7 +744,7 @@ impl Tile {
                 let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     glow_renderer.context_id(),
-                    render_geo.to_physical(scale).loc.to_f64(),
+                    self.visual_location().to_physical(scale).to_f64(),
                     texture,
                     scale,
                     Transform::Normal,
@@ -687,7 +757,7 @@ impl Tile {
                 .into();
                 self.window.set_offscreen_element_id(Some(element_id));
 
-                let origin = render_geo.to_physical(scale).center();
+                let origin = tile_geometry.to_physical(scale).center();
                 let rescale =
                     RescaleRenderElement::from_element(texture, origin, opening_animation_scale);
 
@@ -695,19 +765,28 @@ impl Tile {
             });
         } else {
             self.window.set_offscreen_element_id(None);
-            tile_geometry = self.visual_geometry();
             normal_elements = self.render_inner(renderer, self.visual_location(), scale, alpha)
         }
+
+        let border_element = self
+            .border
+            .render(renderer, alpha)
+            .map(|border| {
+                border
+                    .with_location(tile_geometry.loc)
+                    .with_size(tile_geometry.size)
+            })
+            .map(Into::into)
+            .into_iter();
 
         let is_fullscreen = self.window.fullscreen();
         let is_floating = !self.window.tiled();
         let rules = self.window.rules();
-        let border = self.config.border.with_overrides(&rules.border);
-        let (border_thickness, border_radius) = if is_fullscreen {
-            (0, 0.0)
-        } else {
-            (border.thickness, border.radius)
-        };
+        let border::Parameters {
+            thickness: border_thickness,
+            corner_radius: border_radius,
+            ..
+        } = self.border.current_parameters();
         let (blur, optimized_blur) = (
             self.config.blur.with_overrides(&rules.blur),
             rules.blur.optimized,
@@ -724,25 +803,6 @@ impl Tile {
             tile_geometry.loc + Point::<i32, Logical>::from((border_thickness, border_thickness)),
             tile_geometry.size - Size::from((border_thickness, border_thickness)).upscale(2),
         );
-
-        let border_element = (border_thickness != 0)
-            .then(|| {
-                super::decorations::draw_border(
-                    renderer,
-                    scale,
-                    alpha,
-                    tile_geometry,
-                    border_thickness as f64,
-                    border_radius as f64,
-                    if active {
-                        border.focused_color
-                    } else {
-                        border.normal_color
-                    },
-                )
-                .into()
-            })
-            .into_iter();
 
         let blur_element = (!blur.disabled() && self.has_transparent_region())
             .then(|| {
