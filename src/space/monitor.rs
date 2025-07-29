@@ -38,8 +38,8 @@ pub struct Monitor {
 pub struct MonitorRenderResult<R: FhtRenderer> {
     /// The elements rendered from this result.
     pub elements: Vec<MonitorRenderElement<R>>,
-    /// Whether the active workspace has a fullscreen element.
-    pub has_fullscreen: bool,
+    /// Whether we should render the monitor layer above the top Layer shells
+    pub render_above_top: bool,
 }
 
 fht_render_elements! {
@@ -240,11 +240,15 @@ impl Monitor {
         // We want to render workspaces that currently have a render offset animation
         // as they could be displayed on the monitor (well this depends, but most of the time, yes)
         let mut elements = vec![];
-        let mut has_fullscreen = false;
+        let mut render_above_top = false;
 
         for (idx, workspace) in self.workspaces.iter().enumerate() {
             if idx == self.active_idx || workspace.has_render_offset_animation() {
-                has_fullscreen |= workspace.fullscreened_tile().is_some();
+                if !workspace.has_render_offset_animation() {
+                    // We only take this into account this when the workspace view is not currently
+                    // animated/moved around.
+                    render_above_top |= workspace.fullscreened_tile().is_some();
+                }
                 elements.extend(
                     workspace
                         .render(renderer, scale, None)
@@ -257,7 +261,7 @@ impl Monitor {
 
         MonitorRenderResult {
             elements,
-            has_fullscreen,
+            render_above_top,
         }
     }
 }

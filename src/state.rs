@@ -16,7 +16,7 @@ use smithay::desktop::utils::{
     take_presentation_feedback_surface_tree, under_from_surface_tree,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, PopupManager, WindowSurfaceType};
+use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -71,6 +71,7 @@ use crate::cursor::CursorThemeManager;
 use crate::focus_target::PointerFocusTarget;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
+use crate::layer::MappedLayer;
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
@@ -626,6 +627,7 @@ pub struct Fht {
     pub popups: PopupManager,
     pub root_surfaces: HashMap<WlSurface, WlSurface>,
     pub idle_inhibiting_surfaces: Vec<WlSurface>,
+    pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
     pub lock_state: LockState,
 
     pub output_state: HashMap<Output, output::OutputState>,
@@ -847,6 +849,7 @@ impl Fht {
             seat_state,
             keyboard,
             pointer,
+            mapped_layer_surfaces: HashMap::new(),
             lock_state: LockState::Unlocked,
 
             dnd_icon: None,

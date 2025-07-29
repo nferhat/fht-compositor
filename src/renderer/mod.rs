@@ -36,6 +36,7 @@ use smithay::backend::renderer::{
     Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
     RendererSuper, Texture, TextureFilter, TextureMapping,
 };
+use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::{Output, OutputModeSource};
@@ -53,7 +54,7 @@ use smithay::wayland::shm::with_buffer_contents_mut;
 use crate::config::ui::ConfigUiRenderElement;
 use crate::cursor::CursorRenderElement;
 use crate::handlers::session_lock::SessionLockRenderElement;
-use crate::layer::{layer_elements, LayerShellRenderElement};
+use crate::layer::LayerShellRenderElement;
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
 use crate::space::{MonitorRenderElement, MonitorRenderResult, TileRenderElement};
 use crate::state::Fht;
@@ -184,42 +185,67 @@ impl Fht {
             rv.elements.extend(elements.into_iter().map(Into::into));
         }
 
-        // Overlay layer shells are drawn above everything else, including fullscreen windows
-        let overlay_elements = layer_elements(renderer, output, Layer::Overlay, &self.config);
-        rv.elements.extend(overlay_elements);
-
-        // Interactive move tile goes above everything else
-        let interactive_move_elements = self.space.render_interactive_swap(renderer, output, scale);
-        rv.elements
-            .extend(interactive_move_elements.into_iter().map(Into::into));
-
-        // Top layer shells sit between the normal windows and fullscreen windows.
-        //
-        // NOTE: About the location of render elements.
-        // The compositor logic for now does not have a notion of "global space", similar to what
-        // smithay::desktop::Space provides, but instead, each tile stores its location relative to
-        // the output its mapped in.
-        //
-        // We do not have to offset the render elements in order to position them on the Output.
+        // Collect the render elements for the rendered monitor
         let monitor = self.space.monitor_mut_for_output(output).unwrap();
+        let has_blur = monitor.has_blur();
         let MonitorRenderResult {
             elements: monitor_elements,
-            has_fullscreen,
+            render_above_top,
         } = monitor.render(renderer, scale);
+        // And interactive swap elements
+        let interactive_move_elements = self.space.render_interactive_swap(renderer, output, scale);
 
-        if !has_fullscreen {
+        let layer_map = layer_map_for_output(output);
+        let mut extend_from_layer = |elements: &mut Vec<FhtRenderElement<R>>, layer| {
+            for mapped in layer_map
+                .layers_on(layer)
+                .filter_map(|layer| self.mapped_layer_surfaces.get(layer))
+                .rev()
+            {
+                let layer_geo = layer_map.layer_geometry(&mapped.layer).unwrap();
+                elements.extend(
+                    mapped
+                        .render(renderer, layer_geo, scale, &self.config)
+                        .map(Into::into)
+                        .collect::<Vec<_>>(),
+                );
+            }
+        };
+
+        // Overlay layer shells are drawn above everything else, including fullscreen windows
+        extend_from_layer(&mut rv.elements, Layer::Overlay);
+        // Then we collect the top layer shells, which might be rendered above or below the
+        // monitor contents depending on the currently displayed workspace.
+        let mut top = vec![];
+        extend_from_layer(&mut top, Layer::Top);
+        // Then the background layer shells that are always behind
+        let mut background = vec![];
+        extend_from_layer(&mut background, Layer::Bottom);
+        extend_from_layer(&mut background, Layer::Background);
+
+        if render_above_top {
+            // First the actual monitor contents.
             rv.elements
-                .extend(layer_elements(renderer, output, Layer::Top, &self.config));
+                .extend(interactive_move_elements.into_iter().map(Into::into));
+            rv.elements
+                .extend(monitor_elements.into_iter().map(Into::into));
+            // Then layer shells
+            rv.elements.extend(top);
+            rv.elements.extend(background);
+        } else {
+            // Otherwise, render in normal order.
+            rv.elements.extend(top);
+            // Then the actual monitor contents.
+            rv.elements
+                .extend(interactive_move_elements.into_iter().map(Into::into));
+            rv.elements
+                .extend(monitor_elements.into_iter().map(Into::into));
+            // And finally background stuff
+            rv.elements.extend(background);
         }
 
-        rv.elements
-            .extend(monitor_elements.into_iter().map(Into::into));
-
-        // Finally we have background and bottom elements.
-        let background = layer_elements(renderer, output, Layer::Bottom, &self.config).chain(
-            layer_elements(renderer, output, Layer::Background, &self.config),
-        );
-        rv.elements.extend(background);
+        // We don't need it anymore, and avoid deadlock down below.
+        drop(layer_map);
 
         // In case the optimized blur layer is dirty, re-render
         // It only has the bottom and background layer shells drawn onto with blur applied.
@@ -230,7 +256,7 @@ impl Fht {
         if !self.config.decorations.blur.disable
             && self.config.decorations.blur.passes > 0
             && fx_buffers.optimized_blur_dirty
-            && monitor.has_blur()
+            && has_blur
         {
             if let Err(err) = fx_buffers.update_optimized_blur_buffer(
                 renderer.glow_renderer_mut(),

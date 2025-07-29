@@ -9,7 +9,7 @@ use smithay::wayland::shell::wlr_layer::{
 };
 use smithay::wayland::shell::xdg::PopupSurface;
 
-use crate::layer::ResolvedLayerRules;
+use crate::layer::MappedLayer;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::state::{Fht, State};
 
@@ -25,20 +25,11 @@ impl WlrLayerShellHandler for State {
         wlr_layer: wlr_layer::Layer,
         namespace: String,
     ) {
-        // We don't map layer surfaces immediatly, rather, they get pushed to `pending_layers`
-        // before mapping. The compositors waits for the initial configure of the layer surface
-        // before mapping so we are sure it have dimensions and a render buffer
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| self.fht.space.active_output().clone());
         let layer_surface = LayerSurface::new(surface, namespace);
-
-        // Initially resolve layer rules.
-        // ---
-        // The layer surface might not have sent its namespace yet, but still initialize state with
-        // whatever we have here.
-        ResolvedLayerRules::resolve(&layer_surface, &self.fht.config.layer_rules, &output);
 
         if matches!(wlr_layer, Layer::Background | Layer::Bottom) {
             // the optimized blur buffer has been dirtied, re-render on next State::dispatch
@@ -46,9 +37,12 @@ impl WlrLayerShellHandler for State {
         }
 
         let mut map = layer_map_for_output(&output);
-        if let Err(err) = map.map_layer(&layer_surface) {
+        if let Err(err) = map.map_layer(&layer_surface.clone()) {
             error!(?err, "Failed to map layer-shell");
         }
+
+        let mapped = MappedLayer::new(layer_surface.clone(), output.clone(), &self.fht.config);
+        self.fht.mapped_layer_surfaces.insert(layer_surface, mapped);
     }
 
     fn layer_destroyed(&mut self, surface: wlr_layer::LayerSurface) {
@@ -124,6 +118,7 @@ impl State {
             let layer = map
                 .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .unwrap();
+            let layer_geo = map.layer_geometry(layer).unwrap();
             // send the initial configure if relevant
             if !initial_configure_sent {
                 if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
@@ -135,7 +130,8 @@ impl State {
             }
 
             // FIXME: Maybe check if there were changes before commiting?
-            ResolvedLayerRules::resolve(layer, &state.config.layer_rules, output);
+            let mapped_layer = state.mapped_layer_surfaces.get_mut(layer).unwrap();
+            mapped_layer.refresh(&state.config, layer_geo);
         }
         if let Some(output) = layer_output.as_ref() {
             // fighting rust's borrow checker episode 32918731287
