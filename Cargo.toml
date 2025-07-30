@@ -53,6 +53,7 @@ edition.workspace = true
 repository.workspace = true
 lints.workspace = true
 readme = "README.md"
+rust-version = "1.85"
 
 [dependencies]
 anyhow.workspace = true
