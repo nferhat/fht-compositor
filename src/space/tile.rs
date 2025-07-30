@@ -198,9 +198,9 @@ impl Tile {
 
         self.border.update_parameters(super::border::Parameters {
             color: if active {
-                border.normal_color
-            } else {
                 border.focused_color
+            } else {
+                border.normal_color
             },
             corner_radius: border.radius,
             thickness: border.thickness,
