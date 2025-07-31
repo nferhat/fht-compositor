@@ -702,9 +702,8 @@ impl UdevData {
         // of this and the connector info. We test it, it works, nice, otherwise, use
         // closest requested, or fallback.
         let modes = connector.modes();
-        let mut custom_mode = None;
-        let fallback_mode = get_default_mode(modes);
-        let mut requested_mode = fallback_mode;
+        let default_mode = get_default_mode(modes);
+        let mut requested_mode = None;
         let output_config = fht
             .config
             .outputs
@@ -713,9 +712,12 @@ impl UdevData {
             .unwrap_or_default();
 
         if let Some((width, height, refresh)) = output_config.mode {
-            requested_mode =
-                get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
-            custom_mode = get_custom_mode(width, height, refresh);
+            // If we can find a pre-defined mode from the output with the given parameters,
+            // everything is fine!
+            requested_mode = get_matching_mode(modes, width, height, refresh)
+                // Otherwise try to generate a mode with CVT calculations,
+                // though this doesn't always work.
+                .or_else(|| get_custom_mode(width, height, refresh));
         }
 
         if let Some(transform) = output_config.transform {
@@ -746,26 +748,25 @@ impl UdevData {
             model,
         };
 
+        // Now create the wl_output object to expose it to clients.
+        // The global will be created with Fht::add_output
         let output = Output::new(output_name.clone(), physical_properties);
         for mode in modes {
             let wl_mode = OutputMode::from(*mode);
-            if mode.mode_type().contains(ModeTypeFlags::PREFERRED) {
-                output.set_preferred(wl_mode);
-            }
             output.add_mode(wl_mode);
         }
-        if let Some(custom_mode) = &custom_mode {
-            // Include the custom mode by default.
-            // Later when we create the DrmOutput if there's an error we will remove it.
-            output.add_mode(OutputMode::from(*custom_mode));
-        }
-        // First use the fallback since its needed to create a DRM output.
-        output.change_current_state(
-            Some(OutputMode::from(custom_mode.unwrap_or(fallback_mode))),
-            new_transform,
-            new_scale,
-            None,
-        );
+
+        let mut refresh_interval =
+            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&default_mode));
+        let new_mode = requested_mode
+            .map(|mode| {
+                refresh_interval =
+                    Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&mode));
+                OutputMode::from(mode)
+            })
+            .unwrap_or_else(|| OutputMode::from(default_mode));
+        output.set_preferred(new_mode); // adds the mode if its a custom CVT one
+        output.change_current_state(Some(new_mode), new_transform, new_scale, None);
         output
             .user_data()
             .insert_if_missing(|| OutputSerial(serial));
@@ -794,70 +795,30 @@ impl UdevData {
             planes.overlay = vec![];
         }
 
-        let mut drm_output = None;
-
-        if let Some(custom_mode) = custom_mode {
-            match device
-                .drm_output_manager
-                .lock()
-                .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
-                    crtc,
-                    custom_mode,
-                    &[connector.handle()],
-                    &output,
-                    Some(planes.clone()),
-                    &mut renderer,
-                    &DrmOutputRenderElements::default(),
-                ) {
-                Ok(d_output) => {
-                    let refresh_interval =
-                        Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&custom_mode));
-                    drm_output = Some((d_output, refresh_interval));
-                    // We created the output with custom mode successfully, now we can switch to it.
-                    let mode = OutputMode::from(custom_mode);
-                    output.change_current_state(Some(mode), None, None, None);
-                }
-                Err(err) => {
-                    error!(
-                        ?err,
-                        "Failed to create DRM output {output_name} with custom mode"
-                    );
-                    output.delete_mode(OutputMode::from(custom_mode));
-                }
-            };
-        }
-
-        if drm_output.is_none() {
-            // DRM output didn't initialize yet. Either:
-            // - We dont have a custom mode, so this is the first try.
-            // - There was an error with custom mode, we try creating here.
-            match device
-                .drm_output_manager
-                .lock()
-                .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
-                    crtc,
-                    requested_mode,
-                    &[connector.handle()],
-                    &output,
-                    Some(planes),
-                    &mut renderer,
-                    &DrmOutputRenderElements::default(),
-                ) {
-                Ok(d_output) => {
-                    let refresh_interval =
-                        Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&requested_mode));
-                    drm_output = Some((d_output, refresh_interval));
-                    let mode = OutputMode::from(requested_mode);
-                    output.change_current_state(Some(mode), None, None, None);
-                }
-                Err(err) => {
-                    anyhow::bail!("Failed to create DRM output: {err:?}")
-                }
-            };
-        }
-
-        // SAFETY: If there was any issue up to here we would have already returned
-        let (drm_output, refresh_interval) = drm_output.unwrap();
+        // When initializing the DRM output, we use the default mode to initialize, since sometimes
+        // using a custom mode right now might cause the DrmOutput to fail initializing.
+        //
+        // DrmCompositor will automatically try to switch to the active output mode after being
+        // initialized.
+        //
+        // SEE: nferhat/fht-compositor#75
+        let mut drm_output = match device
+            .drm_output_manager
+            .lock()
+            .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
+                crtc,
+                default_mode,
+                &[connector.handle()],
+                &output,
+                Some(planes.clone()),
+                &mut renderer,
+                &DrmOutputRenderElements::default(),
+            ) {
+            Ok(output) => output,
+            Err(err) => {
+                anyhow::bail!("Failed to create DRM output: {err:?}");
+            }
+        };
 
         // We check for vrr now, since we need a DrmOutput to access the compositor.
         let vrr_enabled = drm_output.with_compositor(|compositor| {
@@ -890,6 +851,17 @@ impl UdevData {
                 }
             }
         });
+
+        // Apply the custom mode if any
+        if let Some(mode) = requested_mode {
+            if let Err(err) = drm_output.use_mode(
+                mode,
+                &mut renderer,
+                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
+            ) {
+                error!(?err, "Failed to apply custom mode for {output_name}");
+            }
+        }
 
         fht.add_output(output.clone(), Some(refresh_interval), vrr_enabled);
 
