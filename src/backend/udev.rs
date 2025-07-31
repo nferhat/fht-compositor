@@ -48,6 +48,7 @@ use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
+use smithay::reexports::rustix::path::Arg;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
@@ -819,6 +820,11 @@ impl UdevData {
                 anyhow::bail!("Failed to create DRM output: {err:?}");
             }
         };
+
+        // Since we only use 8-bit formats, we fix the "max bpc" property
+        if let Err(err) = set_max_bpc(device.drm_output_manager.device(), connector.handle(), 8) {
+            warn!(?err, "Failed to set max bpc for output {output_name}");
+        }
 
         // We check for vrr now, since we need a DrmOutput to access the compositor.
         let vrr_enabled = drm_output.with_compositor(|compositor| {
@@ -1977,4 +1983,48 @@ fn get_custom_mode(width: u16, height: u16, refresh: Option<f64>) -> Option<drm:
     };
 
     Some(mode_info.into())
+}
+
+// https://lists.freedesktop.org/archives/dri-devel/2018-September/190283.html
+fn set_max_bpc(
+    device: &impl drm::control::Device,
+    connector: ConnectorHandle,
+    max_bpc: u64,
+) -> anyhow::Result<()> {
+    let props = device
+        .get_properties(connector)
+        .context("failed to get connector props")?;
+    for (prop, value) in props {
+        let info = device
+            .get_property(prop)
+            .context("failed to get property")?;
+        if info.name().as_str() != Ok("max bpc") {
+            continue; // no what we are searching for
+        }
+
+        let drm::control::property::ValueType::UnsignedRange(min, max) = info.value_type() else {
+            anyhow::bail!("wrong value type")
+        };
+
+        let bpc = max_bpc.clamp(min, max);
+
+        let drm::control::property::Value::UnsignedRange(value) =
+            info.value_type().convert_value(value)
+        else {
+            anyhow::bail!("wrong property type")
+        };
+        if value == bpc {
+            return Ok(()); // no changes
+        }
+
+        device
+            .set_property(
+                connector,
+                prop,
+                drm::control::property::Value::UnsignedRange(bpc).into(),
+            )
+            .context("error setting property")?;
+    }
+
+    Ok(())
 }
