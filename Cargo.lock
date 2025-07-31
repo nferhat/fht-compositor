@@ -990,8 +990,8 @@ dependencies = [
  "glam",
  "libc",
  "libdisplay-info",
- "owning_ref",
  "pipewire",
+ "safer_owning_ref",
  "sd-notify",
  "serde",
  "serde_json",
@@ -2001,15 +2001,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "owning_ref"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff55baddef9e4ad00f88b6c743a2a8062d4c6ade126c2a528644b8e444d52ce"
-dependencies = [
- "stable_deref_trait",
-]
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2420,6 +2411,15 @@ name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+
+[[package]]
+name = "safer_owning_ref"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af21b9de2df966f61c07b5b541c81c98225b86e48ababd43366a642654de30ef"
+dependencies = [
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "same-file"
