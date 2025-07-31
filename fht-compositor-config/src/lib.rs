@@ -1400,7 +1400,7 @@ pub fn config_path() -> PathBuf {
         None => {
             warn!("Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml");
             fallback_path()
-        },
+        }
     }
 }
 
