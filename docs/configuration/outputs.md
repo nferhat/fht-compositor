@@ -52,7 +52,7 @@ The position of the *top-left corner*. The output space is absolute.
 > If your configuration contains two overlapping outputs, `fht-compositor` will resort to the default output arragement seen
 > at the top of this page. It will also print out a warning message in the logs
 
-----
+---
 
 #### `vrr`
 
@@ -68,3 +68,19 @@ There are three modes available:
   * A window has been marked with the rule [vrr](/configuration/window-rules#vrr)
   * The window is scanned out to the primary plane (which most likely means having
   the window fullscreen with no other layer-shells displayed above it)
+
+---
+
+#### `transform`
+
+Option to rotate your display
+
+Following options are availible:
+- `"normal"`: Keep default roation
+- `"90"`: Rotate 90°
+- `"180"`: Rotate 180°
+- `"270"`: Rotate 270°
+- `"flipped"`: Flip the output
+- `"flipped-90"`: Flip the output and rotate 90°
+- `"flipped-180"`: Flip the output and rotate 180°
+- `"flipped-270"`: Flip the output and rotate 270°
