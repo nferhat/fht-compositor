@@ -401,7 +401,8 @@ impl State {
                 if !self
                     .fht
                     .space
-                    .outputs().any(|o| o.geometry().to_f64().contains(pointer_location))
+                    .outputs()
+                    .any(|o| o.geometry().to_f64().contains(pointer_location))
                 {
                     // Clamp the pointer location to the previous output
                     let previous_output = self.fht.space.active_output().clone();

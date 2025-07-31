@@ -155,9 +155,8 @@ impl MappedLayer {
             })
             .into_iter()
             .map(Into::into);
-        let rv = rv.chain(blur);
 
-        rv
+        rv.chain(blur)
     }
 }
 
