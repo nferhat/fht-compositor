@@ -65,11 +65,7 @@ pub fn start(
 
     // SAFETY: We place socket in XDG_RUNTIME_DIR, which should always be available to create the
     // wayland socket itself.
-    let socket_dir = xdg::BaseDirectories::new()
-        .unwrap()
-        .get_runtime_directory()
-        .cloned()
-        .unwrap();
+    let socket_dir = xdg::BaseDirectories::new().runtime_dir.unwrap();
     let socket_name = format!("fhtc-{pid}-{wayland_socket_name}.socket");
     let socket_path = socket_dir.join(&socket_name);
     let listener = UnixListener::bind(&socket_path)?;

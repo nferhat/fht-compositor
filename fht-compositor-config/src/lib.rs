@@ -1380,9 +1380,8 @@ impl Default for Debug {
     }
 }
 
-fn get_xdg_path() -> Result<path::PathBuf, xdg::BaseDirectoriesError> {
-    xdg::BaseDirectories::new()
-        .map(|base_directories| base_directories.get_config_file("fht/compositor.toml"))
+fn get_xdg_path() -> Option<PathBuf> {
+    xdg::BaseDirectories::new().get_config_file("fht/compositor.toml")
 }
 
 fn fallback_path() -> path::PathBuf {
@@ -1396,9 +1395,13 @@ fn fallback_path() -> path::PathBuf {
 }
 
 pub fn config_path() -> PathBuf {
-    get_xdg_path().inspect_err(|err| {
-            warn!(?err, "Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml");
-    }).ok().unwrap_or_else(fallback_path)
+    match get_xdg_path() {
+        Some(path) => path,
+        None => {
+            warn!("Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml");
+            fallback_path()
+        },
+    }
 }
 
 pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>), Error> {
@@ -1425,7 +1428,7 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
     let _ = file.read_to_string(&mut buf)?;
 
     // First deserialize as a toml::Value and try to get the imports table to merge with.
-    let mut config: Value = toml::de::from_str(buf.as_str())?;
+    let mut config: Value = toml::from_str(buf.as_str())?;
     let mut paths = vec![path];
 
     if let Some(imports) = config.get("imports").cloned() {
@@ -1452,7 +1455,7 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
                     error!(?err, "Failed to read import file");
                     continue;
                 }
-                match toml::de::from_str(&buf) {
+                match toml::from_str(&buf) {
                     Ok(value) => {
                         debug!(?path, "Merging configuration from path");
                         paths.push(path);
