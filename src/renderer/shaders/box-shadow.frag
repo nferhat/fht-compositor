@@ -9,6 +9,7 @@
 //! - shadow_color: The shadow color.
 
 precision highp float;
+#include "rounded-corners.glsl"
 
 uniform vec4 shadow_color;
 uniform float blur_sigma;
@@ -66,31 +67,18 @@ float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float 
     return value;
 }
 
-// per-pixel "random" number between 0 and 1
-float random() {
-    return fract(sin(dot(vec2(12.9898, 78.233), gl_FragCoord.xy)) * 43758.5453);
-}
-
-// Simple rounded box sdf to check that we are inside. We do not make use the of the more
-// advanced rounding_alpha code since we just need a rough estimate of our position.
-// --
-// Credits: <https://iquilezles.org/articles/distfunctions2d/>
-float rounded_box_sdf(vec2 pos, vec4 rect, float corner_radius) {
-    vec2 half_size = (rect.zw) * 0.5;
-    vec2 q = abs(pos - rect.xy - half_size) - half_size + corner_radius;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - corner_radius;
-}
-
 void main() {
     // the shader's element size will always fit the blur sigma / 2
-    vec4 rect = vec4(vec2(blur_sigma), size.x - (2. * blur_sigma), size.y - (2. * blur_sigma));
+    vec2 rect_pos = vec2(blur_sigma);
+    vec2 rect_size = size - vec2(2. * blur_sigma);
     vec2 pos = v_coords * size;
-    if (rounded_box_sdf(pos, rect, corner_radius) < 0.0)
-        discard; // we dont draw the shadow *inside* the rectangle
-
     float frag_alpha = shadow_color.a;
-    frag_alpha *= rounded_box_shadow(rect.xy, rect.xy + rect.zw, v_coords * size, blur_sigma / 2., corner_radius);
-    frag_alpha += (random() - 0.5) / 128.0; // breakup banding
+    frag_alpha *= rounded_box_shadow(rect_pos, rect_pos + rect_size, pos, blur_sigma / 2., corner_radius);
+
+    // Cut out the inner side, for transparent windows
+    pos -= vec2(blur_sigma);
+    if (0.0 <= pos.x && pos.x <= rect_size.x && 0.0 <= pos.y && pos.y <= rect_size.y)
+        frag_alpha *= 1.0 - rounding_alpha(pos, rect_size, corner_radius);
 
     gl_FragColor = vec4(shadow_color.xyz * frag_alpha, frag_alpha) * alpha;
 }

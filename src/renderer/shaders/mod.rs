@@ -92,7 +92,7 @@ impl Shaders {
             .expect("Shader source should always compile!");
         let box_shadow = renderer
             .compile_custom_pixel_shader(
-                BOX_SHADOW_SRC,
+                preprocess_shader_source(BOX_SHADOW_SRC),
                 &[
                     UniformName::new("shadow_color", UniformType::_4f),
                     UniformName::new("corner_radius", UniformType::_1f),
