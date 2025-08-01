@@ -8,7 +8,7 @@
 //! - blur_sigma: The shadow blur radii/sigma.
 //! - shadow_color: The shadow color.
 
-precision mediump float;
+precision highp float;
 
 uniform vec4 shadow_color;
 uniform float blur_sigma;

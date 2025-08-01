@@ -6,7 +6,7 @@
 //! - corner_radius: The corner radius to apply.
 //! - thickness: The border thickness to apply.
 
-precision mediump float;
+precision highp float;
 #include "rounded-corners.glsl"
 
 // To avoid useless computation
