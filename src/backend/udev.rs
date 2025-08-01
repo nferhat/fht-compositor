@@ -66,7 +66,9 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use crate::frame_clock::FrameClock;
 use crate::output::{OutputSerial, RedrawState};
 use crate::renderer::blur::EffectsFramebuffers;
-use crate::renderer::{AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer};
+use crate::renderer::{
+    AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
+};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 use crate::utils::get_monotonic_time;
 
@@ -771,6 +773,13 @@ impl UdevData {
         output
             .user_data()
             .insert_if_missing(|| OutputSerial(serial));
+        output
+            .user_data()
+            // This ID is used to match and output and a udev surface
+            .insert_if_missing(|| UdevOutputData {
+                device: device_node,
+                crtc,
+            });
 
         let output_global = output.create_global::<State>(&fht.display_handle);
 
@@ -803,6 +812,7 @@ impl UdevData {
         // initialized.
         //
         // SEE: nferhat/fht-compositor#75
+        let render_elements = generate_output_render_elements(fht, &mut renderer);
         let mut drm_output = match device
             .drm_output_manager
             .lock()
@@ -813,7 +823,7 @@ impl UdevData {
                 &output,
                 Some(planes.clone()),
                 &mut renderer,
-                &DrmOutputRenderElements::default(),
+                &render_elements,
             ) {
             Ok(output) => output,
             Err(err) => {
@@ -860,11 +870,7 @@ impl UdevData {
 
         // Apply the custom mode if any
         if let Some(mode) = requested_mode {
-            if let Err(err) = drm_output.use_mode(
-                mode,
-                &mut renderer,
-                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
-            ) {
+            if let Err(err) = drm_output.use_mode(mode, &mut renderer, &render_elements) {
                 error!(?err, "Failed to apply custom mode for {output_name}");
             }
         }
@@ -956,15 +962,13 @@ impl UdevData {
             .gpu_manager
             .single_renderer(&device.render_node)
             .unwrap();
+        let render_elements = generate_output_render_elements(fht, &mut renderer);
         let _ = device
             .drm_output_manager
             .lock()
             .try_to_restore_modifiers::<_, FhtRenderElement<UdevRenderer<'_>>>(
                 &mut renderer,
-                // FIXME: For a flicker free operation we should return the actual elements for
-                // this output.. Instead we just use black to "simulate" a modeset
-                // :)
-                &DrmOutputRenderElements::default(),
+                &render_elements,
             );
 
         Ok(())
@@ -978,25 +982,14 @@ impl UdevData {
     ) -> anyhow::Result<bool> {
         crate::profile_function!();
 
-        let Some((device_node, crtc)) =
-            self.devices.iter_mut().find_map(|(device_node, device)| {
-                let crtc = device
-                    .surfaces
-                    .iter()
-                    .find(|(_, surface)| surface.output == *output)
-                    .map(|(crtc, _)| *crtc);
-                crtc.map(|crtc| (*device_node, crtc))
-            })
-        else {
-            anyhow::bail!("No surface matching output")
-        };
+        let UdevOutputData { device, crtc } = output.user_data().get().unwrap();
 
-        let device = self.devices.get_mut(&device_node).unwrap();
+        let device = self.devices.get_mut(device).unwrap();
         if !device.drm_output_manager.device().is_active() {
             anyhow::bail!("Device DRM is not active")
         }
 
-        let surface = device.surfaces.get_mut(&crtc).unwrap();
+        let surface = device.surfaces.get_mut(crtc).unwrap();
 
         let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
             self.gpu_manager.single_renderer(&surface.render_node)
@@ -1400,6 +1393,7 @@ impl UdevData {
                     custom_mode = get_custom_mode(width, height, refresh);
                 }
 
+                let render_elements = generate_output_render_elements(fht, &mut renderer);
                 let new_mode = custom_mode.unwrap_or(requested_mode);
 
                 if surface.drm_output.with_compositor(|compositor| {
@@ -1422,11 +1416,11 @@ impl UdevData {
                 let mut new_mode = None;
                 let mut used_custom = false;
                 if let Some(custom_mode) = custom_mode {
-                    if let Err(err) = surface.drm_output.use_mode(
-                        custom_mode,
-                        &mut renderer,
-                        &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
-                    ) {
+                    if let Err(err) =
+                        surface
+                            .drm_output
+                            .use_mode(custom_mode, &mut renderer, &render_elements)
+                    {
                         error!(?err, "Failed to apply custom mode for {output_name}");
                     } else {
                         new_mode = Some(custom_mode);
@@ -1435,11 +1429,11 @@ impl UdevData {
                 }
 
                 if !used_custom {
-                    if let Err(err) = surface.drm_output.use_mode(
-                        requested_mode,
-                        &mut renderer,
-                        &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
-                    ) {
+                    if let Err(err) =
+                        surface
+                            .drm_output
+                            .use_mode(requested_mode, &mut renderer, &render_elements)
+                    {
                         error!(
                             ?err,
                             "Failed to apply requested/fallback mode for {output_name}"
@@ -1521,18 +1515,9 @@ impl UdevData {
         output: &Output,
         mode: OutputMode,
     ) -> anyhow::Result<()> {
-        let Some((device_node, crtc)) =
-            self.devices.iter_mut().find_map(|(device_node, device)| {
-                let crtc = device
-                    .surfaces
-                    .iter()
-                    .find(|(_, surface)| surface.output == *output)
-                    .map(|(crtc, _)| *crtc);
-                crtc.map(|crtc| (*device_node, crtc))
-            })
-        else {
-            anyhow::bail!("No surface matching output")
-        };
+        let UdevOutputData { device, crtc } = output.user_data().get().unwrap();
+        let device = self.devices.get_mut(device).unwrap();
+        let surface = device.surfaces.get_mut(crtc).unwrap();
 
         // Try to find matching mode using data from output mode.
         let OutputMode { size, refresh } = mode;
@@ -1541,8 +1526,6 @@ impl UdevData {
         let refresh = (refresh as f64) / 1000.;
 
         let output_name = output.name();
-        let device = self.devices.get_mut(&device_node).unwrap();
-        let surface = device.surfaces.get_mut(&crtc).unwrap();
 
         let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
             self.gpu_manager.single_renderer(&surface.render_node)
@@ -1553,11 +1536,12 @@ impl UdevData {
         }) else {
             anyhow::bail!("Failed to get renderer");
         };
+        let render_elements = generate_output_render_elements(fht, &mut renderer);
 
         let connector = device
             .drm_scanner
             .crtcs()
-            .find(|(_, handle)| *handle == crtc)
+            .find(|(_, handle)| handle == crtc)
             .map(|(info, _)| info)
             .unwrap();
         let modes = connector.modes();
@@ -1578,11 +1562,11 @@ impl UdevData {
         let mut new_mode = None;
         let mut used_custom = false;
         if let Some(custom_mode) = custom_mode {
-            if let Err(err) = surface.drm_output.use_mode(
-                custom_mode,
-                &mut renderer,
-                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
-            ) {
+            if let Err(err) =
+                surface
+                    .drm_output
+                    .use_mode(custom_mode, &mut renderer, &render_elements)
+            {
                 error!(?err, "Failed to apply custom mode for {output_name}");
             } else {
                 new_mode = Some(custom_mode);
@@ -1591,11 +1575,11 @@ impl UdevData {
         }
 
         if !used_custom {
-            if let Err(err) = surface.drm_output.use_mode(
-                requested_mode,
-                &mut renderer,
-                &DrmOutputRenderElements::<_, FhtRenderElement<_>>::default(),
-            ) {
+            if let Err(err) =
+                surface
+                    .drm_output
+                    .use_mode(requested_mode, &mut renderer, &render_elements)
+            {
                 anyhow::bail!("Failed to apply requested/fallback mode for {output_name}: {err:?}");
             } else {
                 new_mode = Some(requested_mode);
@@ -1657,6 +1641,11 @@ impl UdevData {
 
         Ok(())
     }
+}
+
+struct UdevOutputData {
+    device: DrmNode,
+    crtc: CrtcHandle,
 }
 
 pub struct Device {
@@ -2027,4 +2016,20 @@ fn set_max_bpc(
     }
 
     Ok(())
+}
+
+fn generate_output_render_elements<'a>(
+    fht: &mut Fht,
+    renderer: &mut UdevRenderer<'a>,
+) -> DrmOutputRenderElements<UdevRenderer<'a>, FhtRenderElement<UdevRenderer<'a>>> {
+    let mut render_elements = DrmOutputRenderElements::new();
+    let outputs = fht.space.outputs().cloned().collect::<Vec<_>>();
+
+    for output in outputs {
+        let UdevOutputData { crtc, .. } = output.user_data().get().unwrap();
+        let OutputElementsResult { elements, .. } = fht.output_elements(renderer, &output);
+        render_elements.add_output(crtc, [0.1, 0.1, 0.1, 1.0].into(), elements);
+    }
+
+    render_elements
 }
