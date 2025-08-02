@@ -234,6 +234,12 @@ impl Monitor {
         false
     }
 
+    /// Return whether the monitor contents should be rendered above the top layer shells
+    pub fn render_above_top(&self) -> bool {
+        let ws = self.active_workspace();
+        ws.fullscreened_tile().is_some() && !ws.has_render_offset_animation()
+    }
+
     /// Create the render elements for this [`Monitor`]
     pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: i32) -> MonitorRenderResult<R> {
         crate::profile_function!();

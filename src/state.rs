@@ -52,7 +52,7 @@ use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::SessionLockManagerState;
-use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
+use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::dialog::XdgDialogState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -151,6 +151,10 @@ impl State {
         self.fht.space.refresh();
         self.fht.popups.cleanup();
         self.fht.refresh_idle_inhibit();
+
+        // This must be called before redrawing the outputs since the render elements depend on
+        // up-to-date focus and window rules, so update them before redrawing the outputs
+        self.update_keyboard_focus();
         self.fht.resolve_rules_for_all_windows_if_needed();
 
         {
@@ -617,6 +621,10 @@ pub struct Fht {
     // We store both the timer and the keysym used to trigger the key action.
     // When we remove the keysym from suppressed keys we stop it.
     pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
+    // To focus a layer-surface with an OnDemand keyboard exclusivity mode, the user must click
+    // on the layer surface. Then, when we update the keyboard focus, we check against the clicked
+    // layer surface
+    pub focused_on_demand_layer_shell: Option<LayerSurface>,
 
     pub devices: Vec<input::Device>,
 
@@ -851,6 +859,7 @@ impl Fht {
             pointer,
             mapped_layer_surfaces: HashMap::new(),
             lock_state: LockState::Unlocked,
+            focused_on_demand_layer_shell: None,
 
             dnd_icon: None,
             cursor_theme_manager,
@@ -1244,10 +1253,18 @@ impl Fht {
                     layer
                         .surface_under(point_in_output - layer_loc.to_f64(), WindowSurfaceType::ALL)
                         .map(|(surface, surface_loc)| {
-                            (
-                                PointerFocusTarget::WlSurface(surface),
-                                (surface_loc + output_loc + layer_loc).to_f64(),
-                            )
+                            if surface == *layer.wl_surface() {
+                                // Used in handling on-demand layer-shell focus
+                                (
+                                    PointerFocusTarget::LayerSurface(layer.clone()),
+                                    (output_loc + layer_loc).to_f64(),
+                                )
+                            } else {
+                                (
+                                    PointerFocusTarget::WlSurface(surface),
+                                    (surface_loc + output_loc + layer_loc).to_f64(),
+                                )
+                            }
                         })
                 })
         };
@@ -1293,6 +1310,27 @@ impl Fht {
             .or_else(|| window_under(false))
             .or_else(|| layer_under(Layer::Bottom))
             .or_else(|| layer_under(Layer::Background))
+    }
+
+    /// Focus the given layer surface if its keyboard interactivity is set to
+    /// [`KeyboardInteractivity::OnDemand`], and returns whether it focused it or not
+    pub fn set_on_demand_layer_shell_focus(&mut self, layer: Option<&LayerSurface>) {
+        if let Some(layer) = layer {
+            if layer.cached_state().keyboard_interactivity == KeyboardInteractivity::OnDemand {
+                if self.focused_on_demand_layer_shell.as_ref() != Some(layer) {
+                    self.focused_on_demand_layer_shell = Some(layer.clone());
+                    self.queue_redraw_all(); // FIXME: Granular with layer output
+                    return;
+                }
+            }
+        }
+
+        // A layer-shell with keyboard interacitivty set to something else got clicked,
+        // remove the select one if any
+        if layer.is_some() {
+            self.focused_on_demand_layer_shell = None;
+            self.queue_redraw_all();
+        }
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
