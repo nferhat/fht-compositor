@@ -3,6 +3,7 @@
 //! This file only handles D-Bus communication. For pipewire logic, see `src/pipewire/mod.rs`
 
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
@@ -155,6 +156,7 @@ impl Portal {
             });
 
         let exit_status = std::process::Command::new("fht-share-picker")
+            .stdout(Stdio::piped())
             .spawn()
             .and_then(|child| child.wait_with_output());
         let source = match exit_status {
