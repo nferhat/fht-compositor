@@ -191,7 +191,6 @@ impl Tile {
 
         if is_fullscreen {
             // Disable border for fullscreened windos
-            border.thickness = 0;
             border.radius = 0.0;
             shadow.disable = true;
         }
@@ -565,10 +564,13 @@ impl Tile {
         };
 
         let border::Parameters {
-            thickness: border_thickness,
+            thickness: mut border_thickness,
             corner_radius: border_radius,
             ..
         } = self.border.current_parameters();
+        if is_fullscreen {
+            border_thickness = 0
+        }
 
         drop(rules); // Avoid deadlock :skull:
 
@@ -801,12 +803,16 @@ impl Tile {
         }
 
         let is_floating = !self.window.tiled();
+        let is_fullscreen = self.window.fullscreen();
         let rules = self.window.rules();
         let border::Parameters {
-            thickness: border_thickness,
+            thickness: mut border_thickness,
             corner_radius: border_radius,
             ..
         } = self.border.current_parameters();
+        if is_fullscreen {
+            border_thickness = 0
+        }
         let (blur, optimized_blur) = (
             self.config.blur.with_overrides(&rules.blur),
             rules.blur.optimized,
