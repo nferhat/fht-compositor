@@ -63,7 +63,7 @@ export default defineConfig({
 
     socialLinks: [
       { icon: "github", link: "https://github.com/nferhat/fht-compositor" },
-      { icon: "discord", link: "discord.gg/H58C8AdU7x" },
+      { icon: "discord", link: "https://discord.gg/H58C8AdU7x" },
       {
         icon: "matrix",
         link: "https://matrix.to/#/#fht-compositor:matrix.org",
