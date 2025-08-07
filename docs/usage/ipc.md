@@ -47,7 +47,7 @@ have to resort to polling every few seconds.
 
 ::: tabs
 == Example with eww
-```yuck
+```scheme
 ; Here, we store the space data into a global variable, updated each second.
 ; Since eww supports native JSON decoding, this is really handy
 (defpoll space-data :interval "1s"
