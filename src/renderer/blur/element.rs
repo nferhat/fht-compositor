@@ -9,10 +9,9 @@ use smithay::backend::renderer::Renderer as _;
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
-use super::{CurrentBuffer, EffectsFramebuffers};
+use super::EffectsFramebuffers;
 #[cfg(feature = "udev-backend")]
 use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
-use crate::renderer::data::RendererData;
 use crate::renderer::shaders::Shaders;
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::FhtRenderer;
@@ -280,34 +279,10 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 alpha,
                 ..
             } => {
-                let mut fx_buffers = EffectsFramebuffers::get(output);
-                fx_buffers.current_buffer = CurrentBuffer::Normal;
-
                 let gles_frame: &mut GlesFrame = frame.borrow_mut();
-                let shaders = Shaders::get_from_frame(gles_frame).blur.clone();
-                let vbos = RendererData::get_from_frame(gles_frame).vbos;
-                let supports_instancing = gles_frame
-                    .capabilities()
-                    .contains(&smithay::backend::renderer::gles::Capability::Instancing);
-                let debug = !gles_frame.debug_flags().is_empty();
-                let projection_matrix = glam::Mat3::from_cols_array(gles_frame.projection());
-
-                // Update the blur buffers.
-                // We use gl ffi directly to circumvent some stuff done by smithay
-                let blurred_texture = gles_frame.with_context(|gl| unsafe {
-                    super::get_main_buffer_blur(
-                        gl,
-                        &mut fx_buffers,
-                        &shaders,
-                        blur_config,
-                        projection_matrix,
-                        *scale,
-                        &vbos,
-                        debug,
-                        supports_instancing,
-                        dst,
-                    )
-                })??;
+                // FIXME: Proper damage tracking
+                let blurred_texture =
+                    super::get_blurred_contents(gles_frame, output, dst, *scale, blur_config)?;
 
                 let (program, additional_uniforms) = if *corner_radius == 0.0 {
                     (None, vec![])
