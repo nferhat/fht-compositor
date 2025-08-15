@@ -596,6 +596,8 @@ impl Workspace {
                         active_idx
                     }
                 }
+                InsertWindowStrategy::LongestSide => todo!(),
+                InsertWindowStrategy::Spiral => todo!(),
             }
         };
         if self.config.focus_new_windows {
@@ -826,6 +828,7 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
+            WorkspaceLayout::BinarySpacePartition => todo!(),
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
@@ -1156,6 +1159,8 @@ impl Workspace {
                     active_idx
                 }
             }
+            InsertWindowStrategy::LongestSide => todo!(),
+            InsertWindowStrategy::Spiral => todo!(),
         };
 
         let tiles_len =
@@ -1341,6 +1346,7 @@ impl Workspace {
                     }
                 }
             }
+            WorkspaceLayout::BinarySpacePartition => todo!(),
             WorkspaceLayout::Floating => {}
         }
     }
@@ -1602,6 +1608,7 @@ impl Workspace {
                     right_geo.loc.y += height + inner_gaps;
                 }
             }
+            WorkspaceLayout::BinarySpacePartition => todo!(),
             WorkspaceLayout::Floating => {}
         }
     }

@@ -603,6 +603,7 @@ pub enum WorkspaceLayout {
     Tile,
     BottomStack,
     CenteredMaster,
+    BinarySpacePartition,
     Floating,
 }
 
@@ -613,6 +614,8 @@ pub enum InsertWindowStrategy {
     EndOfSlaveStack,
     ReplaceMaster,
     AfterFocused,
+    LongestSide,
+    Spiral,
 }
 
 fn default_cursor_theme() -> String {
