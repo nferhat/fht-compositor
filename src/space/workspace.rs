@@ -585,7 +585,7 @@ impl Workspace {
                     self.tiles.insert(0, tile);
                     0
                 }
-                InsertWindowStrategy::AfterFocused => {
+                InsertWindowStrategy::AfterFocused | InsertWindowStrategy::LongestSide | InsertWindowStrategy::Spiral => {
                     let active_idx = self.active_tile_idx.map_or(0, |idx| idx + 1);
                     if active_idx == self.tiles.len() {
                         // Dont wrap around if we are on the last window, to avoid cyclic confusion.
@@ -596,8 +596,6 @@ impl Workspace {
                         active_idx
                     }
                 }
-                InsertWindowStrategy::LongestSide => todo!(),
-                InsertWindowStrategy::Spiral => todo!(),
             }
         };
         if self.config.focus_new_windows {
@@ -828,7 +826,48 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::BinarySpacePartition => todo!(),
+            WorkspaceLayout::BinarySpacePartition => {
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        //
+                        // In this case we want to create a stack stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this master window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                    }
+                }
+
+                self.arrange_tiles(true);
+            },
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
@@ -1148,7 +1187,7 @@ impl Workspace {
                 tiled_proportions.insert(0, prepared_proportion);
                 0
             }
-            InsertWindowStrategy::AfterFocused => {
+            InsertWindowStrategy::AfterFocused | InsertWindowStrategy::LongestSide | InsertWindowStrategy::Spiral => {
                 let active_idx = active_idx.map_or(0, |idx| idx + 1);
                 if active_idx == tiled_proportions.len() {
                     // Dont wrap around if we are on the last window, to avoid cyclic confusion.
@@ -1159,8 +1198,6 @@ impl Workspace {
                     active_idx
                 }
             }
-            InsertWindowStrategy::LongestSide => todo!(),
-            InsertWindowStrategy::Spiral => todo!(),
         };
 
         let tiles_len =
