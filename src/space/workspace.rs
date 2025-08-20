@@ -1729,7 +1729,7 @@ impl Workspace {
                             Rectangle::new(stack_geo.loc, (stack_width, stack_height).into());
                         tile.set_geometry(new_geo, animate);
 
-                        if idx % 2 == 1 {
+                        if (nmaster as usize - idx) % 2 == 1 {
                             stack_geo.loc.x += stack_width + inner_gaps;
                         }
                         stack_geo.loc.y += stack_height + inner_gaps;
