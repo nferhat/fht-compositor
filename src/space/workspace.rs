@@ -585,7 +585,9 @@ impl Workspace {
                     self.tiles.insert(0, tile);
                     0
                 }
-                InsertWindowStrategy::AfterFocused | InsertWindowStrategy::LongestSide | InsertWindowStrategy::Spiral => {
+                InsertWindowStrategy::AfterFocused
+                | InsertWindowStrategy::LongestSide
+                | InsertWindowStrategy::Spiral => {
                     let active_idx = self.active_tile_idx.map_or(0, |idx| idx + 1);
                     if active_idx == self.tiles.len() {
                         // Dont wrap around if we are on the last window, to avoid cyclic confusion.
@@ -867,7 +869,7 @@ impl Workspace {
                 }
 
                 self.arrange_tiles(true);
-            },
+            }
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
@@ -1187,7 +1189,9 @@ impl Workspace {
                 tiled_proportions.insert(0, prepared_proportion);
                 0
             }
-            InsertWindowStrategy::AfterFocused | InsertWindowStrategy::LongestSide | InsertWindowStrategy::Spiral => {
+            InsertWindowStrategy::AfterFocused
+            | InsertWindowStrategy::LongestSide
+            | InsertWindowStrategy::Spiral => {
                 let active_idx = active_idx.map_or(0, |idx| idx + 1);
                 if active_idx == tiled_proportions.len() {
                     // Dont wrap around if we are on the last window, to avoid cyclic confusion.
@@ -1645,7 +1649,54 @@ impl Workspace {
                     right_geo.loc.y += height + inner_gaps;
                 }
             }
-            WorkspaceLayout::BinarySpacePartition => todo!(),
+            WorkspaceLayout::BinarySpacePartition => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                // Will leave this as is for now, but will generally assume that
+                // nmaster = 1 for BSP
+                let master_heights = {
+                    let tiles = tiles.get(0..nmaster as usize).unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|tile| tile.proportion())
+                        .collect::<Vec<_>>();
+                    proportion_length(&proportions, master_geo.size.h)
+                };
+
+                let stack_heights = {
+                    let proportions = binary_space_proportions((tiles_len - nmaster) as usize);
+                    proportion_length(&proportions, stack_geo.size.h)
+                };
+
+                for (idx, tile) in tiles.into_iter().enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        continue;
+                    }
+                    if (idx as i32) < nmaster {
+                        let master_height = master_heights[idx];
+                        let geo = Rectangle::new(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height).into(),
+                        );
+                        tile.set_geometry(geo, animate);
+                        master_geo.loc.y += master_height + inner_gaps;
+                    } else {
+                        let stack_height = stack_heights[idx - nmaster as usize];
+                        let new_geo =
+                            Rectangle::new(stack_geo.loc, (stack_geo.size.w, stack_height).into());
+                        tile.set_geometry(new_geo, animate);
+                        stack_geo.loc.y += stack_height + inner_gaps;
+                    }
+                }
+            }
             WorkspaceLayout::Floating => {}
         }
     }
@@ -2011,9 +2062,26 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
     work_area
 }
 
+/// Proportions according to binary space partitioning.
+fn binary_space_proportions(len: usize) -> Vec<f64> {
+    let mut proportions: Vec<f64> = Vec::new();
+    let mut current_proportion: f64 = 1.0;
+    for i in 0..len {
+        if (i + 1) % 2 == 0 {
+            current_proportion /= 2.0;
+            proportions.push(current_proportion);
+            proportions[i - 1] = current_proportion;
+        } else {
+            proportions.push(current_proportion);
+        }
+    }
+
+    proportions
+}
+
 /// Proportion a given length with given proportions.
 ///
-/// This function ensures that the the returned lengths' sum is equal to `length`
+/// This function ensures that the returned lengths' sum is equal to `length`
 fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
     let total_proportions: f64 = proportions.iter().sum();
     let lengths = proportions
@@ -2035,4 +2103,24 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_space_correct_proportions() {
+        let len1: usize = 1;
+        let len4: usize = 4;
+        let len6: usize = 6;
+
+        let propo1 = binary_space_proportions(len1);
+        let propo4 = binary_space_proportions(len4);
+        let propo6 = binary_space_proportions(len6);
+
+        assert_eq!(propo1, vec![1.0]);
+        assert_eq!(propo4, vec![0.5, 0.5, 0.25, 0.25]);
+        assert_eq!(propo6, vec![0.5, 0.5, 0.25, 0.25, 0.125, 0.125]);
+    }
 }
