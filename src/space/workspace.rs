@@ -1701,12 +1701,14 @@ impl Workspace {
                 };
 
                 let stack_heights = {
-                    let proportions = binary_space_proportion_heights((tiles_len - nmaster) as usize);
+                    let proportions =
+                        binary_space_proportion_heights((tiles_len - nmaster) as usize);
                     binary_space_lengths(&proportions, master_geo.size.h)
                 };
 
                 let stack_widths = {
-                    let proportions = binary_space_proportion_widths((tiles_len - nmaster) as usize);
+                    let proportions =
+                        binary_space_proportion_widths((tiles_len - nmaster) as usize);
                     binary_space_lengths(&proportions, master_geo.size.w)
                 };
 
@@ -2194,7 +2196,7 @@ mod tests {
         assert_eq!(propo4, vec![0.5, 0.5, 0.25, 0.25]);
         assert_eq!(propo6, vec![0.5, 0.5, 0.25, 0.25, 0.125, 0.125]);
     }
-    
+
     #[test]
     fn binary_space_correct_widths() {
         let len1: usize = 1;
