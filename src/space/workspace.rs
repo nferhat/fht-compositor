@@ -1732,9 +1732,11 @@ impl Workspace {
                         tile.set_geometry(new_geo, animate);
 
                         if (nmaster as usize - idx) % 2 == 1 {
-                            stack_geo.loc.x += stack_width + inner_gaps;
+                            stack_geo.loc.x += stack_width + (inner_gaps / 2);
                         }
-                        stack_geo.loc.y += stack_height + inner_gaps;
+                        if (nmaster as usize - idx) % 2 == 0 {
+                            stack_geo.loc.y += stack_height + (inner_gaps / 2);
+                        }
                     }
                 }
             }
@@ -2170,8 +2172,9 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
 }
 
 /// Returns a vector containing the calculated proportional lengths
+///
+/// This function ensures that the returned lengths' sum is equal to `length`
 fn binary_space_lengths(proportions: &[f64], length: i32) -> Vec<i32> {
-    // Probably will need to find a better way to guarantee lengths for binary space partitioning
     proportions
         .iter()
         .map(|&cfact| (length as f64 * cfact).floor() as i32)
