@@ -614,8 +614,6 @@ pub enum InsertWindowStrategy {
     EndOfSlaveStack,
     ReplaceMaster,
     AfterFocused,
-    LongestSide,
-    Spiral,
 }
 
 fn default_cursor_theme() -> String {
