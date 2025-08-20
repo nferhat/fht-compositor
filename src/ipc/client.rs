@@ -1,4 +1,4 @@
-use std::io::{Read, Write as _};
+use std::io::{BufRead as _, BufReader, Read, Write as _};
 
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
@@ -34,10 +34,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 
     let mut req = serde_json::to_string(&request).unwrap();
     req.push('\n'); // it is required to append a newline.
-    _ = stream.write(req.as_bytes())?;
+    stream.write_all(req.as_bytes())?;
 
     let mut res_buf = String::new();
-    _ = stream.read_to_string(&mut res_buf)?;
+    {
+        // We must use a buf reader to get an entire line
+        let mut buf_reader = BufReader::new(&mut stream);
+        _ = buf_reader.read_line(&mut res_buf)
+    }
 
     let response = serde_json::de::from_str(&res_buf)?;
     let response = match response {

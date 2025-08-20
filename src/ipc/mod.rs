@@ -129,25 +129,44 @@ async fn handle_new_client(
     let (reader, mut writer) = stream.split();
     let mut reader = futures_util::io::BufReader::new(reader);
 
-    // The IPC model requires each request to be on a single line.
-    let mut req_buf = String::new();
-    reader.read_line(&mut req_buf).await?;
-    let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
+    // In fht-compositor IPC's model, each new line is a new request.
+    // This allows the socket to be re-used to send out multiple requests
 
-    let response = match request {
-        Ok(req) => match handle_request(req, to_compositor).await {
-            Ok(res) => res,
-            // We transform the Result::Err into a Response::Error
-            Err(err) => Response::Error(err.to_string()),
-        },
-        Err(err) => Response::Error(err.to_string()), // Just write an error string;
-    };
+    loop {
+        let mut req_buf = String::new();
+        match dbg!(reader.read_line(&mut req_buf).await) {
+            Ok(_) => (),
+            Err(err) => {
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe
+                ) {
+                    // The socket closed, stop this client thread
+                    return Ok(());
+                } else {
+                    // Otherwise, some sort of error happened
+                    anyhow::bail!("error reading request: {err:?}")
+                }
+            }
+        }
 
-    let mut response_str = serde_json::to_string(&response)?;
-    response_str.push('\n'); // separate by newlines
-    _ = writer.write(response_str.as_bytes()).await?;
+        let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
+        dbg!(&request);
+        // We transform the Result::Err into a Response::Error
+        let response = match request {
+            Ok(req) => match handle_request(req, to_compositor.clone()).await {
+                Ok(res) => res,
+                Err(err) => Response::Error(err.to_string()),
+            },
+            Err(err) => Response::Error(err.to_string()), // Just write an error string;
+        };
+        dbg!(&response);
 
-    Ok(())
+        let mut response_str = serde_json::to_string(&response)?;
+        response_str.push('\n'); // separate by newlines
+        dbg!(&response_str);
+        _ = dbg!(writer.write(response_str.as_bytes()).await?);
+    }
 }
 
 enum ClientRequest {
