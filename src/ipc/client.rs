@@ -1,4 +1,4 @@
-use std::io::{BufRead as _, BufReader, Read, Write as _};
+use std::io::{BufRead as _, BufReader, Write as _};
 
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
@@ -154,7 +154,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
             }
         }
         fht_compositor_ipc::Response::Windows(windows) => {
-            for window in windows {
+            for (_, window) in windows {
                 print_window(&mut writer, window)?;
                 writeln!(&mut writer, "---")?;
             }
@@ -179,7 +179,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
             active_idx,
         }) => {
             writeln!(&mut writer, "Space")?;
-            for (idx, monitor) in monitors.iter().enumerate() {
+            for (idx, (_, monitor)) in monitors.iter().enumerate() {
                 writeln!(&mut writer, "\tMonitor #{idx}:")?;
                 writeln!(&mut writer, "\t\tOutput: {}", monitor.output)?;
                 writeln!(&mut writer, "\t\tPrimary: {}", idx == *primary_idx)?;

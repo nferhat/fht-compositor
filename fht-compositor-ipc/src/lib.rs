@@ -99,7 +99,7 @@ pub enum Response {
     /// Output information.
     Outputs(HashMap<String, Output>),
     /// All windows information.
-    Windows(Vec<Window>),
+    Windows(HashMap<usize, Window>),
     /// All layer-shells information.
     LayerShells(Vec<LayerShell>),
     /// Space information.
@@ -307,7 +307,7 @@ pub struct Monitor {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Space {
     /// The [`Monitor`]s tracked by the [`Space`]
-    pub monitors: Vec<Monitor>,
+    pub monitors: HashMap<String, Monitor>,
     /// The index of the primary [`Monitor`].
     ///
     /// Usually this is the first added [`Monitor`]. In case the primary [`Monitor`] gets removed,

@@ -171,7 +171,7 @@ async fn handle_new_client(
 
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
-    Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
+    Windows(async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>),
     LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
     Window {
@@ -471,9 +471,9 @@ impl State {
                     .fht
                     .space
                     .monitors()
-                    .map(|mon| fht_compositor_ipc::Monitor {
-                        output: mon.output().name(),
-                        workspaces: mon
+                    .map(|mon| {
+                        let output = mon.output().name();
+                        let workspaces = mon
                             .workspaces()
                             .map(|workspace| {
                                 let workspace_id = *workspace.id();
@@ -494,9 +494,17 @@ impl State {
                             })
                             .collect::<Vec<_>>()
                             .try_into()
-                            .expect("workspace number is always 9"),
-                        active: mon.active(),
-                        active_workspace_idx: mon.active_workspace_idx(),
+                            .expect("workspace number is always 9");
+
+                        (
+                            output.clone(),
+                            fht_compositor_ipc::Monitor {
+                                output,
+                                workspaces,
+                                active: mon.active(),
+                                active_workspace_idx: mon.active_workspace_idx(),
+                            },
+                        )
                     })
                     .collect();
 
@@ -1199,8 +1207,8 @@ impl State {
 fn workspace_windows(
     workspace: &Workspace,
     keyboard_focus: Option<&KeyboardFocusTarget>,
-) -> Vec<fht_compositor_ipc::Window> {
-    let mut windows = Vec::with_capacity(workspace.windows().len());
+) -> HashMap<usize, fht_compositor_ipc::Window> {
+    let mut windows = HashMap::with_capacity(workspace.windows().len());
     let is_focused = move |window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
     let output = workspace.output().name();
     let workspace_id = *workspace.id();
@@ -1211,21 +1219,24 @@ fn workspace_windows(
         let location = tile.location() + tile.window_loc();
         let size = window.size();
 
-        windows.push(fht_compositor_ipc::Window {
-            id: *window.id(),
-            title: window.title(),
-            app_id: window.app_id(),
-            output: output.clone(),
-            workspace_idx: workspace.index(),
-            workspace_id,
-            size: (size.w as u32, size.h as u32),
-            location: location.into(),
-            fullscreened: window.fullscreen(),
-            maximized: window.maximized(),
-            tiled: window.tiled(),
-            activated: Some(tile_idx) == active_tile_idx,
-            focused: is_focused(window),
-        });
+        windows.insert(
+            *window.id(),
+            fht_compositor_ipc::Window {
+                id: *window.id(),
+                title: window.title(),
+                app_id: window.app_id(),
+                output: output.clone(),
+                workspace_idx: workspace.index(),
+                workspace_id,
+                size: (size.w as u32, size.h as u32),
+                location: location.into(),
+                fullscreened: window.fullscreen(),
+                maximized: window.maximized(),
+                tiled: window.tiled(),
+                activated: Some(tile_idx) == active_tile_idx,
+                focused: is_focused(window),
+            },
+        );
     }
 
     windows
