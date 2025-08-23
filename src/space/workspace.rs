@@ -1394,6 +1394,15 @@ impl Workspace {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
+                let mut stack_lengths = Vec::new();
+                binary_space_lengths(
+                    &mut stack_lengths,
+                    stack_geo,
+                    inner_gaps,
+                    0,
+                    (tiles_len - nmaster) as usize,
+                );
+
                 if (0..nmaster).contains(&(unconfigured_idx as i32)) {
                     let tiles = tiled_proportions
                         .get(0..nmaster as usize)
@@ -1404,16 +1413,8 @@ impl Workspace {
                     let prepared_width = master_geo.size.w - (2 * border_width);
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 } else {
-                    let tiles = tiled_proportions
-                        .get(nmaster as usize..)
-                        .unwrap_or_default();
-                    let proportions = tiles.to_vec();
-                    let heights = binary_space_lengths(&proportions, stack_geo.size.h);
-                    let widths = binary_space_lengths(&proportions, stack_geo.size.w);
-                    let prepared_height =
-                        heights[unconfigured_idx - nmaster as usize] - (2 * border_width);
-                    let prepared_width =
-                        widths[unconfigured_idx - nmaster as usize] - (2 * border_width);
+                    let prepared_width = stack_lengths[unconfigured_idx].size.w;
+                    let prepared_height = stack_lengths[unconfigured_idx].size.h;
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 }
             }
@@ -1700,17 +1701,14 @@ impl Workspace {
                     proportion_length(&proportions, master_geo.size.h)
                 };
 
-                let stack_heights = {
-                    let proportions =
-                        binary_space_proportion_heights((tiles_len - nmaster) as usize);
-                    binary_space_lengths(&proportions, master_geo.size.h)
-                };
-
-                let stack_widths = {
-                    let proportions =
-                        binary_space_proportion_widths((tiles_len - nmaster) as usize);
-                    binary_space_lengths(&proportions, master_geo.size.w)
-                };
+                let mut stack_lengths = Vec::new();
+                binary_space_lengths(
+                    &mut stack_lengths,
+                    stack_geo,
+                    inner_gaps,
+                    0,
+                    (tiles_len - nmaster) as usize,
+                );
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if Some(idx) == self.fullscreened_tile_idx {
@@ -1725,18 +1723,7 @@ impl Workspace {
                         tile.set_geometry(geo, animate);
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
-                        let stack_height = stack_heights[idx - nmaster as usize];
-                        let stack_width = stack_widths[idx - nmaster as usize];
-                        let new_geo =
-                            Rectangle::new(stack_geo.loc, (stack_width, stack_height).into());
-                        tile.set_geometry(new_geo, animate);
-
-                        if (nmaster as usize - idx) % 2 == 1 {
-                            stack_geo.loc.x += stack_width + (inner_gaps / 2);
-                        }
-                        if (nmaster as usize - idx) % 2 == 0 {
-                            stack_geo.loc.y += stack_height + (inner_gaps / 2);
-                        }
+                        tile.set_geometry(stack_lengths[idx], animate);
                     }
                 }
             }
@@ -2105,46 +2092,6 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
     work_area
 }
 
-/// Length proportions according to binary space partitioning.
-fn binary_space_proportion_heights(len: usize) -> Vec<f64> {
-    // I can't yet figure out a more functional way of doing this
-    // so I am prioritizing clarity over anything else right now
-
-    let mut proportions: Vec<f64> = Vec::new();
-    let mut current_proportion: f64 = 1.0;
-    for i in 0..len {
-        if i % 2 == 1 {
-            current_proportion /= 2.0;
-            proportions.push(current_proportion);
-            proportions[i - 1] = current_proportion;
-        } else {
-            proportions.push(current_proportion);
-        }
-    }
-
-    proportions
-}
-
-/// Width proportions according to binary space partitioning.
-fn binary_space_proportion_widths(len: usize) -> Vec<f64> {
-    // I can't yet figure out a more functional way of doing this
-    // so I am prioritizing clarity over anything else right now
-
-    let mut proportions: Vec<f64> = Vec::new();
-    let mut current_proportion: f64 = 1.0;
-    for i in 0..len {
-        if i > 0 && i % 2 == 0 {
-            current_proportion /= 2.0;
-            proportions.push(current_proportion);
-            proportions[i - 1] = current_proportion;
-        } else {
-            proportions.push(current_proportion);
-        }
-    }
-
-    proportions
-}
-
 /// Proportion a given length with given proportions.
 ///
 /// This function ensures that the returned lengths' sum is equal to `length`
@@ -2171,14 +2118,54 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
         .collect()
 }
 
-/// Returns a vector containing the calculated proportional lengths
-///
-/// This function ensures that the returned lengths' sum is equal to `length`
-fn binary_space_lengths(proportions: &[f64], length: i32) -> Vec<i32> {
-    proportions
-        .iter()
-        .map(|&cfact| (length as f64 * cfact).floor() as i32)
-        .collect::<Vec<_>>()
+/// Returns the calculated lengths and positions of the binary space partition tiles.
+fn binary_space_lengths(
+    lengths: &mut Vec<Rectangle<i32, Logical>>,
+    rec: Rectangle<i32, Logical>,
+    inner_gaps: i32,
+    idx: usize,
+    len: usize,
+) {
+    // If we're doing iterating through tiles, return
+    if idx == len {
+        return;
+    }
+
+    // For even-numbered tiles, split horizontally and position the next tile below
+    if idx % 2 == 0 {
+        lengths.push(Rectangle::new(
+            rec.loc,
+            (rec.size.w, rec.size.h / 2 - (inner_gaps / 2)).into(),
+        ));
+        binary_space_lengths(
+            lengths,
+            Rectangle::new(
+                Point::new(rec.loc.x, rec.loc.y + rec.size.h / 2 + (inner_gaps / 2) + 1),
+                (rec.size.w, rec.size.h / 2).into(),
+            ),
+            inner_gaps,
+            idx + 1,
+            len,
+        );
+    }
+
+    // For odd-numbered tiles, split vertically and position the next tile to the right
+    if idx % 2 == 1 {
+        lengths.push(Rectangle::new(
+            rec.loc,
+            (rec.size.w / 2 - (inner_gaps / 2), rec.size.h).into(),
+        ));
+        binary_space_lengths(
+            lengths,
+            Rectangle::new(
+                Point::new(rec.loc.x + rec.size.w / 2 + (inner_gaps / 2) + 1, rec.loc.y),
+                (rec.size.w / 2, rec.size.h).into(),
+            ),
+            inner_gaps,
+            idx + 1,
+            len,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2186,32 +2173,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binary_space_correct_heights() {
-        let len1: usize = 1;
-        let len4: usize = 4;
-        let len6: usize = 6;
+    fn bsp_rectangles() {
+        let base = Rectangle::new(Point::new(0, 0), (100, 100).into());
 
-        let propo1 = binary_space_proportion_heights(len1);
-        let propo4 = binary_space_proportion_heights(len4);
-        let propo6 = binary_space_proportion_heights(len6);
+        let mut recs = Vec::new();
+        binary_space_lengths(&mut recs, base, 0, 0, 3);
 
-        assert_eq!(propo1, vec![1.0]);
-        assert_eq!(propo4, vec![0.5, 0.5, 0.25, 0.25]);
-        assert_eq!(propo6, vec![0.5, 0.5, 0.25, 0.25, 0.125, 0.125]);
-    }
+        assert_eq!(recs[0].size.w, 100);
+        assert_eq!(recs[0].size.h, 50);
 
-    #[test]
-    fn binary_space_correct_widths() {
-        let len1: usize = 1;
-        let len4: usize = 4;
-        let len6: usize = 6;
+        assert_eq!(recs[1].size.w, 50);
+        assert_eq!(recs[1].size.h, 50);
 
-        let propo1 = binary_space_proportion_widths(len1);
-        let propo4 = binary_space_proportion_widths(len4);
-        let propo6 = binary_space_proportion_widths(len6);
+        assert_eq!(recs[2].size.w, 50);
+        assert_eq!(recs[2].size.h, 25);
 
-        assert_eq!(propo1, vec![1.0]);
-        assert_eq!(propo4, vec![1.0, 0.5, 0.5, 0.5]);
-        assert_eq!(propo6, vec![1.0, 0.5, 0.5, 0.25, 0.25, 0.25]);
+        assert_eq!(recs[0].loc.x, 0);
+        assert_eq!(recs[0].loc.y, 0);
+
+        assert_eq!(recs[1].loc.x, 0);
+        assert_eq!(recs[1].loc.y, 51);
+
+        assert_eq!(recs[2].loc.x, 51);
+        assert_eq!(recs[2].loc.y, 51);
     }
 }
