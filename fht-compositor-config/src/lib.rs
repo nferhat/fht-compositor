@@ -126,7 +126,8 @@ impl From<SmithayModifiersState> for ModifiersState {
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyPattern(pub ModifiersState, pub Keysym);
 
-// Stored as (&str, u32) to avoid unnecessary Keysym conversions (abd because the compiler complains)
+// Stored as (&str, u32) to avoid unnecessary Keysym conversions (abd because the compiler
+// complains)
 static AZERTY_NUMROW: &[(&str, u32)] = &[
     ("1", keysyms::KEY_ampersand),
     ("ampersand", keysyms::KEY_ampersand),
@@ -163,11 +164,17 @@ impl<'de> Deserialize<'de> for KeyPattern {
         D: Deserializer<'de>,
     {
         let raw = String::deserialize(deserializer)?;
+        // Very simple emacs-like key pattern. The example key patterns are:
+        // Super-c, Logo-c, Mod-c, M-s
+        // Shift-a, S-c
+        // Alt-c, A-c
+        // C-c, A-C-c, A-/
         let mut modifiers = ModifiersState::default();
         let mut keysym = None;
 
         for part in raw.split('-') {
             if keysym.is_some() {
+                // We specified someting after having a keysym, invalid
                 return Err(<D::Error as serde::de::Error>::custom(
                     "key pattern ends after the keysym",
                 ));
@@ -186,7 +193,9 @@ impl<'de> Deserialize<'de> for KeyPattern {
                         let k = xkb::keysym_from_name(other, xkb::KEYSYM_NO_FLAGS).raw();
                         let k = if k == keysyms::KEY_NoSymbol {
                             xkb::keysym_from_name(other, xkb::KEYSYM_CASE_INSENSITIVE).raw()
-                        } else { k };
+                        } else {
+                            k
+                        };
                         if k == keysyms::KEY_NoSymbol {
                             return Err(<D::Error as serde::de::Error>::invalid_value(
                                 Unexpected::Str(other),
