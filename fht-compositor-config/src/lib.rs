@@ -126,6 +126,37 @@ impl From<SmithayModifiersState> for ModifiersState {
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyPattern(pub ModifiersState, pub Keysym);
 
+// Stored as (&str, u32) to avoid unnecessary Keysym conversions (and because the compiler complains)
+static AZERTY_NUMROW: &[(&str, u32)] = &[
+    ("1", keysyms::KEY_ampersand),
+    ("ampersand", keysyms::KEY_ampersand),
+    ("2", keysyms::KEY_eacute),
+    ("eacute", keysyms::KEY_eacute),
+    ("3", keysyms::KEY_quotedbl),
+    ("quotedbl", keysyms::KEY_quotedbl),
+    ("4", keysyms::KEY_apostrophe),
+    ("apostrophe", keysyms::KEY_apostrophe),
+    ("5", keysyms::KEY_parenleft),
+    ("parenleft", keysyms::KEY_parenleft),
+    ("6", keysyms::KEY_minus),
+    ("minus", keysyms::KEY_minus),
+    ("7", keysyms::KEY_egrave),
+    ("egrave", keysyms::KEY_egrave),
+    ("8", keysyms::KEY_underscore),
+    ("underscore", keysyms::KEY_underscore),
+    ("9", keysyms::KEY_ccedilla),
+    ("ccedilla", keysyms::KEY_ccedilla),
+    ("0", keysyms::KEY_agrave),
+    ("agrave", keysyms::KEY_agrave),
+];
+
+fn lookup_azerty_numrow(s: &str) -> Option<Keysym> {
+    AZERTY_NUMROW
+        .iter()
+        .find(|(name, _)| *name == s)
+        .map(|&(_, k)| k.into()) // convert u32 -> Keysym here
+}
+
 impl<'de> Deserialize<'de> for KeyPattern {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -139,6 +170,7 @@ impl<'de> Deserialize<'de> for KeyPattern {
         // C-c, A-C-c, A-/
         let mut modifiers = ModifiersState::default();
         let mut keysym = None;
+
         for part in raw.split('-') {
             if keysym.is_some() {
                 // We specified someting after having a keysym, invalid
@@ -153,23 +185,23 @@ impl<'de> Deserialize<'de> for KeyPattern {
                 "Alt" | "A" => modifiers.alt = true,
                 "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
                 "AltGr" => modifiers.alt_gr = true,
-                value => {
-                    // We tried all the possible modifier patterns that we support
-                    // Try to get a keysym from xkb, if we can't get the keysym, we can't build the
-                    // keysym, and error out
-                    match xkb::keysym_from_name(value, xkb::KEYSYM_NO_FLAGS).raw() {
-                        keysyms::KEY_NoSymbol => {
-                            match xkb::keysym_from_name(value, xkb::KEYSYM_CASE_INSENSITIVE).raw() {
-                                keysyms::KEY_NoSymbol => {
-                                    return Err(<D::Error as serde::de::Error>::invalid_value(
-                                        Unexpected::Str(value),
-                                        &"Keysym",
-                                    ))
-                                }
-                                k => keysym = Some(k.into()),
-                            }
+                other => {
+                    if let Some(k) = lookup_azerty_numrow(other) {
+                        keysym = Some(k);
+                    } else {
+                        let k = xkb::keysym_from_name(other, xkb::KEYSYM_NO_FLAGS).raw();
+                        let k = if k == keysyms::KEY_NoSymbol {
+                            xkb::keysym_from_name(other, xkb::KEYSYM_CASE_INSENSITIVE).raw()
+                        } else {
+                            k
+                        };
+                        if k == keysyms::KEY_NoSymbol {
+                            return Err(<D::Error as serde::de::Error>::invalid_value(
+                                Unexpected::Str(other),
+                                &"Keysym",
+                            ));
                         }
-                        k => keysym = Some(k.into()),
+                        keysym = Some(k.into());
                     }
                 }
             }
