@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use fht_compositor_config::WorkspaceSwitchAnimationDirection;
-use smithay::backend::renderer::element::utils::RelocateRenderElement;
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::output::Output;
 use smithay::utils::Point;
 
@@ -224,7 +224,7 @@ impl Monitor {
     pub fn has_blur(&self) -> bool {
         for workspace in &self.workspaces {
             // only check for visible workspaces
-            if (workspace.index() == self.active_idx || workspace.has_render_offset_animation())
+            if (workspace.index() == self.active_idx || workspace.render_offset().is_some())
                 && workspace.tiles().any(|tile| tile.has_transparent_region())
             {
                 return true;
@@ -237,7 +237,7 @@ impl Monitor {
     /// Return whether the monitor contents should be rendered above the top layer shells
     pub fn render_above_top(&self) -> bool {
         let ws = self.active_workspace();
-        ws.fullscreened_tile().is_some() && !ws.has_render_offset_animation()
+        ws.fullscreened_tile().is_some() && !ws.render_offset().is_some()
     }
 
     /// Create the render elements for this [`Monitor`]
@@ -249,18 +249,36 @@ impl Monitor {
         let mut render_above_top = false;
 
         for (idx, workspace) in self.workspaces.iter().enumerate() {
-            if idx == self.active_idx || workspace.has_render_offset_animation() {
-                if !workspace.has_render_offset_animation() {
+            if idx == self.active_idx || workspace.render_offset().is_some() {
+                if !workspace.render_offset().is_some() {
                     // We only take this into account this when the workspace view is not currently
                     // animated/moved around.
                     render_above_top |= workspace.fullscreened_tile().is_some();
                 }
-                elements.extend(
-                    workspace
-                        .render(renderer, scale, None)
-                        .into_iter()
-                        .map(Into::into),
-                );
+
+                let render_offset = workspace.render_offset();
+                let ws_elements = workspace
+                    .render(renderer, scale, None)
+                    .into_iter()
+                    .map(Into::into);
+
+                if let Some(render_offset) = render_offset {
+                    let render_offset = render_offset.to_physical(scale);
+                    elements.extend(
+                        ws_elements
+                            .map(|e| {
+                                RelocateRenderElement::from_element(
+                                    e,
+                                    render_offset,
+                                    Relocate::Relative,
+                                )
+                            })
+                            .map(Into::into),
+                    )
+                } else {
+                    elements.extend(ws_elements.map(Into::into))
+                }
+
                 continue;
             }
         }
