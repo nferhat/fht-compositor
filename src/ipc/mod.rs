@@ -134,7 +134,7 @@ async fn handle_new_client(
 
     loop {
         let mut req_buf = String::new();
-        match dbg!(reader.read_line(&mut req_buf).await) {
+        match reader.read_line(&mut req_buf).await {
             Ok(_) => (),
             Err(err) => {
                 if matches!(
@@ -151,7 +151,6 @@ async fn handle_new_client(
         }
 
         let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
-        dbg!(&request);
         // We transform the Result::Err into a Response::Error
         let response = match request {
             Ok(req) => match handle_request(req, to_compositor.clone()).await {
@@ -160,11 +159,9 @@ async fn handle_new_client(
             },
             Err(err) => Response::Error(err.to_string()), // Just write an error string;
         };
-        dbg!(&response);
 
         let mut response_str = serde_json::to_string(&response)?;
         response_str.push('\n'); // separate by newlines
-        dbg!(&response_str);
         _ = dbg!(writer.write(response_str.as_bytes()).await?);
     }
 }
