@@ -830,6 +830,48 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
+            WorkspaceLayout::BinarySpacePartition => {
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        //
+                        // In this case we want to create a stack stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this master window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                    }
+                }
+
+                self.arrange_tiles(true);
+            }
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
@@ -1345,6 +1387,40 @@ impl Workspace {
                     }
                 }
             }
+            WorkspaceLayout::BinarySpacePartition => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                if (0..nmaster).contains(&(unconfigured_idx as i32)) {
+                    let tiles = tiled_proportions
+                        .get(0..nmaster as usize)
+                        .unwrap_or_default();
+                    let proportions = tiles.to_vec();
+                    let lengths = proportion_length(&proportions, master_geo.size.h);
+                    let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
+                    let prepared_width = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                } else {
+                    let tiles = tiled_proportions
+                        .get(nmaster as usize..)
+                        .unwrap_or_default();
+                    let proportions = tiles.to_vec();
+                    let heights = binary_space_lengths(&proportions, stack_geo.size.h);
+                    let widths = binary_space_lengths(&proportions, stack_geo.size.w);
+                    let prepared_height =
+                        heights[unconfigured_idx - nmaster as usize] - (2 * border_width);
+                    let prepared_width =
+                        widths[unconfigured_idx - nmaster as usize] - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                }
+            }
             WorkspaceLayout::Floating => {}
         }
     }
@@ -1604,6 +1680,68 @@ impl Workspace {
                     let geo = Rectangle::new(right_geo.loc, (right_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
+                }
+            }
+            WorkspaceLayout::BinarySpacePartition => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                // Will leave this as is for now, but will generally assume that
+                // nmaster = 1 for BSP
+                let master_heights = {
+                    let tiles = tiles.get(0..nmaster as usize).unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|tile| tile.proportion())
+                        .collect::<Vec<_>>();
+                    proportion_length(&proportions, master_geo.size.h)
+                };
+
+                let stack_heights = {
+                    let proportions =
+                        binary_space_proportion_heights((tiles_len - nmaster) as usize);
+                    binary_space_lengths(&proportions, master_geo.size.h)
+                };
+
+                let stack_widths = {
+                    let proportions =
+                        binary_space_proportion_widths((tiles_len - nmaster) as usize);
+                    binary_space_lengths(&proportions, master_geo.size.w)
+                };
+
+                for (idx, tile) in tiles.into_iter().enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        continue;
+                    }
+                    if (idx as i32) < nmaster {
+                        let master_height = master_heights[idx];
+                        let geo = Rectangle::new(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height).into(),
+                        );
+                        tile.set_geometry(geo, animate);
+                        master_geo.loc.y += master_height + inner_gaps;
+                    } else {
+                        let stack_height = stack_heights[idx - nmaster as usize];
+                        let stack_width = stack_widths[idx - nmaster as usize];
+                        let new_geo =
+                            Rectangle::new(stack_geo.loc, (stack_width, stack_height).into());
+                        tile.set_geometry(new_geo, animate);
+
+                        if (nmaster as usize - idx) % 2 == 1 {
+                            stack_geo.loc.x += stack_width + (inner_gaps / 2);
+                        }
+                        if (nmaster as usize - idx) % 2 == 0 {
+                            stack_geo.loc.y += stack_height + (inner_gaps / 2);
+                        }
+                    }
                 }
             }
             WorkspaceLayout::Floating => {}
@@ -1943,9 +2081,49 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
     work_area
 }
 
+/// Length proportions according to binary space partitioning.
+fn binary_space_proportion_heights(len: usize) -> Vec<f64> {
+    // I can't yet figure out a more functional way of doing this
+    // so I am prioritizing clarity over anything else right now
+
+    let mut proportions: Vec<f64> = Vec::new();
+    let mut current_proportion: f64 = 1.0;
+    for i in 0..len {
+        if i % 2 == 1 {
+            current_proportion /= 2.0;
+            proportions.push(current_proportion);
+            proportions[i - 1] = current_proportion;
+        } else {
+            proportions.push(current_proportion);
+        }
+    }
+
+    proportions
+}
+
+/// Width proportions according to binary space partitioning.
+fn binary_space_proportion_widths(len: usize) -> Vec<f64> {
+    // I can't yet figure out a more functional way of doing this
+    // so I am prioritizing clarity over anything else right now
+
+    let mut proportions: Vec<f64> = Vec::new();
+    let mut current_proportion: f64 = 1.0;
+    for i in 0..len {
+        if i > 0 && i % 2 == 0 {
+            current_proportion /= 2.0;
+            proportions.push(current_proportion);
+            proportions[i - 1] = current_proportion;
+        } else {
+            proportions.push(current_proportion);
+        }
+    }
+
+    proportions
+}
+
 /// Proportion a given length with given proportions.
 ///
-/// This function ensures that the the returned lengths' sum is equal to `length`
+/// This function ensures that the returned lengths' sum is equal to `length`
 fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
     let total_proportions: f64 = proportions.iter().sum();
     let lengths = proportions
@@ -1967,4 +2145,49 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
             }
         })
         .collect()
+}
+
+/// Returns a vector containing the calculated proportional lengths
+///
+/// This function ensures that the returned lengths' sum is equal to `length`
+fn binary_space_lengths(proportions: &[f64], length: i32) -> Vec<i32> {
+    proportions
+        .iter()
+        .map(|&cfact| (length as f64 * cfact).floor() as i32)
+        .collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_space_correct_heights() {
+        let len1: usize = 1;
+        let len4: usize = 4;
+        let len6: usize = 6;
+
+        let propo1 = binary_space_proportion_heights(len1);
+        let propo4 = binary_space_proportion_heights(len4);
+        let propo6 = binary_space_proportion_heights(len6);
+
+        assert_eq!(propo1, vec![1.0]);
+        assert_eq!(propo4, vec![0.5, 0.5, 0.25, 0.25]);
+        assert_eq!(propo6, vec![0.5, 0.5, 0.25, 0.25, 0.125, 0.125]);
+    }
+
+    #[test]
+    fn binary_space_correct_widths() {
+        let len1: usize = 1;
+        let len4: usize = 4;
+        let len6: usize = 6;
+
+        let propo1 = binary_space_proportion_widths(len1);
+        let propo4 = binary_space_proportion_widths(len4);
+        let propo6 = binary_space_proportion_widths(len6);
+
+        assert_eq!(propo1, vec![1.0]);
+        assert_eq!(propo4, vec![1.0, 0.5, 0.5, 0.5]);
+        assert_eq!(propo6, vec![1.0, 0.5, 0.5, 0.25, 0.25, 0.25]);
+    }
 }
