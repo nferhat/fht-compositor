@@ -153,6 +153,19 @@ impl<'de> Deserialize<'de> for KeyPattern {
                 "Alt" | "A" => modifiers.alt = true,
                 "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
                 "AltGr" => modifiers.alt_gr = true,
+
+                // AZERTY numrow remap: allow both US digits and FR symbols
+                "1" | "ampersand"  => keysym = Some(keysyms::KEY_ampersand.into()),
+                "2" | "eacute"     => keysym = Some(keysyms::KEY_eacute.into()),
+                "3" | "quotedbl"   => keysym = Some(keysyms::KEY_quotedbl.into()),
+                "4" | "apostrophe" => keysym = Some(keysyms::KEY_apostrophe.into()),
+                "5" | "parenleft"  => keysym = Some(keysyms::KEY_parenleft.into()),
+                "6" | "minus"      => keysym = Some(keysyms::KEY_minus.into()),
+                "7" | "egrave"     => keysym = Some(keysyms::KEY_egrave.into()),
+                "8" | "underscore" => keysym = Some(keysyms::KEY_underscore.into()),
+                "9" | "ccedilla"   => keysym = Some(keysyms::KEY_ccedilla.into()),
+                "0" | "agrave"     => keysym = Some(keysyms::KEY_agrave.into()),
+                
                 value => {
                     // We tried all the possible modifier patterns that we support
                     // Try to get a keysym from xkb, if we can't get the keysym, we can't build the
