@@ -126,8 +126,7 @@ impl From<SmithayModifiersState> for ModifiersState {
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyPattern(pub ModifiersState, pub Keysym);
 
-// Stored as (&str, u32) to avoid unnecessary Keysym conversions (abd because the compiler
-// complains)
+// Stored as (&str, u32) to avoid unnecessary Keysym conversions (and because the compiler complains)
 static AZERTY_NUMROW: &[(&str, u32)] = &[
     ("1", keysyms::KEY_ampersand),
     ("ampersand", keysyms::KEY_ampersand),
