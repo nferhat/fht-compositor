@@ -571,7 +571,54 @@ impl State {
                     .amount(Axis::Vertical)
                     .unwrap_or_else(|| vertical_amount_discrete.unwrap_or(0.0) * 3.0 / 120.0);
 
-                {
+                // Check for mouse axis bindings FIRST
+                let modifiers = self.fht.keyboard.modifier_state().into();
+                let mut handled = false;
+                
+                // Check vertical axis bindings
+                if vertical_amount > 0.0 {
+                    let mouse_pattern = fht_compositor_config::MousePattern(
+                        modifiers,
+                        fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelUp),
+                    );
+                    if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
+                        handled = true;
+                    }
+                } else if vertical_amount < 0.0 {
+                    let mouse_pattern = fht_compositor_config::MousePattern(
+                        modifiers,
+                        fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelDown),
+                    );
+                    if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
+                        handled = true;
+                    }
+                }
+                
+                // Check horizontal axis bindings
+                if !handled && horizontal_amount > 0.0 {
+                    let mouse_pattern = fht_compositor_config::MousePattern(
+                        modifiers,
+                        fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelRight),
+                    );
+                    if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
+                        handled = true;
+                    }
+                } else if !handled && horizontal_amount < 0.0 {
+                    let mouse_pattern = fht_compositor_config::MousePattern(
+                        modifiers,
+                        fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelLeft),
+                    );
+                    if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
+                        handled = true;
+                    }
+                }
+
+                // Only forward to pointer if we didn't handle it with a binding
+                if !handled {
                     let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
 
                     if horizontal_amount != 0.0 {
