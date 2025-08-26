@@ -332,9 +332,9 @@ impl<'de> Deserialize<'de> for MousePattern {
         for part in raw.split('-') {
             if input.is_some() {
                 // We specified something after having a button/axis, invalid
-                    return Err(<D::Error as serde::de::Error>::custom(
-                        "key pattern ends after the keysym",
-                    ));            
+                return Err(<D::Error as serde::de::Error>::custom(
+                    "key pattern ends after the keysym",
+                ));
             }
 
             match part.trim() {
