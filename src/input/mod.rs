@@ -4,7 +4,7 @@ pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
 pub use actions::*;
-use fht_compositor_config::KeyPattern;
+use fht_compositor_config::{KeyPattern};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
     GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,

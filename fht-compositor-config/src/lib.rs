@@ -301,23 +301,60 @@ impl MouseButton {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseAxis {
+    WheelUp,
+    WheelDown,
+    WheelLeft,
+    WheelRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseInput {
+    Button(MouseButton),
+    Axis(MouseAxis),
+}
+
+impl MouseInput {
+    pub fn from_evdev(event_type: u16, code: u16, value: i32) -> Option<Self> {
+        match (event_type, code, value) {
+            // EV_KEY = 0x01
+            (0x01, 0x110, _) => Some(MouseInput::Button(MouseButton::Left)),
+            (0x01, 0x111, _) => Some(MouseInput::Button(MouseButton::Middle)),
+            (0x01, 0x112, _) => Some(MouseInput::Button(MouseButton::Right)),
+            (0x01, 0x115, _) => Some(MouseInput::Button(MouseButton::Forward)),
+            (0x01, 0x116, _) => Some(MouseInput::Button(MouseButton::Back)),
+
+            // EV_REL = 0x02
+            // REL_WHEEL = 0x08, REL_HWHEEL = 0x06
+            (0x02, 0x08, v) if v > 0 => Some(MouseInput::Axis(MouseAxis::WheelUp)),
+            (0x02, 0x08, v) if v < 0 => Some(MouseInput::Axis(MouseAxis::WheelDown)),
+            (0x02, 0x06, v) if v > 0 => Some(MouseInput::Axis(MouseAxis::WheelRight)),
+            (0x02, 0x06, v) if v < 0 => Some(MouseInput::Axis(MouseAxis::WheelLeft)),
+
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MousePattern(pub ModifiersState, pub MouseButton);
+pub struct MousePattern(pub ModifiersState, pub MouseInput);
 
 impl<'de> Deserialize<'de> for MousePattern {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
+        use serde::de::{Error, Unexpected};
+
         let raw = String::deserialize(deserializer)?;
         let mut modifiers = ModifiersState::default();
-        let mut button = None;
+        let mut input: Option<MouseInput> = None;
+
         for part in raw.split('-') {
-            if button.is_some() {
-                // We specified someting after having a keysym, invalid
-                return Err(<D::Error as serde::de::Error>::custom(
-                    "key pattern ends after the keysym",
-                ));
+            if input.is_some() {
+                // We specified something after having a button/axis, invalid
+                return Err(D::Error::custom("mouse pattern ends after the trigger"));
             }
 
             match part.trim() {
@@ -326,27 +363,55 @@ impl<'de> Deserialize<'de> for MousePattern {
                 "Alt" | "A" => modifiers.alt = true,
                 "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
                 "AltGr" => modifiers.alt_gr = true,
-                x => match x.to_lowercase().trim() {
-                    "left" => button = Some(MouseButton::Left),
-                    "middle" => button = Some(MouseButton::Middle),
-                    "right" => button = Some(MouseButton::Right),
-                    "forward" => button = Some(MouseButton::Forward),
-                    "back" | "backwards" => button = Some(MouseButton::Back),
+                x => match x.to_lowercase().as_str() {
+                    // Buttons
+                    "left" => input = Some(MouseInput::Button(MouseButton::Left)),
+                    "middle" => input = Some(MouseInput::Button(MouseButton::Middle)),
+                    "right" => input = Some(MouseInput::Button(MouseButton::Right)),
+                    "forward" => input = Some(MouseInput::Button(MouseButton::Forward)),
+                    "back" | "backwards" => input = Some(MouseInput::Button(MouseButton::Back)),
+
+                    // Axes (wheel events)
+                    "wheelup" | "scrollup" => input = Some(MouseInput::Axis(MouseAxis::WheelUp)),
+                    "wheeldown" | "scrolldown" => input = Some(MouseInput::Axis(MouseAxis::WheelDown)),
+                    "wheelleft" | "scrollleft" => input = Some(MouseInput::Axis(MouseAxis::WheelLeft)),
+                    "wheelright" | "scrollright" => input = Some(MouseInput::Axis(MouseAxis::WheelRight)),
                     _ => {
-                        return Err(<D::Error as serde::de::Error>::invalid_value(
+                        return Err(D::Error::invalid_value(
                             Unexpected::Str(x),
-                            &"MouseButton",
+                            &"MouseButton or MouseAxis",
                         ))
                     }
                 },
             }
         }
 
-        let Some(button) = button else {
-            return Err(<D::Error as serde::de::Error>::missing_field("button"));
+        let Some(input) = input else {
+            return Err(D::Error::missing_field("button/axis"));
         };
 
-        Ok(MousePattern(modifiers, button))
+        let pattern = MousePattern(modifiers, input);
+
+        debug!("MousePattern parsed: {:?}", pattern);
+
+        Ok(pattern)
+    }
+}
+
+impl From<smithay::backend::input::MouseButton> for MouseInput {
+    fn from(button: smithay::backend::input::MouseButton) -> Self {
+        use smithay::backend::input::MouseButton as SmithayButton;
+        
+        let mouse_button = match button {
+            SmithayButton::Left => MouseButton::Left,
+            SmithayButton::Middle => MouseButton::Middle,
+            SmithayButton::Right => MouseButton::Right,
+            SmithayButton::Forward => MouseButton::Forward,
+            SmithayButton::Back => MouseButton::Back,
+            _ => MouseButton::Left, // fallback for unknown buttons
+        };
+        
+        MouseInput::Button(mouse_button)
     }
 }
 
@@ -355,6 +420,11 @@ impl<'de> Deserialize<'de> for MousePattern {
 pub enum MouseAction {
     SwapTile,
     ResizeTile,
+    FocusNextWindow,
+    FocusPreviousWindow,
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
+    ChangeMwfact(f64),
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
