@@ -315,28 +315,6 @@ pub enum MouseInput {
     Axis(MouseAxis),
 }
 
-impl MouseInput {
-    pub fn from_evdev(event_type: u16, code: u16, value: i32) -> Option<Self> {
-        match (event_type, code, value) {
-            // EV_KEY = 0x01
-            (0x01, 0x110, _) => Some(MouseInput::Button(MouseButton::Left)),
-            (0x01, 0x111, _) => Some(MouseInput::Button(MouseButton::Middle)),
-            (0x01, 0x112, _) => Some(MouseInput::Button(MouseButton::Right)),
-            (0x01, 0x115, _) => Some(MouseInput::Button(MouseButton::Forward)),
-            (0x01, 0x116, _) => Some(MouseInput::Button(MouseButton::Back)),
-
-            // EV_REL = 0x02
-            // REL_WHEEL = 0x08, REL_HWHEEL = 0x06
-            (0x02, 0x08, v) if v > 0 => Some(MouseInput::Axis(MouseAxis::WheelUp)),
-            (0x02, 0x08, v) if v < 0 => Some(MouseInput::Axis(MouseAxis::WheelDown)),
-            (0x02, 0x06, v) if v > 0 => Some(MouseInput::Axis(MouseAxis::WheelRight)),
-            (0x02, 0x06, v) if v < 0 => Some(MouseInput::Axis(MouseAxis::WheelLeft)),
-
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MousePattern(pub ModifiersState, pub MouseInput);
 
