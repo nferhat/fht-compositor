@@ -332,7 +332,9 @@ impl<'de> Deserialize<'de> for MousePattern {
         for part in raw.split('-') {
             if input.is_some() {
                 // We specified something after having a button/axis, invalid
-                return Err(D::Error::custom("mouse pattern ends after the trigger"));
+                    return Err(<D::Error as serde::de::Error>::custom(
+                        "key pattern ends after the keysym",
+                    ));            
             }
 
             match part.trim() {
@@ -355,7 +357,7 @@ impl<'de> Deserialize<'de> for MousePattern {
                     "wheelleft" | "scrollleft" => input = Some(MouseInput::Axis(MouseAxis::WheelLeft)),
                     "wheelright" | "scrollright" => input = Some(MouseInput::Axis(MouseAxis::WheelRight)),
                     _ => {
-                        return Err(D::Error::invalid_value(
+                        return Err(<D::Error as serde::de::Error>::invalid_value(
                             Unexpected::Str(x),
                             &"MouseButton or MouseAxis",
                         ))
@@ -365,14 +367,10 @@ impl<'de> Deserialize<'de> for MousePattern {
         }
 
         let Some(input) = input else {
-            return Err(D::Error::missing_field("button/axis"));
+            return Err(<D::Error as serde::de::Error>::missing_field("button/axis"));
         };
 
-        let pattern = MousePattern(modifiers, input);
-
-        debug!("MousePattern parsed: {:?}", pattern);
-
-        Ok(pattern)
+        Ok(MousePattern(modifiers, input))
     }
 }
 
