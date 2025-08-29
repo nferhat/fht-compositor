@@ -411,7 +411,7 @@ where
     if head.version() >= zwlr_output_head_v1::EVT_MAKE_SINCE {
         head.make(physical_props.make);
         head.model(physical_props.model);
-        head.serial_number(output.serial().unwrap_or_else(|| "unknown".into()));
+        head.serial_number(physical_props.serial_number);
     }
 
     if head.version() >= zwlr_output_head_v1::EVT_ADAPTIVE_SYNC_SINCE {

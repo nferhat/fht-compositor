@@ -410,7 +410,7 @@ impl State {
                             name: name.clone(),
                             make: props.make,
                             model: props.model,
-                            serial: output.serial(),
+                            serial: props.serial_number,
                             physical_size: Some((props.size.w as u32, props.size.h as u32)),
                             modes,
                             active_mode_idx,

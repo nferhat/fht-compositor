@@ -20,6 +20,7 @@ impl HeadlessData {
             model: String::from("headless-output"),
             size: (0, 0).into(),
             subpixel: Subpixel::None,
+            serial_number: String::from("headless"),
         };
         let output = Output::new(name, props);
         let mode = Mode {

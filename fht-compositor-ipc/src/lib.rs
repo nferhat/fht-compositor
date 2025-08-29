@@ -129,7 +129,7 @@ pub struct Output {
     /// The output model.
     pub model: String,
     /// Serial of the output, if known.
-    pub serial: Option<String>,
+    pub serial: String,
     /// Physical width and height of the output in mm.
     pub physical_size: Option<(u32, u32)>,
     /// Available modes for the output.

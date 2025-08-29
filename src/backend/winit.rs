@@ -80,6 +80,7 @@ impl WinitData {
                 subpixel: smithay::output::Subpixel::Unknown,
                 make: String::from("winit"),
                 model: String::from("window"),
+                serial_number: String::from("winit-output"),
             },
         );
 
