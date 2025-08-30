@@ -301,20 +301,37 @@ impl MouseButton {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseAxis {
+    WheelUp,
+    WheelDown,
+    WheelLeft,
+    WheelRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseInput {
+    Button(MouseButton),
+    Axis(MouseAxis),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MousePattern(pub ModifiersState, pub MouseButton);
+pub struct MousePattern(pub ModifiersState, pub MouseInput);
 
 impl<'de> Deserialize<'de> for MousePattern {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
+        use serde::de::{Error, Unexpected};
+
         let raw = String::deserialize(deserializer)?;
         let mut modifiers = ModifiersState::default();
-        let mut button = None;
+        let mut input: Option<MouseInput> = None;
+
         for part in raw.split('-') {
-            if button.is_some() {
-                // We specified someting after having a keysym, invalid
+            if input.is_some() {
+                // We specified something after having a button/axis, invalid
                 return Err(<D::Error as serde::de::Error>::custom(
                     "key pattern ends after the keysym",
                 ));
@@ -326,27 +343,51 @@ impl<'de> Deserialize<'de> for MousePattern {
                 "Alt" | "A" => modifiers.alt = true,
                 "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
                 "AltGr" => modifiers.alt_gr = true,
-                x => match x.to_lowercase().trim() {
-                    "left" => button = Some(MouseButton::Left),
-                    "middle" => button = Some(MouseButton::Middle),
-                    "right" => button = Some(MouseButton::Right),
-                    "forward" => button = Some(MouseButton::Forward),
-                    "back" | "backwards" => button = Some(MouseButton::Back),
+                x => match x.to_lowercase().as_str() {
+                    // Buttons
+                    "left" => input = Some(MouseInput::Button(MouseButton::Left)),
+                    "middle" => input = Some(MouseInput::Button(MouseButton::Middle)),
+                    "right" => input = Some(MouseInput::Button(MouseButton::Right)),
+                    "forward" => input = Some(MouseInput::Button(MouseButton::Forward)),
+                    "back" | "backwards" => input = Some(MouseInput::Button(MouseButton::Back)),
+
+                    // Axes (wheel events)
+                    "wheelup" | "scrollup" => input = Some(MouseInput::Axis(MouseAxis::WheelUp)),
+                    "wheeldown" | "scrolldown" => input = Some(MouseInput::Axis(MouseAxis::WheelDown)),
+                    "wheelleft" | "scrollleft" => input = Some(MouseInput::Axis(MouseAxis::WheelLeft)),
+                    "wheelright" | "scrollright" => input = Some(MouseInput::Axis(MouseAxis::WheelRight)),
                     _ => {
                         return Err(<D::Error as serde::de::Error>::invalid_value(
                             Unexpected::Str(x),
-                            &"MouseButton",
+                            &"MouseButton or MouseAxis",
                         ))
                     }
                 },
             }
         }
 
-        let Some(button) = button else {
-            return Err(<D::Error as serde::de::Error>::missing_field("button"));
+        let Some(input) = input else {
+            return Err(<D::Error as serde::de::Error>::missing_field("button/axis"));
         };
 
-        Ok(MousePattern(modifiers, button))
+        Ok(MousePattern(modifiers, input))
+    }
+}
+
+impl From<smithay::backend::input::MouseButton> for MouseInput {
+    fn from(button: smithay::backend::input::MouseButton) -> Self {
+        use smithay::backend::input::MouseButton as SmithayButton;
+        
+        let mouse_button = match button {
+            SmithayButton::Left => MouseButton::Left,
+            SmithayButton::Middle => MouseButton::Middle,
+            SmithayButton::Right => MouseButton::Right,
+            SmithayButton::Forward => MouseButton::Forward,
+            SmithayButton::Back => MouseButton::Back,
+            _ => MouseButton::Left, // fallback for unknown buttons
+        };
+        
+        MouseInput::Button(mouse_button)
     }
 }
 
@@ -355,6 +396,11 @@ impl<'de> Deserialize<'de> for MousePattern {
 pub enum MouseAction {
     SwapTile,
     ResizeTile,
+    FocusNextWindow,
+    FocusPreviousWindow,
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
+    ChangeMwfact(f64),
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

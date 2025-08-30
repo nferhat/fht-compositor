@@ -502,6 +502,8 @@ impl State {
     pub fn process_mouse_action(&mut self, button: u32, action: MouseAction, serial: Serial) {
         crate::profile_function!();
 
+        let config = Arc::clone(&self.fht.config);
+
         match action {
             MouseAction::SwapTile => {
                 let pointer_loc = self.fht.pointer.current_location();
@@ -589,6 +591,51 @@ impl State {
                     }
                 }
             }
+            MouseAction::FocusNextWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_next_tile(true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            MouseAction::FocusPreviousWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_previous_tile(true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            MouseAction::FocusNextWorkspace => {
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            MouseAction::FocusPreviousWorkspace => {
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = mon.active_workspace_idx().saturating_sub(1);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            MouseAction::ChangeMwfact(delta) => self.fht.space.change_mwfact(delta, true),
         }
     }
 }
