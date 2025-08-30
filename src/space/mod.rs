@@ -693,10 +693,7 @@ impl Space {
             .iter()
             .find(|mon| mon.output().geometry().to_f64().contains(point))?;
         let active = monitor.active_workspace();
-        Some((
-            active.fullscreened_window()?,
-            active.output().current_location(),
-        ))
+        Some((active.fullscreened_window()?, Point::default()))
     }
 
     /// Move this [`Window`] on the active [`Workspace`] of the [`Monitor`] associated with this
