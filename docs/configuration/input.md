@@ -21,7 +21,7 @@ By default, all these are empty strings (using system defaults), and layout is `
 
 #### `repeat-rate`, `repeat-delay`
 
-These two options control key repeating. `repeat-delay` is the delay in milliseconds that you should hown a key for key repeating to
+These two options control key repeating. `repeat-delay` is the delay in milliseconds that you should hold down a key for repeating to
 start. `repeat-rate` is the frequency at which the key is repeated.
 
 Default settings are `repeat-rate=25`, `repeat-delay=250`
@@ -76,7 +76,7 @@ For touchpads, determines how to emulate a scroll wheel using only your fingers 
 #### `scroll-button`, `scroll-button-lock`
 
 The button used to enable `on-button-down` scroll method. When `scroll-button-lock` is enabled, the button does not need to be held
-down, and insteads turns the button into a toggle switch.
+down, and instead turns the button into a toggle switch.
 
 ---
 

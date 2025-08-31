@@ -39,11 +39,11 @@ The last kind of curves we support are spring curves. They use a physical model 
 [libadwaita's `SpringAnimation`](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/1.3/class.SpringAnimation.html).
 
 Since they are much more tweakable, you'd rather use something like [Elastic](https://apps.gnome.org/Elastic/) to tweak
-the parameters yourself, and get a preview of what the curve will look like, aswell as the total animation time.
+the parameters yourself, and get a preview of what the curve will look like, as well as the total animation time.
 
 ![Elastic window](/assets/elastic.png)
 
-Note however that you should be conservative with the valuess you pass into this animation, as it can *really quickly* cause
+Note however that you should be conservative with the values you pass into this animation, as it can *really quickly* cause
 values to overshoot/undershoot to infinity, and potentially causing crashes (integer overflows).
 
 ```toml
