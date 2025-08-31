@@ -323,8 +323,6 @@ impl<'de> Deserialize<'de> for MousePattern {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::{Error, Unexpected};
-
         let raw = String::deserialize(deserializer)?;
         let mut modifiers = ModifiersState::default();
         let mut input: Option<MouseInput> = None;
@@ -400,7 +398,6 @@ pub enum MouseAction {
     FocusPreviousWindow,
     FocusNextWorkspace,
     FocusPreviousWorkspace,
-    ChangeMwfact(f64),
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
