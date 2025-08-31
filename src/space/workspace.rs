@@ -12,6 +12,7 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
+use super::bsp::{BspTree, build_tree, to_leaves};
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
 use super::Config;
@@ -864,6 +865,21 @@ impl Workspace {
                         self.active_tile_idx = Some(closest_idx);
                         self.tiles.insert(closest_idx, tile);
                     }
+                } else if edges.intersects(ResizeEdge::BOTTOM) {
+                    // Insert after this stack window.
+                    self.active_tile_idx = Some(closest_idx + 1);
+                    self.tiles.insert(closest_idx + 1, tile);
+                } else if edges.intersects(ResizeEdge::TOP) {
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                    // Insert before this stack window.
+                } else {
+                    // Swap the closest window and the grabbed window.
+                    // FIXME: This becomes invalid if the number of windows changed
+
+                    // First insert the grabbed tile.
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
                 }
 
                 self.arrange_tiles(true);
@@ -1394,14 +1410,10 @@ impl Workspace {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                let mut stack_lengths = Vec::new();
-                binary_space_lengths(
-                    &mut stack_lengths,
-                    stack_geo,
-                    inner_gaps,
-                    0,
-                    (tiles_len - nmaster) as usize,
-                );
+                let mut bsp_tree = BspTree::new(stack_geo, (tiles_len - nmaster) as usize);
+                let mut leaves = Vec::new();
+                build_tree(&mut bsp_tree, 0, (tiles_len - nmaster) as usize, 0.5, inner_gaps);
+                to_leaves(&mut bsp_tree, 0, &mut leaves);
 
                 if (0..nmaster).contains(&(unconfigured_idx as i32)) {
                     let tiles = tiled_proportions
@@ -1413,8 +1425,12 @@ impl Workspace {
                     let prepared_width = master_geo.size.w - (2 * border_width);
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 } else {
-                    let prepared_width = stack_lengths[unconfigured_idx].size.w;
-                    let prepared_height = stack_lengths[unconfigured_idx].size.h;
+                    let prepared_width = leaves[unconfigured_idx - nmaster as usize]
+                        .size
+                        .w;
+                    let prepared_height = leaves[unconfigured_idx - nmaster as usize]
+                        .size
+                        .h;
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 }
             }
@@ -1690,8 +1706,6 @@ impl Workspace {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                // Will leave this as is for now, but will generally assume that
-                // nmaster = 1 for BSP
                 let master_heights = {
                     let tiles = tiles.get(0..nmaster as usize).unwrap_or_default();
                     let proportions = tiles
@@ -1701,14 +1715,10 @@ impl Workspace {
                     proportion_length(&proportions, master_geo.size.h)
                 };
 
-                let mut stack_lengths = Vec::new();
-                binary_space_lengths(
-                    &mut stack_lengths,
-                    stack_geo,
-                    inner_gaps,
-                    0,
-                    (tiles_len - nmaster) as usize,
-                );
+                let mut bsp_tree = BspTree::new(stack_geo, (tiles_len - nmaster) as usize);
+                let mut leaves = Vec::new();
+                build_tree(&mut bsp_tree, 0, (tiles_len - nmaster) as usize, 0.5, inner_gaps);
+                to_leaves(&mut bsp_tree, 0, &mut leaves);
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if Some(idx) == self.fullscreened_tile_idx {
@@ -1723,7 +1733,7 @@ impl Workspace {
                         tile.set_geometry(geo, animate);
                         master_geo.loc.y += master_height + inner_gaps;
                     } else {
-                        tile.set_geometry(stack_lengths[idx], animate);
+                        tile.set_geometry(leaves[idx - nmaster as usize], animate);
                     }
                 }
             }
@@ -2116,85 +2126,4 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
             }
         })
         .collect()
-}
-
-/// Returns the calculated lengths and positions of the binary space partition tiles.
-fn binary_space_lengths(
-    lengths: &mut Vec<Rectangle<i32, Logical>>,
-    rec: Rectangle<i32, Logical>,
-    inner_gaps: i32,
-    idx: usize,
-    len: usize,
-) {
-    // If we're doing iterating through tiles, return
-    if idx == len {
-        return;
-    }
-
-    // For even-numbered tiles, split horizontally and position the next tile below
-    if idx % 2 == 0 {
-        lengths.push(Rectangle::new(
-            rec.loc,
-            (rec.size.w, rec.size.h / 2 - (inner_gaps / 2)).into(),
-        ));
-        binary_space_lengths(
-            lengths,
-            Rectangle::new(
-                Point::new(rec.loc.x, rec.loc.y + rec.size.h / 2 + (inner_gaps / 2) + 1),
-                (rec.size.w, rec.size.h / 2).into(),
-            ),
-            inner_gaps,
-            idx + 1,
-            len,
-        );
-    }
-
-    // For odd-numbered tiles, split vertically and position the next tile to the right
-    if idx % 2 == 1 {
-        lengths.push(Rectangle::new(
-            rec.loc,
-            (rec.size.w / 2 - (inner_gaps / 2), rec.size.h).into(),
-        ));
-        binary_space_lengths(
-            lengths,
-            Rectangle::new(
-                Point::new(rec.loc.x + rec.size.w / 2 + (inner_gaps / 2) + 1, rec.loc.y),
-                (rec.size.w / 2, rec.size.h).into(),
-            ),
-            inner_gaps,
-            idx + 1,
-            len,
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bsp_rectangles() {
-        let base = Rectangle::new(Point::new(0, 0), (100, 100).into());
-
-        let mut recs = Vec::new();
-        binary_space_lengths(&mut recs, base, 0, 0, 3);
-
-        assert_eq!(recs[0].size.w, 100);
-        assert_eq!(recs[0].size.h, 50);
-
-        assert_eq!(recs[1].size.w, 50);
-        assert_eq!(recs[1].size.h, 50);
-
-        assert_eq!(recs[2].size.w, 50);
-        assert_eq!(recs[2].size.h, 25);
-
-        assert_eq!(recs[0].loc.x, 0);
-        assert_eq!(recs[0].loc.y, 0);
-
-        assert_eq!(recs[1].loc.x, 0);
-        assert_eq!(recs[1].loc.y, 51);
-
-        assert_eq!(recs[2].loc.x, 51);
-        assert_eq!(recs[2].loc.y, 51);
-    }
 }
