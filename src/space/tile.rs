@@ -865,7 +865,10 @@ impl Tile {
                 // Floating windows on the other hand might have other windows below it, so they
                 // don't use optimized. They are also (in comparaison) relatively
                 // small, so its even better
-                let optimized = optimized_blur.unwrap_or(is_floating);
+                //
+                // HACK: Since the true blur implementation is quite expensive as of right now, we
+                // use optimized blur by default. Unless the user asks for it.
+                let optimized = optimized_blur.unwrap_or(true);
 
                 // render_offset is from the workspace, to account for switching animations
                 let sample_area =

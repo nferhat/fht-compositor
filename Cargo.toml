@@ -22,12 +22,12 @@ serde = { version = "1.0.217", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-rev = "0d49747f72b281eb5ecf7e61e221d55dcb8732c7"
+rev = "20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "0d49747f72b281eb5ecf7e61e221d55dcb8732c7"
+rev = "20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
 
 [profile.opt]
 inherits = "release"
@@ -170,7 +170,7 @@ systemd = ["dep:sd-notify"]
 # {{{ Lints
 
 # For the sake of code correctness, we force quite aggressive lints.
-# 
+#
 # In the past I used to program without much though about this, but having lints to guide
 # your coding habits is quite necessary for such a large project.
 

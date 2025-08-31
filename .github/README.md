@@ -1,5 +1,11 @@
 <h1 align=center>fht-compositor</h1>
 <p align=center>A dynamic tiling Wayland compositor.</p>
+<p align=center>
+    <!-- FIXME: Add features link -->
+    <a href="https://nferhat.github.io/fht-compositor/getting-started/introduction.html">Getting started</a> •
+    <a href="https://nferhat.github.io/fht-compositor/configuration/introduction.html">Configuration</a> •
+    <a href="https://nferhat.github.io/fht-compositor/usage/workspaces.html">Usage</a>
+</p>
 <p align="center">
     <a href="https://matrix.to/#/#fht-compositor:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-fht--compositor-violet?logo=matrix"></a>
     <a href="https://github.com/nferhat/fht-compositor/blob/main/LICENSE"><img alt="GitHub License" src="https://img.shields.io/github/license/nferhat/fht-compositor"></a>

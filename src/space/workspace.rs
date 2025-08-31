@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use fht_animation::Animation;
 use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
-use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
@@ -484,9 +483,14 @@ impl Workspace {
         let (ontop_tiles, normal_tiles) = self
             .tiles
             .iter()
+            // The active tile is rendered apart, though
+            .filter(|tile| Some(tile.window()) != self.active_tile().map(Tile::window))
             .partition::<Vec<_>, _>(|tile| tile.window().rules().ontop.unwrap_or(false));
 
-        fullscreen.chain(ontop_tiles).chain(normal_tiles)
+        fullscreen
+            .chain(ontop_tiles)
+            .chain(self.active_tile().into_iter())
+            .chain(normal_tiles)
     }
 
     /// Insert a [`Window`] inside this [`Workspace`].
@@ -1884,9 +1888,12 @@ impl Workspace {
         true
     }
 
-    /// Returns whether this [`Workspace`] has a render offset animation.
-    pub fn has_render_offset_animation(&self) -> bool {
-        self.render_offset.is_some()
+    /// Returns the current value of the render offset
+    pub fn render_offset(&self) -> Option<Point<i32, Logical>> {
+        self.render_offset
+            .as_ref()
+            .map(Animation::value)
+            .map(|&[x, y]| Point::from((x, y)))
     }
 
     /// Start a render offset animation
@@ -1995,14 +2002,8 @@ impl Workspace {
             .unwrap_or((None, 1.0));
 
         let render_offset = render_offset
-            .or_else(|| {
-                self.render_offset.as_ref().map(|animation| {
-                    let [x, y] = *animation.value();
-                    Point::<i32, Logical>::from((x, y))
-                })
-            })
+            .or_else(|| self.render_offset())
             .unwrap_or_default();
-        let render_offset_physical = render_offset.to_physical_precise_round(scale);
 
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
@@ -2010,14 +2011,7 @@ impl Workspace {
 
             let fullscreen_elements = tile
                 .render(renderer, scale, 1.0, &self.output, render_offset)
-                .map(|element| {
-                    RelocateRenderElement::from_element(
-                        element,
-                        render_offset_physical,
-                        Relocate::Relative,
-                    )
-                    .into()
-                });
+                .map(Into::into);
 
             if skip_alpha_animation_idx.is_none() {
                 return fullscreen_elements.collect();
@@ -2026,13 +2020,7 @@ impl Workspace {
 
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
-            let element = closing_tile.render(scale, alpha);
-            let element = RelocateRenderElement::from_element(
-                element,
-                render_offset_physical,
-                Relocate::Relative,
-            )
-            .into();
+            let element = closing_tile.render(scale, alpha).into();
             elements.push(element);
         }
 
@@ -2040,10 +2028,11 @@ impl Workspace {
             .tiles
             .iter()
             .enumerate()
+            // Render the active tile apart, above the rest, but below the closing tiles
+            .filter(|(idx, _)| Some(*idx) != self.active_tile_idx)
             .partition::<Vec<_>, _>(|(_, tile)| tile.window().rules().ontop.unwrap_or(false));
 
-        // First render ontop tiles.
-        for (idx, tile) in ontop_tiles.into_iter() {
+        let mut render_tile = |idx, tile: &Tile| {
             let alpha = if Some(idx) == skip_alpha_animation_idx {
                 1.0
             } else {
@@ -2052,36 +2041,23 @@ impl Workspace {
 
             elements.extend(
                 tile.render(renderer, scale, alpha, &self.output, render_offset)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset_physical,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    }),
+                    .map(Into::into),
             );
+        };
+
+        // First render ontop tiles.
+        for (idx, tile) in ontop_tiles.into_iter() {
+            render_tile(idx, tile)
+        }
+
+        // Then the active one
+        if let Some(active_tile) = self.active_tile() {
+            render_tile(self.active_tile_idx.unwrap(), active_tile)
         }
 
         // Now render others, just fine.
         for (idx, tile) in normal_tiles.into_iter() {
-            let alpha = if Some(idx) == skip_alpha_animation_idx {
-                1.0
-            } else {
-                alpha
-            };
-
-            elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset)
-                    .map(|element| {
-                        RelocateRenderElement::from_element(
-                            element,
-                            render_offset_physical,
-                            Relocate::Relative,
-                        )
-                        .into()
-                    }),
-            );
+            render_tile(idx, tile)
         }
 
         elements
@@ -2090,8 +2066,8 @@ impl Workspace {
 
 fht_render_elements! {
     WorkspaceRenderElement<R> => {
-        Tile = RelocateRenderElement<TileRenderElement<R>>,
-        ClosingTile = RelocateRenderElement<ClosingTileRenderElement>,
+        Tile = TileRenderElement<R>,
+        ClosingTile = ClosingTileRenderElement,
     }
 }
 

@@ -64,7 +64,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::frame_clock::FrameClock;
-use crate::output::{OutputSerial, RedrawState};
+use crate::output::RedrawState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{
     AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
@@ -670,7 +670,7 @@ impl UdevData {
             .as_ref()
             .and_then(|info| info.model())
             .unwrap_or_else(|| "Unknown".into());
-        let serial = info
+        let serial_number = info
             .as_ref()
             .and_then(|info| info.serial())
             .unwrap_or_else(|| "Unknown".into());
@@ -749,6 +749,7 @@ impl UdevData {
             },
             make,
             model,
+            serial_number,
         };
 
         // Now create the wl_output object to expose it to clients.
@@ -770,9 +771,6 @@ impl UdevData {
             .unwrap_or_else(|| OutputMode::from(default_mode));
         output.set_preferred(new_mode); // adds the mode if its a custom CVT one
         output.change_current_state(Some(new_mode), new_transform, new_scale, None);
-        output
-            .user_data()
-            .insert_if_missing(|| OutputSerial(serial));
         output
             .user_data()
             // This ID is used to match and output and a udev surface

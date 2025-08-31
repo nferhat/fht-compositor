@@ -2621,7 +2621,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/Smithay?rev=0d49747f72b281eb5ecf7e61e221d55dcb8732c7#0d49747f72b281eb5ecf7e61e221d55dcb8732c7"
+source = "git+https://github.com/smithay/Smithay?rev=20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6#20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -2697,7 +2697,7 @@ dependencies = [
 [[package]]
 name = "smithay-drm-extras"
 version = "0.1.0"
-source = "git+https://github.com/smithay/Smithay?rev=0d49747f72b281eb5ecf7e61e221d55dcb8732c7#0d49747f72b281eb5ecf7e61e221d55dcb8732c7"
+source = "git+https://github.com/smithay/Smithay?rev=20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6#20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
 dependencies = [
  "drm",
  "libdisplay-info",
@@ -3903,9 +3903,9 @@ checksum = "2fb433233f2df9344722454bc7e96465c9d03bff9d77c248f9e7523fe79585b5"
 
 [[package]]
 name = "xkbcommon"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
+checksum = "a7a974f48060a14e95705c01f24ad9c3345022f4d97441b8a36beb7ed5c4a02d"
 dependencies = [
  "libc",
  "memmap2",

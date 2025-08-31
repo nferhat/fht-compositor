@@ -129,30 +129,46 @@ async fn handle_new_client(
     let (reader, mut writer) = stream.split();
     let mut reader = futures_util::io::BufReader::new(reader);
 
-    // The IPC model requires each request to be on a single line.
-    let mut req_buf = String::new();
-    reader.read_line(&mut req_buf).await?;
-    let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
+    // In fht-compositor IPC's model, each new line is a new request.
+    // This allows the socket to be re-used to send out multiple requests
 
-    let response = match request {
-        Ok(req) => match handle_request(req, to_compositor).await {
-            Ok(res) => res,
-            // We transform the Result::Err into a Response::Error
-            Err(err) => Response::Error(err.to_string()),
-        },
-        Err(err) => Response::Error(err.to_string()), // Just write an error string;
-    };
+    loop {
+        let mut req_buf = String::new();
+        match reader.read_line(&mut req_buf).await {
+            Ok(_) => (),
+            Err(err) => {
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe
+                ) {
+                    // The socket closed, stop this client thread
+                    return Ok(());
+                } else {
+                    // Otherwise, some sort of error happened
+                    anyhow::bail!("error reading request: {err:?}")
+                }
+            }
+        }
 
-    let mut response_str = serde_json::to_string(&response)?;
-    response_str.push('\n'); // separate by newlines
-    _ = writer.write(response_str.as_bytes()).await?;
+        let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
+        // We transform the Result::Err into a Response::Error
+        let response = match request {
+            Ok(req) => match handle_request(req, to_compositor.clone()).await {
+                Ok(res) => res,
+                Err(err) => Response::Error(err.to_string()),
+            },
+            Err(err) => Response::Error(err.to_string()), // Just write an error string;
+        };
 
-    Ok(())
+        let mut response_str = serde_json::to_string(&response)?;
+        response_str.push('\n'); // separate by newlines
+        _ = dbg!(writer.write(response_str.as_bytes()).await?);
+    }
 }
 
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
-    Windows(async_channel::Sender<Vec<fht_compositor_ipc::Window>>),
+    Windows(async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>),
     LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
     Space(async_channel::Sender<fht_compositor_ipc::Space>),
     Window {
@@ -394,7 +410,7 @@ impl State {
                             name: name.clone(),
                             make: props.make,
                             model: props.model,
-                            serial: output.serial(),
+                            serial: props.serial_number,
                             physical_size: Some((props.size.w as u32, props.size.h as u32)),
                             modes,
                             active_mode_idx,
@@ -452,9 +468,9 @@ impl State {
                     .fht
                     .space
                     .monitors()
-                    .map(|mon| fht_compositor_ipc::Monitor {
-                        output: mon.output().name(),
-                        workspaces: mon
+                    .map(|mon| {
+                        let output = mon.output().name();
+                        let workspaces = mon
                             .workspaces()
                             .map(|workspace| {
                                 let workspace_id = *workspace.id();
@@ -475,9 +491,17 @@ impl State {
                             })
                             .collect::<Vec<_>>()
                             .try_into()
-                            .expect("workspace number is always 9"),
-                        active: mon.active(),
-                        active_workspace_idx: mon.active_workspace_idx(),
+                            .expect("workspace number is always 9");
+
+                        (
+                            output.clone(),
+                            fht_compositor_ipc::Monitor {
+                                output,
+                                workspaces,
+                                active: mon.active(),
+                                active_workspace_idx: mon.active_workspace_idx(),
+                            },
+                        )
                     })
                     .collect();
 
@@ -1180,8 +1204,8 @@ impl State {
 fn workspace_windows(
     workspace: &Workspace,
     keyboard_focus: Option<&KeyboardFocusTarget>,
-) -> Vec<fht_compositor_ipc::Window> {
-    let mut windows = Vec::with_capacity(workspace.windows().len());
+) -> HashMap<usize, fht_compositor_ipc::Window> {
+    let mut windows = HashMap::with_capacity(workspace.windows().len());
     let is_focused = move |window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
     let output = workspace.output().name();
     let workspace_id = *workspace.id();
@@ -1192,21 +1216,24 @@ fn workspace_windows(
         let location = tile.location() + tile.window_loc();
         let size = window.size();
 
-        windows.push(fht_compositor_ipc::Window {
-            id: *window.id(),
-            title: window.title(),
-            app_id: window.app_id(),
-            output: output.clone(),
-            workspace_idx: workspace.index(),
-            workspace_id,
-            size: (size.w as u32, size.h as u32),
-            location: location.into(),
-            fullscreened: window.fullscreen(),
-            maximized: window.maximized(),
-            tiled: window.tiled(),
-            activated: Some(tile_idx) == active_tile_idx,
-            focused: is_focused(window),
-        });
+        windows.insert(
+            *window.id(),
+            fht_compositor_ipc::Window {
+                id: *window.id(),
+                title: window.title(),
+                app_id: window.app_id(),
+                output: output.clone(),
+                workspace_idx: workspace.index(),
+                workspace_id,
+                size: (size.w as u32, size.h as u32),
+                location: location.into(),
+                fullscreened: window.fullscreen(),
+                maximized: window.maximized(),
+                tiled: window.tiled(),
+                activated: Some(tile_idx) == active_tile_idx,
+                focused: is_focused(window),
+            },
+        );
     }
 
     windows

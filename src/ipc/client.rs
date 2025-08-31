@@ -1,4 +1,4 @@
-use std::io::{Read, Write as _};
+use std::io::{BufRead as _, BufReader, Write as _};
 
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
@@ -34,10 +34,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 
     let mut req = serde_json::to_string(&request).unwrap();
     req.push('\n'); // it is required to append a newline.
-    _ = stream.write(req.as_bytes())?;
+    stream.write_all(req.as_bytes())?;
 
     let mut res_buf = String::new();
-    _ = stream.read_to_string(&mut res_buf)?;
+    {
+        // We must use a buf reader to get an entire line
+        let mut buf_reader = BufReader::new(&mut stream);
+        _ = buf_reader.read_line(&mut res_buf)
+    }
 
     let response = serde_json::de::from_str(&res_buf)?;
     let response = match response {
@@ -150,7 +154,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
             }
         }
         fht_compositor_ipc::Response::Windows(windows) => {
-            for window in windows {
+            for (_, window) in windows {
                 print_window(&mut writer, window)?;
                 writeln!(&mut writer, "---")?;
             }
@@ -175,7 +179,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
             active_idx,
         }) => {
             writeln!(&mut writer, "Space")?;
-            for (idx, monitor) in monitors.iter().enumerate() {
+            for (idx, (_, monitor)) in monitors.iter().enumerate() {
                 writeln!(&mut writer, "\tMonitor #{idx}:")?;
                 writeln!(&mut writer, "\t\tOutput: {}", monitor.output)?;
                 writeln!(&mut writer, "\t\tPrimary: {}", idx == *primary_idx)?;

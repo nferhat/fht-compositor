@@ -99,7 +99,7 @@ pub enum Response {
     /// Output information.
     Outputs(HashMap<String, Output>),
     /// All windows information.
-    Windows(Vec<Window>),
+    Windows(HashMap<usize, Window>),
     /// All layer-shells information.
     LayerShells(Vec<LayerShell>),
     /// Space information.
@@ -129,7 +129,7 @@ pub struct Output {
     /// The output model.
     pub model: String,
     /// Serial of the output, if known.
-    pub serial: Option<String>,
+    pub serial: String,
     /// Physical width and height of the output in mm.
     pub physical_size: Option<(u32, u32)>,
     /// Available modes for the output.
@@ -307,7 +307,7 @@ pub struct Monitor {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Space {
     /// The [`Monitor`]s tracked by the [`Space`]
-    pub monitors: Vec<Monitor>,
+    pub monitors: HashMap<String, Monitor>,
     /// The index of the primary [`Monitor`].
     ///
     /// Usually this is the first added [`Monitor`]. In case the primary [`Monitor`] gets removed,
