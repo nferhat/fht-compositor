@@ -635,7 +635,6 @@ impl State {
                     self.set_keyboard_focus(Some(window));
                 }
             }
-            MouseAction::ChangeMwfact(delta) => self.fht.space.change_mwfact(delta, true),
         }
     }
 }
