@@ -51,6 +51,12 @@ pub fn print_schema() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct IpcRequest {
+    pub request: Request,
+    pub subscribe: bool,
+}
+
 /// A request you send to the compositor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]

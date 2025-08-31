@@ -1,6 +1,7 @@
 use smithay::{
     delegate_xdg_decoration,
-    reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode, wayland::shell::xdg::{ToplevelSurface, decoration::XdgDecorationHandler},
+    reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+    wayland::shell::xdg::{decoration::XdgDecorationHandler, ToplevelSurface},
 };
 
 use crate::state::State;

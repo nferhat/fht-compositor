@@ -41,6 +41,9 @@ pub enum Command {
         /// Enable JSON output formatting
         #[arg(short, long)]
         json: bool,
+        /// Subscribe and listen to streaming response
+        #[arg(short, long)]
+        subscribe: bool,
     },
 }
 

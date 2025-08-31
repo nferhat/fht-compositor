@@ -27,6 +27,11 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
     };
 
+    let request = fht_compositor_ipc::IpcRequest {
+        request,
+        subscribe: false // one time request
+    };
+
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
     // handling for error logging yada-yada
     let (_, mut stream) = fht_compositor_ipc::connect()?;
@@ -95,6 +100,64 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         print_formatted(&response)?;
         Ok(())
     }
+}
+
+/// Make a subscribe request to the running `fht-compositor` IPC server for streaming results.
+///
+/// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
+/// variable.
+///
+/// Known limitation: Cant handle multiple clients.
+pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
+    let request = match request {
+        cli::Request::Windows => fht_compositor_ipc::Request::Windows,
+        cli::Request::Space => fht_compositor_ipc::Request::Space,
+        cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
+        cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
+        cli::Request::Window { id } => fht_compositor_ipc::Request::Window(id),
+        other => anyhow::bail!("Cannot subscribe to {:#?}", other),
+    };
+
+    let request = fht_compositor_ipc::IpcRequest {
+        request,
+        subscribe: true // subscription request
+    };
+
+    let (_, mut stream) = fht_compositor_ipc::connect()?;
+    stream.set_nonblocking(false)?;
+
+    // Send the subscription request
+    let mut req = serde_json::to_string(&request)?;
+    req.push('\n');
+    stream.write_all(req.as_bytes())?;
+
+    let mut buf_reader = BufReader::new(&mut stream);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = buf_reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            // EOF
+            break;
+        }
+
+        let response: fht_compositor_ipc::Response = match serde_json::from_str(&line) {
+            Ok(resp) => resp,
+            Err(err) => {
+                eprintln!("Failed to parse IPC line: {err}");
+                continue;
+            }
+        };
+
+        if json {
+            println!("{}", serde_json::to_string(&response)?);
+        } else {
+            print_formatted(&response)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
