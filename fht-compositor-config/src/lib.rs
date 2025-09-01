@@ -404,6 +404,10 @@ pub enum MouseAction {
     FocusPreviousWindow,
     FocusNextWorkspace,
     FocusPreviousWorkspace,
+    // idk... i just did a `git pull` and got an error with `ChangeMwfact`
+    // this guy was not here before?  
+    ChangeMwfact(f64) // idk if its the right type for delta (but rustc told me that its f64)
+    // @Ardox, consider checking this out becaue I have no clue wat this thingy is.
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

@@ -29,7 +29,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 
     let request = fht_compositor_ipc::IpcRequest {
         request,
-        subscribe: false // one time request
+        subscribe: false, // one time request
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -120,7 +120,7 @@ pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Resu
 
     let request = fht_compositor_ipc::IpcRequest {
         request,
-        subscribe: true // subscription request
+        subscribe: true, // subscription request
     };
 
     let (_, mut stream) = fht_compositor_ipc::connect()?;
