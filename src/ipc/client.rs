@@ -106,8 +106,6 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 ///
 /// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
 /// variable.
-///
-/// Known limitation: Cant handle multiple clients.
 pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     let request = match request {
         cli::Request::Windows => fht_compositor_ipc::Request::Windows,
