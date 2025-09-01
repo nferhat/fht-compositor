@@ -89,7 +89,7 @@ impl Monitor {
 
         for (workspace, other_workspace) in self.workspaces_mut().zip(other.workspaces) {
             workspace.merge_with(other_workspace);
-            broadcast_event!(Workspace);
+            broadcast_event!(EWindow, EWorkspace, ESpace);
         }
     }
 
@@ -195,7 +195,7 @@ impl Monitor {
         }
 
         self.active_idx = idx;
-        broadcast_event!(Workspace);
+        broadcast_event!(EWindow, EWorkspace, ESpace);
         self.workspaces[self.active_idx].active_window()
     }
 

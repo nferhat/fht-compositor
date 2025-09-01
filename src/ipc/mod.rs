@@ -63,46 +63,22 @@ pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> =
 // only used for matching.
 #[allow(dead_code)]
 pub enum IpcSubscriberEvent {
-    Window,
-    Workspace,
-    Space,
-    LayerShells,
+    EWindow,
+    EWorkspace,
+    ESpace,
+    ELayerShells,
 }
 
 // Macro to use the global ipc state to broadcast to clients
 #[macro_export]
 macro_rules! broadcast_event {
-    (Window) => {
+    ( $( $event:ident ),+ $(,)? ) => {
         if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Window);
+            $(
+                ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::$event);
+            )+
         }
     };
-    (Workspace) => {
-        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Workspace);
-        }
-    };
-    (Space) => {
-        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Space);
-        }
-    };
-    (LayerShells) => {
-        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::LayerShells);
-        }
-    };
-}
-
-fn log_event(event_name: &str) {
-    use std::io::Write;
-    let path = "/tmp/fht_ipc_test.log"; // temp file to observe
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .unwrap(); // unwrap is fine for testing
-    writeln!(file, "broadcast_event called: {}", event_name).unwrap();
 }
 
 impl IpcServerSubscriberState {
@@ -127,7 +103,7 @@ impl IpcServerSubscriberState {
     // 4. Using references is kinda hacky here and a burden to devs.
     pub fn broadcast_event(&mut self, event: IpcSubscriberEvent) {
         match event {
-            IpcSubscriberEvent::Window => {
+            IpcSubscriberEvent::EWindow => {
                 // == individual windows == //
                 for &id in self.subscribers_window.keys() {
                     if let Ok(Some(json_str)) = crate::ipc::client::make_request(
@@ -170,7 +146,7 @@ impl IpcServerSubscriberState {
                 }
             }
 
-            IpcSubscriberEvent::Workspace => {
+            IpcSubscriberEvent::EWorkspace => {
                 for &id in self.subscribers_workspace.keys() {
                     if let Ok(Some(json_str)) = crate::ipc::client::make_request(
                         crate::cli::Request::Workspace { id },
@@ -190,7 +166,7 @@ impl IpcServerSubscriberState {
                 }
             }
 
-            IpcSubscriberEvent::Space => {
+            IpcSubscriberEvent::ESpace => {
                 if let Ok(Some(json_str)) =
                     crate::ipc::client::make_request(crate::cli::Request::Space, true, true)
                 {
@@ -203,7 +179,7 @@ impl IpcServerSubscriberState {
                 }
             }
 
-            IpcSubscriberEvent::LayerShells => {
+            IpcSubscriberEvent::ELayerShells => {
                 if let Ok(Some(json_str)) =
                     crate::ipc::client::make_request(crate::cli::Request::LayerShells, true, true)
                 {

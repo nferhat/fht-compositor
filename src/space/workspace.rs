@@ -20,6 +20,7 @@ use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::utils::RectCenterExt;
 use crate::window::Window;
+use crate::broadcast_event; // from `ipc/mod.rs`
 
 static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
@@ -603,7 +604,8 @@ impl Workspace {
             }
         };
         if self.config.focus_new_windows {
-            self.active_tile_idx = Some(new_idx)
+            self.active_tile_idx = Some(new_idx);
+            broadcast_event!(EWindow, EWorkspace, ESpace);
         }
 
         self.arrange_tiles(animate);
@@ -870,6 +872,7 @@ impl Workspace {
             let idx = self.active_tile_idx.unwrap();
             self.active_tile_idx = Some(idx.clamp(0, self.tiles.len() - 1));
         }
+        broadcast_event!(EWindow, EWorkspace, ESpace);
 
         self.refresh();
         self.arrange_tiles(animate);
