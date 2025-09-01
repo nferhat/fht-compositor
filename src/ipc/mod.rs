@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::{Mutex, Arc};
+use once_cell::sync::Lazy;
 
 use anyhow::Context;
 use calloop::io::Async;
@@ -53,6 +55,44 @@ pub struct IpcServerSubscriberState {
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Workspace>>>>,
 }
 
+pub enum IpcSubscriberEvent {
+    Window(fht_compositor_ipc::Window),
+    Windows(Vec<fht_compositor_ipc::Window>),
+    Workspace(fht_compositor_ipc::Workspace),
+    Space(fht_compositor_ipc::Space),
+    // TODO: handle this, it is currently ignored
+    LayerShells(Vec<fht_compositor_ipc::LayerShell>), 
+}
+
+// GLOBAL
+pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(IpcServerSubscriberState::new()))
+});
+
+// Macro to use the global ipc state to broadcast to clients
+macro_rules! broadcast_event {
+    (Window($w:expr)) => {
+        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+            ipc.broadcast_event(IpcSubscriberEvent::Window($w.clone()));
+        }
+    };
+    (Workspace($ws:expr)) => {
+        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+            ipc.broadcast_event(IpcSubscriberEvent::Workspace($ws.clone()));
+        }
+    };
+    (Space($s:expr)) => {
+        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+            ipc.broadcast_event(IpcSubscriberEvent::Space($s.clone()));
+        }
+    };
+    (LayerShells($ls:expr)) => {
+        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+            ipc.broadcast_event(IpcSubscriberEvent::LayerShells($ls.clone()));
+        }
+    };
+}
+
 impl IpcServerSubscriberState {
     pub fn new() -> Self {
         Self {
@@ -64,116 +104,43 @@ impl IpcServerSubscriberState {
         }
     }
 
-    /// Broadcast all derived IPC data to every subscriber
-    pub fn broadcast_all_subscribers(
-        &mut self,
-        fht_space: &crate::space::Space,
-        focus: Option<&KeyboardFocusTarget>,
-    ) {
-        // focus should be `state.fht.keyboard.current_focus()`
-
-        // Broadcast workspace
-        for (&workspace_id, channels) in &mut self.subscribers_workspace {
-            let workspace_data = if workspace_id == usize::MAX {
-                Some(fht_space.active_workspace())
-            } else {
-                fht_space.workspace_for_id(WorkspaceId(workspace_id))
-            }
-            .map(|ws| fht_compositor_ipc::Workspace {
-                output: ws.output().name(),
-                id: *ws.id(),
-                active_window_idx: ws.active_tile_idx(),
-                fullscreen_window_idx: ws.fullscreened_tile_idx(),
-                mwfact: ws.mwfact(),
-                nmaster: ws.nmaster(),
-                windows: ws.windows().map(Window::id).map(|id| *id).collect(),
-            });
-
-            channels.retain(|tx| tx.send_blocking(workspace_data.clone()).is_ok());
-        }
-
-        // Broadcast windows
-        let windows = fht_space
-            .monitors()
-            .flat_map(|mon| mon.workspaces().flat_map(|ws| workspace_windows(ws, focus)))
-            .collect::<HashMap<usize, fht_compositor_ipc::Window>>();
-
-        self.subscribers_windows
-            .retain(|tx| tx.send_blocking(windows.clone()).is_ok());
-
-        // Broadcast space
-        let monitors = fht_space
-            .monitors()
-            .map(|mon| {
-                let output = mon.output().name();
-                let workspaces = mon
-                    .workspaces()
-                    .map(|workspace| {
-                        let workspace_id = *workspace.id();
-                        fht_compositor_ipc::Workspace {
-                            output: mon.output().name(),
-                            id: workspace_id,
-                            active_window_idx: workspace.active_tile_idx(),
-                            fullscreen_window_idx: workspace.fullscreened_tile_idx(),
-                            mwfact: workspace.mwfact(),
-                            nmaster: workspace.nmaster(),
-                            windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .expect("workspace number is always 9");
-
-                (
-                    output.clone(),
-                    fht_compositor_ipc::Monitor {
-                        output,
-                        workspaces,
-                        active: mon.active(),
-                        active_workspace_idx: mon.active_workspace_idx(),
-                    },
-                )
-            })
-            .collect();
-
-        let space = fht_compositor_ipc::Space {
-            monitors,
-            active_idx: fht_space.active_monitor_idx(),
-            primary_idx: fht_space.primary_monitor_idx(),
-        };
-
-        self.subscribers_space
-            .retain(|tx| tx.send_blocking(space.clone()).is_ok());
-
-        // Broadcast layer shells
-        let mut layers = Vec::new();
-        for output in fht_space.outputs() {
-            let layer_map = layer_map_for_output(output);
-            let output_name = output.name();
-
-            layers.extend(layer_map.layers().into_iter().map(move |layer_surface| {
-                fht_compositor_ipc::LayerShell {
-                    namespace: layer_surface.namespace().to_string(),
-                    output: output_name.clone(),
-                    layer: unsafe { std::mem::transmute(layer_surface.layer()) },
-                    keyboard_interactivity: unsafe {
-                        std::mem::transmute(layer_surface.cached_state().keyboard_interactivity)
-                    },
+    /// Broadcast an IPC event to every subscriber
+    pub fn broadcast_event(&mut self, event: IpcSubscriberEvent) {
+        match event {
+            IpcSubscriberEvent::Window(window) => {
+                for subscriber in &self.subscribers_windows {
+                    let _ = subscriber.try_send(HashMap::from([(window.id, window.clone())]));
                 }
-            }));
-        }
 
-        self.subscribers_layer_shells
-            .retain(|tx| tx.send_blocking(layers.clone()).is_ok());
-
-        // Broadcast individual windows
-        for (&id, channels) in &mut self.subscribers_window {
-            let window = if id == usize::MAX {
-                None
-            } else {
-                windows.get(&id).cloned()
-            };
-            channels.retain(|tx| tx.send_blocking(window.clone()).is_ok());
+                if let Some(subs) = self.subscribers_window.get(&window.id) {
+                    for s in subs {
+                        let _ = s.try_send(Some(window.clone()));
+                    }
+                }
+            }
+            IpcSubscriberEvent::Windows(windows) => {
+                for subscriber in &self.subscribers_windows {
+                    let map = windows.iter().map(|w| (w.id, w.clone())).collect();
+                    let _ = subscriber.try_send(map);
+                }
+            }
+            IpcSubscriberEvent::Workspace(workspace) => {
+                for subs in self.subscribers_workspace.values() {
+                    for subscriber in subs {
+                        let _ = subscriber.try_send(Some(workspace.clone()));
+                    }
+                }
+            }
+            IpcSubscriberEvent::Space(space) => {
+                for subscriber in &self.subscribers_space {
+                    let _ = subscriber.try_send(space.clone());
+                }
+            }
+            IpcSubscriberEvent::LayerShells(layers) => {
+                for subscriber in &self.subscribers_layer_shells {
+                    let _ = subscriber.try_send(layers.clone());
+                }
+            }
         }
     }
 }

@@ -992,6 +992,7 @@ dependencies = [
  "glam",
  "libc",
  "libdisplay-info",
+ "once_cell",
  "pipewire",
  "safer_owning_ref",
  "sd-notify",
