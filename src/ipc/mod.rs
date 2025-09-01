@@ -42,7 +42,8 @@ impl Server {
     }
 }
 
-struct IpcServerSubscriberState {
+/// [`IpcServerSubscriberState`] Handles all the ipc stuff that we can subscribe to.
+pub struct IpcServerSubscriberState {
     subscribers_outputs: Vec<async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>>,
     subscribers_windows: Vec<async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>>,
     subscribers_space: Vec<async_channel::Sender<fht_compositor_ipc::Space>>,
@@ -52,13 +53,161 @@ struct IpcServerSubscriberState {
 }
 
 impl IpcServerSubscriberState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             subscribers_outputs: Vec::new(),
             subscribers_windows: Vec::new(),
             subscribers_space: Vec::new(),
             subscribers_layer_shells: Vec::new(),
             subscribers_window: HashMap::new(),
+        }
+    }
+
+    /// Broadcast all derived IPC data to every subscriber
+    pub fn broadcast_all_subscribers(
+        &mut self,
+        fht_space: &crate::space::Space,
+        focus: Option<&KeyboardFocusTarget>,
+    ) {
+        // focus should be `state.fht.keyboard.current_focus()`
+
+        // Broadcast outputs
+        let outputs = fht_space
+            .outputs()
+            .map(|output| {
+                let name = output.name();
+                let props = output.physical_properties();
+                let preferred_mode = output.preferred_mode();
+                let active_mode = output.current_mode();
+                let mut active_mode_idx = None;
+
+                let modes = output
+                    .modes()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, mode)| {
+                        if Some(mode) == active_mode {
+                            assert!(
+                                active_mode_idx.replace(idx).is_none(),
+                                "Two active modes on output"
+                            );
+                        }
+                        fht_compositor_ipc::OutputMode {
+                            dimensions: (mode.size.w as u32, mode.size.h as u32),
+                            preferred: Some(mode) == preferred_mode,
+                            refresh: mode.refresh as f64 / 1000.,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let position = output.current_location().into();
+                let logical_size = output.geometry().size;
+                let scale = output.current_scale().integer_scale();
+                let transform = output.current_transform().into();
+
+                let ipc_output = fht_compositor_ipc::Output {
+                    name: name.clone(),
+                    make: props.make,
+                    model: props.model,
+                    serial: props.serial_number,
+                    physical_size: Some((props.size.w as u32, props.size.h as u32)),
+                    modes,
+                    active_mode_idx,
+                    position,
+                    size: (logical_size.w as u32, logical_size.h as u32),
+                    scale,
+                    transform,
+                };
+
+                (name, ipc_output)
+            })
+            .collect::<HashMap<_, _>>();
+
+        self.subscribers_outputs
+            .retain(|tx| tx.send_blocking(outputs.clone()).is_ok());
+
+        // Broadcast windows
+        let windows = fht_space
+            .monitors()
+            .flat_map(|mon| mon.workspaces().flat_map(|ws| workspace_windows(ws, focus)))
+            .collect::<HashMap<usize, fht_compositor_ipc::Window>>();
+
+        self.subscribers_windows
+            .retain(|tx| tx.send_blocking(windows.clone()).is_ok());
+
+        // Broadcast space
+        let monitors = fht_space
+            .monitors()
+            .map(|mon| {
+                let output = mon.output().name();
+                let workspaces = mon
+                    .workspaces()
+                    .map(|workspace| {
+                        let workspace_id = *workspace.id();
+                        fht_compositor_ipc::Workspace {
+                            output: mon.output().name(),
+                            id: workspace_id,
+                            active_window_idx: workspace.active_tile_idx(),
+                            fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                            mwfact: workspace.mwfact(),
+                            nmaster: workspace.nmaster(),
+                            windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .expect("workspace number is always 9");
+
+                (
+                    output.clone(),
+                    fht_compositor_ipc::Monitor {
+                        output,
+                        workspaces,
+                        active: mon.active(),
+                        active_workspace_idx: mon.active_workspace_idx(),
+                    },
+                )
+            })
+            .collect();
+
+        let space = fht_compositor_ipc::Space {
+            monitors,
+            active_idx: fht_space.active_monitor_idx(),
+            primary_idx: fht_space.primary_monitor_idx(),
+        };
+
+        self.subscribers_space
+            .retain(|tx| tx.send_blocking(space.clone()).is_ok());
+
+        // Broadcast layer shells
+        let mut layers = Vec::new();
+        for output in fht_space.outputs() {
+            let layer_map = layer_map_for_output(output);
+            let output_name = output.name();
+
+            layers.extend(layer_map.layers().into_iter().map(move |layer_surface| {
+                fht_compositor_ipc::LayerShell {
+                    namespace: layer_surface.namespace().to_string(),
+                    output: output_name.clone(),
+                    layer: unsafe { std::mem::transmute(layer_surface.layer()) },
+                    keyboard_interactivity: unsafe {
+                        std::mem::transmute(layer_surface.cached_state().keyboard_interactivity)
+                    },
+                }
+            }));
+        }
+
+        self.subscribers_layer_shells
+            .retain(|tx| tx.send_blocking(layers.clone()).is_ok());
+
+        // Broadcast individual windows
+        for (&id, channels) in &mut self.subscribers_window {
+            let window = if id == usize::MAX {
+                None
+            } else {
+                windows.get(&id).cloned()
+            };
+            channels.retain(|tx| tx.send_blocking(window.clone()).is_ok());
         }
     }
 }
@@ -70,7 +219,6 @@ pub fn start(
 ) -> anyhow::Result<Server> {
     // First setup the communication channel between the IPC server and compositor
     let (to_compositor, from_clients) = calloop::channel::channel();
-    let mut subscribers = IpcServerSubscriberState::new();
 
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
@@ -78,7 +226,7 @@ pub fn start(
                 return;
             };
 
-            if let Err(err) = state.handle_ipc_client_request(req, &mut subscribers) {
+            if let Err(err) = state.handle_ipc_client_request(req) {
                 error!(?err, "Failed to handle IPC client request");
             }
         })
@@ -163,15 +311,12 @@ async fn handle_new_client(
     // write stuff when tx gets a request
     scheduler
         .schedule(async move {
-            log_to_file("Spawned writer task for client");
 
             while let Ok(response) = rx.recv().await {
-                log_to_file("WRITING!!!!");
                 match serde_json::to_string(&response) {
                     Ok(mut s) => {
                         s.push('\n');
                         if writer.write_all(s.as_bytes()).await.is_err() {
-                            log_to_file("[E] Failed to write to client, exiting writer task");
                             break;
                         }
                     }
@@ -214,7 +359,7 @@ async fn handle_new_client(
         match request {
             Ok(req) => {
                 if let Err(err) =
-                    handle_request(req, to_compositor.clone(), tx.clone()).await
+                    handle_request(req, to_compositor.clone(), tx.clone(), scheduler.clone()).await
                 {
                     let _ = tx.send(Response::Error(err.to_string())).await;
                 }
@@ -266,20 +411,11 @@ enum ClientRequest {
     },
 }
 
-fn log_to_file(msg: &str) {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/fht-ipc-debug.log")
-        .unwrap();
-    writeln!(file, "{}", msg).unwrap();
-}
-
 async fn handle_request(
     req: fht_compositor_ipc::IpcRequest,
     to_compositor: calloop::channel::Sender<ClientRequest>,
     tx: async_channel::Sender<fht_compositor_ipc::Response>,
+    scheduler: calloop::futures::Scheduler<()>,
 ) -> anyhow::Result<()> {
     if req.subscribe {
         match req.request {
@@ -289,11 +425,13 @@ async fn handle_request(
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    while let Ok(update) = rx.recv().await {
-                        let _ = tx_clone.send(Response::Windows(update)).await;
-                    }
-                });
+                scheduler
+                    .schedule(async move {
+                        while let Ok(update) = rx.recv().await {
+                            let _ = tx_clone.send(Response::Windows(update)).await;
+                        }
+                    })
+                    .unwrap();
             }
 
             fht_compositor_ipc::Request::Space => {
@@ -302,11 +440,13 @@ async fn handle_request(
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    while let Ok(update) = rx.recv().await {
-                        let _ = tx_clone.send(Response::Space(update)).await;
-                    }
-                });
+                scheduler
+                    .schedule(async move {
+                        while let Ok(update) = rx.recv().await {
+                            let _ = tx_clone.send(Response::Space(update)).await;
+                        }
+                    })
+                    .unwrap();
             }
 
             fht_compositor_ipc::Request::Outputs => {
@@ -315,11 +455,13 @@ async fn handle_request(
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    while let Ok(update) = rx.recv().await {
-                        let _ = tx_clone.send(Response::Outputs(update)).await;
-                    }
-                });
+                scheduler
+                    .schedule(async move {
+                        while let Ok(update) = rx.recv().await {
+                            let _ = tx_clone.send(Response::Outputs(update)).await;
+                        }
+                    })
+                    .unwrap();
             }
 
             fht_compositor_ipc::Request::LayerShells => {
@@ -328,11 +470,13 @@ async fn handle_request(
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    while let Ok(update) = rx.recv().await {
-                        let _ = tx_clone.send(Response::LayerShells(update)).await;
-                    }
-                });
+                scheduler
+                    .schedule(async move {
+                        while let Ok(update) = rx.recv().await {
+                            let _ = tx_clone.send(Response::LayerShells(update)).await;
+                        }
+                    })
+                    .unwrap();
             }
 
             fht_compositor_ipc::Request::Window(id) => {
@@ -344,11 +488,13 @@ async fn handle_request(
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    while let Ok(update) = rx.recv().await {
-                        let _ = tx_clone.send(Response::Window(update)).await;
-                    }
-                });
+                scheduler
+                    .schedule(async move {
+                        while let Ok(update) = rx.recv().await {
+                            let _ = tx_clone.send(Response::Window(update)).await;
+                        }
+                    })
+                    .unwrap();
             }
 
             _ => {
@@ -540,12 +686,7 @@ async fn handle_request(
 }
 
 impl State {
-    fn handle_ipc_client_request(
-        &mut self,
-        req: ClientRequest,
-        subscribers: &mut IpcServerSubscriberState,
-    ) -> anyhow::Result<()> {
-        log_to_file("HANDLING IPC CLIENT REQUEST");
+    fn handle_ipc_client_request(&mut self, req: ClientRequest) -> anyhow::Result<()> {
         match req {
             ClientRequest::Outputs(tx) => {
                 let outputs = self
@@ -881,7 +1022,7 @@ impl State {
                     .collect::<HashMap<_, _>>();
 
                 let _ = tx.send_blocking(outputs);
-                subscribers.subscribers_outputs.push(tx);
+                self.ipcsub.subscribers_outputs.push(tx);
             }
 
             // Subscribe windows
@@ -898,7 +1039,7 @@ impl State {
                     .collect();
 
                 let _ = tx.send_blocking(windows);
-                subscribers.subscribers_windows.push(tx);
+                self.ipcsub.subscribers_windows.push(tx);
             }
 
             // Subscribe space
@@ -950,7 +1091,7 @@ impl State {
                     primary_idx: self.fht.space.primary_monitor_idx(),
                 });
 
-                subscribers.subscribers_space.push(tx);
+                self.ipcsub.subscribers_space.push(tx);
             }
 
             // Subscribe layer shells
@@ -977,7 +1118,7 @@ impl State {
                 }
 
                 let _ = tx.send_blocking(layers);
-                subscribers.subscribers_layer_shells.push(tx);
+                self.ipcsub.subscribers_layer_shells.push(tx);
             }
 
             // Subscribe single window
@@ -1021,7 +1162,7 @@ impl State {
                 });
 
                 let _ = sender.send_blocking(window);
-                subscribers
+                self.ipcsub
                     .subscribers_window
                     .entry(id.unwrap_or(usize::MAX))
                     .or_default()

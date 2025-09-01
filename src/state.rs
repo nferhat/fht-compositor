@@ -71,6 +71,7 @@ use crate::cursor::CursorThemeManager;
 use crate::focus_target::PointerFocusTarget;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
+use crate::ipc::IpcServerSubscriberState;
 use crate::layer::MappedLayer;
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
@@ -90,6 +91,7 @@ use crate::{cli, ipc};
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
+    pub ipcsub: IpcServerSubscriberState,
 }
 
 impl State {
@@ -143,7 +145,11 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self { fht, backend }
+        Self {
+            fht,
+            backend,
+            ipcsub: IpcServerSubscriberState::new(),
+        }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {

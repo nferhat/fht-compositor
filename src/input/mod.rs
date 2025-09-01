@@ -574,24 +574,32 @@ impl State {
                 // Check for mouse axis bindings FIRST
                 let modifiers = self.fht.keyboard.modifier_state().into();
                 let mut handled = false;
-                
+
                 // Check vertical axis bindings using discrete amounts
                 if let Some(discrete) = vertical_amount_discrete {
-                    if discrete > 0.0 {                    
+                    if discrete > 0.0 {
                         let mouse_pattern = fht_compositor_config::MousePattern(
                             modifiers,
-                            fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelUp),
+                            fht_compositor_config::MouseInput::Axis(
+                                fht_compositor_config::MouseAxis::WheelUp,
+                            ),
                         );
-                        if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        if let Some(action) =
+                            self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                        {
                             self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
                             handled = true;
                         }
                     } else if discrete < 0.0 {
                         let mouse_pattern = fht_compositor_config::MousePattern(
                             modifiers,
-                            fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelDown),
+                            fht_compositor_config::MouseInput::Axis(
+                                fht_compositor_config::MouseAxis::WheelDown,
+                            ),
                         );
-                        if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                        if let Some(action) =
+                            self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                        {
                             self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
                             handled = true;
                         }
@@ -604,18 +612,26 @@ impl State {
                         if discrete > 0.0 {
                             let mouse_pattern = fht_compositor_config::MousePattern(
                                 modifiers,
-                                fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelRight),
+                                fht_compositor_config::MouseInput::Axis(
+                                    fht_compositor_config::MouseAxis::WheelRight,
+                                ),
                             );
-                            if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                            if let Some(action) =
+                                self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                            {
                                 self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
                                 handled = true;
                             }
                         } else if discrete < 0.0 {
                             let mouse_pattern = fht_compositor_config::MousePattern(
                                 modifiers,
-                                fht_compositor_config::MouseInput::Axis(fht_compositor_config::MouseAxis::WheelLeft),
+                                fht_compositor_config::MouseInput::Axis(
+                                    fht_compositor_config::MouseAxis::WheelLeft,
+                                ),
                             );
-                            if let Some(action) = self.fht.config.mousebinds.get(&mouse_pattern).cloned() {
+                            if let Some(action) =
+                                self.fht.config.mousebinds.get(&mouse_pattern).cloned()
+                            {
                                 self.process_mouse_action(0, action, SERIAL_COUNTER.next_serial());
                                 handled = true;
                             }
