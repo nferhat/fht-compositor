@@ -44,22 +44,23 @@ impl Server {
 
 /// [`IpcServerSubscriberState`] Handles all the ipc stuff that we can subscribe to.
 pub struct IpcServerSubscriberState {
-    subscribers_outputs: Vec<async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>>,
     subscribers_windows: Vec<async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>>,
     subscribers_space: Vec<async_channel::Sender<fht_compositor_ipc::Space>>,
     subscribers_layer_shells: Vec<async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>>,
     subscribers_window:
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Window>>>>,
+    subscribers_workspace:
+        HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Workspace>>>>,
 }
 
 impl IpcServerSubscriberState {
     pub fn new() -> Self {
         Self {
-            subscribers_outputs: Vec::new(),
             subscribers_windows: Vec::new(),
             subscribers_space: Vec::new(),
             subscribers_layer_shells: Vec::new(),
             subscribers_window: HashMap::new(),
+            subscribers_workspace: HashMap::new(),
         }
     }
 
@@ -71,60 +72,25 @@ impl IpcServerSubscriberState {
     ) {
         // focus should be `state.fht.keyboard.current_focus()`
 
-        // Broadcast outputs
-        let outputs = fht_space
-            .outputs()
-            .map(|output| {
-                let name = output.name();
-                let props = output.physical_properties();
-                let preferred_mode = output.preferred_mode();
-                let active_mode = output.current_mode();
-                let mut active_mode_idx = None;
+        // Broadcast workspace
+        for (&workspace_id, channels) in &mut self.subscribers_workspace {
+            let workspace_data = if workspace_id == usize::MAX {
+                Some(fht_space.active_workspace())
+            } else {
+                fht_space.workspace_for_id(WorkspaceId(workspace_id))
+            }
+            .map(|ws| fht_compositor_ipc::Workspace {
+                output: ws.output().name(),
+                id: *ws.id(),
+                active_window_idx: ws.active_tile_idx(),
+                fullscreen_window_idx: ws.fullscreened_tile_idx(),
+                mwfact: ws.mwfact(),
+                nmaster: ws.nmaster(),
+                windows: ws.windows().map(Window::id).map(|id| *id).collect(),
+            });
 
-                let modes = output
-                    .modes()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, mode)| {
-                        if Some(mode) == active_mode {
-                            assert!(
-                                active_mode_idx.replace(idx).is_none(),
-                                "Two active modes on output"
-                            );
-                        }
-                        fht_compositor_ipc::OutputMode {
-                            dimensions: (mode.size.w as u32, mode.size.h as u32),
-                            preferred: Some(mode) == preferred_mode,
-                            refresh: mode.refresh as f64 / 1000.,
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                let position = output.current_location().into();
-                let logical_size = output.geometry().size;
-                let scale = output.current_scale().integer_scale();
-                let transform = output.current_transform().into();
-
-                let ipc_output = fht_compositor_ipc::Output {
-                    name: name.clone(),
-                    make: props.make,
-                    model: props.model,
-                    serial: props.serial_number,
-                    physical_size: Some((props.size.w as u32, props.size.h as u32)),
-                    modes,
-                    active_mode_idx,
-                    position,
-                    size: (logical_size.w as u32, logical_size.h as u32),
-                    scale,
-                    transform,
-                };
-
-                (name, ipc_output)
-            })
-            .collect::<HashMap<_, _>>();
-
-        self.subscribers_outputs
-            .retain(|tx| tx.send_blocking(outputs.clone()).is_ok());
+            channels.retain(|tx| tx.send_blocking(workspace_data.clone()).is_ok());
+        }
 
         // Broadcast windows
         let windows = fht_space
@@ -311,7 +277,6 @@ async fn handle_new_client(
     // write stuff when tx gets a request
     scheduler
         .schedule(async move {
-
             while let Ok(response) = rx.recv().await {
                 match serde_json::to_string(&response) {
                     Ok(mut s) => {
@@ -400,7 +365,6 @@ enum ClientRequest {
     ),
 
     // subscription variants
-    SubscribeOutputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
     SubscribeWindows(async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>),
     SubscribeSpace(async_channel::Sender<fht_compositor_ipc::Space>),
     SubscribeLayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
@@ -408,6 +372,11 @@ enum ClientRequest {
         /// When `id` is `None`, request the focused workspace.
         id: Option<usize>,
         sender: async_channel::Sender<Option<fht_compositor_ipc::Window>>,
+    },
+    SubscribeWorkspace {
+        /// When `id` is `None`, request the focused workspace.
+        id: Option<usize>,
+        sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
     },
 }
 
@@ -449,16 +418,19 @@ async fn handle_request(
                     .unwrap();
             }
 
-            fht_compositor_ipc::Request::Outputs => {
+            fht_compositor_ipc::Request::Workspace(id) => {
                 let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeOutputs(sub_tx))?;
+                to_compositor.send(ClientRequest::SubscribeWorkspace {
+                    id: Some(id),
+                    sender: sub_tx,
+                })?;
 
                 let rx = sub_rx.clone();
                 let tx_clone = tx.clone();
                 scheduler
                     .schedule(async move {
                         while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::Outputs(update)).await;
+                            let _ = tx_clone.send(Response::Workspace(update)).await;
                         }
                     })
                     .unwrap();
@@ -966,63 +938,28 @@ impl State {
                 tx.send_blocking(self.handle_ipc_action(action))?;
             }
             // Subscribe outputs
-            ClientRequest::SubscribeOutputs(tx) => {
-                let outputs = self
-                    .fht
-                    .space
-                    .outputs()
-                    .map(|output| {
-                        let name = output.name();
-                        let props = output.physical_properties();
-                        let preferred_mode = output.preferred_mode();
-                        let active_mode = output.current_mode();
-                        let mut active_mode_idx = None;
+            ClientRequest::SubscribeWorkspace { id, sender } => {
+                let workspace = match id {
+                    Some(id) => self.fht.space.workspace_for_id(WorkspaceId(id)),
+                    None => Some(self.fht.space.active_workspace()),
+                };
 
-                        let modes = output
-                            .modes()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(idx, mode)| {
-                                if Some(mode) == active_mode {
-                                    assert!(
-                                        active_mode_idx.replace(idx).is_none(),
-                                        "Two active modes on output"
-                                    );
-                                }
+                let workspace = workspace.map(|workspace| fht_compositor_ipc::Workspace {
+                    output: workspace.output().name(),
+                    id: *workspace.id(),
+                    active_window_idx: workspace.active_tile_idx(),
+                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                    mwfact: workspace.mwfact(),
+                    nmaster: workspace.nmaster(),
+                    windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
+                });
 
-                                fht_compositor_ipc::OutputMode {
-                                    dimensions: (mode.size.w as u32, mode.size.h as u32),
-                                    preferred: Some(mode) == preferred_mode,
-                                    refresh: mode.refresh as f64 / 1000.,
-                                }
-                            })
-                            .collect::<Vec<_>>();
-
-                        let position = output.current_location().into();
-                        let logical_size = output.geometry().size;
-                        let scale = output.current_scale().integer_scale();
-                        let transform = output.current_transform().into();
-
-                        let ipc_output = fht_compositor_ipc::Output {
-                            name: name.clone(),
-                            make: props.make,
-                            model: props.model,
-                            serial: props.serial_number,
-                            physical_size: Some((props.size.w as u32, props.size.h as u32)),
-                            modes,
-                            active_mode_idx,
-                            position,
-                            size: (logical_size.w as u32, logical_size.h as u32),
-                            scale,
-                            transform,
-                        };
-
-                        (name, ipc_output)
-                    })
-                    .collect::<HashMap<_, _>>();
-
-                let _ = tx.send_blocking(outputs);
-                self.ipcsub.subscribers_outputs.push(tx);
+                let _ = sender.send_blocking(workspace);
+                self.ipcsub
+                    .subscribers_workspace
+                    .entry(id.unwrap_or(usize::MAX))
+                    .or_default()
+                    .push(sender);
             }
 
             // Subscribe windows

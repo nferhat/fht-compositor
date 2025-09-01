@@ -111,7 +111,7 @@ pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Resu
         cli::Request::Windows => fht_compositor_ipc::Request::Windows,
         cli::Request::Space => fht_compositor_ipc::Request::Space,
         cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
-        cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
+        cli::Request::Workspace { id } => fht_compositor_ipc::Request::Workspace(id),
         cli::Request::Window { id } => fht_compositor_ipc::Request::Window(id),
         other => anyhow::bail!("Cannot subscribe to {:#?}", other),
     };
@@ -149,7 +149,24 @@ pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Resu
         };
 
         if json {
-            println!("{}", serde_json::to_string(&response)?);
+            let json_buffer = match response {
+                fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
+                fht_compositor_ipc::Response::LayerShells(layer_shells) => {
+                    serde_json::to_string(&layer_shells)
+                }
+                fht_compositor_ipc::Response::Window(window) => serde_json::to_string(&window),
+                fht_compositor_ipc::Response::Workspace(workspace) => {
+                    match &workspace {
+                        // We unwrap the Some case in case the user asked for the FocusedWorkspace,
+                        // which will always be present
+                        Some(workspace) => serde_json::to_string(workspace),
+                        none => serde_json::to_string(none),
+                    }
+                }
+                fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
+                _ => serde_json::to_string("Invalid response found..."),
+            }?;
+            println!("{}", &json_buffer);
         } else {
             print_formatted(&response)?;
         }
