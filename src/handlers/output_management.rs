@@ -31,14 +31,17 @@ impl OutputManagementHandler for State {
                 position,
                 transform,
                 scale,
-                adaptive_sync: _, // FIXME: Handle VRR
+                adaptive_sync,
             } = config
             else {
                 continue;
             };
 
-            let changed =
-                mode.is_some() || position.is_some() || transform.is_some() || scale.is_some();
+            let changed = mode.is_some()
+                || position.is_some()
+                || transform.is_some()
+                || scale.is_some()
+                || adaptive_sync.is_some();
             if !changed {
                 continue;
             }
@@ -55,6 +58,22 @@ impl OutputManagementHandler for State {
                     );
                     return false;
                 }
+            }
+
+            if let Some(vrr) = adaptive_sync {
+                // Only the backend is responsible for managing VRR.
+                // We also need to override the config in the compositor.
+                if let Err(err) = self.backend.update_output_vrr(
+                    &mut self.fht,
+                    &output,
+                    // Don't enable if on-demand
+                    matches!(vrr, fht_compositor_config::VrrMode::On),
+                ) {
+                    error!(?err, "Failed to apply VRR state for {output_name}");
+                }
+
+                let output_config = self.fht.output_config.get_mut(&output_name).unwrap();
+                output_config.vrr = vrr;
             }
 
             output.change_current_state(

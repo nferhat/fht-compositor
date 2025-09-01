@@ -1350,6 +1350,21 @@ impl Into<SmithayTransform> for OutputTransform {
     }
 }
 
+impl From<SmithayTransform> for OutputTransform {
+    fn from(value: SmithayTransform) -> Self {
+        match value {
+            SmithayTransform::Normal => Self::Normal,
+            SmithayTransform::_90 => Self::_90,
+            SmithayTransform::_180 => Self::_180,
+            SmithayTransform::_270 => Self::_270,
+            SmithayTransform::Flipped => Self::Flipped,
+            SmithayTransform::Flipped90 => Self::Flipped90,
+            SmithayTransform::Flipped180 => Self::Flipped180,
+            SmithayTransform::Flipped270 => Self::Flipped270,
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum VrrMode {
