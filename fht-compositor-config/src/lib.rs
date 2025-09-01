@@ -351,9 +351,15 @@ impl<'de> Deserialize<'de> for MousePattern {
 
                     // Axes (wheel events)
                     "wheelup" | "scrollup" => input = Some(MouseInput::Axis(MouseAxis::WheelUp)),
-                    "wheeldown" | "scrolldown" => input = Some(MouseInput::Axis(MouseAxis::WheelDown)),
-                    "wheelleft" | "scrollleft" => input = Some(MouseInput::Axis(MouseAxis::WheelLeft)),
-                    "wheelright" | "scrollright" => input = Some(MouseInput::Axis(MouseAxis::WheelRight)),
+                    "wheeldown" | "scrolldown" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelDown))
+                    }
+                    "wheelleft" | "scrollleft" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelLeft))
+                    }
+                    "wheelright" | "scrollright" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelRight))
+                    }
                     _ => {
                         return Err(<D::Error as serde::de::Error>::invalid_value(
                             Unexpected::Str(x),
@@ -375,7 +381,7 @@ impl<'de> Deserialize<'de> for MousePattern {
 impl From<smithay::backend::input::MouseButton> for MouseInput {
     fn from(button: smithay::backend::input::MouseButton) -> Self {
         use smithay::backend::input::MouseButton as SmithayButton;
-        
+
         let mouse_button = match button {
             SmithayButton::Left => MouseButton::Left,
             SmithayButton::Middle => MouseButton::Middle,
@@ -384,7 +390,7 @@ impl From<smithay::backend::input::MouseButton> for MouseInput {
             SmithayButton::Back => MouseButton::Back,
             _ => MouseButton::Left, // fallback for unknown buttons
         };
-        
+
         MouseInput::Button(mouse_button)
     }
 }
