@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{Mutex, Arc};
-use once_cell::sync::Lazy;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use once_cell::sync::Lazy;
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{Focus, GrabStartData};
 use smithay::reexports::calloop::generic::Generic;
@@ -55,40 +55,39 @@ pub struct IpcServerSubscriberState {
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Workspace>>>>,
 }
 
+// GLOBAL
+pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> =
+    Lazy::new(|| Arc::new(Mutex::new(IpcServerSubscriberState::new())));
+
 pub enum IpcSubscriberEvent {
-    Window(fht_compositor_ipc::Window),
-    Windows(Vec<fht_compositor_ipc::Window>),
-    Workspace(fht_compositor_ipc::Workspace),
-    Space(fht_compositor_ipc::Space),
-    // TODO: handle this, it is currently ignored
-    LayerShells(Vec<fht_compositor_ipc::LayerShell>), 
+    Window,
+    Windows,
+    Workspace,
+    Space,
+    LayerShells,
 }
 
-// GLOBAL
-pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(IpcServerSubscriberState::new()))
-});
-
 // Macro to use the global ipc state to broadcast to clients
+#[macro_export]
 macro_rules! broadcast_event {
-    (Window($w:expr)) => {
+    (Window) => {
         if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(IpcSubscriberEvent::Window($w.clone()));
+            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Window);
         }
     };
-    (Workspace($ws:expr)) => {
+    (Workspace) => {
         if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(IpcSubscriberEvent::Workspace($ws.clone()));
+            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Workspace);
         }
     };
-    (Space($s:expr)) => {
+    (Space) => {
         if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(IpcSubscriberEvent::Space($s.clone()));
+            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::Space);
         }
     };
-    (LayerShells($ls:expr)) => {
+    (LayerShells) => {
         if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            ipc.broadcast_event(IpcSubscriberEvent::LayerShells($ls.clone()));
+            ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::LayerShells);
         }
     };
 }
@@ -105,40 +104,110 @@ impl IpcServerSubscriberState {
     }
 
     /// Broadcast an IPC event to every subscriber
+    //
+    // This is kinda hacky but... this seem to be the best "temporary patch"
+    // the problem with implementing a proper subscription system are what follows:
+    //
+    // 1. It requires passing of data.
+    // 2. I am not familiar with the codebase.
+    // 3. Many stuff doesn't implement `Clone`.
+    // 4. Using references is kinda hacky here and a burden to devs.
     pub fn broadcast_event(&mut self, event: IpcSubscriberEvent) {
         match event {
-            IpcSubscriberEvent::Window(window) => {
-                for subscriber in &self.subscribers_windows {
-                    let _ = subscriber.try_send(HashMap::from([(window.id, window.clone())]));
-                }
+            IpcSubscriberEvent::Window => {
+                for &id in self.subscribers_window.keys() {
+                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
+                        crate::cli::Request::Window { id },
+                        true,
+                        true,
+                    ) {
+                        if let Ok(window) =
+                            serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
+                        {
+                            for subscriber in &self.subscribers_windows {
+                                let _ = subscriber
+                                    .try_send(HashMap::from([(window.id, window.clone())]));
+                            }
 
-                if let Some(subs) = self.subscribers_window.get(&window.id) {
-                    for s in subs {
-                        let _ = s.try_send(Some(window.clone()));
+                            if let Some(subs) = self.subscribers_window.get(&window.id) {
+                                for s in subs {
+                                    let _ = s.try_send(Some(window.clone()));
+                                }
+                            }
+                        }
                     }
                 }
             }
-            IpcSubscriberEvent::Windows(windows) => {
+
+            IpcSubscriberEvent::Windows => {
+                let ids: Vec<usize> = self.subscribers_window.keys().copied().collect();
+                let mut all_windows = Vec::new();
+
+                for id in ids {
+                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
+                        crate::cli::Request::Window { id },
+                        true,
+                        true,
+                    ) {
+                        if let Ok(window) =
+                            serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
+                        {
+                            all_windows.push(window);
+                        }
+                    }
+                }
+
                 for subscriber in &self.subscribers_windows {
-                    let map = windows.iter().map(|w| (w.id, w.clone())).collect();
+                    let map: HashMap<_, _> =
+                        all_windows.iter().map(|w| (w.id, w.clone())).collect();
                     let _ = subscriber.try_send(map);
                 }
             }
-            IpcSubscriberEvent::Workspace(workspace) => {
-                for subs in self.subscribers_workspace.values() {
-                    for subscriber in subs {
-                        let _ = subscriber.try_send(Some(workspace.clone()));
+
+            IpcSubscriberEvent::Workspace => {
+                for &id in self.subscribers_workspace.keys() {
+                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
+                        crate::cli::Request::Workspace { id },
+                        true,
+                        true,
+                    ) {
+                        if let Ok(workspace) =
+                            serde_json::from_str::<fht_compositor_ipc::Workspace>(&json_str)
+                        {
+                            if let Some(subs) = self.subscribers_workspace.get(&id) {
+                                for subscriber in subs {
+                                    let _ = subscriber.try_send(Some(workspace.clone()));
+                                }
+                            }
+                        }
                     }
                 }
             }
-            IpcSubscriberEvent::Space(space) => {
-                for subscriber in &self.subscribers_space {
-                    let _ = subscriber.try_send(space.clone());
+
+            IpcSubscriberEvent::Space => {
+                if let Ok(Some(json_str)) =
+                    crate::ipc::client::make_request(crate::cli::Request::Space, true, true)
+                {
+                    if let Ok(space) = serde_json::from_str::<fht_compositor_ipc::Space>(&json_str)
+                    {
+                        for subscriber in &self.subscribers_space {
+                            let _ = subscriber.try_send(space.clone());
+                        }
+                    }
                 }
             }
-            IpcSubscriberEvent::LayerShells(layers) => {
-                for subscriber in &self.subscribers_layer_shells {
-                    let _ = subscriber.try_send(layers.clone());
+
+            IpcSubscriberEvent::LayerShells => {
+                if let Ok(Some(json_str)) =
+                    crate::ipc::client::make_request(crate::cli::Request::LayerShells, true, true)
+                {
+                    if let Ok(layers) =
+                        serde_json::from_str::<Vec<fht_compositor_ipc::LayerShell>>(&json_str)
+                    {
+                        for subscriber in &self.subscribers_layer_shells {
+                            let _ = subscriber.try_send(layers.clone());
+                        }
+                    }
                 }
             }
         }

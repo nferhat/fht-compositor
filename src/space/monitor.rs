@@ -13,10 +13,10 @@ use smithay::utils::Point;
 
 use super::workspace::{Workspace, WorkspaceRenderElement};
 use super::Config;
-use crate::fht_render_elements;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::window::Window;
+use crate::{broadcast_event, fht_render_elements}; // from `ipc/mod.rs`
 
 const WORKSPACE_COUNT: usize = 9;
 
@@ -75,6 +75,7 @@ impl Monitor {
     pub fn refresh(&mut self, is_active: bool) {
         crate::profile_function!();
         self.is_active = is_active;
+        broadcast_event!(Space);
         for workspace in &mut self.workspaces {
             workspace.refresh();
         }
@@ -88,7 +89,8 @@ impl Monitor {
         );
 
         for (workspace, other_workspace) in self.workspaces_mut().zip(other.workspaces) {
-            workspace.merge_with(other_workspace)
+            workspace.merge_with(other_workspace);
+            broadcast_event!(Workspace);
         }
     }
 
@@ -194,6 +196,7 @@ impl Monitor {
         }
 
         self.active_idx = idx;
+        broadcast_event!(Workspace);
         self.workspaces[self.active_idx].active_window()
     }
 

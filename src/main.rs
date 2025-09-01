@@ -87,7 +87,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
                     std::process::exit(-1);
                 }
             } else {
-                if let Err(err) = ipc::client::make_request(request, json) {
+                if let Err(err) = ipc::client::make_request(request, json, false) {
                     error!(?err, "Failed to execute IPC client request");
                     std::process::exit(-1);
                 }

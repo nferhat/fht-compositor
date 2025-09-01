@@ -7,7 +7,11 @@ use crate::cli;
 /// Make a single request to the running `fht-compositor` IPC server.
 ///
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
-pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
+pub fn make_request(
+    request: cli::Request,
+    json: bool,
+    return_reponse_json: bool,
+) -> anyhow::Result<Option<String>> {
     let request = match request {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
@@ -24,7 +28,10 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
-        cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
+        cli::Request::PrintSchema => {
+            fht_compositor_ipc::print_schema()?;
+            return Ok(None);
+        }
     };
 
     let request = fht_compositor_ipc::IpcRequest {
@@ -92,13 +99,17 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
                     Ok(serde_json::json!(null).to_string())
                 }
             },
-            fht_compositor_ipc::Response::Noop => return Ok(()),
+            fht_compositor_ipc::Response::Noop => return Ok(None),
         }?;
-        println!("{}", json_buffer);
-        Ok(())
+        if return_reponse_json {
+            Ok(Some(json_buffer))
+        } else {
+            println!("{}", json_buffer);
+            Ok(None)
+        }
     } else {
         print_formatted(&response)?;
-        Ok(())
+        Ok(None)
     }
 }
 
