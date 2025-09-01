@@ -91,7 +91,6 @@ use crate::{cli, ipc};
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
-    pub ipcsub: IpcServerSubscriberState,
 }
 
 impl State {
@@ -145,11 +144,7 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self {
-            fht,
-            backend,
-            ipcsub: IpcServerSubscriberState::new(),
-        }
+        Self { fht, backend }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {

@@ -59,9 +59,11 @@ pub struct IpcServerSubscriberState {
 pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> =
     Lazy::new(|| Arc::new(Mutex::new(IpcServerSubscriberState::new())));
 
+// dont have to construct them as they are
+// only used for matching.
+#[allow(dead_code)]
 pub enum IpcSubscriberEvent {
     Window,
-    Windows,
     Workspace,
     Space,
     LayerShells,
@@ -92,6 +94,17 @@ macro_rules! broadcast_event {
     };
 }
 
+fn log_event(event_name: &str) {
+    use std::io::Write;
+    let path = "/tmp/fht_ipc_test.log"; // temp file to observe
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap(); // unwrap is fine for testing
+    writeln!(file, "broadcast_event called: {}", event_name).unwrap();
+}
+
 impl IpcServerSubscriberState {
     pub fn new() -> Self {
         Self {
@@ -115,6 +128,7 @@ impl IpcServerSubscriberState {
     pub fn broadcast_event(&mut self, event: IpcSubscriberEvent) {
         match event {
             IpcSubscriberEvent::Window => {
+                // == individual windows == //
                 for &id in self.subscribers_window.keys() {
                     if let Ok(Some(json_str)) = crate::ipc::client::make_request(
                         crate::cli::Request::Window { id },
@@ -137,23 +151,15 @@ impl IpcServerSubscriberState {
                         }
                     }
                 }
-            }
-
-            IpcSubscriberEvent::Windows => {
-                let ids: Vec<usize> = self.subscribers_window.keys().copied().collect();
+                // == all windows == //
                 let mut all_windows = Vec::new();
-
-                for id in ids {
-                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
-                        crate::cli::Request::Window { id },
-                        true,
-                        true,
-                    ) {
-                        if let Ok(window) =
-                            serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
-                        {
-                            all_windows.push(window);
-                        }
+                if let Ok(Some(json_str)) =
+                    crate::ipc::client::make_request(crate::cli::Request::Windows, true, true)
+                {
+                    if let Ok(window) =
+                        serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
+                    {
+                        all_windows.push(window);
                     }
                 }
 
@@ -973,7 +979,7 @@ impl State {
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;
             }
-            // Subscribe outputs
+            // Subscribe workspace
             ClientRequest::SubscribeWorkspace { id, sender } => {
                 let workspace = match id {
                     Some(id) => self.fht.space.workspace_for_id(WorkspaceId(id)),
@@ -991,11 +997,12 @@ impl State {
                 });
 
                 let _ = sender.send_blocking(workspace);
-                self.ipcsub
-                    .subscribers_workspace
-                    .entry(id.unwrap_or(usize::MAX))
-                    .or_default()
-                    .push(sender);
+                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+                    ipc.subscribers_workspace
+                        .entry(id.unwrap_or(usize::MAX))
+                        .or_default()
+                        .push(sender);
+                }
             }
 
             // Subscribe windows
@@ -1012,7 +1019,9 @@ impl State {
                     .collect();
 
                 let _ = tx.send_blocking(windows);
-                self.ipcsub.subscribers_windows.push(tx);
+                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+                    ipc.subscribers_windows.push(tx);
+                }
             }
 
             // Subscribe space
@@ -1064,7 +1073,9 @@ impl State {
                     primary_idx: self.fht.space.primary_monitor_idx(),
                 });
 
-                self.ipcsub.subscribers_space.push(tx);
+                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+                    ipc.subscribers_space.push(tx);
+                }
             }
 
             // Subscribe layer shells
@@ -1091,7 +1102,9 @@ impl State {
                 }
 
                 let _ = tx.send_blocking(layers);
-                self.ipcsub.subscribers_layer_shells.push(tx);
+                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+                    ipc.subscribers_layer_shells.push(tx);
+                }
             }
 
             // Subscribe single window
@@ -1135,11 +1148,12 @@ impl State {
                 });
 
                 let _ = sender.send_blocking(window);
-                self.ipcsub
-                    .subscribers_window
-                    .entry(id.unwrap_or(usize::MAX))
-                    .or_default()
-                    .push(sender);
+                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
+                    ipc.subscribers_window
+                        .entry(id.unwrap_or(usize::MAX))
+                        .or_default()
+                        .push(sender);
+                }
             }
         }
 

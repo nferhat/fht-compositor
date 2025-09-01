@@ -75,7 +75,6 @@ impl Monitor {
     pub fn refresh(&mut self, is_active: bool) {
         crate::profile_function!();
         self.is_active = is_active;
-        broadcast_event!(Space);
         for workspace in &mut self.workspaces {
             workspace.refresh();
         }
