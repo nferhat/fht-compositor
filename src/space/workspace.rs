@@ -11,7 +11,7 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
-use super::bsp::{BspTree, build_tree, to_leaves};
+use super::bsp::BspTree;
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
 use super::Config;
@@ -1414,10 +1414,10 @@ impl Workspace {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                let mut bsp_tree = BspTree::new(stack_geo, (tiles_len - nmaster) as usize);
-                let mut leaves = Vec::new();
-                build_tree(&mut bsp_tree, 0, (tiles_len - nmaster) as usize, 0.5, inner_gaps);
-                to_leaves(&mut bsp_tree, 0, &mut leaves);
+                let mut bsp_tree =
+                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = bsp_tree.leaves(0);
 
                 if (0..nmaster).contains(&(unconfigured_idx as i32)) {
                     let tiles = tiled_proportions
@@ -1429,12 +1429,8 @@ impl Workspace {
                     let prepared_width = master_geo.size.w - (2 * border_width);
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 } else {
-                    let prepared_width = leaves[unconfigured_idx - nmaster as usize]
-                        .size
-                        .w;
-                    let prepared_height = leaves[unconfigured_idx - nmaster as usize]
-                        .size
-                        .h;
+                    let prepared_width = leaves[unconfigured_idx - nmaster as usize].size.w;
+                    let prepared_height = leaves[unconfigured_idx - nmaster as usize].size.h;
                     unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
                 }
             }
@@ -1701,7 +1697,7 @@ impl Workspace {
             }
             WorkspaceLayout::BinarySpacePartition => {
                 master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
-                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+                // we handle inner gaps for stack tiles in the BSP tree instead
 
                 if tiles_len > nmaster {
                     stack_geo.size.w =
@@ -1719,10 +1715,10 @@ impl Workspace {
                     proportion_length(&proportions, master_geo.size.h)
                 };
 
-                let mut bsp_tree = BspTree::new(stack_geo, (tiles_len - nmaster) as usize);
-                let mut leaves = Vec::new();
-                build_tree(&mut bsp_tree, 0, (tiles_len - nmaster) as usize, 0.5, inner_gaps);
-                to_leaves(&mut bsp_tree, 0, &mut leaves);
+                let mut bsp_tree =
+                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = bsp_tree.leaves(0);
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if Some(idx) == self.fullscreened_tile_idx {
