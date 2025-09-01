@@ -11,6 +11,7 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
+use super::bsp::BspTree;
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
 use super::Config;
@@ -830,6 +831,63 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
+            WorkspaceLayout::BinarySpacePartition => {
+                if closest_idx < self.nmaster {
+                    if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
+                        // We need a way to create a slave stack when there are only masters window,
+                        // this condition covers the following case:
+                        //
+                        // (the X marks where the cursor could be)
+                        //
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        // +--------------------+
+                        // |              XXXXXX|
+                        // |              XXXXXX|
+                        // +--------------------+
+                        //
+                        // In this case we want to create a stack stack
+                        self.active_tile_idx = Some(self.tiles.len());
+                        self.tiles.push(tile);
+                    } else if edges.intersects(ResizeEdge::BOTTOM) {
+                        // Insert after this master window.
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx + 1);
+                        self.tiles.insert(closest_idx + 1, tile);
+                    } else if edges.intersects(ResizeEdge::TOP) {
+                        self.nmaster += 1;
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                        // Insert before this master window.
+                    } else {
+                        // Swap the closest window and the grabbed window.
+                        // FIXME: This becomes invalid if the number of windows changed
+
+                        // First insert the grabbed tile.
+                        self.active_tile_idx = Some(closest_idx);
+                        self.tiles.insert(closest_idx, tile);
+                    }
+                } else if edges.intersects(ResizeEdge::BOTTOM) {
+                    // Insert after this stack window.
+                    self.active_tile_idx = Some(closest_idx + 1);
+                    self.tiles.insert(closest_idx + 1, tile);
+                } else if edges.intersects(ResizeEdge::TOP) {
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                    // Insert before this stack window.
+                } else {
+                    // Swap the closest window and the grabbed window.
+                    // FIXME: This becomes invalid if the number of windows changed
+
+                    // First insert the grabbed tile.
+                    self.active_tile_idx = Some(closest_idx);
+                    self.tiles.insert(closest_idx, tile);
+                }
+
+                self.arrange_tiles(true);
+            }
             WorkspaceLayout::Floating => {
                 // Just insert it, who cares really.
                 self.tiles.push(tile);
@@ -1345,6 +1403,37 @@ impl Workspace {
                     }
                 }
             }
+            WorkspaceLayout::BinarySpacePartition => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                let mut bsp_tree =
+                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = bsp_tree.leaves(0);
+
+                if (0..nmaster).contains(&(unconfigured_idx as i32)) {
+                    let tiles = tiled_proportions
+                        .get(0..nmaster as usize)
+                        .unwrap_or_default();
+                    let proportions = tiles.to_vec();
+                    let lengths = proportion_length(&proportions, master_geo.size.h);
+                    let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
+                    let prepared_width = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                } else {
+                    let prepared_width = leaves[unconfigured_idx - nmaster as usize].size.w;
+                    let prepared_height = leaves[unconfigured_idx - nmaster as usize].size.h;
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                }
+            }
             WorkspaceLayout::Floating => {}
         }
     }
@@ -1604,6 +1693,48 @@ impl Workspace {
                     let geo = Rectangle::new(right_geo.loc, (right_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
+                }
+            }
+            WorkspaceLayout::BinarySpacePartition => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                // we handle inner gaps for stack tiles in the BSP tree instead
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                let master_heights = {
+                    let tiles = tiles.get(0..nmaster as usize).unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|tile| tile.proportion())
+                        .collect::<Vec<_>>();
+                    proportion_length(&proportions, master_geo.size.h)
+                };
+
+                let mut bsp_tree =
+                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = bsp_tree.leaves(0);
+
+                for (idx, tile) in tiles.into_iter().enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        continue;
+                    }
+                    if (idx as i32) < nmaster {
+                        let master_height = master_heights[idx];
+                        let geo = Rectangle::new(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height).into(),
+                        );
+                        tile.set_geometry(geo, animate);
+                        master_geo.loc.y += master_height + inner_gaps;
+                    } else {
+                        tile.set_geometry(leaves[idx - nmaster as usize], animate);
+                    }
                 }
             }
             WorkspaceLayout::Floating => {}
@@ -1945,7 +2076,7 @@ fn calculate_work_area(output: &Output, outer_gaps: i32) -> Rectangle<i32, Logic
 
 /// Proportion a given length with given proportions.
 ///
-/// This function ensures that the the returned lengths' sum is equal to `length`
+/// This function ensures that the returned lengths' sum is equal to `length`
 fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
     let total_proportions: f64 = proportions.iter().sum();
     let lengths = proportions
