@@ -48,7 +48,7 @@ You can subscribe to the IPC by using the `--subscribe` flag.
 
 > [!NOTE]
 >
-> As of now, the IPC only supports subscribing to `workspace`, `space`, `layershells`, `window` and `windows`.
+> As of now, the IPC only supports subscribing to `workspace`, `space`, `layer-shells`, `window` and `windows`.
 
 ::: tabs
 == Example with eww

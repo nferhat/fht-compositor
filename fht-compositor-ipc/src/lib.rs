@@ -27,7 +27,7 @@
 //! **Example:**
 //!
 //! ```sh
-//! # Supported requests: workspace, windows, window, space, layershell
+//! # Supported requests: workspace, windows, window, space, layer-shells
 //! $ fht-compositor ipc --subscribe workspace
 //! # ... requests will stream when internal data changes
 //! ```
