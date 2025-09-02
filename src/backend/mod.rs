@@ -183,4 +183,26 @@ impl Backend {
             _ => unreachable!(),
         }
     }
+
+    pub fn vrr_enabled(&self, output: &Output) -> anyhow::Result<bool> {
+        match self {
+            #[cfg(feature = "winit-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Winit(_) => {
+                _ = output;
+                Ok(false)
+            }
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.vrr_enabled(output),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => {
+                _ = output;
+                Ok(false)
+            }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
+        }
+    }
 }

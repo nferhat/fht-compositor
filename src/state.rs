@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use calloop::futures::Scheduler;
-use fht_compositor_config::{BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides};
+use fht_compositor_config::{
+    BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides, VrrMode,
+};
 use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -77,7 +79,7 @@ use crate::output::{self, OutputExt, RedrawState};
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
-use crate::protocols::output_management::OutputManagementManagerState;
+use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
@@ -646,6 +648,9 @@ pub struct Fht {
     pub has_transient_output_changes: bool,
 
     pub config: Arc<fht_compositor_config::Config>,
+    // Sometimes we might have to change the output config at runtime, so we use this value
+    // when updating stuff instead of one guarded by an Arc.
+    pub output_config: HashMap<String, fht_compositor_config::Output>,
     pub cli_config_path: Option<std::path::PathBuf>,
     // The config_ui also tracks the last configuration error, if any.
     pub config_ui: config_ui::ConfigUi,
@@ -730,6 +735,7 @@ impl Fht {
                 )
             }
         };
+        let output_config = config.outputs.clone();
 
         let config_watcher = crate::config::init_watcher(paths, &loop_handle)
             .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
@@ -873,6 +879,7 @@ impl Fht {
             has_transient_output_changes: false,
 
             config: Arc::new(config),
+            output_config,
             cli_config_path: config_path,
             config_ui,
             config_ui_output: None,
@@ -910,7 +917,7 @@ impl Fht {
         &mut self,
         output: Output,
         refresh_interval: Option<Duration>,
-        vrr_enabled: bool,
+        vrr_enabled: Option<VrrMode>,
     ) {
         assert!(
             !self.space.has_output(&output),
@@ -922,7 +929,11 @@ impl Fht {
 
         let state = output::OutputState {
             redraw_state: output::RedrawState::Idle,
-            frame_clock: FrameClock::new(refresh_interval, vrr_enabled),
+            frame_clock: FrameClock::new(
+                refresh_interval,
+                // If on-demand leave it off, backend state will enable it eventually.
+                vrr_enabled.is_some_and(|mode| mode == VrrMode::On),
+            ),
             animations_running: false,
             current_frame_sequence: 0u32,
             pending_screencopies: vec![],
@@ -944,8 +955,9 @@ impl Fht {
 
         // wlr-output-management
         self.output_management_manager_state
-            .add_head::<State>(&output);
-        self.output_management_manager_state.update::<State>();
+            .add_head::<State>(&output, vrr_enabled);
+        self.loop_handle
+            .insert_idle(|state| output_management::update(state));
 
         self.arrange_outputs(Some(output));
     }
@@ -956,7 +968,8 @@ impl Fht {
         self.arrange_outputs(None);
         // wlr-output-management
         self.output_management_manager_state.remove_head(output);
-        self.output_management_manager_state.update::<State>();
+        self.loop_handle
+            .insert_idle(|state| output_management::update(state));
 
         // Cleanly close [`LayerSurface`] instead of letting them know their demise after noticing
         // the output is gone.
@@ -1043,7 +1056,7 @@ impl Fht {
         for (output, config) in self
             .space
             .outputs()
-            .map(|output| (output, self.config.outputs.get(&output.name())))
+            .map(|output| (output, self.output_config.get(&output.name())))
         {
             // NOTE: for winit backend the transform must stay on Flipped180.
             let new_transform = (output.name().as_str() != "winit")
@@ -1161,7 +1174,7 @@ impl Fht {
     pub fn output_update_vrr(&mut self, output: &Output) {
         crate::profile_function!();
         let name = output.name();
-        let Some(config) = self.config.outputs.get(&name) else {
+        let Some(config) = self.output_config.get(&name) else {
             return; // no config, VRR disabled by default.
         };
 

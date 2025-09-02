@@ -36,7 +36,7 @@ impl HeadlessData {
             Some((0, 0).into()),
         );
 
-        fht.add_output(output.clone(), None, false);
+        fht.add_output(output.clone(), None, None);
 
         Self { output }
     }

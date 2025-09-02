@@ -65,6 +65,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::frame_clock::FrameClock;
 use crate::output::RedrawState;
+use crate::protocols::output_management;
 use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{
     AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
@@ -842,7 +843,7 @@ impl UdevData {
                         warn!("Cannot enable VRR on output since its not supported!");
                     }
                     let _ = compositor.use_vrr(false);
-                    false
+                    None
                 }
                 Ok(VrrSupport::Supported | VrrSupport::RequiresModeset) => {
                     // If on demand we only enable when we have a window exported to primary
@@ -856,12 +857,15 @@ impl UdevData {
                         );
                     }
 
-                    compositor.vrr_enabled()
+                    Some(match compositor.vrr_enabled() {
+                        true => VrrMode::On,
+                        false => VrrMode::Off,
+                    })
                 }
 
                 Err(err) => {
                     warn!(?err, "Failed to query VRR support for output");
-                    false
+                    None
                 }
             }
         });
@@ -1503,7 +1507,8 @@ impl UdevData {
             }
         }
 
-        fht.output_management_manager_state.update::<State>();
+        fht.loop_handle
+            .insert_idle(|state| output_management::update(state));
     }
 
     /// Set the mode for an [`Output`] and its associated connector.
@@ -1638,6 +1643,21 @@ impl UdevData {
         }
 
         Ok(())
+    }
+
+    pub fn vrr_enabled(&self, output: &Output) -> anyhow::Result<bool> {
+        for device in self.devices.values() {
+            for surface in device.surfaces.values() {
+                if surface.output != *output {
+                    continue;
+                }
+
+                let vrr_enabled = surface.drm_output.with_compositor(|c| c.vrr_enabled());
+                return Ok(vrr_enabled);
+            }
+        }
+
+        anyhow::bail!("No matching output found")
     }
 }
 
