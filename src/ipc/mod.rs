@@ -67,11 +67,11 @@ pub struct SubscriberManager {
     snapshots: SubscriberSnapshots,
 }
 
-// GLOBAL
+/// The GLOBAL ipc subscriber manager state.
 pub static IPC_SUB_STATE: Lazy<Arc<Mutex<SubscriberManager>>> =
     Lazy::new(|| Arc::new(Mutex::new(SubscriberManager::new())));
 
-// Wrapper that broadcast to clients by diffing
+/// Wrapper of `diff_and_update` which is an impl of [`SubscriberManager`]
 pub fn try_broadcast_from_global(state: &State) {
     if let Ok(mut sub_mgr) = crate::ipc::IPC_SUB_STATE.lock() {
         sub_mgr.diff_and_update(state);
@@ -258,6 +258,27 @@ pub fn start(
     // First setup the communication channel between the IPC server and compositor
     let (to_compositor, from_clients) = calloop::channel::channel();
 
+    // Polling the subscription broadcast every 100 ms.
+    // Although it may seem inefficient, it is one of the most scalable
+    // approaches possible.
+    //
+    // The disadvantages of other methods are that they require immense
+    // data which we may not always be able to provide. And certain structures
+    // in this codebase are not `Clone`, so either we have to wrap everything in Arc
+    // and rewrite massive portions to work with Arc (and also deal with atomic overhead)
+    // OR use references everywhere which can clutter the codebase with lifetimes.
+    // And another disadvantage of other methods is that we have to call broadcast everywhere
+    // we mutate the [`State`] which is a maintainance burden.
+    //
+    // if there is a better approach that doesn't need polling,
+    // then its better to use that.
+    //
+    // And another important NOTE: 
+    //
+    // If the IPC is getting a feature where we can do stuff like `--config ipc.poll_time n`,
+    // then I suggest that 100ms (or 50ms) will be the least count that a user can provide.
+    //
+    // Have like 0ms of polling time `MAY OR MAY NOT CRASH THE COMPOSITOR`
     let timer = calloop::timer::Timer::immediate();
     loop_handle.insert_source(timer, move |_, _, state| {
         try_broadcast_from_global(&state);
@@ -352,7 +373,7 @@ async fn handle_new_client(
     // for handling subscriptions
     let (tx, rx) = async_channel::unbounded::<fht_compositor_ipc::Response>();
 
-    // write stuff when tx gets a request
+    // write stuff when we get an rx (request)
     scheduler
         .schedule(async move {
             while let Ok(response) = rx.recv().await {
@@ -372,7 +393,8 @@ async fn handle_new_client(
     loop {
         let mut req_buf = String::new();
         match reader.read_line(&mut req_buf).await {
-            // For future developers,
+            // Dear developers,
+            //
             // FOR GODS SAKE, PLEASE DONT REMOVE THIS EOF LINE!
             // If you did, there will be massive concequences!
             //
@@ -442,7 +464,7 @@ enum ClientRequest {
         async_channel::Sender<anyhow::Result<()>>,
     ),
 
-    // subscription variants
+    // == Subscription variants ==
     SubscribeWindows(async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>),
     SubscribeSpace(async_channel::Sender<fht_compositor_ipc::Space>),
     SubscribeLayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),

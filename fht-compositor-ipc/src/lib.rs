@@ -17,10 +17,20 @@
 //!
 //! ## Using the IPC
 //!
-//! When it comes to **using** the IPC, you can query some information using [`Request`] and
+//! When it comes to **using** the IPC, you can query some information using [`IpcRequest`] and
 //! get out a [`Response`].
 //!
-//! **TODO**: Event stream
+//! The IPC also supports Event Streaming.
+//! 
+//! To use it, `--subscribe` command is used.
+//!
+//! **Example:**
+//!
+//! ```sh
+//! # Supported requests: workspace, windows, window, space, layershell
+//! $ fht-compositor ipc --subscribe workspace
+//! # ... requests will stream when internal data changes
+//! ```
 
 use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
@@ -51,13 +61,14 @@ pub fn print_schema() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An IPC request information that you send to the compositor.
 #[derive(Serialize, Deserialize)]
 pub struct IpcRequest {
     pub request: Request,
     pub subscribe: bool,
 }
 
-/// A request you send to the compositor.
+/// The request you send to the compositor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Request {
