@@ -71,7 +71,6 @@ use crate::cursor::CursorThemeManager;
 use crate::focus_target::PointerFocusTarget;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
-use crate::ipc::IpcServerSubscriberState;
 use crate::layer::MappedLayer;
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]

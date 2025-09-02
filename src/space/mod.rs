@@ -25,7 +25,6 @@ pub use tile::TileRenderElement;
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
-use crate::broadcast_event; // from `ipc/mod.rs`
 use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
@@ -267,7 +266,7 @@ impl Space {
         }
 
         self.monitors[self.primary_idx].merge_with(removed);
-        broadcast_event!(EWindow, EWorkspace, ESpace);
+         
     }
 
     /// Arrange the [`Monitor`] of this [`Output`].
@@ -554,7 +553,7 @@ impl Space {
 
         if let Some(new_monitor_idx) = new_monitor_idx {
             self.active_idx = new_monitor_idx;
-            broadcast_event!(EWindow, EWorkspace, ESpace);
+             
         }
 
         ret
@@ -975,7 +974,7 @@ impl Space {
                 cursor_position.to_i32_round() - output_loc,
             );
         self.active_idx = monitor_under_idx;
-        broadcast_event!(EWindow, EWorkspace, ESpace);
+         
     }
 
     /// Renders the tile affected by the current interactive swap.

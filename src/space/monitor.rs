@@ -16,7 +16,7 @@ use super::Config;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::window::Window;
-use crate::{broadcast_event, fht_render_elements}; // from `ipc/mod.rs`
+use crate::fht_render_elements;
 
 const WORKSPACE_COUNT: usize = 9;
 
@@ -89,7 +89,7 @@ impl Monitor {
 
         for (workspace, other_workspace) in self.workspaces_mut().zip(other.workspaces) {
             workspace.merge_with(other_workspace);
-            broadcast_event!(EWindow, EWorkspace, ESpace);
+             
         }
     }
 
@@ -195,7 +195,7 @@ impl Monitor {
         }
 
         self.active_idx = idx;
-        broadcast_event!(EWindow, EWorkspace, ESpace);
+         
         self.workspaces[self.active_idx].active_window()
     }
 

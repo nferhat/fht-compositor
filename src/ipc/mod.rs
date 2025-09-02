@@ -45,7 +45,7 @@ impl Server {
 }
 
 /// [`IpcServerSubscriberState`] Handles all the ipc stuff that we can subscribe to.
-pub struct IpcServerSubscriberState {
+pub struct SubscriberManager {
     subscribers_windows: Vec<async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>>,
     subscribers_space: Vec<async_channel::Sender<fht_compositor_ipc::Space>>,
     subscribers_layer_shells: Vec<async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>>,
@@ -56,8 +56,8 @@ pub struct IpcServerSubscriberState {
 }
 
 // GLOBAL
-pub static IPC_SUB_STATE: Lazy<Arc<Mutex<IpcServerSubscriberState>>> =
-    Lazy::new(|| Arc::new(Mutex::new(IpcServerSubscriberState::new())));
+pub static IPC_SUB_STATE: Lazy<Arc<Mutex<SubscriberManager>>> =
+    Lazy::new(|| Arc::new(Mutex::new(SubscriberManager::new())));
 
 // dont have to construct them as they are
 // only used for matching.
@@ -69,19 +69,14 @@ pub enum IpcSubscriberEvent {
     ELayerShells,
 }
 
-// Macro to use the global ipc state to broadcast to clients
-#[macro_export]
-macro_rules! broadcast_event {
-    ( $( $event:ident ),+ $(,)? ) => {
-        if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-            $(
-                ipc.broadcast_event(crate::ipc::IpcSubscriberEvent::$event);
-            )+
-        }
-    };
+// Wrapper that broadcast to clients by diffing
+pub fn try_broadcast_from_global(state: &State) {
+    if let Ok(mut sub_mgr) = crate::ipc::IPC_SUB_STATE.lock() {
+        sub_mgr.diff_and_update(state);
+    }
 }
 
-impl IpcServerSubscriberState {
+impl SubscriberManager {
     pub fn new() -> Self {
         Self {
             subscribers_windows: Vec::new(),
@@ -92,105 +87,146 @@ impl IpcServerSubscriberState {
         }
     }
 
-    /// Broadcast an IPC event to every subscriber
-    //
-    // This is kinda hacky but... this seem to be the best "temporary patch"
-    // the problem with implementing a proper subscription system are what follows:
-    //
-    // 1. It requires passing of data.
-    // 2. I am not familiar with the codebase.
-    // 3. Many stuff doesn't implement `Clone`.
-    // 4. Using references is kinda hacky here and a burden to devs.
-    pub fn broadcast_event(&mut self, event: IpcSubscriberEvent) {
-        match event {
-            IpcSubscriberEvent::EWindow => {
-                // == individual windows == //
-                for &id in self.subscribers_window.keys() {
-                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
-                        crate::cli::Request::Window { id },
-                        true,
-                        true,
-                    ) {
-                        if let Ok(window) =
-                            serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
-                        {
-                            for subscriber in &self.subscribers_windows {
-                                let _ = subscriber
-                                    .try_send(HashMap::from([(window.id, window.clone())]));
+    /// Picks the data needed for subscribers, diffs it against previous snapshot, 
+    /// and broadcasts only changes.
+    pub fn diff_and_update(&mut self, state: &State) {
+        // == Windows ==
+        if !self.subscribers_windows.is_empty() || !self.subscribers_window.is_empty() {
+            let all_windows: Vec<fht_compositor_ipc::Window> = state.fht
+                .space
+                .monitors()
+                .flat_map(|mon| {
+                    mon.workspaces().flat_map(|ws| {
+                        ws.tiles().map(|tile| {
+                            let window = tile.window();
+                            let location = tile.location() + tile.window_loc();
+                            let size = window.size();
+                            fht_compositor_ipc::Window {
+                                id: *window.id(),
+                                title: window.title(),
+                                app_id: window.app_id(),
+                                output: ws.output().name(),
+                                workspace_idx: ws.index(),
+                                workspace_id: *ws.id(),
+                                size: (size.w as u32, size.h as u32),
+                                location: location.into(),
+                                fullscreened: window.fullscreen(),
+                                maximized: window.maximized(),
+                                tiled: window.tiled(),
+                                activated: true,
+                                focused: true,
                             }
+                        })
+                    })
+                })
+                .collect();
 
-                            if let Some(subs) = self.subscribers_window.get(&window.id) {
-                                for s in subs {
-                                    let _ = s.try_send(Some(window.clone()));
-                                }
-                            }
-                        }
-                    }
-                }
-                // == all windows == //
-                let mut all_windows = Vec::new();
-                if let Ok(Some(json_str)) =
-                    crate::ipc::client::make_request(crate::cli::Request::Windows, true, true)
-                {
-                    if let Ok(window) =
-                        serde_json::from_str::<fht_compositor_ipc::Window>(&json_str)
-                    {
-                        all_windows.push(window);
-                    }
-                }
+            let window_map: HashMap<usize, _> =
+                all_windows.iter().map(|w| (w.id, w.clone())).collect();
 
-                for subscriber in &self.subscribers_windows {
-                    let map: HashMap<_, _> =
-                        all_windows.iter().map(|w| (w.id, w.clone())).collect();
-                    let _ = subscriber.try_send(map);
-                }
+            for s in &self.subscribers_windows {
+                let _ = s.try_send(window_map.clone());
             }
 
-            IpcSubscriberEvent::EWorkspace => {
-                for &id in self.subscribers_workspace.keys() {
-                    if let Ok(Some(json_str)) = crate::ipc::client::make_request(
-                        crate::cli::Request::Workspace { id },
-                        true,
-                        true,
-                    ) {
-                        if let Ok(workspace) =
-                            serde_json::from_str::<fht_compositor_ipc::Workspace>(&json_str)
-                        {
-                            if let Some(subs) = self.subscribers_workspace.get(&id) {
-                                for subscriber in subs {
-                                    let _ = subscriber.try_send(Some(workspace.clone()));
-                                }
-                            }
-                        }
+            for (&id, subs) in &self.subscribers_window {
+                if let Some(window) = window_map.get(&id) {
+                    for s in subs {
+                        let _ = s.try_send(Some(window.clone()));
                     }
                 }
             }
+        }
 
-            IpcSubscriberEvent::ESpace => {
-                if let Ok(Some(json_str)) =
-                    crate::ipc::client::make_request(crate::cli::Request::Space, true, true)
-                {
-                    if let Ok(space) = serde_json::from_str::<fht_compositor_ipc::Space>(&json_str)
-                    {
-                        for subscriber in &self.subscribers_space {
-                            let _ = subscriber.try_send(space.clone());
-                        }
-                    }
+        // == Workspaces ==
+        if !self.subscribers_workspace.is_empty() {
+            for (&id, subs) in &self.subscribers_workspace {
+                let workspace = if id == usize::MAX {
+                    Some(state.fht.space.active_workspace())
+                } else {
+                    state.fht.space.workspace_for_id(WorkspaceId(id))
+                }
+                .map(|ws| fht_compositor_ipc::Workspace {
+                    output: ws.output().name(),
+                    id: *ws.id(),
+                    active_window_idx: ws.active_tile_idx(),
+                    fullscreen_window_idx: ws.fullscreened_tile_idx(),
+                    mwfact: ws.mwfact(),
+                    nmaster: ws.nmaster(),
+                    windows: ws.windows().map(|w| *w.id()).collect(),
+                });
+
+                for s in subs {
+                    let _ = s.try_send(workspace.clone());
+                }
+            }
+        }
+
+        // == Space ==
+        if !self.subscribers_space.is_empty() {
+            let monitors = state.fht
+                .space
+                .monitors()
+                .map(|mon| {
+                    let workspaces = mon
+                        .workspaces()
+                        .map(|ws| fht_compositor_ipc::Workspace {
+                            output: mon.output().name(),
+                            id: *ws.id(),
+                            active_window_idx: ws.active_tile_idx(),
+                            fullscreen_window_idx: ws.fullscreened_tile_idx(),
+                            mwfact: ws.mwfact(),
+                            nmaster: ws.nmaster(),
+                            windows: ws.windows().map(|w| *w.id()).collect(),
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .expect("always 9 workspaces per monitor");
+
+                    (
+                        mon.output().name(),
+                        fht_compositor_ipc::Monitor {
+                            output: mon.output().name(),
+                            workspaces,
+                            active: mon.active(),
+                            active_workspace_idx: mon.active_workspace_idx(),
+                        },
+                    )
+                })
+                .collect();
+
+            let space = fht_compositor_ipc::Space {
+                monitors,
+                active_idx: state.fht.space.active_monitor_idx(),
+                primary_idx: state.fht.space.primary_monitor_idx(),
+            };
+
+            for s in &self.subscribers_space {
+                let _ = s.try_send(space.clone());
+            }
+        }
+
+        // == Layer shells ==
+        if !self.subscribers_layer_shells.is_empty() {
+            let mut layers = Vec::new();
+            for output in state.fht.space.outputs() {
+                let layer_map = layer_map_for_output(output);
+                let output_name = output.name();
+                for layer_surface in layer_map.layers() {
+                    layers.push(fht_compositor_ipc::LayerShell {
+                        namespace: layer_surface.namespace().to_string(),
+                        output: output_name.clone(),
+                        #[allow(clippy::missing_transmute_annotations)]
+                        layer: unsafe { std::mem::transmute(layer_surface.layer()) },
+                        #[allow(clippy::missing_transmute_annotations)]
+                        keyboard_interactivity: unsafe {
+                            std::mem::transmute(layer_surface.cached_state().keyboard_interactivity)
+                        },
+                    });
                 }
             }
 
-            IpcSubscriberEvent::ELayerShells => {
-                if let Ok(Some(json_str)) =
-                    crate::ipc::client::make_request(crate::cli::Request::LayerShells, true, true)
-                {
-                    if let Ok(layers) =
-                        serde_json::from_str::<Vec<fht_compositor_ipc::LayerShell>>(&json_str)
-                    {
-                        for subscriber in &self.subscribers_layer_shells {
-                            let _ = subscriber.try_send(layers.clone());
-                        }
-                    }
-                }
+            for s in &self.subscribers_layer_shells {
+                let _ = s.try_send(layers.clone());
             }
         }
     }
@@ -206,6 +242,10 @@ pub fn start(
 
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
+            {
+                try_broadcast_from_global(&state);
+            }
+
             let calloop::channel::Event::Msg(req) = msg else {
                 return;
             };
