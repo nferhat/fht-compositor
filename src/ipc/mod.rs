@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Context;
 use calloop::io::Async;
@@ -257,13 +258,14 @@ pub fn start(
     // First setup the communication channel between the IPC server and compositor
     let (to_compositor, from_clients) = calloop::channel::channel();
 
+    let timer = calloop::timer::Timer::immediate();
+    loop_handle.insert_source(timer, move |_, _, state| {
+        try_broadcast_from_global(&state);
+        calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(100))
+    }).map_err(|err| anyhow::anyhow!("Failed to insert timer source: {err}"))?;
+
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
-            // THIS thing only triggers if there is a msg
-            {
-                try_broadcast_from_global(&state);
-            }
-
             let calloop::channel::Event::Msg(req) = msg else {
                 return;
             };
