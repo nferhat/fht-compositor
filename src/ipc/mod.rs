@@ -273,17 +273,19 @@ pub fn start(
     // if there is a better approach that doesn't need polling,
     // then its better to use that.
     //
-    // And another important NOTE: 
+    // And another important NOTE:
     //
     // If the IPC is getting a feature where we can do stuff like `--config ipc.poll_time n`,
     // then I suggest that 100ms (or 50ms) will be the least count that a user can provide.
     //
     // Have like 0ms of polling time `MAY OR MAY NOT CRASH THE COMPOSITOR`
     let timer = calloop::timer::Timer::immediate();
-    loop_handle.insert_source(timer, move |_, _, state| {
-        try_broadcast_from_global(&state);
-        calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(100))
-    }).map_err(|err| anyhow::anyhow!("Failed to insert timer source: {err}"))?;
+    loop_handle
+        .insert_source(timer, move |_, _, state| {
+            try_broadcast_from_global(&state);
+            calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(100))
+        })
+        .map_err(|err| anyhow::anyhow!("Failed to insert timer source: {err}"))?;
 
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {

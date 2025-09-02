@@ -21,7 +21,7 @@
 //! get out a [`Response`].
 //!
 //! The IPC also supports Event Streaming.
-//! 
+//!
 //! To use it, `--subscribe` command is used.
 //!
 //! **Example:**
