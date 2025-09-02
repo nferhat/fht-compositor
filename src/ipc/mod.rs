@@ -92,7 +92,6 @@ impl SubscriberManager {
     /// Picks the data needed for subscribers, diffs it against previous snapshot,
     /// and broadcasts only changes.
     pub fn diff_and_update(&mut self, state: &State) {
-        log_to_file("I HEARD YOU!");
         // == Windows ==
         if !self.subscribers_windows.is_empty() || !self.subscribers_window.is_empty() {
             let all_windows: Vec<fht_compositor_ipc::Window> = state
@@ -250,19 +249,6 @@ impl SubscriberManager {
     }
 }
 
-fn log_to_file(msg: &str) {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/fht_ipc_test.log")
-    {
-        let _ = writeln!(file, "{}", msg);
-    }
-}
-
 /// Start the [`IpcServer`] for the compositor.
 pub fn start(
     loop_handle: &LoopHandle<'static, State>,
@@ -273,8 +259,8 @@ pub fn start(
 
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
+            // THIS thing only triggers if there is a msg
             {
-                log_to_file("BROADCASTING GLOBALLY!");
                 try_broadcast_from_global(&state);
             }
 
