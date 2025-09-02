@@ -44,6 +44,15 @@ impl Server {
     }
 }
 
+/// [`SubscriberSnapshots`] Holds the previous state of the data send to subscribers.
+#[derive(Default)]
+struct SubscriberSnapshots {
+    windows: Option<HashMap<usize, fht_compositor_ipc::Window>>,
+    workspaces: HashMap<usize, Option<fht_compositor_ipc::Workspace>>,
+    space: Option<fht_compositor_ipc::Space>,
+    layer_shells: Option<Vec<fht_compositor_ipc::LayerShell>>,
+}
+
 /// [`IpcServerSubscriberState`] Handles all the ipc stuff that we can subscribe to.
 pub struct SubscriberManager {
     subscribers_windows: Vec<async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>>,
@@ -53,21 +62,13 @@ pub struct SubscriberManager {
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Window>>>>,
     subscribers_workspace:
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Workspace>>>>,
+
+    snapshots: SubscriberSnapshots,
 }
 
 // GLOBAL
 pub static IPC_SUB_STATE: Lazy<Arc<Mutex<SubscriberManager>>> =
     Lazy::new(|| Arc::new(Mutex::new(SubscriberManager::new())));
-
-// dont have to construct them as they are
-// only used for matching.
-#[allow(dead_code)]
-pub enum IpcSubscriberEvent {
-    EWindow,
-    EWorkspace,
-    ESpace,
-    ELayerShells,
-}
 
 // Wrapper that broadcast to clients by diffing
 pub fn try_broadcast_from_global(state: &State) {
@@ -84,54 +85,54 @@ impl SubscriberManager {
             subscribers_layer_shells: Vec::new(),
             subscribers_window: HashMap::new(),
             subscribers_workspace: HashMap::new(),
+            snapshots: SubscriberSnapshots::default(),
         }
     }
 
     /// Picks the data needed for subscribers, diffs it against previous snapshot, 
     /// and broadcasts only changes.
     pub fn diff_and_update(&mut self, state: &State) {
+        log_to_file("I HEARD YOU!");
         // == Windows ==
         if !self.subscribers_windows.is_empty() || !self.subscribers_window.is_empty() {
             let all_windows: Vec<fht_compositor_ipc::Window> = state.fht
                 .space
                 .monitors()
-                .flat_map(|mon| {
-                    mon.workspaces().flat_map(|ws| {
-                        ws.tiles().map(|tile| {
-                            let window = tile.window();
-                            let location = tile.location() + tile.window_loc();
-                            let size = window.size();
-                            fht_compositor_ipc::Window {
-                                id: *window.id(),
-                                title: window.title(),
-                                app_id: window.app_id(),
-                                output: ws.output().name(),
-                                workspace_idx: ws.index(),
-                                workspace_id: *ws.id(),
-                                size: (size.w as u32, size.h as u32),
-                                location: location.into(),
-                                fullscreened: window.fullscreen(),
-                                maximized: window.maximized(),
-                                tiled: window.tiled(),
-                                activated: true,
-                                focused: true,
-                            }
-                        })
-                    })
-                })
+                .flat_map(|mon| mon.workspaces().flat_map(|ws| ws.tiles().map(|tile| {
+                    let window = tile.window();
+                    let location = tile.location() + tile.window_loc();
+                    let size = window.size();
+                    fht_compositor_ipc::Window {
+                        id: *window.id(),
+                        title: window.title(),
+                        app_id: window.app_id(),
+                        output: ws.output().name(),
+                        workspace_idx: ws.index(),
+                        workspace_id: *ws.id(),
+                        size: (size.w as u32, size.h as u32),
+                        location: location.into(),
+                        fullscreened: window.fullscreen(),
+                        maximized: window.maximized(),
+                        tiled: window.tiled(),
+                        activated: true,
+                        focused: true,
+                    }
+                })))
                 .collect();
 
-            let window_map: HashMap<usize, _> =
-                all_windows.iter().map(|w| (w.id, w.clone())).collect();
+            let window_map: HashMap<usize, _> = all_windows.iter().map(|w| (w.id, w.clone())).collect();
 
-            for s in &self.subscribers_windows {
-                let _ = s.try_send(window_map.clone());
-            }
-
-            for (&id, subs) in &self.subscribers_window {
-                if let Some(window) = window_map.get(&id) {
-                    for s in subs {
-                        let _ = s.try_send(Some(window.clone()));
+            // Send only if different
+            if self.snapshots.windows.as_ref() != Some(&window_map) {
+                self.snapshots.windows = Some(window_map.clone());
+                for s in &self.subscribers_windows {
+                    let _ = s.try_send(window_map.clone());
+                }
+                for (&id, subs) in &self.subscribers_window {
+                    if let Some(window) = window_map.get(&id) {
+                        for s in subs {
+                            let _ = s.try_send(Some(window.clone()));
+                        }
                     }
                 }
             }
@@ -155,44 +156,45 @@ impl SubscriberManager {
                     windows: ws.windows().map(|w| *w.id()).collect(),
                 });
 
-                for s in subs {
-                    let _ = s.try_send(workspace.clone());
+                let send = self.snapshots.workspaces.get(&id) != Some(&workspace);
+                if send {
+                    self.snapshots.workspaces.insert(id, workspace.clone());
+                    for s in subs {
+                        let _ = s.try_send(workspace.clone());
+                    }
                 }
             }
         }
 
         // == Space ==
         if !self.subscribers_space.is_empty() {
-            let monitors = state.fht
-                .space
-                .monitors()
-                .map(|mon| {
-                    let workspaces = mon
-                        .workspaces()
-                        .map(|ws| fht_compositor_ipc::Workspace {
-                            output: mon.output().name(),
-                            id: *ws.id(),
-                            active_window_idx: ws.active_tile_idx(),
-                            fullscreen_window_idx: ws.fullscreened_tile_idx(),
-                            mwfact: ws.mwfact(),
-                            nmaster: ws.nmaster(),
-                            windows: ws.windows().map(|w| *w.id()).collect(),
-                        })
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .expect("always 9 workspaces per monitor");
+            let monitors = state.fht.space.monitors().map(|mon| {
+                let workspaces: [fht_compositor_ipc::Workspace; 9] = mon
+                    .workspaces()
+                    .map(|ws| fht_compositor_ipc::Workspace {
+                        output: mon.output().name(),
+                        id: *ws.id(),
+                        active_window_idx: ws.active_tile_idx(),
+                        fullscreen_window_idx: ws.fullscreened_tile_idx(),
+                        mwfact: ws.mwfact(),
+                        nmaster: ws.nmaster(),
+                        windows: ws.windows().map(|w| *w.id()).collect(),
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .expect("always 9 workspaces per monitor");
 
-                    (
-                        mon.output().name(),
-                        fht_compositor_ipc::Monitor {
-                            output: mon.output().name(),
-                            workspaces,
-                            active: mon.active(),
-                            active_workspace_idx: mon.active_workspace_idx(),
-                        },
-                    )
-                })
-                .collect();
+                (
+                    mon.output().name(),
+                    fht_compositor_ipc::Monitor {
+                        output: mon.output().name(),
+                        workspaces,
+                        active: mon.active(),
+                        active_workspace_idx: mon.active_workspace_idx(),
+                    },
+                )
+            })
+            .collect();
 
             let space = fht_compositor_ipc::Space {
                 monitors,
@@ -200,8 +202,11 @@ impl SubscriberManager {
                 primary_idx: state.fht.space.primary_monitor_idx(),
             };
 
-            for s in &self.subscribers_space {
-                let _ = s.try_send(space.clone());
+            if self.snapshots.space.as_ref() != Some(&space) {
+                self.snapshots.space = Some(space.clone());
+                for s in &self.subscribers_space {
+                    let _ = s.try_send(space.clone());
+                }
             }
         }
 
@@ -225,10 +230,26 @@ impl SubscriberManager {
                 }
             }
 
-            for s in &self.subscribers_layer_shells {
-                let _ = s.try_send(layers.clone());
+            if self.snapshots.layer_shells.as_ref() != Some(&layers) {
+                self.snapshots.layer_shells = Some(layers.clone());
+                for s in &self.subscribers_layer_shells {
+                    let _ = s.try_send(layers.clone());
+                }
             }
         }
+    }
+}
+
+fn log_to_file(msg: &str) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/fht_ipc_test.log")
+    {
+        let _ = writeln!(file, "{}", msg);
     }
 }
 
@@ -243,6 +264,7 @@ pub fn start(
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
             {
+                log_to_file("BROADCASTING GLOBALLY!");
                 try_broadcast_from_global(&state);
             }
 
