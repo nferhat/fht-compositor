@@ -3,8 +3,8 @@
 `fht-compositor` features a inter-process communication system allowing you fetch data from the
 compositor and modify the live compositor state.
 
-
 You can communicate with this IPC with one of:
+
 1. `fht-compositor ipc` subcommand in the CLI, `fht-compositor ipc --help` for more information
 
 > [!NOTE]
@@ -18,14 +18,14 @@ You can communicate with this IPC with one of:
 > # Here, both the versions are matching, no need to restart
 > Compositor: 25.03.1 (a17380aa)
 > CLI: 25.03.1 (a17380aa)
-> ````
+> ```
 
 2. Programmatic access to the IPC, through its Unix socket, useful for scripting or integrating
-  with other parts of your system:
-    * If you are using Rust, use the `fht-compositor-ipc` library directly, as it has all the
-    IPC types pre-defined with `(De)Serialize`.
-    * You can do shell scripting using `socat`, though you'll have to figure out what to write
-    inside the socket yourself.
+   with other parts of your system:
+   - If you are using Rust, use the `fht-compositor-ipc` library directly, as it has all the
+     IPC types pre-defined with `(De)Serialize`.
+   - You can do shell scripting using `socat`, though you'll have to figure out what to write
+     inside the socket yourself.
 
 > [!TIP]
 > To see how the requests/responses are formatted, you can setup and temporary socket and link it
@@ -40,20 +40,25 @@ You can communicate with this IPC with one of:
 > You can also use `fht-compositor ipc --json` to see JSON-formatted responses if you only care about
 > that.
 
-## State updates
+## Streaming State updates
 
-As of right now, the IPC doesn't support sending live events and updates to the clients, so you will
-have to resort to polling every few seconds.
+The IPC has support for sending live events and updates to all subscribed clients.
+
+You can subscribe to the IPC by using the `--subscribe` flag.
+
+> [!NOTE]
+>
+> As of now, the IPC only supports subscribing to `workspace`, `space`, `layershells`, `window` and `windows`.
 
 ::: tabs
 == Example with eww
+
 ```scheme
 ; Here, we store the space data into a global variable, updated each second.
 ; Since eww supports native JSON decoding, this is really handy
-(defpoll space-data :interval "1s"
-                    ; Initital value is empty, to make eww startup fast
-                    :initial "{\"monitors\": {}, \"primary-idx\": -1, \"active-idx\": -1}"
-                    `fht-compositor ipc --json space`)
+(deflisten space-data ; Initital value is empty, to make eww startup fast
+                      :initial "{\"monitors\": {}, \"primary-idx\": -1, \"active-idx\": -1}"
+                      `fht-compositor ipc --subscribe --json space`)
 
 ; Now, somewhere else, you can immediatly use the data to your liking
 (label :text "Output: ${space-data.monitors[0].name}")
@@ -61,6 +66,7 @@ have to resort to polling every few seconds.
 
 == Example with Quickshell
 Taken from [Isabel's Dotfiles](https://github.com/isabelroses/dotfiles)
+
 ```qml
 Process {
   id: getSelectedWorkspace
