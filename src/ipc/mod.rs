@@ -89,38 +89,44 @@ impl SubscriberManager {
         }
     }
 
-    /// Picks the data needed for subscribers, diffs it against previous snapshot, 
+    /// Picks the data needed for subscribers, diffs it against previous snapshot,
     /// and broadcasts only changes.
     pub fn diff_and_update(&mut self, state: &State) {
         log_to_file("I HEARD YOU!");
         // == Windows ==
         if !self.subscribers_windows.is_empty() || !self.subscribers_window.is_empty() {
-            let all_windows: Vec<fht_compositor_ipc::Window> = state.fht
+            let all_windows: Vec<fht_compositor_ipc::Window> = state
+                .fht
                 .space
                 .monitors()
-                .flat_map(|mon| mon.workspaces().flat_map(|ws| ws.tiles().map(|tile| {
-                    let window = tile.window();
-                    let location = tile.location() + tile.window_loc();
-                    let size = window.size();
-                    fht_compositor_ipc::Window {
-                        id: *window.id(),
-                        title: window.title(),
-                        app_id: window.app_id(),
-                        output: ws.output().name(),
-                        workspace_idx: ws.index(),
-                        workspace_id: *ws.id(),
-                        size: (size.w as u32, size.h as u32),
-                        location: location.into(),
-                        fullscreened: window.fullscreen(),
-                        maximized: window.maximized(),
-                        tiled: window.tiled(),
-                        activated: true,
-                        focused: true,
-                    }
-                })))
+                .flat_map(|mon| {
+                    mon.workspaces().flat_map(|ws| {
+                        ws.tiles().map(|tile| {
+                            let window = tile.window();
+                            let location = tile.location() + tile.window_loc();
+                            let size = window.size();
+                            fht_compositor_ipc::Window {
+                                id: *window.id(),
+                                title: window.title(),
+                                app_id: window.app_id(),
+                                output: ws.output().name(),
+                                workspace_idx: ws.index(),
+                                workspace_id: *ws.id(),
+                                size: (size.w as u32, size.h as u32),
+                                location: location.into(),
+                                fullscreened: window.fullscreen(),
+                                maximized: window.maximized(),
+                                tiled: window.tiled(),
+                                activated: true,
+                                focused: true,
+                            }
+                        })
+                    })
+                })
                 .collect();
 
-            let window_map: HashMap<usize, _> = all_windows.iter().map(|w| (w.id, w.clone())).collect();
+            let window_map: HashMap<usize, _> =
+                all_windows.iter().map(|w| (w.id, w.clone())).collect();
 
             // Send only if different
             if self.snapshots.windows.as_ref() != Some(&window_map) {
@@ -168,33 +174,37 @@ impl SubscriberManager {
 
         // == Space ==
         if !self.subscribers_space.is_empty() {
-            let monitors = state.fht.space.monitors().map(|mon| {
-                let workspaces: [fht_compositor_ipc::Workspace; 9] = mon
-                    .workspaces()
-                    .map(|ws| fht_compositor_ipc::Workspace {
-                        output: mon.output().name(),
-                        id: *ws.id(),
-                        active_window_idx: ws.active_tile_idx(),
-                        fullscreen_window_idx: ws.fullscreened_tile_idx(),
-                        mwfact: ws.mwfact(),
-                        nmaster: ws.nmaster(),
-                        windows: ws.windows().map(|w| *w.id()).collect(),
-                    })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .expect("always 9 workspaces per monitor");
+            let monitors = state
+                .fht
+                .space
+                .monitors()
+                .map(|mon| {
+                    let workspaces: [fht_compositor_ipc::Workspace; 9] = mon
+                        .workspaces()
+                        .map(|ws| fht_compositor_ipc::Workspace {
+                            output: mon.output().name(),
+                            id: *ws.id(),
+                            active_window_idx: ws.active_tile_idx(),
+                            fullscreen_window_idx: ws.fullscreened_tile_idx(),
+                            mwfact: ws.mwfact(),
+                            nmaster: ws.nmaster(),
+                            windows: ws.windows().map(|w| *w.id()).collect(),
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .expect("always 9 workspaces per monitor");
 
-                (
-                    mon.output().name(),
-                    fht_compositor_ipc::Monitor {
-                        output: mon.output().name(),
-                        workspaces,
-                        active: mon.active(),
-                        active_workspace_idx: mon.active_workspace_idx(),
-                    },
-                )
-            })
-            .collect();
+                    (
+                        mon.output().name(),
+                        fht_compositor_ipc::Monitor {
+                            output: mon.output().name(),
+                            workspaces,
+                            active: mon.active(),
+                            active_workspace_idx: mon.active_workspace_idx(),
+                        },
+                    )
+                })
+                .collect();
 
             let space = fht_compositor_ipc::Space {
                 monitors,

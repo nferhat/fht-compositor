@@ -13,10 +13,10 @@ use smithay::utils::Point;
 
 use super::workspace::{Workspace, WorkspaceRenderElement};
 use super::Config;
+use crate::fht_render_elements;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::window::Window;
-use crate::fht_render_elements;
 
 const WORKSPACE_COUNT: usize = 9;
 
@@ -89,7 +89,6 @@ impl Monitor {
 
         for (workspace, other_workspace) in self.workspaces_mut().zip(other.workspaces) {
             workspace.merge_with(other_workspace);
-             
         }
     }
 
@@ -195,7 +194,7 @@ impl Monitor {
         }
 
         self.active_idx = idx;
-         
+
         self.workspaces[self.active_idx].active_window()
     }
 

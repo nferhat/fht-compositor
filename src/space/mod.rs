@@ -29,7 +29,7 @@ use crate::input::resize_tile_grab::ResizeEdge;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::utils::RectCenterExt;
-use crate::window::Window; 
+use crate::window::Window;
 
 mod border;
 mod closing_tile;
@@ -266,7 +266,6 @@ impl Space {
         }
 
         self.monitors[self.primary_idx].merge_with(removed);
-         
     }
 
     /// Arrange the [`Monitor`] of this [`Output`].
@@ -553,7 +552,6 @@ impl Space {
 
         if let Some(new_monitor_idx) = new_monitor_idx {
             self.active_idx = new_monitor_idx;
-             
         }
 
         ret
@@ -974,7 +972,6 @@ impl Space {
                 cursor_position.to_i32_round() - output_loc,
             );
         self.active_idx = monitor_under_idx;
-         
     }
 
     /// Renders the tile affected by the current interactive swap.
