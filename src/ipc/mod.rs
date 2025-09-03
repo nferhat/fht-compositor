@@ -21,7 +21,7 @@ use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
 use crate::space::{Workspace, WorkspaceId};
-use crate::state::{State, Fht};
+use crate::state::{Fht, State};
 use crate::utils::get_credentials_for_surface;
 use crate::window::{Window, WindowId};
 
@@ -375,7 +375,7 @@ async fn handle_new_client(
             }
         }
 
-        let request = serde_json::from_str::<fht_compositor_ipc::IpcRequest>(&req_buf);
+        let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
 
         // We transform the Result::Err into a Response::Error
         match request {
@@ -437,278 +437,232 @@ enum ClientRequest {
     },
 }
 
-async fn handle_request(
-    req: fht_compositor_ipc::IpcRequest,
+/// A helper that sets up a subscription
+fn handle_subscription_req<T, F>(
+    scheduler: &calloop::futures::Scheduler<()>,
+    to_compositor: &calloop::channel::Sender<ClientRequest>,
+    client_req: F,
+    wrap: fn(T) -> Response,
+    tx: &async_channel::Sender<fht_compositor_ipc::Response>,
+) -> anyhow::Result<()>
+where
+    T: Send + 'static,
+    F: FnOnce(async_channel::Sender<T>) -> ClientRequest,
+{
+    let (sub_tx, sub_rx) = async_channel::unbounded();
+    to_compositor
+        .send(client_req(sub_tx))
+        .context("IPC communication channel closed")?;
+
+    let tx_clone = tx.clone();
+    scheduler
+        .schedule(async move {
+            while let Ok(update) = sub_rx.recv().await {
+                let _ = tx_clone.send(wrap(update)).await;
+            }
+        })
+        .unwrap();
+
+    Ok(())
+}
+
+pub async fn handle_request(
+    req: fht_compositor_ipc::Request,
     to_compositor: calloop::channel::Sender<ClientRequest>,
     tx: async_channel::Sender<fht_compositor_ipc::Response>,
     scheduler: calloop::futures::Scheduler<()>,
 ) -> anyhow::Result<()> {
-    if req.subscribe {
-        match req.request {
-            fht_compositor_ipc::Request::Windows => {
-                let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeWindows(sub_tx))?;
-
-                let rx = sub_rx.clone();
-                let tx_clone = tx.clone();
-                scheduler
-                    .schedule(async move {
-                        while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::Windows(update)).await;
-                        }
-                    })
-                    .unwrap();
+    match req {
+        // == Subscribe request == //
+        fht_compositor_ipc::Request::Subscribe(target) => match target {
+            fht_compositor_ipc::SubscribeTarget::Windows => {
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeWindows,
+                    Response::Windows,
+                    &tx,
+                )?;
             }
-
-            fht_compositor_ipc::Request::Space => {
-                let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeSpace(sub_tx))?;
-
-                let rx = sub_rx.clone();
-                let tx_clone = tx.clone();
-                scheduler
-                    .schedule(async move {
-                        while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::Space(update)).await;
-                        }
-                    })
-                    .unwrap();
+            fht_compositor_ipc::SubscribeTarget::Space => {
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeSpace,
+                    Response::Space,
+                    &tx,
+                )?;
             }
-
-            fht_compositor_ipc::Request::Workspace(id) => {
-                let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeWorkspace {
-                    id: Some(id),
-                    sender: sub_tx,
-                })?;
-
-                let rx = sub_rx.clone();
-                let tx_clone = tx.clone();
-                scheduler
-                    .schedule(async move {
-                        while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::Workspace(update)).await;
-                        }
-                    })
-                    .unwrap();
+            fht_compositor_ipc::SubscribeTarget::Workspace(id) => {
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    |sender| ClientRequest::SubscribeWorkspace {
+                        id: Some(id),
+                        sender,
+                    },
+                    Response::Workspace,
+                    &tx,
+                )?;
             }
-
-            fht_compositor_ipc::Request::LayerShells => {
-                let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeLayerShells(sub_tx))?;
-
-                let rx = sub_rx.clone();
-                let tx_clone = tx.clone();
-                scheduler
-                    .schedule(async move {
-                        while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::LayerShells(update)).await;
-                        }
-                    })
-                    .unwrap();
+            fht_compositor_ipc::SubscribeTarget::Window(id) => {
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    |sender| ClientRequest::SubscribeWindow {
+                        id: Some(id),
+                        sender,
+                    },
+                    Response::Window,
+                    &tx,
+                )?;
             }
-
-            fht_compositor_ipc::Request::Window(id) => {
-                let (sub_tx, sub_rx) = async_channel::unbounded();
-                to_compositor.send(ClientRequest::SubscribeWindow {
-                    id: Some(id),
-                    sender: sub_tx,
-                })?;
-
-                let rx = sub_rx.clone();
-                let tx_clone = tx.clone();
-                scheduler
-                    .schedule(async move {
-                        while let Ok(update) = rx.recv().await {
-                            let _ = tx_clone.send(Response::Window(update)).await;
-                        }
-                    })
-                    .unwrap();
+            fht_compositor_ipc::SubscribeTarget::LayerShells => {
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeLayerShells,
+                    Response::LayerShells,
+                    &tx,
+                )?;
             }
-
-            _ => {
-                let tx_clone = tx.clone();
-                let _ = tx_clone
-                    .send(Response::Error(
-                        "This request cannot be subscribed to.".to_string(),
-                    ))
-                    .await;
+            fht_compositor_ipc::SubscribeTarget::ALL => {
+                unimplemented!() // will be worked on in the next commit
             }
+        },
+
+        // == One shot request == //
+        fht_compositor_ipc::Request::Version => {
+            tx.send(Response::Version(crate::cli::get_version_string()))
+                .await?;
         }
-    } else {
-        let res = match req.request {
-            fht_compositor_ipc::Request::Version => {
-                Response::Version(crate::cli::get_version_string())
-            }
-            fht_compositor_ipc::Request::Outputs => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::Outputs(atx))
-                    .context("IPC communication channel closed")?;
-                let outputs = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive output information")?;
 
-                Response::Outputs(outputs)
-            }
-            fht_compositor_ipc::Request::Windows => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::Windows(atx))
-                    .context("IPC communication channel closed")?;
-                let windows = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive output information")?;
+        fht_compositor_ipc::Request::Outputs => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Outputs(atx))
+                .context("IPC communication channel closed")?;
+            let outputs = arx.recv().await?;
+            tx.send(Response::Outputs(outputs)).await?;
+        }
 
-                Response::Windows(windows)
-            }
-            fht_compositor_ipc::Request::LayerShells => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::LayerShells(atx))
-                    .context("IPC communication channel closed")?;
-                let layer_shells = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive layer-shell information")?;
+        fht_compositor_ipc::Request::Windows => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Windows(atx))
+                .context("IPC communication channel closed")?;
+            let windows = arx.recv().await?;
+            tx.send(Response::Windows(windows)).await?;
+        }
 
-                Response::LayerShells(layer_shells)
-            }
-            fht_compositor_ipc::Request::Space => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::Space(atx))
-                    .context("IPC communication channel closed")?;
-                let space = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive output information")?;
+        fht_compositor_ipc::Request::LayerShells => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::LayerShells(atx))
+                .context("IPC communication channel closed")?;
+            let layer_shells = arx.recv().await?;
+            tx.send(Response::LayerShells(layer_shells)).await?;
+        }
 
-                Response::Space(space)
-            }
-            fht_compositor_ipc::Request::Window(id) => {
-                let (atx, arx) = async_channel::bounded(1);
-                let req = ClientRequest::Window {
-                    id: Some(id),
-                    sender: atx,
-                };
-                to_compositor
-                    .send(req)
-                    .context("IPC communication channel closed")?;
-                let space = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive focused window information")?;
+        fht_compositor_ipc::Request::Space => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Space(atx))
+                .context("IPC communication channel closed")?;
+            let space = arx.recv().await?;
+            tx.send(Response::Space(space)).await?;
+        }
 
-                Response::Window(space)
-            }
-            fht_compositor_ipc::Request::Workspace(id) => {
-                let (atx, arx) = async_channel::bounded(1);
-                let req = ClientRequest::Workspace {
-                    id: Some(id),
-                    sender: atx,
-                };
-                to_compositor
-                    .send(req)
-                    .context("IPC communication channel closed")?;
-                let workspace = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive focused workspace information")?;
+        fht_compositor_ipc::Request::Window(id) => {
+            let (atx, arx) = async_channel::bounded(1);
+            let req = ClientRequest::Window {
+                id: Some(id),
+                sender: atx,
+            };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let window = arx.recv().await?;
+            tx.send(Response::Window(window)).await?;
+        }
 
-                Response::Workspace(workspace)
-            }
-            fht_compositor_ipc::Request::GetWorkspace { output, index } => {
-                let (atx, arx) = async_channel::bounded(1);
-                let req = ClientRequest::WorkspaceByIndex {
-                    output,
-                    index,
-                    sender: atx,
-                };
+        fht_compositor_ipc::Request::Workspace(id) => {
+            let (atx, arx) = async_channel::bounded(1);
+            let req = ClientRequest::Workspace {
+                id: Some(id),
+                sender: atx,
+            };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let workspace = arx.recv().await?;
+            tx.send(Response::Workspace(workspace)).await?;
+        }
 
-                to_compositor
-                    .send(req)
-                    .context("IPC communication channel closed")?;
-                let workspace = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive focused workspace information")?;
+        fht_compositor_ipc::Request::GetWorkspace { output, index } => {
+            let (atx, arx) = async_channel::bounded(1);
+            let req = ClientRequest::WorkspaceByIndex {
+                output,
+                index,
+                sender: atx,
+            };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let workspace = arx.recv().await?;
+            tx.send(Response::Workspace(workspace)).await?;
+        }
 
-                Response::Workspace(workspace)
-            }
-            fht_compositor_ipc::Request::FocusedWindow => {
-                let (atx, arx) = async_channel::bounded(1);
-                let req = ClientRequest::Window {
-                    id: None,
-                    sender: atx,
-                };
-                to_compositor
-                    .send(req)
-                    .context("IPC communication channel closed")?;
-                let space = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive focused window information")?;
+        fht_compositor_ipc::Request::FocusedWindow => {
+            let (atx, arx) = async_channel::bounded(1);
+            let req = ClientRequest::Window { id: None, sender: atx };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let window = arx.recv().await?;
+            tx.send(Response::Window(window)).await?;
+        }
 
-                Response::Window(space)
-            }
-            fht_compositor_ipc::Request::FocusedWorkspace => {
-                let (atx, arx) = async_channel::bounded(1);
-                let req = ClientRequest::Workspace {
-                    id: None,
-                    sender: atx,
-                };
-                to_compositor
-                    .send(req)
-                    .context("IPC communication channel closed")?;
-                let workspace = arx
-                    .recv()
-                    .await
-                    .context("Failed to retreive focused workspace information")?;
+        fht_compositor_ipc::Request::FocusedWorkspace => {
+            let (atx, arx) = async_channel::bounded(1);
+            let req = ClientRequest::Workspace { id: None, sender: atx };
+            to_compositor
+                .send(req)
+                .context("IPC communication channel closed")?;
+            let workspace = arx.recv().await?;
+            tx.send(Response::Workspace(workspace)).await?;
+        }
 
-                Response::Workspace(workspace)
-            }
-            fht_compositor_ipc::Request::PickWindow => {
-                let (atx, arx) = async_channel::bounded(1024);
-                to_compositor
-                    .send(ClientRequest::PickWindow(atx))
-                    .context("IPC communication channel closed")?;
-                let result = arx
-                    .recv()
-                    .await
-                    .context("Failed to receive picked window")?;
-                Response::PickedWindow(result)
-            }
-            fht_compositor_ipc::Request::PickLayerShell => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::PickLayerShell(atx))
-                    .context("IPC communication channel closed")?;
-                let result = arx
-                    .recv()
-                    .await
-                    .context("Failed to receive picked layer-shell")?;
-                Response::PickedLayerShell(result)
-            }
-            fht_compositor_ipc::Request::Action(action) => {
-                let (atx, arx) = async_channel::bounded(1);
-                to_compositor
-                    .send(ClientRequest::Action(action, atx))
-                    .context("IPC communication channel closed")?;
-                let result = arx
-                    .recv()
-                    .await
-                    .context("Failed to receive action result")?;
-                match result {
-                    Ok(()) => Response::Noop,
-                    Err(err) => Response::Error(err.to_string()),
-                }
-            }
-        };
+        fht_compositor_ipc::Request::PickWindow => {
+            let (atx, arx) = async_channel::bounded(1024);
+            to_compositor
+                .send(ClientRequest::PickWindow(atx))
+                .context("IPC communication channel closed")?;
+            let result = arx.recv().await?;
+            tx.send(Response::PickedWindow(result)).await?;
+        }
 
-        tx.send(res).await?;
+        fht_compositor_ipc::Request::PickLayerShell => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::PickLayerShell(atx))
+                .context("IPC communication channel closed")?;
+            let result = arx.recv().await?;
+            tx.send(Response::PickedLayerShell(result)).await?;
+        }
+
+        fht_compositor_ipc::Request::Action(action) => {
+            let (atx, arx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::Action(action, atx))
+                .context("IPC communication channel closed")?;
+            let result = arx.recv().await?;
+            let resp = match result {
+                Ok(()) => Response::Noop,
+                Err(err) => Response::Error(err.to_string()),
+            };
+            tx.send(resp).await?;
+        }
     }
 
     Ok(())

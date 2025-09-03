@@ -7,11 +7,7 @@ use crate::cli;
 /// Make a single request to the running `fht-compositor` IPC server.
 ///
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
-pub fn make_request(
-    request: cli::Request,
-    json: bool,
-    return_reponse_json: bool,
-) -> anyhow::Result<Option<String>> {
+pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     let request = match request {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
@@ -30,13 +26,12 @@ pub fn make_request(
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
         cli::Request::PrintSchema => {
             fht_compositor_ipc::print_schema()?;
-            return Ok(None);
+            return Ok(());
         }
-    };
-
-    let request = fht_compositor_ipc::IpcRequest {
-        request,
-        subscribe: false, // one time request
+        cli::Request::Subscribe { target } => {
+            make_subscribe_request(target, json)?;
+            return Ok(());
+        }
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -99,17 +94,13 @@ pub fn make_request(
                     Ok(serde_json::json!(null).to_string())
                 }
             },
-            fht_compositor_ipc::Response::Noop => return Ok(None),
+            fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
-        if return_reponse_json {
-            Ok(Some(json_buffer))
-        } else {
-            println!("{}", json_buffer);
-            Ok(None)
-        }
+        println!("{}", json_buffer);
+        Ok(())
     } else {
         print_formatted(&response)?;
-        Ok(None)
+        Ok(())
     }
 }
 
@@ -117,20 +108,27 @@ pub fn make_request(
 ///
 /// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
 /// variable.
-pub fn make_subscribe_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
-    let request = match request {
-        cli::Request::Windows => fht_compositor_ipc::Request::Windows,
-        cli::Request::Space => fht_compositor_ipc::Request::Space,
-        cli::Request::LayerShells => fht_compositor_ipc::Request::LayerShells,
-        cli::Request::Workspace { id } => fht_compositor_ipc::Request::Workspace(id),
-        cli::Request::Window { id } => fht_compositor_ipc::Request::Window(id),
-        other => anyhow::bail!("Cannot subscribe to {:#?}", other),
-    };
-
-    let request = fht_compositor_ipc::IpcRequest {
-        request,
-        subscribe: true, // subscription request
-    };
+pub fn make_subscribe_request(request: Option<cli::SubscribeTarget>, json: bool) -> anyhow::Result<()> {
+    let request = request.map_or(
+        fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::ALL),
+        |target| match target {
+            cli::SubscribeTarget::Windows => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Windows)
+            }
+            cli::SubscribeTarget::Space => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Space)
+            }
+            cli::SubscribeTarget::LayerShells => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::LayerShells)
+            }
+            cli::SubscribeTarget::Workspace { id } => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Workspace(id))
+            }
+            cli::SubscribeTarget::Window { id } => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Window(id))
+            }
+        },
+    );
 
     let (_, mut stream) = fht_compositor_ipc::connect()?;
     stream.set_nonblocking(false)?;

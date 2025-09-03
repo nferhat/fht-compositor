@@ -17,7 +17,7 @@
 //!
 //! ## Using the IPC
 //!
-//! When it comes to **using** the IPC, you can query some information using [`IpcRequest`] and
+//! When it comes to **using** the IPC, you can query some information using [`Request`] and
 //! get out a [`Response`].
 //!
 //! The IPC also supports Event Streaming.
@@ -61,13 +61,6 @@ pub fn print_schema() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// An IPC request information that you send to the compositor.
-#[derive(Serialize, Deserialize)]
-pub struct IpcRequest {
-    pub request: Request,
-    pub subscribe: bool,
-}
-
 /// The request you send to the compositor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -105,6 +98,25 @@ pub enum Request {
     PickLayerShell,
     /// Request the compositor to execute an action.
     Action(Action),
+    /// Subscribe and listen to streaming response
+    Subscribe(SubscribeTarget),
+}
+
+/// A subscribe request you send to the compositor.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+pub enum SubscribeTarget {
+    /// Request information about all mapped windows.
+    Windows,
+    /// Request information about the workspace system.
+    Space,
+    /// Request information about a window.
+    Window(usize),
+    /// Request information about a workspace.
+    Workspace(usize),
+    /// Request information about all layer-shells.
+    LayerShells,
+    /// Subscribe to all request.
+    ALL,
 }
 
 /// A respose from the compositor.
