@@ -24,7 +24,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
-        cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
+        cli::Request::PrintSchema => {
+            fht_compositor_ipc::print_schema()?;
+            return Ok(());
+        }
+        cli::Request::Subscribe { target } => {
+            make_subscribe_request(target, json)?;
+            return Ok(());
+        }
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -92,13 +99,120 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         println!("{}", json_buffer);
         Ok(())
     } else {
-        print_formatted(&response)?;
+        print_formatted(&response, false)?;
         Ok(())
     }
 }
 
-fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
+/// Make a subscribe request to the running `fht-compositor` IPC server for streaming results.
+///
+/// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
+/// variable.
+pub fn make_subscribe_request(
+    request: Option<cli::SubscribeTarget>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let request = request.map_or(
+        fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::ALL),
+        |target| match target {
+            cli::SubscribeTarget::Windows => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Windows)
+            }
+            cli::SubscribeTarget::Space => {
+                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Space)
+            }
+            cli::SubscribeTarget::LayerShells => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::LayerShells,
+            ),
+            cli::SubscribeTarget::Workspace { id } => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::Workspace(id),
+            ),
+            cli::SubscribeTarget::Window { id } => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::Window(id),
+            ),
+        },
+    );
+
+    let wrap_event = matches!(request, fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::ALL));
+
+    let (_, mut stream) = fht_compositor_ipc::connect()?;
+    stream.set_nonblocking(false)?;
+
+    let mut req = serde_json::to_string(&request)?;
+    req.push('\n');
+    stream.write_all(req.as_bytes())?;
+
+    let mut buf_reader = BufReader::new(&mut stream);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = buf_reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let response: fht_compositor_ipc::Response = match serde_json::from_str(&line) {
+            Ok(resp) => resp,
+            Err(err) => {
+                eprintln!("Failed to parse IPC line: {err}");
+                continue;
+            }
+        };
+
+        if json {
+            let json_buffer = serialize_subcription_response(&response, wrap_event)?;
+            println!("{}", json_buffer);
+        } else {
+            print_formatted(&response, wrap_event)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// A helper function which searialize's json and occationally
+/// warps the event so that it can be easy to read for clients.
+///
+/// - Used by `make_subscribe_request`
+fn serialize_subcription_response(
+    response: &fht_compositor_ipc::Response,
+    wrap_event: bool,
+) -> anyhow::Result<String> {
+    let (event_name, data) = match response {
+        fht_compositor_ipc::Response::Windows(w) => ("Windows", serde_json::to_value(w)?),
+        fht_compositor_ipc::Response::LayerShells(l) => ("LayerShells", serde_json::to_value(l)?),
+        fht_compositor_ipc::Response::Window(w) => ("Window", serde_json::to_value(w)?),
+        fht_compositor_ipc::Response::Workspace(ws) => ("Workspace", serde_json::to_value(ws)?),
+        fht_compositor_ipc::Response::Space(s) => ("Space", serde_json::to_value(s)?),
+        _ => ("Unknown", serde_json::to_value("Invalid response found...")?),
+    };
+
+    if wrap_event {
+        Ok(serde_json::to_string(&serde_json::json!({
+            "event": event_name,
+            "data": data
+        }))?)
+    } else {
+        Ok(serde_json::to_string(&data)?)
+    }
+}
+
+fn print_formatted(res: &fht_compositor_ipc::Response, wrap_event: bool) -> anyhow::Result<()> {
     let mut writer = std::io::BufWriter::new(std::io::stdout());
+
+    if wrap_event {
+        let event_name = match res {
+            fht_compositor_ipc::Response::Windows(_) => "Windows",
+            fht_compositor_ipc::Response::LayerShells(_) => "LayerShells",
+            fht_compositor_ipc::Response::Window(_) => "Window",
+            fht_compositor_ipc::Response::Workspace(_) => "Workspace",
+            fht_compositor_ipc::Response::Space(_) => "Space",
+            _ => "Unknown",
+        };
+        writeln!(&mut writer, "Event: {event_name}")?;
+    }
+
     match res {
         fht_compositor_ipc::Response::Version(version) => {
             println!("Compositor: {version}");
