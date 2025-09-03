@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::Context;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use once_cell::sync::Lazy;
 use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{Focus, GrabStartData};
 use smithay::reexports::calloop::generic::Generic;
@@ -24,7 +21,7 @@ use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
 use crate::space::{Workspace, WorkspaceId};
-use crate::state::State;
+use crate::state::{State, Fht};
 use crate::utils::get_credentials_for_surface;
 use crate::window::{Window, WindowId};
 
@@ -54,7 +51,7 @@ struct SubscriberSnapshots {
     layer_shells: Option<Vec<fht_compositor_ipc::LayerShell>>,
 }
 
-/// [`IpcServerSubscriberState`] Handles all the ipc stuff that we can subscribe to.
+/// [`SubscriberManager`] Handles all the ipc stuff that we can subscribe to.
 pub struct SubscriberManager {
     subscribers_windows: Vec<async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>>,
     subscribers_space: Vec<async_channel::Sender<fht_compositor_ipc::Space>>,
@@ -65,17 +62,6 @@ pub struct SubscriberManager {
         HashMap<usize, Vec<async_channel::Sender<Option<fht_compositor_ipc::Workspace>>>>,
 
     snapshots: SubscriberSnapshots,
-}
-
-/// The GLOBAL ipc subscriber manager state.
-pub static IPC_SUB_STATE: Lazy<Arc<Mutex<SubscriberManager>>> =
-    Lazy::new(|| Arc::new(Mutex::new(SubscriberManager::new())));
-
-/// Wrapper of `diff_and_update` which is an impl of [`SubscriberManager`]
-pub fn try_broadcast_from_global(state: &State) {
-    if let Ok(mut sub_mgr) = crate::ipc::IPC_SUB_STATE.lock() {
-        sub_mgr.diff_and_update(state);
-    }
 }
 
 impl SubscriberManager {
@@ -92,11 +78,10 @@ impl SubscriberManager {
 
     /// Picks the data needed for subscribers, diffs it against previous snapshot,
     /// and broadcasts only changes.
-    pub fn diff_and_update(&mut self, state: &State) {
+    pub fn diff_and_update(&mut self, fht: &Fht) {
         // == Windows ==
         if !self.subscribers_windows.is_empty() || !self.subscribers_window.is_empty() {
-            let all_windows: Vec<fht_compositor_ipc::Window> = state
-                .fht
+            let all_windows: Vec<fht_compositor_ipc::Window> = fht
                 .space
                 .monitors()
                 .flat_map(|mon| {
@@ -148,9 +133,9 @@ impl SubscriberManager {
         if !self.subscribers_workspace.is_empty() {
             for (&id, subs) in &self.subscribers_workspace {
                 let workspace = if id == usize::MAX {
-                    Some(state.fht.space.active_workspace())
+                    Some(fht.space.active_workspace())
                 } else {
-                    state.fht.space.workspace_for_id(WorkspaceId(id))
+                    fht.space.workspace_for_id(WorkspaceId(id))
                 }
                 .map(|ws| fht_compositor_ipc::Workspace {
                     output: ws.output().name(),
@@ -174,8 +159,7 @@ impl SubscriberManager {
 
         // == Space ==
         if !self.subscribers_space.is_empty() {
-            let monitors = state
-                .fht
+            let monitors = fht
                 .space
                 .monitors()
                 .map(|mon| {
@@ -208,8 +192,8 @@ impl SubscriberManager {
 
             let space = fht_compositor_ipc::Space {
                 monitors,
-                active_idx: state.fht.space.active_monitor_idx(),
-                primary_idx: state.fht.space.primary_monitor_idx(),
+                active_idx: fht.space.active_monitor_idx(),
+                primary_idx: fht.space.primary_monitor_idx(),
             };
 
             if self.snapshots.space.as_ref() != Some(&space) {
@@ -223,7 +207,7 @@ impl SubscriberManager {
         // == Layer shells ==
         if !self.subscribers_layer_shells.is_empty() {
             let mut layers = Vec::new();
-            for output in state.fht.space.outputs() {
+            for output in fht.space.outputs() {
                 let layer_map = layer_map_for_output(output);
                 let output_name = output.name();
                 for layer_surface in layer_map.layers() {
@@ -257,35 +241,6 @@ pub fn start(
 ) -> anyhow::Result<Server> {
     // First setup the communication channel between the IPC server and compositor
     let (to_compositor, from_clients) = calloop::channel::channel();
-
-    // Polling the subscription broadcast every 100 ms.
-    // Although it may seem inefficient, it is one of the most scalable
-    // approaches possible.
-    //
-    // The disadvantages of other methods are that they require immense
-    // data which we may not always be able to provide. And certain structures
-    // in this codebase are not `Clone`, so either we have to wrap everything in Arc
-    // and rewrite massive portions to work with Arc (and also deal with atomic overhead)
-    // OR use references everywhere which can clutter the codebase with lifetimes.
-    // And another disadvantage of other methods is that we have to call broadcast everywhere
-    // we mutate the [`State`] which is a maintainance burden.
-    //
-    // if there is a better approach that doesn't need polling,
-    // then its better to use that.
-    //
-    // And another important NOTE:
-    //
-    // If the IPC is getting a feature where we can do stuff like `--config ipc.poll_time n`,
-    // then I suggest that 100ms (or 50ms) will be the least count that a user can provide.
-    //
-    // Have like 0ms of polling time `MAY OR MAY NOT CRASH THE COMPOSITOR`
-    let timer = calloop::timer::Timer::immediate();
-    loop_handle
-        .insert_source(timer, move |_, _, state| {
-            try_broadcast_from_global(&state);
-            calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(100))
-        })
-        .map_err(|err| anyhow::anyhow!("Failed to insert timer source: {err}"))?;
 
     loop_handle
         .insert_source(from_clients, move |msg, _, state| {
@@ -1057,12 +1012,11 @@ impl State {
                 });
 
                 let _ = sender.send_blocking(workspace);
-                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-                    ipc.subscribers_workspace
-                        .entry(id.unwrap_or(usize::MAX))
-                        .or_default()
-                        .push(sender);
-                }
+                self.ipcsub
+                    .subscribers_workspace
+                    .entry(id.unwrap_or(usize::MAX))
+                    .or_default()
+                    .push(sender);
             }
 
             // Subscribe windows
@@ -1079,9 +1033,7 @@ impl State {
                     .collect();
 
                 let _ = tx.send_blocking(windows);
-                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-                    ipc.subscribers_windows.push(tx);
-                }
+                self.ipcsub.subscribers_windows.push(tx);
             }
 
             // Subscribe space
@@ -1133,9 +1085,7 @@ impl State {
                     primary_idx: self.fht.space.primary_monitor_idx(),
                 });
 
-                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-                    ipc.subscribers_space.push(tx);
-                }
+                self.ipcsub.subscribers_space.push(tx);
             }
 
             // Subscribe layer shells
@@ -1162,9 +1112,7 @@ impl State {
                 }
 
                 let _ = tx.send_blocking(layers);
-                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-                    ipc.subscribers_layer_shells.push(tx);
-                }
+                self.ipcsub.subscribers_layer_shells.push(tx);
             }
 
             // Subscribe single window
@@ -1208,12 +1156,11 @@ impl State {
                 });
 
                 let _ = sender.send_blocking(window);
-                if let Ok(mut ipc) = crate::ipc::IPC_SUB_STATE.lock() {
-                    ipc.subscribers_window
-                        .entry(id.unwrap_or(usize::MAX))
-                        .or_default()
-                        .push(sender);
-                }
+                self.ipcsub
+                    .subscribers_window
+                    .entry(id.unwrap_or(usize::MAX))
+                    .or_default()
+                    .push(sender);
             }
         }
 
