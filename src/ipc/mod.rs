@@ -526,8 +526,47 @@ pub async fn handle_request(
                     &tx,
                 )?;
             }
+            // TODO: Make it easier to read response?
             fht_compositor_ipc::SubscribeTarget::ALL => {
-                unimplemented!() // will be worked on in the next commit
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeWindows,
+                    Response::Windows,
+                    &tx,
+                )?;
+
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeSpace,
+                    Response::Space,
+                    &tx,
+                )?;
+
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    ClientRequest::SubscribeLayerShells,
+                    Response::LayerShells,
+                    &tx,
+                )?;
+
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    |sender| ClientRequest::SubscribeWindow { id: None, sender },
+                    Response::Window,
+                    &tx,
+                )?;
+
+                handle_subscription_req(
+                    &scheduler,
+                    &to_compositor,
+                    |sender| ClientRequest::SubscribeWorkspace { id: None, sender },
+                    Response::Workspace,
+                    &tx,
+                )?;
             }
         },
 
@@ -615,7 +654,10 @@ pub async fn handle_request(
 
         fht_compositor_ipc::Request::FocusedWindow => {
             let (atx, arx) = async_channel::bounded(1);
-            let req = ClientRequest::Window { id: None, sender: atx };
+            let req = ClientRequest::Window {
+                id: None,
+                sender: atx,
+            };
             to_compositor
                 .send(req)
                 .context("IPC communication channel closed")?;
@@ -625,7 +667,10 @@ pub async fn handle_request(
 
         fht_compositor_ipc::Request::FocusedWorkspace => {
             let (atx, arx) = async_channel::bounded(1);
-            let req = ClientRequest::Workspace { id: None, sender: atx };
+            let req = ClientRequest::Workspace {
+                id: None,
+                sender: atx,
+            };
             to_compositor
                 .send(req)
                 .context("IPC communication channel closed")?;

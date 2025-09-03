@@ -108,7 +108,10 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
 ///
 /// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
 /// variable.
-pub fn make_subscribe_request(request: Option<cli::SubscribeTarget>, json: bool) -> anyhow::Result<()> {
+pub fn make_subscribe_request(
+    request: Option<cli::SubscribeTarget>,
+    json: bool,
+) -> anyhow::Result<()> {
     let request = request.map_or(
         fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::ALL),
         |target| match target {
@@ -118,15 +121,15 @@ pub fn make_subscribe_request(request: Option<cli::SubscribeTarget>, json: bool)
             cli::SubscribeTarget::Space => {
                 fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Space)
             }
-            cli::SubscribeTarget::LayerShells => {
-                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::LayerShells)
-            }
-            cli::SubscribeTarget::Workspace { id } => {
-                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Workspace(id))
-            }
-            cli::SubscribeTarget::Window { id } => {
-                fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::Window(id))
-            }
+            cli::SubscribeTarget::LayerShells => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::LayerShells,
+            ),
+            cli::SubscribeTarget::Workspace { id } => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::Workspace(id),
+            ),
+            cli::SubscribeTarget::Window { id } => fht_compositor_ipc::Request::Subscribe(
+                fht_compositor_ipc::SubscribeTarget::Window(id),
+            ),
         },
     );
 
