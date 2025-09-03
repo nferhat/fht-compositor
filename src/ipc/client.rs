@@ -99,7 +99,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         println!("{}", json_buffer);
         Ok(())
     } else {
-        print_formatted(&response)?;
+        print_formatted(&response, false)?;
         Ok(())
     }
 }
@@ -133,10 +133,11 @@ pub fn make_subscribe_request(
         },
     );
 
+    let wrap_event = matches!(request, fht_compositor_ipc::Request::Subscribe(fht_compositor_ipc::SubscribeTarget::ALL));
+
     let (_, mut stream) = fht_compositor_ipc::connect()?;
     stream.set_nonblocking(false)?;
 
-    // Send the subscription request
     let mut req = serde_json::to_string(&request)?;
     req.push('\n');
     stream.write_all(req.as_bytes())?;
@@ -148,7 +149,6 @@ pub fn make_subscribe_request(
         line.clear();
         let bytes_read = buf_reader.read_line(&mut line)?;
         if bytes_read == 0 {
-            // EOF
             break;
         }
 
@@ -161,34 +161,58 @@ pub fn make_subscribe_request(
         };
 
         if json {
-            let json_buffer = match response {
-                fht_compositor_ipc::Response::Windows(windows) => serde_json::to_string(&windows),
-                fht_compositor_ipc::Response::LayerShells(layer_shells) => {
-                    serde_json::to_string(&layer_shells)
-                }
-                fht_compositor_ipc::Response::Window(window) => serde_json::to_string(&window),
-                fht_compositor_ipc::Response::Workspace(workspace) => {
-                    match &workspace {
-                        // We unwrap the Some case in case the user asked for the FocusedWorkspace,
-                        // which will always be present
-                        Some(workspace) => serde_json::to_string(workspace),
-                        none => serde_json::to_string(none),
-                    }
-                }
-                fht_compositor_ipc::Response::Space(space) => serde_json::to_string(&space),
-                _ => serde_json::to_string("Invalid response found..."),
-            }?;
-            println!("{}", &json_buffer);
+            let json_buffer = serialize_subcription_response(&response, wrap_event)?;
+            println!("{}", json_buffer);
         } else {
-            print_formatted(&response)?;
+            print_formatted(&response, wrap_event)?;
         }
     }
 
     Ok(())
 }
 
-fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
+/// A helper function which searialize's json and occationally
+/// warps the event so that it can be easy to read for clients.
+///
+/// - Used by `make_subscribe_request`
+fn serialize_subcription_response(
+    response: &fht_compositor_ipc::Response,
+    wrap_event: bool,
+) -> anyhow::Result<String> {
+    let (event_name, data) = match response {
+        fht_compositor_ipc::Response::Windows(w) => ("Windows", serde_json::to_value(w)?),
+        fht_compositor_ipc::Response::LayerShells(l) => ("LayerShells", serde_json::to_value(l)?),
+        fht_compositor_ipc::Response::Window(w) => ("Window", serde_json::to_value(w)?),
+        fht_compositor_ipc::Response::Workspace(ws) => ("Workspace", serde_json::to_value(ws)?),
+        fht_compositor_ipc::Response::Space(s) => ("Space", serde_json::to_value(s)?),
+        _ => ("Unknown", serde_json::to_value("Invalid response found...")?),
+    };
+
+    if wrap_event {
+        Ok(serde_json::to_string(&serde_json::json!({
+            "event": event_name,
+            "data": data
+        }))?)
+    } else {
+        Ok(serde_json::to_string(&data)?)
+    }
+}
+
+fn print_formatted(res: &fht_compositor_ipc::Response, wrap_event: bool) -> anyhow::Result<()> {
     let mut writer = std::io::BufWriter::new(std::io::stdout());
+
+    if wrap_event {
+        let event_name = match res {
+            fht_compositor_ipc::Response::Windows(_) => "Windows",
+            fht_compositor_ipc::Response::LayerShells(_) => "LayerShells",
+            fht_compositor_ipc::Response::Window(_) => "Window",
+            fht_compositor_ipc::Response::Workspace(_) => "Workspace",
+            fht_compositor_ipc::Response::Space(_) => "Space",
+            _ => "Unknown",
+        };
+        writeln!(&mut writer, "Event: {event_name}")?;
+    }
+
     match res {
         fht_compositor_ipc::Response::Version(version) => {
             println!("Compositor: {version}");

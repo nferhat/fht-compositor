@@ -526,7 +526,6 @@ pub async fn handle_request(
                     &tx,
                 )?;
             }
-            // TODO: Make it easier to read response?
             fht_compositor_ipc::SubscribeTarget::ALL => {
                 handle_subscription_req(
                     &scheduler,

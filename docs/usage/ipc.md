@@ -44,11 +44,17 @@ You can communicate with this IPC with one of:
 
 The IPC has support for sending live events and updates to all subscribed clients.
 
-You can subscribe to the IPC by using the `--subscribe` flag.
+You can subscribe to the IPC by using the `subscribe` subcommand.
 
 > [!NOTE]
 >
 > As of now, the IPC only supports subscribing to `workspace`, `space`, `layer-shells`, `window` and `windows`.
+>
+> You can subscribe to the workspace event like this:
+>
+> ```sh
+> $ fht-compositor ipc subscribe workspace
+> ```
 
 ::: tabs
 == Example with eww
@@ -58,7 +64,7 @@ You can subscribe to the IPC by using the `--subscribe` flag.
 ; Since eww supports native JSON decoding, this is really handy
 (deflisten space-data ; Initital value is empty, to make eww startup fast
                       :initial "{\"monitors\": {}, \"primary-idx\": -1, \"active-idx\": -1}"
-                      `fht-compositor ipc --subscribe --json space`)
+                      `fht-compositor ipc --json subscribe space`)
 
 ; Now, somewhere else, you can immediatly use the data to your liking
 (label :text "Output: ${space-data.monitors[0].name}")
