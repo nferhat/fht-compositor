@@ -416,6 +416,7 @@ enum ClientRequest {
     },
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
     PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
+    CursorPosition(async_channel::Sender<(f64, f64)>),
     Action(
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
@@ -694,7 +695,14 @@ pub async fn handle_request(
             let result = arx.recv().await?;
             tx.send(Response::PickedLayerShell(result)).await?;
         }
-
+        fht_compositor_ipc::Request::CursorPosition => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::CursorPosition(tx))
+                .context("IPC communication channel closed")?;
+            let (x, y) = rx.recv().await.context("Failed to receive action result")?;
+            Ok(Response::CursorPosition { x, y })
+        }
         fht_compositor_ipc::Request::Action(action) => {
             let (atx, arx) = async_channel::bounded(1);
             to_compositor
@@ -988,6 +996,9 @@ impl State {
                 };
                 let pointer = self.fht.pointer.clone();
                 pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
+            }
+            ClientRequest::CursorPosition(tx) => {
+                tx.send_blocking(self.fht.pointer.current_location().into())?;
             }
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;

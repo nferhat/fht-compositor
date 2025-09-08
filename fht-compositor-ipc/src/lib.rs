@@ -96,6 +96,8 @@ pub enum Request {
     /// Request the user to pick a layer-shell. On the next click, the information of the
     /// layer-shell under the pointer cursor will be sent back, if any.
     PickLayerShell,
+    /// Request the cursor position.
+    CursorPosition,
     /// Request the compositor to execute an action.
     Action(Action),
     /// Subscribe and listen to streaming response
@@ -141,6 +143,8 @@ pub enum Response {
     PickedWindow(PickWindowResult),
     /// The picked layer shell by the user.
     PickedLayerShell(PickLayerShellResult),
+    /// The cursor position.
+    CursorPosition { x: f64, y: f64 },
     /// There was an error handling the request.
     Error(String),
     /// Noop, for requests that do not need a result/output.
