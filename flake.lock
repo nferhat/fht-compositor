@@ -11,11 +11,11 @@
         "rust-overlay": []
       },
       "locked": {
-        "lastModified": 1754412932,
-        "narHash": "sha256-h+9iRGxsO30qt6XmdB7si9FtPSKJ4PmJXcIyXLWm1QU=",
+        "lastModified": 1757515251,
+        "narHash": "sha256-msst/d5JaJwssgXv1bqxg9L1pxpCQ0s2P6SFem+mOwE=",
         "owner": "nferhat",
         "repo": "fht-share-picker",
-        "rev": "584625e7eaf319e43d9d3a50e84c40980d54546d",
+        "rev": "896322e1e9c76e1e974ae9ce8c107f9a358fe19d",
         "type": "github"
       },
       "original": {
