@@ -603,7 +603,7 @@ impl Workspace {
             }
         };
         if self.config.focus_new_windows {
-            self.active_tile_idx = Some(new_idx)
+            self.active_tile_idx = Some(new_idx);
         }
 
         self.arrange_tiles(animate);

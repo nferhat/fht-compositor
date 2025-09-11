@@ -25,7 +25,14 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
         cli::Request::CursorPosition => fht_compositor_ipc::Request::CursorPosition,
-        cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
+        cli::Request::PrintSchema => {
+            fht_compositor_ipc::print_schema()?;
+            return Ok(());
+        }
+        cli::Request::Subscribe => {
+            make_subscribe_request(json)?;
+            return Ok(());
+        }
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -96,13 +103,87 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         println!("{}", json_buffer);
         Ok(())
     } else {
-        print_formatted(&response)?;
+        print_formatted(&response, false)?;
         Ok(())
     }
 }
 
-fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
+/// Make a subscribe request to the running `fht-compositor` IPC server for streaming results.
+///
+/// Just like `make_request`, uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment
+/// variable.
+pub fn make_subscribe_request(json: bool) -> anyhow::Result<()> {
+    let request = fht_compositor_ipc::Request::Subscribe;
+
+    let (_, mut stream) = fht_compositor_ipc::connect()?;
+    stream.set_nonblocking(false)?;
+
+    let mut req = serde_json::to_string(&request)?;
+    req.push('\n');
+    stream.write_all(req.as_bytes())?;
+
+    let mut buf_reader = BufReader::new(&mut stream);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = buf_reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let response: fht_compositor_ipc::Response = match serde_json::from_str(&line) {
+            Ok(resp) => resp,
+            Err(err) => {
+                eprintln!("Failed to parse IPC line: {err}");
+                continue;
+            }
+        };
+
+        if json {
+            let (event_name, data) = match response {
+                fht_compositor_ipc::Response::Windows(w) => ("Windows", serde_json::to_value(w)?),
+                fht_compositor_ipc::Response::LayerShells(l) => {
+                    ("LayerShells", serde_json::to_value(l)?)
+                }
+                fht_compositor_ipc::Response::Window(w) => ("Window", serde_json::to_value(w)?),
+                fht_compositor_ipc::Response::Workspace(ws) => {
+                    ("Workspace", serde_json::to_value(ws)?)
+                }
+                fht_compositor_ipc::Response::Space(s) => ("Space", serde_json::to_value(s)?),
+                _ => (
+                    "Unknown",
+                    serde_json::to_value("Invalid response found...")?,
+                ),
+            };
+            let json_buffer = serde_json::to_string(&serde_json::json!({
+                "event": event_name,
+                "data": data
+            }))?;
+            println!("{}", json_buffer);
+        } else {
+            print_formatted(&response, true)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn print_formatted(res: &fht_compositor_ipc::Response, wrap_event: bool) -> anyhow::Result<()> {
     let mut writer = std::io::BufWriter::new(std::io::stdout());
+
+    if wrap_event {
+        let event_name = match res {
+            fht_compositor_ipc::Response::Windows(_) => "Windows",
+            fht_compositor_ipc::Response::LayerShells(_) => "LayerShells",
+            fht_compositor_ipc::Response::Window(_) => "Window",
+            fht_compositor_ipc::Response::Workspace(_) => "Workspace",
+            fht_compositor_ipc::Response::Space(_) => "Space",
+            _ => "Unknown",
+        };
+        writeln!(&mut writer, "Event: {event_name}")?;
+    }
+
     match res {
         fht_compositor_ipc::Response::Version(version) => {
             println!("Compositor: {version}");

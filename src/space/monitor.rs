@@ -88,7 +88,7 @@ impl Monitor {
         );
 
         for (workspace, other_workspace) in self.workspaces_mut().zip(other.workspaces) {
-            workspace.merge_with(other_workspace)
+            workspace.merge_with(other_workspace);
         }
     }
 
@@ -194,6 +194,7 @@ impl Monitor {
         }
 
         self.active_idx = idx;
+
         self.workspaces[self.active_idx].active_window()
     }
 

@@ -1,9 +1,9 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
-use fht_compositor_ipc::{Request, Response};
+use fht_compositor_ipc::{IpcRequest, Request, Response};
 
-fn write_req(stream: &mut UnixStream, req: Request) -> Response {
+fn write_req(stream: &mut UnixStream, req: IpcRequest) -> Response {
     let mut req = serde_json::to_string(&req).unwrap();
     req.push('\n'); // it is required to append a newline.
     stream.write_all(req.as_bytes()).unwrap();
@@ -19,7 +19,21 @@ fn write_req(stream: &mut UnixStream, req: Request) -> Response {
 fn main() {
     let (_, mut stream) = fht_compositor_ipc::connect().unwrap();
     // Example where we get two responses
-    dbg!(write_req(&mut stream, Request::Space));
-    dbg!(write_req(&mut stream, Request::LayerShells));
+    {
+        dbg!(write_req(
+            &mut stream,
+            IpcRequest {
+                request: Request::Space,
+                subscribe: false
+            }
+        ));
+        dbg!(write_req(
+            &mut stream,
+            IpcRequest {
+                request: Request::LayerShells,
+                subscribe: false
+            }
+        ));
+    }
     stream.set_nonblocking(false).unwrap();
 }

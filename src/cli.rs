@@ -32,9 +32,9 @@ pub struct Cli {
 pub enum Command {
     /// Check the compositor configuration for any errors.
     CheckConfiguration,
-    /// Generate shell completions for shell
+    /// Generate shell completions for shell.
     GenerateCompletions { shell: clap_complete::Shell },
-    /// Execute an IPC [`Request`].
+    /// Execute an IPC Request.
     Ipc {
         #[command(subcommand)]
         request: Request,
@@ -96,6 +96,8 @@ pub enum Request {
     /// Print the JSON schema for the IPC [`Request`](fht_compositor_ipc::Request) type. You can
     /// feed this schema into generators to integrate with other languages.
     PrintSchema,
+    /// Subscribe and listen to streaming response
+    Subscribe,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
