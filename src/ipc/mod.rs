@@ -475,100 +475,47 @@ pub async fn handle_request(
 ) -> anyhow::Result<()> {
     match req {
         // == Subscribe request == //
-        fht_compositor_ipc::Request::Subscribe(target) => match target {
-            fht_compositor_ipc::SubscribeTarget::Windows => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeWindows,
-                    Response::Windows,
-                    &tx,
-                )?;
-            }
-            fht_compositor_ipc::SubscribeTarget::Space => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeSpace,
-                    Response::Space,
-                    &tx,
-                )?;
-            }
-            fht_compositor_ipc::SubscribeTarget::Workspace(id) => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    |sender| ClientRequest::SubscribeWorkspace {
-                        id: Some(id),
-                        sender,
-                    },
-                    Response::Workspace,
-                    &tx,
-                )?;
-            }
-            fht_compositor_ipc::SubscribeTarget::Window(id) => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    |sender| ClientRequest::SubscribeWindow {
-                        id: Some(id),
-                        sender,
-                    },
-                    Response::Window,
-                    &tx,
-                )?;
-            }
-            fht_compositor_ipc::SubscribeTarget::LayerShells => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeLayerShells,
-                    Response::LayerShells,
-                    &tx,
-                )?;
-            }
-            fht_compositor_ipc::SubscribeTarget::ALL => {
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeWindows,
-                    Response::Windows,
-                    &tx,
-                )?;
+        fht_compositor_ipc::Request::Subscribe => {
+            handle_subscription_req(
+                &scheduler,
+                &to_compositor,
+                ClientRequest::SubscribeWindows,
+                Response::Windows,
+                &tx,
+            )?;
 
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeSpace,
-                    Response::Space,
-                    &tx,
-                )?;
+            handle_subscription_req(
+                &scheduler,
+                &to_compositor,
+                ClientRequest::SubscribeSpace,
+                Response::Space,
+                &tx,
+            )?;
 
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    ClientRequest::SubscribeLayerShells,
-                    Response::LayerShells,
-                    &tx,
-                )?;
+            handle_subscription_req(
+                &scheduler,
+                &to_compositor,
+                ClientRequest::SubscribeLayerShells,
+                Response::LayerShells,
+                &tx,
+            )?;
 
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    |sender| ClientRequest::SubscribeWindow { id: None, sender },
-                    Response::Window,
-                    &tx,
-                )?;
+            handle_subscription_req(
+                &scheduler,
+                &to_compositor,
+                |sender| ClientRequest::SubscribeWindow { id: None, sender },
+                Response::Window,
+                &tx,
+            )?;
 
-                handle_subscription_req(
-                    &scheduler,
-                    &to_compositor,
-                    |sender| ClientRequest::SubscribeWorkspace { id: None, sender },
-                    Response::Workspace,
-                    &tx,
-                )?;
-            }
-        },
+            handle_subscription_req(
+                &scheduler,
+                &to_compositor,
+                |sender| ClientRequest::SubscribeWorkspace { id: None, sender },
+                Response::Workspace,
+                &tx,
+            )?;
+        }
 
         // == One shot request == //
         fht_compositor_ipc::Request::Version => {
@@ -696,12 +643,12 @@ pub async fn handle_request(
             tx.send(Response::PickedLayerShell(result)).await?;
         }
         fht_compositor_ipc::Request::CursorPosition => {
-            let (tx, rx) = async_channel::bounded(1);
+            let (atx, arx) = async_channel::bounded(1);
             to_compositor
-                .send(ClientRequest::CursorPosition(tx))
+                .send(ClientRequest::CursorPosition(atx))
                 .context("IPC communication channel closed")?;
-            let (x, y) = rx.recv().await.context("Failed to receive action result")?;
-            Ok(Response::CursorPosition { x, y })
+            let (x, y) = arx.recv().await.context("Failed to receive action result")?;
+            tx.send(Response::CursorPosition { x, y }).await?;
         }
         fht_compositor_ipc::Request::Action(action) => {
             let (atx, arx) = async_channel::bounded(1);

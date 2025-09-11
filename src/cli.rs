@@ -97,31 +97,7 @@ pub enum Request {
     /// feed this schema into generators to integrate with other languages.
     PrintSchema,
     /// Subscribe and listen to streaming response
-    Subscribe {
-        #[command(subcommand)]
-        target: Option<SubscribeTarget>,
-    },
-}
-
-/// A subscribe request you send to the compositor.
-#[derive(Debug, Clone, PartialEq, clap::Subcommand)]
-pub enum SubscribeTarget {
-    /// Request information about all mapped windows.
-    Windows,
-    /// Request information about the workspace system.
-    Space,
-    /// Request information about a window.
-    Window {
-        #[arg(long)]
-        id: usize,
-    },
-    /// Request information about a workspace.
-    Workspace {
-        #[arg(long)]
-        id: usize,
-    },
-    /// Request information about all layer-shells.
-    LayerShells,
+    Subscribe,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

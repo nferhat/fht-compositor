@@ -22,13 +22,13 @@
 //!
 //! The IPC also supports Event Streaming.
 //!
-//! To use it, `--subscribe` command is used.
+//! To use it, `subscribe` command is used.
 //!
 //! **Example:**
 //!
 //! ```sh
-//! # Supported requests: workspace, windows, window, space, layer-shells
-//! $ fht-compositor ipc --subscribe workspace
+//! # Supported responses: workspace, windows, window, space, layer-shells
+//! $ fht-compositor ipc subscribe
 //! # ... requests will stream when internal data changes
 //! ```
 
@@ -101,24 +101,7 @@ pub enum Request {
     /// Request the compositor to execute an action.
     Action(Action),
     /// Subscribe and listen to streaming response
-    Subscribe(SubscribeTarget),
-}
-
-/// A subscribe request you send to the compositor.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
-pub enum SubscribeTarget {
-    /// Request information about all mapped windows.
-    Windows,
-    /// Request information about the workspace system.
-    Space,
-    /// Request information about a window.
-    Window(usize),
-    /// Request information about a workspace.
-    Workspace(usize),
-    /// Request information about all layer-shells.
-    LayerShells,
-    /// Subscribe to all request.
-    ALL,
+    Subscribe,
 }
 
 /// A respose from the compositor.
