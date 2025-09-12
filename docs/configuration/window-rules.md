@@ -170,6 +170,13 @@ floating = true
 
 ---
 
+
+#### `location.x`, `location.y`
+
+The position to open the tile in, if its floating. This takes precedence over the `centered` parameter.
+
+---
+
 #### `border`, `blur`, `shadow`
 
 These values take the same fields as their versions in the [decorations configuration](/configuration/decorations),

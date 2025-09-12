@@ -701,12 +701,19 @@ impl Space {
     pub fn move_window_to_output(&mut self, window: &Window, output: &Output, animate: bool) {
         // If we try to add the window back into its original workspace.
         let mut original_workspace_id = None;
+        let mut insert_location = None;
         'monitors: for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
+                let location = workspace.tile_location(window);
+
                 if workspace.remove_window(window, true) {
                     // We successfully removed the window,
                     // Stop checking for other monitors
                     original_workspace_id = Some(workspace.id());
+                    let is_floating = !window.tiled();
+                    if is_floating {
+                        insert_location = Some(location).flatten();
+                    }
                     break 'monitors;
                 }
             }
@@ -722,12 +729,12 @@ impl Space {
             let original_workspace = self
                 .workspace_mut_for_id(original_workspace_id)
                 .expect("original_workspace_id should always be valid");
-            original_workspace.insert_window(window.clone(), animate);
+            original_workspace.insert_window(window.clone(), insert_location, animate);
             return;
         };
 
         let active = target_monitor.active_workspace_mut();
-        active.insert_window(window.clone(), animate);
+        active.insert_window(window.clone(), insert_location, animate);
     }
 
     /// Move this [`Window`] to a given [`Workspace`].
@@ -739,13 +746,23 @@ impl Space {
     ) {
         // If we try to add the window back into its original workspace.
         let mut original_workspace_id = None;
+        let mut insert_location = None;
+
         'monitors: for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
                 if workspace.remove_window(window, true) {
-                    // We successfully removed the window,
-                    // Stop checking for other monitors
-                    original_workspace_id = Some(workspace.id());
-                    break 'monitors;
+                    let location = workspace.tile_location(window);
+
+                    if workspace.remove_window(window, true) {
+                        // We successfully removed the window,
+                        // Stop checking for other monitors
+                        original_workspace_id = Some(workspace.id());
+                        let is_floating = !window.tiled();
+                        if is_floating {
+                            insert_location = Some(location).flatten();
+                        }
+                        break 'monitors;
+                    }
                 }
             }
         }
@@ -763,11 +780,11 @@ impl Space {
             let original_workspace = self
                 .workspace_mut_for_id(original_workspace_id)
                 .expect("original_workspace_id should always be valid");
-            original_workspace.insert_window(window.clone(), animate);
+            original_workspace.insert_window(window.clone(), insert_location, animate);
             return;
         };
 
-        target_workspace.insert_window(window.clone(), animate);
+        target_workspace.insert_window(window.clone(), insert_location, animate);
     }
 
     /// Get the fullscreen [`Window`] under the `point`, and its position in global space.

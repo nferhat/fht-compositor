@@ -22,7 +22,7 @@ use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
 use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
-use smithay::utils::Transform as SmithayTransform;
+use smithay::utils::{Logical, Transform as SmithayTransform};
 use toml::{Table, Value};
 
 static DEFAULT_CONFIG_CONTENTS: &str = include_str!("../../res/compositor.toml");
@@ -1151,6 +1151,7 @@ pub struct WindowRule {
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
+    pub location: Option<Position>,
     pub border: BorderOverrides,
     pub blur: BlurOverrides,
     pub shadow: ShadowOverrides,
@@ -1376,9 +1377,15 @@ pub enum VrrMode {
 
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-pub struct OutputPosition {
+pub struct Position {
     pub x: i32,
     pub y: i32,
+}
+
+impl Into<smithay::utils::Point<i32, Logical>> for Position {
+    fn into(self) -> smithay::utils::Point<i32, Logical> {
+        (self.x, self.y).into()
+    }
 }
 
 #[derive(Default, Debug, Clone, Deserialize, PartialEq)]
@@ -1391,7 +1398,7 @@ pub struct Output {
     pub mode: Option<(u16, u16, Option<f64>)>,
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
-    pub position: Option<OutputPosition>,
+    pub position: Option<Position>,
     pub vrr: VrrMode,
 }
 
