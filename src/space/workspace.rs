@@ -597,7 +597,7 @@ impl Workspace {
             //
             // Doing this allows for more natural interactions, opening a child window then closing
             // it automatically focuses the parent window again.
-            self.tiles.insert(parent_idx.saturating_sub(1), tile);
+            self.tiles.insert(parent_idx, tile);
             parent_idx
         } else {
             match self.config.insert_window_strategy {
