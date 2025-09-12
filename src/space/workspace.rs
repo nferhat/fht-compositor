@@ -11,7 +11,7 @@ use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 
-use super::bsp::BspTree;
+use super::tree::Tree;
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
 use super::Config;
@@ -831,7 +831,7 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::BinarySpacePartition => {
+            WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
                 if closest_idx < self.nmaster {
                     if edges.intersects(ResizeEdge::RIGHT) && self.nmaster == self.tiles.len() {
                         // We need a way to create a slave stack when there are only masters window,
@@ -1403,7 +1403,7 @@ impl Workspace {
                     }
                 }
             }
-            WorkspaceLayout::BinarySpacePartition => {
+            WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
                 master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
                 stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
 
@@ -1414,10 +1414,10 @@ impl Workspace {
                     stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
                 }
 
-                let mut bsp_tree =
-                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
-                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
-                let leaves = bsp_tree.leaves(0);
+                let mut tree =
+                    Tree::new(self.layouts[self.active_layout_idx], stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = tree.into_leaves(0);
 
                 if (0..nmaster).contains(&(unconfigured_idx as i32)) {
                     let tiles = tiled_proportions
@@ -1695,7 +1695,7 @@ impl Workspace {
                     right_geo.loc.y += height + inner_gaps;
                 }
             }
-            WorkspaceLayout::BinarySpacePartition => {
+            WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
                 master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
                 // we handle inner gaps for stack tiles in the BSP tree instead
 
@@ -1715,10 +1715,10 @@ impl Workspace {
                     proportion_length(&proportions, master_geo.size.h)
                 };
 
-                let mut bsp_tree =
-                    BspTree::new(stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
-                bsp_tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
-                let leaves = bsp_tree.leaves(0);
+                let mut tree =
+                    Tree::new(layout, stack_geo, (tiles_len - nmaster) as usize, inner_gaps);
+                tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = tree.into_leaves(0);
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if Some(idx) == self.fullscreened_tile_idx {
