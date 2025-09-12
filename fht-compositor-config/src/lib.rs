@@ -1164,6 +1164,7 @@ pub struct WindowRule {
     pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
     pub vrr: Option<bool>,      // only effective when the window is on the primary plane
+    pub skip_focus: Option<bool>,
 }
 
 // NOTE: For layer shells we by default disable blur and shadow

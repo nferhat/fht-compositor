@@ -512,11 +512,14 @@ impl Workspace {
 
         window.request_bounds(Some(self.output.geometry().size));
         window.configure_for_output(&self.output);
+        let skip_focus = window.rules().skip_focus.unwrap_or(false);
+        let is_floating = !window.tiled();
+
         let mut tile = Tile::new(window.clone(), Rc::clone(&self.config));
         let mut parent_idx = None;
         tile.start_opening_animation();
 
-        if !tile.window().tiled() {
+        if is_floating {
             let rules = tile.window().rules();
             let (centered, centered_in_parent) = (rules.centered, rules.centered_in_parent);
             drop(rules);
@@ -619,7 +622,7 @@ impl Workspace {
                 }
             }
         };
-        if self.config.focus_new_windows {
+        if self.config.focus_new_windows && !skip_focus {
             self.active_tile_idx = Some(new_idx)
         }
 

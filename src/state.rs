@@ -2087,6 +2087,7 @@ pub struct ResolvedWindowRules {
     pub centered: Option<bool>,
     pub centered_in_parent: Option<bool>,
     pub vrr: Option<bool>,
+    pub skip_focus: Option<bool>,
 }
 
 impl ResolvedWindowRules {
@@ -2169,6 +2170,10 @@ impl ResolvedWindowRules {
 
             if let Some(vrr) = rule.vrr {
                 resolved_rules.vrr = Some(vrr);
+            }
+
+            if let Some(skip_focus) = rule.skip_focus {
+                resolved_rules.skip_focus = Some(skip_focus);
             }
         }
 
