@@ -251,7 +251,7 @@ is fullscreened)
 ### `skip-focus`
 
 Don't focus this window immediately when it gets opened, regardless of the
-[`general.focus-follows`](configuration/general#focus-new-windows) setting.
+[`general.focus-follows`](/configuration/general#focus-new-windows) setting.
 
 This is a hack for "notification windows" for XWwayland programs, such as
 [gpu-screen-recorder](https://git.dec05eba.com/gpu-screen-recorder-ui/about/).
