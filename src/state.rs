@@ -92,7 +92,6 @@ use crate::{cli, ipc};
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
-    pub current_swipe_fingers: Option<u32>,
 }
 
 impl State {
@@ -146,7 +145,7 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self { fht, backend, current_swipe_fingers: None }
+        Self { fht, backend }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
@@ -698,6 +697,9 @@ pub struct Fht {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
+
+    pub current_swipe_fingers: Option<u32>,
+    pub gesture_action_executed: bool,
 }
 
 impl Fht {
@@ -911,6 +913,9 @@ impl Fht {
             xdg_activation_state,
             xdg_shell_state,
             xdg_foreign_state,
+
+            current_swipe_fingers: None,
+            gesture_action_executed: false,
         }
     }
 

@@ -1011,6 +1011,10 @@ pub struct WorkspaceSwitchAnimation {
         deserialize_with = "deserialize_duration_millis"
     )]
     pub duration: Duration,
+    pub swipe_distance: f64,
+    pub swipe_cancel_ratio: f64,
+    pub swipe_min_speed_to_force: f64,
+    pub direction_detection_threshold: f64,
 }
 
 impl Default for WorkspaceSwitchAnimation {
@@ -1020,6 +1024,10 @@ impl Default for WorkspaceSwitchAnimation {
             curve: default_workspace_switch_curve(),
             duration: default_workspace_switch_animation_duration(),
             direction: WorkspaceSwitchAnimationDirection::Horizontal,
+            swipe_distance: 200.0,
+            swipe_cancel_ratio: 0.3,
+            swipe_min_speed_to_force: 500.0,
+            direction_detection_threshold: 20.0,
         }
     }
 }
@@ -1460,12 +1468,13 @@ pub struct GesturePattern {
     pub direction: GestureDirection,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 pub enum GestureDirection {
     Left,
     Right,
     Up,
     Down,
+    None,
 }
 
 impl<'de> Deserialize<'de> for GesturePattern {

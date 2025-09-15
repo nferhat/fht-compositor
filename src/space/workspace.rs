@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use fht_animation::Animation;
-use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
+use fht_compositor_config::{GestureAction, GestureDirection, InsertWindowStrategy, WorkspaceLayout, WorkspaceSwitchAnimation};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
@@ -52,6 +52,32 @@ struct InteractiveResize {
     initial_window_geometry: Rectangle<i32, Logical>,
     edges: ResizeEdge,
 }
+
+// for some reasons fingers and initial_workspace_idx are told as not used. They are used.
+#[derive(Debug)]
+pub struct SwipeGestureState {
+    pub direction: Option<GestureDirection>,
+    pub fingers: u32,
+    pub total_offset: Point<f64, Logical>,
+    pub screen_width: f64,
+    pub swipe_distance: f64,
+    pub cancel_ratio: f64,
+    pub min_speed_to_force: f64,
+    pub direction_detection_threshold: f64,
+    pub initial_workspace_idx: usize,
+    pub last_update_time: Duration,
+    pub current_velocity: f64,
+}
+
+#[derive(Debug)]
+pub enum RenderOffsetAnimation {
+    Simple(Animation<[i32; 2]>),
+    GestureTracking {
+        gesture_state: SwipeGestureState,
+        base_offset: Point<i32, Logical>,
+    },
+}
+
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -123,11 +149,12 @@ pub struct Workspace {
     /// user experience.
     has_transient_layout_changes: bool,
 
-    /// Render offset of this workspace.
+    /// An animation that runs when fullscreening/unfullscreening a window.
     ///
-    /// This is used to achieve workspace switch animations, this relocates all the generated
-    /// render elements from [`Workspace::render`].
-    render_offset: Option<Animation<[i32; 2]>>,
+    /// This is used to achieve a smooth transition in and out of fullscreen.
+    /// The animation moves the workspace render offset from 0 to the output width (or
+    /// negative width) depending on the direction of the workspace switch.
+    pub render_offset_animation: Option<RenderOffsetAnimation>,
 
     /// Fade out animations for non-fullscreen windows.
     ///
@@ -164,7 +191,7 @@ impl Workspace {
             nmaster: config.nmaster,
             gaps: config.gaps,
             has_transient_layout_changes: false,
-            render_offset: None,
+            render_offset_animation: None,
             fullscreen_fade_animation: None,
             interactive_resize: None,
             config: Rc::clone(config),
@@ -1784,10 +1811,29 @@ impl Workspace {
 
     /// Returns the current value of the render offset
     pub fn render_offset(&self) -> Option<Point<i32, Logical>> {
-        self.render_offset
-            .as_ref()
-            .map(Animation::value)
-            .map(|&[x, y]| Point::from((x, y)))
+        match &self.render_offset_animation {
+            Some(RenderOffsetAnimation::Simple(animation)) => {
+                let [x, y] = *animation.value();
+                Some(Point::from((x, y)))
+            }
+            Some(RenderOffsetAnimation::GestureTracking { gesture_state, base_offset }) => {
+                let Some(direction) = &gesture_state.direction else {
+                    return Some(*base_offset);
+                };
+                
+                let progress = match direction {
+                    GestureDirection::Left => gesture_state.total_offset.x,
+                    GestureDirection::Right => gesture_state.total_offset.x,
+                    _ => 0.0,
+                };
+                
+                Some(Point::from((
+                    base_offset.x + progress as i32,
+                    base_offset.y
+                )))
+            }
+            None => None,
+        }
     }
 
     /// Start a render offset animation
@@ -1797,19 +1843,18 @@ impl Workspace {
         end: Point<i32, Logical>,
         animation_config: &super::AnimationConfig,
     ) {
-        if let Some(animation) = self.render_offset.take() {
-            let [x, y] = *animation.value();
-            start = Point::from((x, y));
+        if let Some(current_offset) = self.render_offset() {
+            start = current_offset;
         }
 
-        self.render_offset = Some(
+        self.render_offset_animation = Some(RenderOffsetAnimation::Simple(
             Animation::new(
                 [start.x, start.y],
                 [end.x, end.y],
                 animation_config.duration,
             )
-            .with_curve(animation_config.curve),
-        );
+            .with_curve(animation_config.curve)
+        ));
     }
 
     /// Advance animations for this [`Workspace`]
@@ -1817,9 +1862,19 @@ impl Workspace {
         crate::profile_function!();
         let mut running = false;
 
-        let _ = self.render_offset.take_if(|a| a.is_finished());
-        if let Some(animation) = &mut self.render_offset {
+        if let Some(RenderOffsetAnimation::Simple(ref animation)) = &self.render_offset_animation {
+            if animation.is_finished() {
+                self.render_offset_animation = None;
+            }
+        }
+
+        // Avancer les animations simples
+        if let Some(RenderOffsetAnimation::Simple(ref mut animation)) = &mut self.render_offset_animation {
             animation.tick(target_presentation_time);
+            running = true;
+        }
+
+        if matches!(self.render_offset_animation, Some(RenderOffsetAnimation::GestureTracking { .. })) {
             running = true;
         }
 
@@ -1955,6 +2010,132 @@ impl Workspace {
         }
 
         elements
+    }
+
+    pub fn start_swipe_gesture(
+        &mut self,
+        fingers: u32,
+        initial_workspace_idx: usize,
+        animation_config: &WorkspaceSwitchAnimation,
+    ) {
+        let output_geometry = self.output.geometry();
+        let screen_width = output_geometry.size.w as f64;
+        
+        let base_offset = self.render_offset().unwrap_or_default();
+        
+        let gesture_state = SwipeGestureState {
+            direction: None,
+            fingers,
+            total_offset: Point::from((0.0, 0.0)),
+            screen_width,
+            swipe_distance: animation_config.swipe_distance,
+            cancel_ratio: animation_config.swipe_cancel_ratio,
+            min_speed_to_force: animation_config.swipe_min_speed_to_force,
+            direction_detection_threshold: animation_config.direction_detection_threshold,
+            initial_workspace_idx,
+            last_update_time: Duration::ZERO,
+            current_velocity: 0.0,
+        };
+        
+        self.render_offset_animation = Some(RenderOffsetAnimation::GestureTracking {
+            gesture_state,
+            base_offset,
+        });
+    }
+
+
+    pub fn update_swipe_gesture(&mut self, delta: Point<f64, Logical>, time: Duration, detected_direction: Option<GestureDirection>) {
+        if let Some(RenderOffsetAnimation::GestureTracking { 
+            ref mut gesture_state, 
+            base_offset: _ 
+        }) = &mut self.render_offset_animation {
+            
+            if gesture_state.direction.is_none() {
+                if let Some(dir) = detected_direction {
+                    gesture_state.direction = Some(dir);
+                }
+            }
+
+            if gesture_state.last_update_time != Duration::ZERO {
+                let time_delta = time.saturating_sub(gesture_state.last_update_time);
+                if time_delta > Duration::ZERO {
+                    let time_delta_secs = time_delta.as_secs_f64();
+                    let distance = delta.x.abs().max(delta.y.abs());
+                    gesture_state.current_velocity = distance / time_delta_secs;
+                }
+            }
+            
+            gesture_state.total_offset += delta;
+            gesture_state.last_update_time = time;
+        }
+    }
+
+    pub fn end_swipe_gesture(&mut self, animation_config: &WorkspaceSwitchAnimation) -> Option<GestureAction> {
+        if let Some(RenderOffsetAnimation::GestureTracking { 
+            gesture_state, 
+            base_offset 
+        }) = self.render_offset_animation.take() {
+
+            let Some(direction) = gesture_state.direction else {
+                self.render_offset_animation = Some(RenderOffsetAnimation::Simple(
+                    Animation::new(
+                        [base_offset.x, base_offset.y],
+                        [base_offset.x, base_offset.y],
+                        Duration::from_millis(100),
+                    )
+                    .with_curve(animation_config.curve)
+                ));
+                return None;
+            };
+            
+            let progress = match direction {
+                GestureDirection::Left => gesture_state.total_offset.x,
+                GestureDirection::Right => gesture_state.total_offset.x,
+                _ => 0.0,
+            };
+            
+            let abs_progress = progress.abs();
+            let cancel_threshold = gesture_state.swipe_distance * gesture_state.cancel_ratio;
+            
+            let should_trigger = abs_progress >= gesture_state.swipe_distance || 
+                (gesture_state.current_velocity >= gesture_state.min_speed_to_force && 
+                abs_progress >= cancel_threshold);
+            
+            if should_trigger {
+                let final_offset: Point<i32, Logical> = match direction {
+                    GestureDirection::Left => Point::from((-gesture_state.screen_width as i32, 0)),
+                    GestureDirection::Right => Point::from((gesture_state.screen_width as i32, 0)),
+                    _ => Point::from((0, 0)),
+                };
+                
+                self.render_offset_animation = Some(RenderOffsetAnimation::Simple(
+                    Animation::new(
+                        [base_offset.x + progress as i32, base_offset.y],
+                        [final_offset.x, final_offset.y],
+                        animation_config.duration,
+                    )
+                    .with_curve(animation_config.curve)
+                ));
+                
+                Some(match direction {
+                    GestureDirection::Left => GestureAction::FocusNextWorkspace,
+                    GestureDirection::Right => GestureAction::FocusPreviousWorkspace,
+                    _ => return None,
+                })
+            } else {
+                self.render_offset_animation = Some(RenderOffsetAnimation::Simple(
+                    Animation::new(
+                        [base_offset.x + progress as i32, base_offset.y],
+                        [base_offset.x, base_offset.y],
+                        animation_config.duration / 2,
+                    )
+                    .with_curve(animation_config.curve)
+                ));
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
