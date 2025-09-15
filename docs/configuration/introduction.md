@@ -20,8 +20,21 @@ contents itself is broken down into multiple sub-sections:
 The compositor will try to load your configuration from the following paths, with decreasing order of precedence:
 
 1. `--config-path`/`-c` command line argument.
-2. `$XDG_CONFIG_HOME/fht/compositor.toml`
-3. `~/.config/fht/compositor.toml`
+2. `$XDG_CONFIG_HOME/fht/(anything).toml`
+3. `~/.config/fht/(anything).toml`
+
+In the config directory, any file with a `.toml` extension will be loaded. This means you can split your configuration
+into multiple files if you want to:
+
+example:
+```
+.config/fht/
+├── envs.toml
+├── execs.toml
+├── general.toml
+├── keybinds.toml
+└── rules.toml
+```
 
 If there's no configuration in second/third paths, the compositor will generate a
 [template configuration file](https://github.com/nferhat/fht-compositor/blob/main/res/compositor.toml). You should
