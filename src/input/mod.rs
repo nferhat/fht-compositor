@@ -4,7 +4,7 @@ pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
 pub use actions::*;
-use fht_compositor_config::KeyPattern;
+use fht_compositor_config::{GestureDirection, GesturePattern, KeyPattern};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
     GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,
@@ -826,6 +826,8 @@ impl State {
                 }
             }
             InputEvent::GestureSwipeBegin { event } => {
+                self.current_swipe_fingers = Some(event.fingers());
+
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
                 pointer.gesture_swipe_begin(
@@ -838,6 +840,20 @@ impl State {
                 );
             }
             InputEvent::GestureSwipeUpdate { event } => {
+                let fingers = self.current_swipe_fingers.unwrap_or(0);
+                let delta = event.delta();
+
+                let direction = if delta.x.abs() > delta.y.abs() {
+                    if delta.x > 0.0 { GestureDirection::Right } else { GestureDirection::Left }
+                } else {
+                    if delta.y > 0.0 { GestureDirection::Down } else { GestureDirection::Up }
+                };
+
+                let pattern = GesturePattern { fingers, direction };
+                if let Some(action) = self.fht.config.gesturebinds.get(&pattern) {
+                    self.process_gesture_action(action.clone());
+                }
+
                 let pointer = self.fht.pointer.clone();
                 pointer.gesture_swipe_update(
                     self,
@@ -848,6 +864,7 @@ impl State {
                 );
             }
             InputEvent::GestureSwipeEnd { event } => {
+                self.current_swipe_fingers = None;
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
                 pointer.gesture_swipe_end(

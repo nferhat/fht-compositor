@@ -92,6 +92,7 @@ use crate::{cli, ipc};
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
+    pub current_swipe_fingers: Option<u32>,
 }
 
 impl State {
@@ -145,7 +146,7 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self { fht, backend }
+        Self { fht, backend, current_swipe_fingers: None }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
