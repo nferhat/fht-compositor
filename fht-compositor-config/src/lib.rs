@@ -1452,8 +1452,26 @@ impl Default for Debug {
     }
 }
 
-fn get_xdg_path() -> Option<PathBuf> {
-    xdg::BaseDirectories::new().get_config_file("fht/compositor.toml")
+fn get_xdg_paths() -> Option<Vec<PathBuf>> {
+    let config_dir = xdg::BaseDirectories::new().get_config_home()?.join("fht");
+
+    let tomls: Vec<PathBuf> = fs::read_dir(&config_dir).ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? == "toml" {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if tomls.is_empty() {
+        None
+    } else {
+        Some(tomls)
+    }
 }
 
 fn fallback_path() -> path::PathBuf {
@@ -1467,8 +1485,16 @@ fn fallback_path() -> path::PathBuf {
 }
 
 pub fn config_path() -> PathBuf {
-    match get_xdg_path() {
-        Some(path) => path,
+    match get_xdg_paths() {
+        Some(paths) => {
+            // If there are multiple toml files, return the directory
+            let config_dir = xdg::BaseDirectories::new().get_config_home().unwrap().join("fht");
+            if paths.len() > 1 {
+                config_dir
+            } else {
+                paths.into_iter().next().unwrap_or_else(fallback_path)
+            }
+        }
         None => {
             warn!("Failed to get config path from XDG! using fallback location: $HOME/.config/fht/compositor.toml");
             fallback_path()
@@ -1476,8 +1502,32 @@ pub fn config_path() -> PathBuf {
     }
 }
 
+fn load_all_from_dir(dir: &PathBuf) -> Result<(Config, Vec<PathBuf>), Error> {
+    let mut paths = vec![];
+    let mut merged_value = Value::Table(Table::new());
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().map_or(false, |ext| ext == "toml") {
+            let mut file = fs::File::open(&path)?;
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)?;
+            let value: Value = toml::from_str(&buf)?;
+            merged_value = merge(merged_value, value);
+            paths.push(path);
+        }
+    }
+
+    let config = Value::try_into(merged_value)?;
+    Ok((config, paths))
+}
+
 pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>), Error> {
     let path = path.unwrap_or_else(config_path);
+    if path.is_dir() {
+        return load_all_from_dir(&path);
+    }
     debug!(?path, "Loading compositor configuration");
 
     let mut file = match fs::OpenOptions::new().read(true).write(false).open(&path) {
