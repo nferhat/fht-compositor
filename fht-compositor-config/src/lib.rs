@@ -77,6 +77,7 @@ pub struct Config {
     pub layer_rules: Vec<LayerRule>,
     pub outputs: HashMap<String, Output>,
     pub debug: Debug,
+    pub gesturebinds: HashMap<GesturePattern, GestureAction>,
 }
 
 // Custom default implementation to use default_keybinds() as the true default
@@ -98,6 +99,7 @@ impl Default for Config {
             layer_rules: Default::default(),
             outputs: HashMap::new(),
             debug: Default::default(),
+            gesturebinds: Default::default(),
         }
     }
 }
@@ -1009,6 +1011,10 @@ pub struct WorkspaceSwitchAnimation {
         deserialize_with = "deserialize_duration_millis"
     )]
     pub duration: Duration,
+    pub swipe_distance: f64,
+    pub swipe_cancel_ratio: f64,
+    pub swipe_min_speed_to_force: f64,
+    pub direction_detection_threshold: f64,
 }
 
 impl Default for WorkspaceSwitchAnimation {
@@ -1018,6 +1024,10 @@ impl Default for WorkspaceSwitchAnimation {
             curve: default_workspace_switch_curve(),
             duration: default_workspace_switch_animation_duration(),
             direction: WorkspaceSwitchAnimationDirection::Horizontal,
+            swipe_distance: 200.0,
+            swipe_cancel_ratio: 0.3,
+            swipe_min_speed_to_force: 500.0,
+            direction_detection_threshold: 20.0,
         }
     }
 }
@@ -1452,6 +1462,82 @@ impl Default for Debug {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GesturePattern {
+    pub fingers: u32,
+    pub direction: GestureDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+pub enum GestureDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+    None,
+}
+
+impl<'de> Deserialize<'de> for GesturePattern {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        let parts: Vec<&str> = raw.split('-').collect();
+        if parts.len() != 2 {
+            return Err(serde::de::Error::invalid_value(
+                Unexpected::Str(&raw),
+                &"A gesture pattern in the form of {fingers}-{direction}, e.g. 3-left",
+            ));
+        }
+
+        let fingers = parts[0].parse::<u32>().map_err(|_| {
+            serde::de::Error::invalid_value(
+                Unexpected::Str(parts[0]),
+                &"A positive integer representing the number of fingers",
+            )
+        })?;
+        if fingers == 0 {
+            return Err(serde::de::Error::invalid_value(
+                Unexpected::Unsigned(0),
+                &"A positive integer representing the number of fingers",
+            ));
+        }
+
+        let direction = match parts[1].to_lowercase().as_str() {
+            "left" => GestureDirection::Left,
+            "right" => GestureDirection::Right,
+            "up" => GestureDirection::Up,
+            "down" => GestureDirection::Down,
+            other => {
+                return Err(serde::de::Error::invalid_value(
+                    Unexpected::Str(other),
+                    &"One of 'left', 'right', 'up', 'down'",
+                ))
+            }
+        };
+
+        Ok(GesturePattern { fingers, direction })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum GestureAction {
+    CloseFocusedWindow,
+    FloatFocusedWindow,
+    FocusNextOutput,
+    FocusNextWindow,
+    FocusNextWorkspace,
+    FocusPreviousOutput,
+    FocusPreviousWindow,
+    FocusPreviousWorkspace,
+    FullscreenFocusedWindow,
+    SelectNextLayout,
+    SelectPreviousLayout,
+    SwapWithNextWindow,
+    SwapWithPreviousWindow,
+}
 fn get_xdg_path() -> Option<PathBuf> {
     xdg::BaseDirectories::new().get_config_file("fht/compositor.toml")
 }
