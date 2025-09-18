@@ -884,12 +884,22 @@ impl State {
                         );
                         
                         if has_workspace_binding && matches!(direction, GestureDirection::Left | GestureDirection::Right) {
-                            active_workspace.update_swipe_gesture(
-                                Point::from((delta.x, delta.y)),
-                                Duration::from_millis(event.time_msec() as u64),
-                                Some(direction),
-                            );
-                            self.fht.queue_redraw_all();
+                            let current_ws_idx = self.fht.space.active_monitor().active_workspace_idx();
+                            let at_limit = match direction {
+                                GestureDirection::Left => current_ws_idx >= 8,
+                                GestureDirection::Right => current_ws_idx == 0,
+                                _ => false,
+                            };
+                            
+                            if !at_limit {
+                                let active_workspace = self.fht.space.active_workspace_mut();
+                                active_workspace.update_swipe_gesture(
+                                    Point::from((delta.x, delta.y)),
+                                    Duration::from_millis(event.time_msec() as u64),
+                                    Some(direction),
+                                );
+                                self.fht.queue_redraw_all();
+                            }
                         } else {
                             if !self.fht.gesture_action_executed {
                                 if let Some(action) = self.fht.config.gesturebinds.get(&pattern) {

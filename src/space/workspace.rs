@@ -2096,6 +2096,25 @@ impl Workspace {
             
             let abs_progress = progress.abs();
             let cancel_threshold = gesture_state.swipe_distance * gesture_state.cancel_ratio;
+
+            let current_ws_idx = gesture_state.initial_workspace_idx;
+            let at_limit = match direction {
+                GestureDirection::Left => current_ws_idx >= 8,  // Dernier workspace
+                GestureDirection::Right => current_ws_idx == 0, // Premier workspace
+                _ => false,
+            };
+
+            if at_limit {
+                self.render_offset_animation = Some(RenderOffsetAnimation::Simple(
+                    Animation::new(
+                        [base_offset.x + progress as i32, base_offset.y],
+                        [base_offset.x, base_offset.y],
+                        animation_config.duration / 2,
+                    )
+                    .with_curve(animation_config.curve)
+                ));
+                return None;
+            }
             
             let should_trigger = abs_progress >= gesture_state.swipe_distance || 
                 (gesture_state.current_velocity >= gesture_state.min_speed_to_force && 
