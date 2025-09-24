@@ -1113,9 +1113,7 @@ impl Fht {
                     .outputs
                     .get(&o.name())
                     .and_then(|c| c.position)
-                    .map(|fht_compositor_config::OutputPosition { x, y }| {
-                        Point::<i32, Logical>::from((x, y))
-                    });
+                    .map(Into::into);
                 (o, current_pos, config_pos)
             })
             .collect::<Vec<_>>();
@@ -2054,6 +2052,8 @@ pub enum UnmappedWindow {
         // configured window will have a resolved set of window rules.
         window: Window,
         workspace_id: WorkspaceId,
+        /// Where to open the window, if its floating.
+        opening_location: Option<Point<i32, Logical>>,
     },
 }
 
@@ -2084,6 +2084,7 @@ pub struct ResolvedWindowRules {
     pub shadow: ShadowOverrides,
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
+    pub location: Option<Point<i32, Logical>>,
     pub opacity: Option<f32>,
     pub proportion: Option<f64>,
     pub decoration_mode: Option<DecorationMode>,
@@ -2094,6 +2095,7 @@ pub struct ResolvedWindowRules {
     pub centered: Option<bool>,
     pub centered_in_parent: Option<bool>,
     pub vrr: Option<bool>,
+    pub skip_focus: Option<bool>,
 }
 
 impl ResolvedWindowRules {
@@ -2138,6 +2140,10 @@ impl ResolvedWindowRules {
                 resolved_rules.open_on_workspace = Some(*open_on_workspace)
             }
 
+            if let Some(location) = &rule.location {
+                resolved_rules.location = Some((*location).into());
+            }
+
             if let Some(opacity) = rule.opacity {
                 resolved_rules.opacity = Some(opacity)
             }
@@ -2172,6 +2178,10 @@ impl ResolvedWindowRules {
 
             if let Some(vrr) = rule.vrr {
                 resolved_rules.vrr = Some(vrr);
+            }
+
+            if let Some(skip_focus) = rule.skip_focus {
+                resolved_rules.skip_focus = Some(skip_focus);
             }
         }
 

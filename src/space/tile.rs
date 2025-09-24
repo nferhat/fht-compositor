@@ -802,7 +802,6 @@ impl Tile {
             normal_elements = self.render_inner(renderer, self.visual_location(), scale, alpha)
         }
 
-        let is_floating = !self.window.tiled();
         let is_fullscreen = self.window.fullscreen();
         let rules = self.window.rules();
         let border::Parameters {
