@@ -1712,7 +1712,6 @@ impl Fht {
             for workspace in monitor.workspaces() {
                 let ws_id = workspace.id();
                 let active_tile_idx = workspace.active_tile_idx();
-                let output_name_ = output_name.clone();
 
                 let make_ipc_window = |idx, tile: &space::Tile| {
                     let window = tile.window();
@@ -1723,8 +1722,6 @@ impl Fht {
                         id: *window.id(),
                         title: window.title(),
                         app_id: window.app_id(),
-                        output: output_name_.clone(),
-                        workspace_idx: workspace.index(),
                         workspace_id: *ws_id,
                         size: (size.w as u32, size.h as u32),
                         location: location.into(),
@@ -1754,7 +1751,6 @@ impl Fht {
                             changed |= tile.window().maximized() != window.maximized;
                             changed |= tile.window().fullscreen() != window.fullscreened;
                             changed |= tile.window().tiled() != window.tiled;
-                            changed |= output_name != window.output;
                             changed |= *ws_id != window.workspace_id;
                             changed |= window.location.0 != location.x;
                             changed |= window.location.1 != location.y;

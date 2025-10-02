@@ -3,7 +3,6 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
 use crate::cli;
-use crate::ipc::subscribe;
 
 /// Make a single request to the running `fht-compositor` IPC server.
 ///
@@ -53,8 +52,6 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             _ = buf_reader.read_line(&mut res_buf)?;
             stdout.write(res_buf.as_bytes())?;
         }
-
-        return Ok(());
     }
 
     let mut res_buf = String::new();
@@ -278,12 +275,6 @@ fn print_window(
     writeln!(writer, "Window #{}", window.id)?;
     writeln!(writer, "\tTitle: {:?}", window.title)?;
     writeln!(writer, "\tApplication ID: {:?}", window.app_id)?;
-    writeln!(writer, "\tCurrent output: {}", window.output)?;
-    writeln!(
-        writer,
-        "\tCurrent workspace index: {}",
-        window.workspace_idx
-    )?;
     writeln!(writer, "\tCurrent workspace ID: {}", window.workspace_id)?;
     writeln!(writer, "\tSize: ({}, {})", window.size.0, window.size.1)?;
     writeln!(

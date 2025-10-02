@@ -250,10 +250,6 @@ pub struct Window {
     ///
     /// It is **not** unique! And you should make no assumptions about its contents.
     pub app_id: Option<String>,
-    /// The output this window is on.
-    pub output: String,
-    /// The workspace index this window is on.
-    pub workspace_idx: usize,
     /// The workspace ID this window is on.
     pub workspace_id: usize,
     /// The size of this window.

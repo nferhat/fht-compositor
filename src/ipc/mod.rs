@@ -596,8 +596,6 @@ impl State {
                         id: *window.id(),
                         title: window.title(),
                         app_id: window.app_id(),
-                        output: workspace.output().name(),
-                        workspace_idx: workspace.index(),
                         workspace_id: *workspace.id(),
                         size: (size.w as u32, size.h as u32),
                         location: location.into(),
@@ -1283,7 +1281,6 @@ fn workspace_windows(
 ) -> HashMap<usize, fht_compositor_ipc::Window> {
     let mut windows = HashMap::with_capacity(workspace.windows().len());
     let is_focused = move |window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
-    let output = workspace.output().name();
     let workspace_id = *workspace.id();
     let active_tile_idx = workspace.active_tile_idx();
 
@@ -1298,8 +1295,6 @@ fn workspace_windows(
                 id: *window.id(),
                 title: window.title(),
                 app_id: window.app_id(),
-                output: output.clone(),
-                workspace_idx: workspace.index(),
                 workspace_id,
                 size: (size.w as u32, size.h as u32),
                 location: location.into(),
