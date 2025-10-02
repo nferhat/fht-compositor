@@ -3,11 +3,13 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
 use crate::cli;
+use crate::ipc::subscribe;
 
 /// Make a single request to the running `fht-compositor` IPC server.
 ///
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
 pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
+    let mut subscribe = false;
     let request = match request {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
@@ -26,6 +28,10 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
         cli::Request::CursorPosition => fht_compositor_ipc::Request::CursorPosition,
         cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
+        cli::Request::Subscribe => {
+            subscribe = true;
+            fht_compositor_ipc::Request::Subscribe
+        }
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -36,6 +42,20 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     let mut req = serde_json::to_string(&request).unwrap();
     req.push('\n'); // it is required to append a newline.
     stream.write_all(req.as_bytes())?;
+
+    // If we are subscribing, keep reading events, and we won't write to this anymore
+    if subscribe {
+        // We must use a buf reader to get an entire line
+        let mut buf_reader = BufReader::new(&mut stream);
+        let mut stdout = std::io::stdout();
+        loop {
+            let mut res_buf = String::new();
+            _ = buf_reader.read_line(&mut res_buf)?;
+            stdout.write(res_buf.as_bytes())?;
+        }
+
+        return Ok(());
+    }
 
     let mut res_buf = String::new();
     {
@@ -188,23 +208,8 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
                 writeln!(&mut writer, "\t\tOutput: {}", monitor.output)?;
                 writeln!(&mut writer, "\t\tPrimary: {}", idx == *primary_idx)?;
                 writeln!(&mut writer, "\t\tActive: {}", idx == *active_idx)?;
-                writeln!(&mut writer, "\t\t---")?;
-                for (workspace_idx, workspace) in monitor.workspaces.iter().enumerate() {
-                    writeln!(&mut writer, "\t\tWorkspace #{workspace_idx}:")?;
-                    writeln!(&mut writer, "\t\t\tID: {}", workspace.id)?;
-                    writeln!(&mut writer, "\t\t\tWindows: {:?}", workspace.windows)?;
-                    writeln!(
-                        &mut writer,
-                        "\t\t\tMaster width factor: {}",
-                        workspace.mwfact
-                    )?;
-                    writeln!(
-                        &mut writer,
-                        "\t\t\tNumber of master windows: {}",
-                        workspace.nmaster
-                    )?;
-                    writeln!(&mut writer, "\t\t---")?;
-                }
+                writeln!(&mut writer, "\t\tWorkspaces: {:#?}", monitor.workspaces)?;
+                writeln!(&mut writer, "---")?;
             }
             //
         }

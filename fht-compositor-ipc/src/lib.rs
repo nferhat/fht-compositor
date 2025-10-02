@@ -90,6 +90,8 @@ pub enum Request {
     CursorPosition,
     /// Request the compositor to execute an action.
     Action(Action),
+    /// Subscribe to the IPC, receiving events continuously.
+    Subscribe,
 }
 
 /// A respose from the compositor.
@@ -120,6 +122,36 @@ pub enum Response {
     Error(String),
     /// Noop, for requests that do not need a result/output.
     Noop,
+}
+
+/// A event from the compositor.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[serde(tag = "event", content = "data")]
+pub enum Event {
+    /// The list of windows. This overrides any previous windows.
+    Windows(HashMap<usize, Window>),
+    /// A window has been created or changed, overrides the one with this ID
+    WindowChanged(Window),
+    /// A window has been closed.
+    WindowClosed { id: usize },
+
+    /// The list of workspaces across all outputs. This overrides any previous workspaces.
+    Workspaces(HashMap<usize, Workspace>),
+    /// A workspace has changed, overrides the one with this ID.
+    WorkspaceChanged(Workspace),
+    /// A workspace has been removed, this is sent if the associated outputs/monitor gets
+    /// disconnected.
+    WorkspaceRemoved { id: usize },
+
+    /// A new configuration of the space.
+    Space(Space),
+    /// A new configuration of layer-shells.
+    LayerShells(Vec<LayerShell>),
+
+    // Special event for internal handling
+    #[serde(skip)]
+    Disconnect,
 }
 
 /// A single output.
@@ -295,8 +327,8 @@ const WORKSPACE_COUNT: usize = 9;
 pub struct Monitor {
     /// The output associated with this monitor.
     pub output: String,
-    /// The workspaces associated with this monitor.
-    pub workspaces: [Workspace; WORKSPACE_COUNT],
+    /// The workspaces IDs associated with this monitor.
+    pub workspaces: [usize; WORKSPACE_COUNT],
     /// The active workspace index.
     pub active_workspace_idx: usize,
     /// Whether this monitor is the active/focused monitor.
@@ -307,7 +339,9 @@ pub struct Monitor {
 ///
 /// The space is the area containing all [`Monitor`] that organizes and orders them. When something
 /// mentions "global coordinates", it means the *logical* coordinate space inside this space.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+//
+// HACK: I don't really like the default, but its needed for subscribing (providing empty state)
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Space {
     /// The [`Monitor`]s tracked by the [`Space`]

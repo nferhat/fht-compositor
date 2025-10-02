@@ -21,7 +21,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
-pub use tile::TileRenderElement;
+pub use tile::{Tile, TileRenderElement};
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
@@ -217,6 +217,14 @@ impl Space {
             .iter()
             .flat_map(Monitor::workspaces)
             .flat_map(Workspace::windows)
+    }
+
+    /// Get an iterator of all the [`Tile`]s managed by this [`Space`].
+    pub fn tiles(&mut self) -> impl Iterator<Item = &tile::Tile> {
+        self.monitors
+            .iter()
+            .flat_map(Monitor::workspaces)
+            .flat_map(Workspace::tiles)
     }
 
     /// Get a mutable iterator of all the [`Tile`]s managed by this [`Space`].

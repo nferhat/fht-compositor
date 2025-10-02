@@ -26,11 +26,17 @@ use crate::utils::get_credentials_for_surface;
 use crate::window::{Window, WindowId};
 
 pub mod client;
+mod subscribe;
 
 /// The compositor IPC server.
 pub struct Server {
     // The UnixSocket server that receives incoming clients
     listener_token: RegistrationToken,
+    pub compositor_state: subscribe::CompositorState,
+    event_broadcaster: (
+        async_broadcast::Sender<fht_compositor_ipc::Event>,
+        async_broadcast::Receiver<fht_compositor_ipc::Event>,
+    ),
     dispatcher: Dispatcher<'static, Generic<UnixListener>, State>,
 }
 
@@ -39,6 +45,23 @@ impl Server {
         loop_handle.remove(self.listener_token);
         let _listener = Dispatcher::into_source_inner(self.dispatcher).unwrap();
         // FIXME: Close socket?
+    }
+
+    pub fn push_events(
+        &mut self,
+        events: impl IntoIterator<Item = fht_compositor_ipc::Event> + 'static,
+        scheduler: &calloop::futures::Scheduler<()>,
+    ) -> anyhow::Result<()> {
+        let broadcaster = self.event_broadcaster.0.clone();
+        scheduler.schedule(async move {
+            for event in events {
+                if let Err(err) = broadcaster.broadcast(event).await {
+                    error!(?err, "Failed to broadcast IPC event")
+                }
+            }
+        })?;
+
+        Ok(())
     }
 }
 
@@ -91,9 +114,17 @@ pub fn start(
                     return Ok(PostAction::Continue);
                 };
 
+                let Some(ipc_server) = &mut state.fht.ipc_server else {
+                    unreachable!()
+                };
+                let event_rx = ipc_server.event_broadcaster.1.clone();
+                let scheduler = state.fht.scheduler.clone();
                 let to_compositor = to_compositor_.clone();
+
                 let fut = async move {
-                    if let Err(err) = handle_new_client(socket, to_compositor).await {
+                    if let Err(err) =
+                        handle_new_client(socket, to_compositor, event_rx, scheduler).await
+                    {
                         error!(?err, "Failed to handle IPC client");
                     }
                 };
@@ -117,6 +148,8 @@ pub fn start(
 
     Ok(Server {
         dispatcher,
+        compositor_state: Default::default(),
+        event_broadcaster: async_broadcast::broadcast(1024),
         listener_token: token,
     })
 }
@@ -124,6 +157,8 @@ pub fn start(
 async fn handle_new_client(
     stream: Async<'static, UnixStream>,
     to_compositor: calloop::channel::Sender<ClientRequest>,
+    event_rx: async_broadcast::Receiver<fht_compositor_ipc::Event>,
+    scheduler: calloop::futures::Scheduler<()>,
 ) -> anyhow::Result<()> {
     crate::profile_function!();
     let (reader, mut writer) = stream.split();
@@ -132,38 +167,67 @@ async fn handle_new_client(
     // In fht-compositor IPC's model, each new line is a new request.
     // This allows the socket to be re-used to send out multiple requests
 
+    let mut is_subscribe = false;
     loop {
         let mut req_buf = String::new();
         match reader.read_line(&mut req_buf).await {
+            // Client disconnected. Thank you @Byson94 for spotting this!
+            // Some clients send an empty buffer when disconnecting, which is, weird.
+            Ok(0) => break,
             Ok(_) => (),
-            Err(err) => {
-                if matches!(
-                    err.kind(),
-                    io::ErrorKind::ConnectionAborted | io::ErrorKind::BrokenPipe
-                ) {
-                    // The socket closed, stop this client thread
-                    return Ok(());
-                } else {
-                    // Otherwise, some sort of error happened
-                    anyhow::bail!("error reading request: {err:?}")
-                }
-            }
+            // Client disconnected, stop this thread.
+            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => return Ok(()),
+            Err(err) => anyhow::bail!("error reading request: {err:?}"),
         }
 
         let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
+        is_subscribe = matches!(request, Ok(fht_compositor_ipc::Request::Subscribe));
+
+        // When you send a subscribe request to the socket, it can't be used anymore for regular
+        // requests. This is a limitation of the current system, to avoid confusion
+        // (how the client should interpret one of our responses?)
+        //
+        // FIXME: Handle other non-subscribe requests before? How should we tell when the client
+        // stops sending other requests? I don't know, this is weird anyway. You should use
+        // a separate socket for subscribing.
+        if is_subscribe {
+            break;
+        }
+
         // We transform the Result::Err into a Response::Error
-        let response = match request {
-            Ok(req) => match handle_request(req, to_compositor.clone()).await {
-                Ok(res) => res,
-                Err(err) => Response::Error(err.to_string()),
-            },
-            Err(err) => Response::Error(err.to_string()), // Just write an error string;
+        let res = match request {
+            Ok(req) => handle_request(req, to_compositor.clone())
+                .await
+                .map_err(|err| Response::Error(err.to_string()))
+                .unwrap_or_else(std::convert::identity),
+            Err(err) => Response::Error(err.to_string()),
         };
 
-        let mut response_str = serde_json::to_string(&response)?;
-        response_str.push('\n'); // separate by newlines
-        _ = dbg!(writer.write(response_str.as_bytes()).await?);
+        let mut json = serde_json::to_string(&res)?;
+        json.push('\n');
+        if let Err(err) = writer.write_all(json.as_bytes()).await {
+            warn!(?err, "Failed to write response to IPC client, closing...");
+            break;
+        }
     }
+
+    if !is_subscribe {
+        // nothing else to handle.
+        return Ok(());
+    }
+
+    // If we do subscribe, we create a channel on which the compositor can inform us when state
+    // changes. When there are any changes, we get pinged and do the diffing.
+    let (initial_tx, initial_rx) = async_channel::bounded(1);
+    let fut = async move {
+        if let Err(err) = subscribe::start_subscribing(event_rx, initial_rx, writer).await {
+            warn!(?err, "Error during client subscription")
+        }
+    };
+    scheduler.schedule(fut)?;
+    to_compositor.send(ClientRequest::NewSubscriber(initial_tx))?;
+
+    Ok(())
 }
 
 enum ClientRequest {
@@ -194,6 +258,7 @@ enum ClientRequest {
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
     ),
+    NewSubscriber(async_channel::Sender<subscribe::CompositorState>),
 }
 
 async fn handle_request(
@@ -201,6 +266,8 @@ async fn handle_request(
     to_compositor: calloop::channel::Sender<ClientRequest>,
 ) -> anyhow::Result<Response> {
     match req {
+        // The parent handle_client will do this for us
+        fht_compositor_ipc::Request::Subscribe => Ok(Response::Noop),
         fht_compositor_ipc::Request::Version => {
             Ok(Response::Version(crate::cli::get_version_string()))
         }
@@ -213,7 +280,6 @@ async fn handle_request(
                 .recv()
                 .await
                 .context("Failed to retreive output information")?;
-
             Ok(Response::Outputs(outputs))
         }
         fht_compositor_ipc::Request::Windows => {
@@ -367,10 +433,11 @@ async fn handle_request(
                 .send(ClientRequest::Action(action, tx))
                 .context("IPC communication channel closed")?;
             let result = rx.recv().await.context("Failed to receive action result")?;
-            match result {
-                Ok(()) => Ok(Response::Noop),
-                Err(err) => Ok(Response::Error(err.to_string())),
-            }
+            let resp = match result {
+                Ok(()) => Response::Noop,
+                Err(err) => Response::Error(err.to_string()),
+            };
+            Ok(resp)
         }
     }
 }
@@ -481,23 +548,7 @@ impl State {
                         let output = mon.output().name();
                         let workspaces = mon
                             .workspaces()
-                            .map(|workspace| {
-                                let workspace_id = *workspace.id();
-
-                                fht_compositor_ipc::Workspace {
-                                    output: mon.output().name(),
-                                    id: workspace_id,
-                                    active_window_idx: workspace.active_tile_idx(),
-                                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
-                                    mwfact: workspace.mwfact(),
-                                    nmaster: workspace.nmaster(),
-                                    windows: workspace
-                                        .windows()
-                                        .map(Window::id)
-                                        .map(|id| *id)
-                                        .collect(),
-                                }
-                            })
+                            .map(|workspace| *workspace.id())
                             .collect::<Vec<_>>()
                             .try_into()
                             .expect("workspace number is always 9");
@@ -657,6 +708,19 @@ impl State {
             }
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;
+            }
+            ClientRequest::NewSubscriber(initial_tx) => {
+                let Some(ipc_server) = &self.fht.ipc_server else {
+                    unreachable!()
+                };
+                let initial_state = ipc_server.compositor_state.clone();
+                let fut = async move {
+                    if let Err(err) = initial_tx.send(initial_state).await {
+                        error!(?err, "Failed to send initial state to subscribed client");
+                    }
+                };
+
+                self.fht.scheduler.schedule(fut)?;
             }
         }
 

@@ -68,7 +68,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
-use crate::focus_target::PointerFocusTarget;
+use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::layer::MappedLayer;
@@ -80,7 +80,7 @@ use crate::portals::screencast::{
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
-use crate::space::{Space, WorkspaceId};
+use crate::space::{self, Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::{get_monotonic_time, RectCenterExt};
@@ -212,6 +212,9 @@ impl State {
                 .flush_clients()
                 .context("Failed to flush_clients!")?;
         }
+
+        // We do this after everything to make sure we send accurate state.
+        self.fht.refresh_ipc();
 
         Ok(())
     }
@@ -1688,6 +1691,107 @@ impl Fht {
                 }
             }
         }
+    }
+
+    pub fn refresh_ipc(&mut self) {
+        let Some(ipc::Server {
+            compositor_state, ..
+        }) = &mut self.ipc_server
+        else {
+            return;
+        };
+
+        let keyboard_focus = self.keyboard.current_focus();
+        let is_focused = move |window: &Window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
+
+        let mut events = vec![];
+
+        let mut existing_windows = HashSet::new();
+        for monitor in self.space.monitors() {
+            let output_name = monitor.output().name();
+            for workspace in monitor.workspaces() {
+                let ws_id = workspace.id();
+                let active_tile_idx = workspace.active_tile_idx();
+                let output_name_ = output_name.clone();
+
+                let make_ipc_window = |idx, tile: &space::Tile| {
+                    let window = tile.window();
+                    let location = tile.location() + tile.window_loc();
+                    let size = window.size();
+
+                    fht_compositor_ipc::Window {
+                        id: *window.id(),
+                        title: window.title(),
+                        app_id: window.app_id(),
+                        output: output_name_.clone(),
+                        workspace_idx: workspace.index(),
+                        workspace_id: *ws_id,
+                        size: (size.w as u32, size.h as u32),
+                        location: location.into(),
+                        fullscreened: window.fullscreen(),
+                        maximized: window.maximized(),
+                        tiled: window.tiled(),
+                        activated: Some(idx) == active_tile_idx,
+                        focused: is_focused(window),
+                    }
+                };
+
+                // First diff windows.
+                for (idx, tile) in workspace.tiles().enumerate() {
+                    let id = tile.window().id();
+                    existing_windows.insert(*id);
+
+                    let entry = compositor_state.windows.entry(*id);
+                    entry
+                        .and_modify(|window| {
+                            let location = tile.location() + tile.window_loc();
+                            let size = tile.window().size();
+
+                            let mut changed = false;
+                            // FIXME: This is quite a lot of checking.
+                            changed |= tile.window().title() != window.title;
+                            changed |= tile.window().app_id() != window.app_id;
+                            changed |= tile.window().maximized() != window.maximized;
+                            changed |= tile.window().fullscreen() != window.fullscreened;
+                            changed |= tile.window().tiled() != window.tiled;
+                            changed |= output_name != window.output;
+                            changed |= *ws_id != window.workspace_id;
+                            changed |= window.location.0 != location.x;
+                            changed |= window.location.1 != location.y;
+                            changed |= window.size.0 != size.w as u32;
+                            changed |= window.size.1 != size.h as u32;
+
+                            if changed {
+                                *window = make_ipc_window(idx, tile);
+                                events
+                                    .push(fht_compositor_ipc::Event::WindowChanged(window.clone()));
+                            }
+                        })
+                        .or_insert_with(|| {
+                            let new_window = make_ipc_window(idx, tile);
+                            events
+                                .push(fht_compositor_ipc::Event::WindowChanged(new_window.clone()));
+                            new_window
+                        });
+                }
+            }
+        }
+        // Now remove old windows.
+        let all_ids: Vec<_> = compositor_state.windows.keys().copied().collect();
+        for id in all_ids {
+            if !existing_windows.contains(&id) {
+                _ = compositor_state.windows.remove(&id);
+                events.push(fht_compositor_ipc::Event::WindowClosed { id })
+            }
+        }
+
+        let Some(server) = &mut self.ipc_server else {
+            unreachable!()
+        };
+
+        if let Err(err) = server.push_events(events, &self.scheduler) {
+            error!(?err, "Failed to broadcast IPC events");
+        };
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
