@@ -1,4 +1,4 @@
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{self, BufRead as _, BufReader, Write as _};
 
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
@@ -46,10 +46,18 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     if subscribe {
         // We must use a buf reader to get an entire line
         let mut buf_reader = BufReader::new(&mut stream);
-        let mut stdout = std::io::stdout();
+        let mut stdout = io::stdout();
         loop {
             let mut res_buf = String::new();
-            _ = buf_reader.read_line(&mut res_buf)?;
+            match buf_reader.read_line(&mut res_buf) {
+                // Client disconnected. Thank you @Byson94 for spotting this!
+                // Some clients send an empty buffer when disconnecting, which is, weird.
+                Ok(0) => break,
+                Ok(_) => (),
+                // The compositor exited. Nothing left to read.
+                Err(err) if err.kind() == io::ErrorKind::BrokenPipe => return Ok(()),
+                Err(err) => anyhow::bail!("Failed to read event from compositor: {err:?}"),
+            }
             stdout.write(res_buf.as_bytes())?;
         }
     }
@@ -269,9 +277,9 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
 }
 
 fn print_window(
-    writer: &mut impl std::io::Write,
+    writer: &mut impl io::Write,
     window: &fht_compositor_ipc::Window,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     writeln!(writer, "Window #{}", window.id)?;
     writeln!(writer, "\tTitle: {:?}", window.title)?;
     writeln!(writer, "\tApplication ID: {:?}", window.app_id)?;
