@@ -1,6 +1,8 @@
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::rc::Rc;
 
 use anyhow::Context;
 use calloop::io::Async;
@@ -32,7 +34,7 @@ mod subscribe;
 pub struct Server {
     // The UnixSocket server that receives incoming clients
     listener_token: RegistrationToken,
-    pub compositor_state: subscribe::CompositorState,
+    pub compositor_state: Rc<RefCell<subscribe::CompositorState>>,
     event_broadcaster: (
         async_broadcast::Sender<fht_compositor_ipc::Event>,
         async_broadcast::Receiver<fht_compositor_ipc::Event>,
@@ -120,10 +122,17 @@ pub fn start(
                 let event_rx = ipc_server.event_broadcaster.1.clone();
                 let scheduler = state.fht.scheduler.clone();
                 let to_compositor = to_compositor_.clone();
+                let compositor_state = ipc_server.compositor_state.clone();
 
                 let fut = async move {
-                    if let Err(err) =
-                        handle_new_client(socket, to_compositor, event_rx, scheduler).await
+                    if let Err(err) = handle_new_client(
+                        socket,
+                        to_compositor,
+                        compositor_state,
+                        event_rx,
+                        scheduler,
+                    )
+                    .await
                     {
                         error!(?err, "Failed to handle IPC client");
                     }
@@ -157,6 +166,7 @@ pub fn start(
 async fn handle_new_client(
     stream: Async<'static, UnixStream>,
     to_compositor: calloop::channel::Sender<ClientRequest>,
+    compositor_state: Rc<RefCell<subscribe::CompositorState>>,
     event_rx: async_broadcast::Receiver<fht_compositor_ipc::Event>,
     scheduler: calloop::futures::Scheduler<()>,
 ) -> anyhow::Result<()> {
@@ -196,7 +206,7 @@ async fn handle_new_client(
 
         // We transform the Result::Err into a Response::Error
         let res = match request {
-            Ok(req) => handle_request(req, to_compositor.clone())
+            Ok(req) => handle_request(req, to_compositor.clone(), compositor_state.clone())
                 .await
                 .map_err(|err| Response::Error(err.to_string()))
                 .unwrap_or_else(std::convert::identity),
@@ -232,9 +242,6 @@ async fn handle_new_client(
 
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
-    Windows(async_channel::Sender<HashMap<usize, fht_compositor_ipc::Window>>),
-    LayerShells(async_channel::Sender<Vec<fht_compositor_ipc::LayerShell>>),
-    Space(async_channel::Sender<fht_compositor_ipc::Space>),
     Window {
         /// When `id` is `None`, request the focused window.
         id: Option<usize>,
@@ -243,12 +250,6 @@ enum ClientRequest {
     Workspace {
         /// When `id` is `None`, request the focused workspace.
         id: Option<usize>,
-        sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
-    },
-    WorkspaceByIndex {
-        /// When `output` is `None`, use the focused output.
-        output: Option<String>,
-        index: usize,
         sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
     },
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
@@ -264,7 +265,8 @@ enum ClientRequest {
 async fn handle_request(
     req: fht_compositor_ipc::Request,
     to_compositor: calloop::channel::Sender<ClientRequest>,
-) -> anyhow::Result<Response> {
+    compositor_state: Rc<RefCell<subscribe::CompositorState>>,
+) -> anyhow::Result<fht_compositor_ipc::Response> {
     match req {
         // The parent handle_client will do this for us
         fht_compositor_ipc::Request::Subscribe => Ok(Response::Noop),
@@ -283,101 +285,60 @@ async fn handle_request(
             Ok(Response::Outputs(outputs))
         }
         fht_compositor_ipc::Request::Windows => {
-            let (tx, rx) = async_channel::bounded(1);
-            to_compositor
-                .send(ClientRequest::Windows(tx))
-                .context("IPC communication channel closed")?;
-            let windows = rx
-                .recv()
-                .await
-                .context("Failed to retreive output information")?;
-
+            let windows = compositor_state.borrow().windows.clone();
             Ok(Response::Windows(windows))
         }
         fht_compositor_ipc::Request::LayerShells => {
-            let (tx, rx) = async_channel::bounded(1);
-            to_compositor
-                .send(ClientRequest::LayerShells(tx))
-                .context("IPC communication channel closed")?;
-            let layer_shells = rx
-                .recv()
-                .await
-                .context("Failed to retreive layer-shell information")?;
-
+            let layer_shells = compositor_state.borrow().layer_shells.clone();
             Ok(Response::LayerShells(layer_shells))
         }
         fht_compositor_ipc::Request::Space => {
-            let (tx, rx) = async_channel::bounded(1);
-            to_compositor
-                .send(ClientRequest::Space(tx))
-                .context("IPC communication channel closed")?;
-            let space = rx
-                .recv()
-                .await
-                .context("Failed to retreive output information")?;
-
+            let space = compositor_state.borrow().space.clone();
             Ok(Response::Space(space))
         }
         fht_compositor_ipc::Request::Window(id) => {
-            let (tx, rx) = async_channel::bounded(1);
-            let req = ClientRequest::Window {
-                id: Some(id),
-                sender: tx,
-            };
-            to_compositor
-                .send(req)
-                .context("IPC communication channel closed")?;
-            let space = rx
-                .recv()
-                .await
-                .context("Failed to retreive focused window information")?;
-
-            Ok(Response::Window(space))
+            let windows = Ref::map(compositor_state.borrow(), |s| &s.windows);
+            let window = windows.get(&id).cloned();
+            Ok(Response::Window(window))
         }
         fht_compositor_ipc::Request::Workspace(id) => {
-            let (tx, rx) = async_channel::bounded(1);
-            let req = ClientRequest::Workspace {
-                id: Some(id),
-                sender: tx,
-            };
-            to_compositor
-                .send(req)
-                .context("IPC communication channel closed")?;
-            let workspace = rx
-                .recv()
-                .await
-                .context("Failed to retreive focused workspace information")?;
-
+            let workspaces = Ref::map(compositor_state.borrow(), |s| &s.workspaces);
+            let workspace = workspaces.get(&id).cloned();
             Ok(Response::Workspace(workspace))
         }
         fht_compositor_ipc::Request::GetWorkspace { output, index } => {
-            let (tx, rx) = async_channel::bounded(1);
-            let req = ClientRequest::WorkspaceByIndex {
-                output,
-                index,
-                sender: tx,
+            let state = compositor_state.borrow();
+            let id = match output {
+                Some(name) => state
+                    .space
+                    .monitors
+                    .get(&name)
+                    .and_then(|mon| mon.workspaces.get(index))
+                    .copied(),
+                None => state
+                    .space
+                    .monitors
+                    .values()
+                    // if no output specified, use active.
+                    .find(|mon| mon.active)
+                    .and_then(|mon| mon.workspaces.get(index))
+                    .copied(),
             };
-
-            to_compositor
-                .send(req)
-                .context("IPC communication channel closed")?;
-            let workspace = rx
-                .recv()
-                .await
-                .context("Failed to retreive focused workspace information")?;
+            let workspace = id.and_then(|id| state.workspaces.get(&id)).cloned();
 
             Ok(Response::Workspace(workspace))
         }
         fht_compositor_ipc::Request::FocusedWindow => {
-            let (tx, rx) = async_channel::bounded(1);
+            // FIXME: Track focused window ID here.
+            let (atx, arx) = async_channel::bounded(1);
             let req = ClientRequest::Window {
                 id: None,
-                sender: tx,
+                sender: atx,
             };
             to_compositor
                 .send(req)
                 .context("IPC communication channel closed")?;
-            let space = rx
+            let space = arx
                 .recv()
                 .await
                 .context("Failed to retreive focused window information")?;
@@ -385,15 +346,16 @@ async fn handle_request(
             Ok(Response::Window(space))
         }
         fht_compositor_ipc::Request::FocusedWorkspace => {
-            let (tx, rx) = async_channel::bounded(1);
+            // FIXME: Track focused workspace ID here.
+            let (atx, arx) = async_channel::bounded(1);
             let req = ClientRequest::Workspace {
                 id: None,
-                sender: tx,
+                sender: atx,
             };
             to_compositor
                 .send(req)
                 .context("IPC communication channel closed")?;
-            let workspace = rx
+            let workspace = arx
                 .recv()
                 .await
                 .context("Failed to retreive focused workspace information")?;
@@ -501,76 +463,6 @@ impl State {
                     .collect();
                 tx.send_blocking(outputs)?
             }
-            ClientRequest::Windows(tx) => {
-                let focus = self.fht.keyboard.current_focus();
-                let windows = self
-                    .fht
-                    .space
-                    .monitors()
-                    .flat_map(|mon| {
-                        mon.workspaces()
-                            .flat_map(|ws| workspace_windows(ws, focus.as_ref()))
-                    })
-                    .collect();
-
-                tx.send_blocking(windows)?;
-            }
-            ClientRequest::LayerShells(tx) => {
-                let mut layers = Vec::new();
-                for output in self.fht.space.outputs() {
-                    let layer_map = layer_map_for_output(output);
-                    let output_name = output.name();
-                    for layer_surface in layer_map.layers() {
-                        layers.push(fht_compositor_ipc::LayerShell {
-                            namespace: layer_surface.namespace().to_string(),
-                            output: output_name.clone(),
-                            // SAFETY: We know that all the enum variants are the same
-                            #[allow(clippy::missing_transmute_annotations)]
-                            layer: unsafe { std::mem::transmute(layer_surface.layer()) },
-                            #[allow(clippy::missing_transmute_annotations)]
-                            keyboard_interactivity: unsafe {
-                                std::mem::transmute(
-                                    layer_surface.cached_state().keyboard_interactivity,
-                                )
-                            },
-                        })
-                    }
-                }
-
-                tx.send_blocking(layers)?;
-            }
-            ClientRequest::Space(tx) => {
-                let monitors = self
-                    .fht
-                    .space
-                    .monitors()
-                    .map(|mon| {
-                        let output = mon.output().name();
-                        let workspaces = mon
-                            .workspaces()
-                            .map(|workspace| *workspace.id())
-                            .collect::<Vec<_>>()
-                            .try_into()
-                            .expect("workspace number is always 9");
-
-                        (
-                            output.clone(),
-                            fht_compositor_ipc::Monitor {
-                                output,
-                                workspaces,
-                                active: mon.active(),
-                                active_workspace_idx: mon.active_workspace_idx(),
-                            },
-                        )
-                    })
-                    .collect();
-
-                tx.send_blocking(fht_compositor_ipc::Space {
-                    monitors,
-                    active_idx: self.fht.space.active_monitor_idx(),
-                    primary_idx: self.fht.space.primary_monitor_idx(),
-                })?;
-            }
             ClientRequest::Window { id, sender } => {
                 let res = match id {
                     Some(id) => self.fht.space.monitors().find_map(|mon| {
@@ -628,49 +520,6 @@ impl State {
 
                 sender.send_blocking(workspace)?;
             }
-            ClientRequest::WorkspaceByIndex {
-                output,
-                index,
-                sender,
-            } => {
-                let monitor = match output {
-                    Some(name) => {
-                        let Some(mon) = self
-                            .fht
-                            .space
-                            .monitors()
-                            .find(|mon| mon.output().name() == name)
-                        else {
-                            sender.send_blocking(None)?;
-                            return Ok(());
-                        };
-
-                        mon
-                    }
-                    None => self.fht.space.active_monitor(),
-                };
-
-                // NOTE: For now we know that workspaces are static, but I do want to implement
-                // a way for the user to set a fixed number of workspaces. (perhaps "dynamic" ones)
-                // See #54
-                if index > monitor.workspaces.len() {
-                    sender.send_blocking(None)?;
-                    return Ok(());
-                }
-
-                let workspace = &monitor.workspaces[index];
-                let ipc_workspace = fht_compositor_ipc::Workspace {
-                    output: workspace.output().name(),
-                    id: *workspace.id(),
-                    active_window_idx: workspace.active_tile_idx(),
-                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
-                    mwfact: workspace.mwfact(),
-                    nmaster: workspace.nmaster(),
-                    windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
-                };
-
-                sender.send_blocking(Some(ipc_workspace))?;
-            }
             ClientRequest::PickWindow(tx) => {
                 let start_data = GrabStartData {
                     focus: None,
@@ -711,7 +560,7 @@ impl State {
                 let Some(ipc_server) = &self.fht.ipc_server else {
                     unreachable!()
                 };
-                let initial_state = ipc_server.compositor_state.clone();
+                let initial_state = ipc_server.compositor_state.borrow().clone();
                 let fut = async move {
                     if let Err(err) = initial_tx.send(initial_state).await {
                         error!(?err, "Failed to send initial state to subscribed client");

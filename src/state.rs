@@ -1694,13 +1694,11 @@ impl Fht {
     }
 
     pub fn refresh_ipc(&mut self) {
-        let Some(ipc::Server {
-            compositor_state, ..
-        }) = &mut self.ipc_server
-        else {
+        let Some(ipc_server) = &mut self.ipc_server else {
             return;
         };
 
+        let mut compositor_state = ipc_server.compositor_state.borrow_mut();
         let keyboard_focus = self.keyboard.current_focus();
         let is_focused = move |window: &Window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
 
@@ -1830,11 +1828,8 @@ impl Fht {
             }
         }
 
-        let Some(server) = &mut self.ipc_server else {
-            unreachable!()
-        };
-
-        if let Err(err) = server.push_events(events, &self.scheduler) {
+        drop(compositor_state); // explicit drop since borrow checker dumb
+        if let Err(err) = ipc_server.push_events(events, &self.scheduler) {
             error!(?err, "Failed to broadcast IPC events");
         };
     }
