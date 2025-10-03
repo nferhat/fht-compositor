@@ -1705,8 +1705,13 @@ impl Fht {
         let mut events = vec![];
 
         let mut existing_windows = HashSet::new();
+        let mut focused_window_id = None;
+        let mut active_workspace_id = None;
+
         for monitor in self.space.monitors() {
             let output_name = monitor.output().name();
+            let mon_active = monitor.active();
+
             for workspace in monitor.workspaces() {
                 let ws_id = workspace.id();
                 let active_tile_idx = workspace.active_tile_idx();
@@ -1737,7 +1742,7 @@ impl Fht {
                     existing_windows.insert(*id);
 
                     let entry = compositor_state.windows.entry(*id);
-                    entry
+                    let is_focused = entry
                         .and_modify(|window| {
                             let location = tile.location() + tile.window_loc();
                             let size = tile.window().size();
@@ -1766,7 +1771,11 @@ impl Fht {
                             events
                                 .push(fht_compositor_ipc::Event::WindowChanged(new_window.clone()));
                             new_window
-                        });
+                        })
+                        .focused;
+                    if is_focused {
+                        focused_window_id = Some(*id);
+                    }
                 }
 
                 // Then diff the workspace.
@@ -1817,6 +1826,9 @@ impl Fht {
                         ));
                         new_workspace
                     });
+                if mon_active && workspace.index() == monitor.active_idx {
+                    active_workspace_id = Some(*workspace.id());
+                }
             }
         }
         // Now remove old windows.
@@ -1826,6 +1838,22 @@ impl Fht {
                 _ = compositor_state.windows.remove(&id);
                 events.push(fht_compositor_ipc::Event::WindowClosed { id })
             }
+        }
+
+        // Update focused window and workspace IDs
+        if compositor_state.focused_window_id != focused_window_id {
+            compositor_state.focused_window_id = focused_window_id;
+            events.push(fht_compositor_ipc::Event::FocusedWindowChanged {
+                id: focused_window_id,
+            });
+        }
+        let active_workspace_id =
+            active_workspace_id.expect("There should always be a focused workspace");
+        if compositor_state.active_workspace_id != active_workspace_id {
+            compositor_state.active_workspace_id = active_workspace_id;
+            events.push(fht_compositor_ipc::Event::ActiveWorkspaceChanged {
+                id: active_workspace_id,
+            });
         }
 
         drop(compositor_state); // explicit drop since borrow checker dumb

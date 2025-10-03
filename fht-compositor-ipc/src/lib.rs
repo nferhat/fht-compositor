@@ -131,6 +131,11 @@ pub enum Response {
 pub enum Event {
     /// The list of windows. This overrides any previous windows.
     Windows(HashMap<usize, Window>),
+    /// The focused window has changed.
+    FocusedWindowChanged {
+        /// The ID of the newly focused window. If `None`, no windows are currently focused.
+        id: Option<usize>,
+    },
     /// A window has been created or changed, overrides the one with this ID
     WindowChanged(Window),
     /// A window has been closed.
@@ -138,6 +143,8 @@ pub enum Event {
 
     /// The list of workspaces across all outputs. This overrides any previous workspaces.
     Workspaces(HashMap<usize, Workspace>),
+    /// The active workspace has changed.
+    ActiveWorkspaceChanged { id: usize },
     /// A workspace has changed, overrides the one with this ID.
     WorkspaceChanged(Workspace),
     /// A workspace has been removed, this is sent if the associated outputs/monitor gets

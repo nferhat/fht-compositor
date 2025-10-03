@@ -15,7 +15,11 @@ use futures_util::AsyncWriteExt;
 #[derive(Default, Clone, Debug)]
 pub struct CompositorState {
     pub windows: HashMap<usize, fht_compositor_ipc::Window>,
+    pub focused_window_id: Option<usize>,
+
     pub workspaces: HashMap<usize, fht_compositor_ipc::Workspace>,
+    pub active_workspace_id: usize,
+
     pub space: fht_compositor_ipc::Space,
     pub layer_shells: Vec<fht_compositor_ipc::LayerShell>,
 }
@@ -31,7 +35,9 @@ pub(super) async fn start_subscribing(
 ) -> anyhow::Result<()> {
     let CompositorState {
         windows,
+        focused_window_id,
         workspaces,
+        active_workspace_id,
         space,
         layer_shells,
     } = match initial_state.recv().await {
@@ -41,7 +47,13 @@ pub(super) async fn start_subscribing(
 
     let initial_events = [
         fht_compositor_ipc::Event::Windows(windows),
+        fht_compositor_ipc::Event::FocusedWindowChanged {
+            id: focused_window_id,
+        },
         fht_compositor_ipc::Event::Workspaces(workspaces),
+        fht_compositor_ipc::Event::ActiveWorkspaceChanged {
+            id: active_workspace_id,
+        },
         fht_compositor_ipc::Event::Space(space),
         fht_compositor_ipc::Event::LayerShells(layer_shells),
     ];

@@ -219,14 +219,6 @@ impl Space {
             .flat_map(Workspace::windows)
     }
 
-    /// Get an iterator of all the [`Tile`]s managed by this [`Space`].
-    pub fn tiles(&mut self) -> impl Iterator<Item = &tile::Tile> {
-        self.monitors
-            .iter()
-            .flat_map(Monitor::workspaces)
-            .flat_map(Workspace::tiles)
-    }
-
     /// Get a mutable iterator of all the [`Tile`]s managed by this [`Space`].
     pub fn tiles_mut(&mut self) -> impl Iterator<Item = &mut tile::Tile> {
         self.monitors
@@ -297,12 +289,6 @@ impl Space {
         self.monitors.iter().any(|mon| mon.output() == output)
     }
 
-    /// Get the active [`Workspace`].
-    pub fn active_workspace(&self) -> &Workspace {
-        let monitor = &self.monitors[self.active_idx];
-        monitor.active_workspace()
-    }
-
     /// Get the [`WorkspaceId`] of the active [`Workspace`].
     pub fn active_workspace_id(&self) -> WorkspaceId {
         let monitor = &self.monitors[self.active_idx];
@@ -329,21 +315,6 @@ impl Space {
         active_workspace.active_tile_mut()
     }
 
-    /// Get the active [`Monitor`] index of this [`Space`]
-    pub fn active_monitor_idx(&self) -> usize {
-        self.active_idx
-    }
-
-    /// Get the primary [`Monitor`] index of this [`Space`]
-    pub fn primary_monitor_idx(&self) -> usize {
-        self.primary_idx
-    }
-
-    /// Get the active [`Monitor`] of this [`Space`], if any.
-    pub fn active_monitor(&self) -> &Monitor {
-        &self.monitors[self.active_idx]
-    }
-
     /// Get the active [`Monitor`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]
@@ -367,13 +338,6 @@ impl Space {
     /// Get the primary [`Output`].
     pub fn primary_output(&self) -> &Output {
         self.monitors[self.primary_idx].output()
-    }
-
-    /// Get the [`Workspace`] associated with this [`WorkspaceId`].
-    pub fn workspace_for_id(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
-        self.monitors
-            .iter()
-            .find_map(|mon| mon.workspaces().find(|ws| ws.id() == workspace_id))
     }
 
     /// Get the [`Workspace`] associated with this [`WorkspaceId`].

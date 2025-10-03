@@ -8,7 +8,6 @@ use anyhow::Context;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{Focus, GrabStartData};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
@@ -18,14 +17,13 @@ use smithay::reexports::rustix;
 use smithay::utils::{Point, Size, SERIAL_COUNTER};
 use smithay::wayland::seat::WaylandFocus;
 
-use crate::focus_target::KeyboardFocusTarget;
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
-use crate::space::{Workspace, WorkspaceId};
+use crate::space::WorkspaceId;
 use crate::state::State;
 use crate::utils::get_credentials_for_surface;
-use crate::window::{Window, WindowId};
+use crate::window::WindowId;
 
 pub mod client;
 mod subscribe;
@@ -242,16 +240,6 @@ async fn handle_new_client(
 
 enum ClientRequest {
     Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
-    Window {
-        /// When `id` is `None`, request the focused window.
-        id: Option<usize>,
-        sender: async_channel::Sender<Option<fht_compositor_ipc::Window>>,
-    },
-    Workspace {
-        /// When `id` is `None`, request the focused workspace.
-        id: Option<usize>,
-        sender: async_channel::Sender<Option<fht_compositor_ipc::Workspace>>,
-    },
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
     PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
     CursorPosition(async_channel::Sender<(f64, f64)>),
@@ -329,37 +317,16 @@ async fn handle_request(
             Ok(Response::Workspace(workspace))
         }
         fht_compositor_ipc::Request::FocusedWindow => {
-            // FIXME: Track focused window ID here.
-            let (atx, arx) = async_channel::bounded(1);
-            let req = ClientRequest::Window {
-                id: None,
-                sender: atx,
-            };
-            to_compositor
-                .send(req)
-                .context("IPC communication channel closed")?;
-            let space = arx
-                .recv()
-                .await
-                .context("Failed to retreive focused window information")?;
-
-            Ok(Response::Window(space))
+            let state = compositor_state.borrow();
+            let window = state
+                .focused_window_id
+                .and_then(|id| state.windows.get(&id))
+                .cloned();
+            Ok(Response::Window(window))
         }
         fht_compositor_ipc::Request::FocusedWorkspace => {
-            // FIXME: Track focused workspace ID here.
-            let (atx, arx) = async_channel::bounded(1);
-            let req = ClientRequest::Workspace {
-                id: None,
-                sender: atx,
-            };
-            to_compositor
-                .send(req)
-                .context("IPC communication channel closed")?;
-            let workspace = arx
-                .recv()
-                .await
-                .context("Failed to retreive focused workspace information")?;
-
+            let state = compositor_state.borrow();
+            let workspace = state.workspaces.get(&state.active_workspace_id).cloned();
             Ok(Response::Workspace(workspace))
         }
         fht_compositor_ipc::Request::PickWindow => {
@@ -462,63 +429,6 @@ impl State {
                     })
                     .collect();
                 tx.send_blocking(outputs)?
-            }
-            ClientRequest::Window { id, sender } => {
-                let res = match id {
-                    Some(id) => self.fht.space.monitors().find_map(|mon| {
-                        mon.workspaces().find_map(|ws| {
-                            ws.tiles()
-                                .find(|tile| tile.window().id() == id)
-                                .map(|tile| (tile, ws))
-                        })
-                    }),
-                    None => {
-                        let monitor = self.fht.space.active_monitor();
-                        let workspace = monitor.active_workspace();
-                        workspace.active_tile().map(|tile| (tile, workspace))
-                    }
-                };
-
-                let window = res.map(|(tile, workspace)| {
-                    let window = tile.window();
-                    let location = tile.location() + tile.window_loc();
-                    let size = window.size();
-
-                    fht_compositor_ipc::Window {
-                        id: *window.id(),
-                        title: window.title(),
-                        app_id: window.app_id(),
-                        workspace_id: *workspace.id(),
-                        size: (size.w as u32, size.h as u32),
-                        location: location.into(),
-                        fullscreened: window.fullscreen(),
-                        maximized: window.maximized(),
-                        tiled: window.tiled(),
-                        // NOTE: We can hardcode these two
-                        activated: true,
-                        focused: true,
-                    }
-                });
-
-                sender.send_blocking(window)?;
-            }
-            ClientRequest::Workspace { id, sender } => {
-                let workspace = match id {
-                    Some(id) => self.fht.space.workspace_for_id(WorkspaceId(id)),
-                    None => Some(self.fht.space.active_workspace()),
-                };
-
-                let workspace = workspace.map(|workspace| fht_compositor_ipc::Workspace {
-                    output: workspace.output().name(),
-                    id: *workspace.id(),
-                    active_window_idx: workspace.active_tile_idx(),
-                    fullscreen_window_idx: workspace.fullscreened_tile_idx(),
-                    mwfact: workspace.mwfact(),
-                    nmaster: workspace.nmaster(),
-                    windows: workspace.windows().map(Window::id).map(|id| *id).collect(),
-                });
-
-                sender.send_blocking(workspace)?;
             }
             ClientRequest::PickWindow(tx) => {
                 let start_data = GrabStartData {
@@ -1122,39 +1032,4 @@ impl State {
 
         Ok(())
     }
-}
-
-fn workspace_windows(
-    workspace: &Workspace,
-    keyboard_focus: Option<&KeyboardFocusTarget>,
-) -> HashMap<usize, fht_compositor_ipc::Window> {
-    let mut windows = HashMap::with_capacity(workspace.windows().len());
-    let is_focused = move |window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
-    let workspace_id = *workspace.id();
-    let active_tile_idx = workspace.active_tile_idx();
-
-    for (tile_idx, tile) in workspace.tiles().enumerate() {
-        let window = tile.window();
-        let location = tile.location() + tile.window_loc();
-        let size = window.size();
-
-        windows.insert(
-            *window.id(),
-            fht_compositor_ipc::Window {
-                id: *window.id(),
-                title: window.title(),
-                app_id: window.app_id(),
-                workspace_id,
-                size: (size.w as u32, size.h as u32),
-                location: location.into(),
-                fullscreened: window.fullscreen(),
-                maximized: window.maximized(),
-                tiled: window.tiled(),
-                activated: Some(tile_idx) == active_tile_idx,
-                focused: is_focused(window),
-            },
-        );
-    }
-
-    windows
 }
