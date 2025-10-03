@@ -1770,6 +1770,55 @@ impl Fht {
                             new_window
                         });
                 }
+
+                // Then diff the workspace.
+                let entry = compositor_state.workspaces.entry(*ws_id);
+                entry
+                    .and_modify(|ipc_ws| {
+                        let mut changed = false;
+                        changed |= output_name != ipc_ws.output;
+
+                        let current_windows: Vec<_> =
+                            workspace.windows().map(Window::id).map(|id| *id).collect();
+                        changed |= current_windows != ipc_ws.windows;
+                        changed |= workspace.active_tile_idx() != ipc_ws.active_window_idx;
+                        changed |=
+                            workspace.fullscreened_tile_idx() != ipc_ws.fullscreen_window_idx;
+                        changed |= workspace.mwfact() != ipc_ws.mwfact;
+                        changed |= workspace.nmaster() != ipc_ws.nmaster;
+
+                        if changed {
+                            let new_workspace = fht_compositor_ipc::Workspace {
+                                id: *ws_id,
+                                output: output_name.clone(),
+                                windows: current_windows,
+                                active_window_idx: workspace.active_tile_idx(),
+                                fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                                mwfact: workspace.mwfact(),
+                                nmaster: workspace.nmaster(),
+                            };
+                            *ipc_ws = new_workspace;
+                            events
+                                .push(fht_compositor_ipc::Event::WorkspaceChanged(ipc_ws.clone()));
+                        }
+                    })
+                    .or_insert_with(|| {
+                        let current_windows: Vec<_> =
+                            workspace.windows().map(Window::id).map(|id| *id).collect();
+                        let new_workspace = fht_compositor_ipc::Workspace {
+                            id: *ws_id,
+                            output: output_name.clone(),
+                            windows: current_windows,
+                            active_window_idx: workspace.active_tile_idx(),
+                            fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                            mwfact: workspace.mwfact(),
+                            nmaster: workspace.nmaster(),
+                        };
+                        events.push(fht_compositor_ipc::Event::WorkspaceChanged(
+                            new_workspace.clone(),
+                        ));
+                        new_workspace
+                    });
             }
         }
         // Now remove old windows.
