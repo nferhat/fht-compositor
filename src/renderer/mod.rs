@@ -873,13 +873,15 @@ where
                 let tex_fb = renderer.bind(&mut tex)?;
                 let mut dmabuf_fb = renderer.bind(&mut dmabuf)?;
 
-                renderer.blit(
-                    &tex_fb,
-                    &mut dmabuf_fb,
-                    region,
-                    Rectangle::new(Point::default(), region.size),
-                    TextureFilter::Linear,
-                )?;
+                renderer
+                    .blit(
+                        &tex_fb,
+                        &mut dmabuf_fb,
+                        region,
+                        Rectangle::new(Point::default(), region.size),
+                        TextureFilter::Linear,
+                    )?
+                    .wait()?;
 
                 Ok((None, damage))
             }

@@ -86,6 +86,8 @@ pub enum Request {
     /// Request the user to pick a layer-shell. On the next click, the information of the
     /// layer-shell under the pointer cursor will be sent back, if any.
     PickLayerShell,
+    /// Get the cursor position.
+    CursorPosition,
     /// Request the compositor to execute an action.
     Action {
         #[command(subcommand)]

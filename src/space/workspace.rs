@@ -204,8 +204,12 @@ impl Workspace {
                 .request_fullscreen(false);
         }
 
-        for window in other.tiles.into_iter().map(Tile::into_window) {
-            self.insert_window(window, true);
+        for tile in other.tiles.into_iter() {
+            // Insert floating tiles at the same place in the previous workspace.
+            let is_floating = !tile.window().tiled();
+            let previous_location = is_floating.then_some(tile.location());
+            let window = Tile::into_window(tile);
+            self.insert_window(window, previous_location, true);
         }
     }
 
@@ -496,7 +500,12 @@ impl Workspace {
     /// Insert a [`Window`] inside this [`Workspace`].
     ///
     /// The workspace will take care of configuring the window's surface for the workspace output.
-    pub fn insert_window(&mut self, window: Window, animate: bool) {
+    pub fn insert_window(
+        &mut self,
+        window: Window,
+        location: Option<Point<i32, Logical>>,
+        animate: bool,
+    ) {
         if self.tiles.iter().any(|tile| *tile.window() == window) {
             return;
         }
@@ -504,11 +513,14 @@ impl Workspace {
 
         window.request_bounds(Some(self.output.geometry().size));
         window.configure_for_output(&self.output);
+        let skip_focus = window.rules().skip_focus.unwrap_or(false);
+        let is_floating = !window.tiled();
+
         let mut tile = Tile::new(window.clone(), Rc::clone(&self.config));
         let mut parent_idx = None;
         tile.start_opening_animation();
 
-        if !tile.window().tiled() {
+        if is_floating {
             let rules = tile.window().rules();
             let (centered, centered_in_parent) = (rules.centered, rules.centered_in_parent);
             drop(rules);
@@ -516,7 +528,15 @@ impl Workspace {
             let size = tile.size();
             let output_geometry = self.output.geometry();
 
-            if let Some(true) = centered {
+            if let Some(location) = location {
+                // Prioritize insert location at all costs, since multiple window rules can stack
+                // and you can find cases like location=(x, y) and centered=true, in which case
+                // the user most likely expects the location to be applied
+                //
+                // This ambiguity could be fixed by using an "exclude" mechanism for window rules,
+                // but right now it isn't implemented yet.
+                tile.set_location(location, false);
+            } else if let Some(true) = centered {
                 // Center the window after insertion.
                 tile.set_location(
                     output_geometry.center() - size.downscale(2).to_point() - output_geometry.loc,
@@ -578,7 +598,7 @@ impl Workspace {
             //
             // Doing this allows for more natural interactions, opening a child window then closing
             // it automatically focuses the parent window again.
-            self.tiles.insert(parent_idx.saturating_sub(1), tile);
+            self.tiles.insert(parent_idx, tile);
             parent_idx
         } else {
             match self.config.insert_window_strategy {
@@ -603,7 +623,7 @@ impl Workspace {
                 }
             }
         };
-        if self.config.focus_new_windows {
+        if self.config.focus_new_windows && !skip_focus {
             self.active_tile_idx = Some(new_idx)
         }
 
@@ -1051,6 +1071,15 @@ impl Workspace {
     /// Get the current fullscreened [`Window`]
     pub fn fullscreened_tile(&self) -> Option<&Tile> {
         self.tiles.get(self.fullscreened_tile_idx?)
+    }
+
+    /// Get the location of the [`Tile`] associated to this [`Window`] relative to this
+    /// [`Workspace`]
+    pub fn tile_location(&self, window: &Window) -> Option<Point<i32, Logical>> {
+        self.tiles
+            .iter()
+            .find(|tile| tile.window() == window)
+            .map(Tile::location)
     }
 
     /// Get the location of this [`Window`] relative to this [`Workspace`]

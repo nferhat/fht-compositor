@@ -33,11 +33,31 @@ The configuration is live-reloaded. You can edit and save the file and `fht-comp
 apply changes.
 
 If you made a mistake when writing your configuration (let that be syntax, invalid values, unknown enum variant, etc.), the
-compositor will warn you with a pop-up window sliding from the top of your screen. You can run `fht-comopsitor check-configuration`
+compositor will warn you with a popup window sliding from the top of your screen. You can run `fht-comopsitor check-configuration`
 to get that error in your terminal.
 
 
 ## Top-level section
+
+#### `imports`
+
+We support importing other configuration files in `fht-compositor`. Example:
+
+```toml
+imports = [
+    "/path/to/compositor.toml",
+    "~/dot/fht/compositor.toml", # tildes are expanded to $HOME
+]
+```
+
+The merging logic does as so: For each file (starting from the main `compositor.toml`) we:
+   1. Load the values from that file
+   2. If a key already exists in the config table:
+        - If the key value is an array, it will be extended
+        - For other values, override with the value
+   3. If a key didn't exist in any previous configuration files, use the last found value
+
+---
 
 ##### `autostart`
 

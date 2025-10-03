@@ -83,6 +83,7 @@ impl State {
                     workspace_idx,
                     false, // we are still unmapped
                 );
+                let mut opening_location = rules.location;
 
                 if let Some(named_output) = rules
                     .open_on_output
@@ -206,6 +207,7 @@ impl State {
                     window.set_rules(rules); // NOTE: apply window rules here since we need them
                                              // for the right border config to be considered
                     if !floating {
+                        opening_location = None; // the workspace will place it instead
                         self.fht
                             .space
                             .prepare_unconfigured_window(&window, workspace_id);
@@ -225,6 +227,7 @@ impl State {
                 } else {
                     window.set_rules(rules); // NOTE: apply window rules here since we need them
                                              // for the right border config to be considered
+                    opening_location = None; // the workspace will place it instead
                     window.request_tiled(true);
                     self.fht
                         .space
@@ -235,6 +238,7 @@ impl State {
                 self.fht.unmapped_windows.push(UnmappedWindow::Configured {
                     window,
                     workspace_id,
+                    opening_location,
                 });
                 return Some(output);
             }
@@ -250,10 +254,16 @@ impl State {
             let UnmappedWindow::Configured {
                 window,
                 workspace_id,
+                opening_location,
             } = self.fht.unmapped_windows.remove(idx)
             else {
                 unreachable!("Tried to map an unconfigured window!");
             };
+
+            // Do another check again just in-case the window decided to change
+            // its mind for absolutely no reason. (which happens)
+            let is_floating = !window.tiled();
+            let opening_location = opening_location.filter(|_| is_floating);
 
             self.fht.adversite_new_foreign_window(&window);
             window.on_commit();
@@ -272,7 +282,7 @@ impl State {
             };
 
             let output = workspace.output().clone();
-            workspace.insert_window(window.clone(), true);
+            workspace.insert_window(window.clone(), opening_location, true);
             let window_geometry = Rectangle::new(
                 self.fht.space.window_location(&window).unwrap(),
                 window.size(),

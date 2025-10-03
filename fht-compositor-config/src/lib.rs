@@ -22,7 +22,7 @@ use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
 use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
-use smithay::utils::Transform as SmithayTransform;
+use smithay::utils::{Logical, Transform as SmithayTransform};
 use toml::{Table, Value};
 
 static DEFAULT_CONFIG_CONTENTS: &str = include_str!("../../res/compositor.toml");
@@ -301,8 +301,22 @@ impl MouseButton {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseAxis {
+    WheelUp,
+    WheelDown,
+    WheelLeft,
+    WheelRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseInput {
+    Button(MouseButton),
+    Axis(MouseAxis),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MousePattern(pub ModifiersState, pub MouseButton);
+pub struct MousePattern(pub ModifiersState, pub MouseInput);
 
 impl<'de> Deserialize<'de> for MousePattern {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -311,10 +325,11 @@ impl<'de> Deserialize<'de> for MousePattern {
     {
         let raw = String::deserialize(deserializer)?;
         let mut modifiers = ModifiersState::default();
-        let mut button = None;
+        let mut input: Option<MouseInput> = None;
+
         for part in raw.split('-') {
-            if button.is_some() {
-                // We specified someting after having a keysym, invalid
+            if input.is_some() {
+                // We specified something after having a button/axis, invalid
                 return Err(<D::Error as serde::de::Error>::custom(
                     "key pattern ends after the keysym",
                 ));
@@ -326,27 +341,57 @@ impl<'de> Deserialize<'de> for MousePattern {
                 "Alt" | "A" => modifiers.alt = true,
                 "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
                 "AltGr" => modifiers.alt_gr = true,
-                x => match x.to_lowercase().trim() {
-                    "left" => button = Some(MouseButton::Left),
-                    "middle" => button = Some(MouseButton::Middle),
-                    "right" => button = Some(MouseButton::Right),
-                    "forward" => button = Some(MouseButton::Forward),
-                    "back" | "backwards" => button = Some(MouseButton::Back),
+                x => match x.to_lowercase().as_str() {
+                    // Buttons
+                    "left" => input = Some(MouseInput::Button(MouseButton::Left)),
+                    "middle" => input = Some(MouseInput::Button(MouseButton::Middle)),
+                    "right" => input = Some(MouseInput::Button(MouseButton::Right)),
+                    "forward" => input = Some(MouseInput::Button(MouseButton::Forward)),
+                    "back" | "backwards" => input = Some(MouseInput::Button(MouseButton::Back)),
+
+                    // Axes (wheel events)
+                    "wheelup" | "scrollup" => input = Some(MouseInput::Axis(MouseAxis::WheelUp)),
+                    "wheeldown" | "scrolldown" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelDown))
+                    }
+                    "wheelleft" | "scrollleft" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelLeft))
+                    }
+                    "wheelright" | "scrollright" => {
+                        input = Some(MouseInput::Axis(MouseAxis::WheelRight))
+                    }
                     _ => {
                         return Err(<D::Error as serde::de::Error>::invalid_value(
                             Unexpected::Str(x),
-                            &"MouseButton",
+                            &"MouseButton or MouseAxis",
                         ))
                     }
                 },
             }
         }
 
-        let Some(button) = button else {
-            return Err(<D::Error as serde::de::Error>::missing_field("button"));
+        let Some(input) = input else {
+            return Err(<D::Error as serde::de::Error>::missing_field("button/axis"));
         };
 
-        Ok(MousePattern(modifiers, button))
+        Ok(MousePattern(modifiers, input))
+    }
+}
+
+impl From<smithay::backend::input::MouseButton> for MouseInput {
+    fn from(button: smithay::backend::input::MouseButton) -> Self {
+        use smithay::backend::input::MouseButton as SmithayButton;
+
+        let mouse_button = match button {
+            SmithayButton::Left => MouseButton::Left,
+            SmithayButton::Middle => MouseButton::Middle,
+            SmithayButton::Right => MouseButton::Right,
+            SmithayButton::Forward => MouseButton::Forward,
+            SmithayButton::Back => MouseButton::Back,
+            _ => MouseButton::Left, // fallback for unknown buttons
+        };
+
+        MouseInput::Button(mouse_button)
     }
 }
 
@@ -355,6 +400,10 @@ impl<'de> Deserialize<'de> for MousePattern {
 pub enum MouseAction {
     SwapTile,
     ResizeTile,
+    FocusNextWindow,
+    FocusPreviousWindow,
+    FocusNextWorkspace,
+    FocusPreviousWorkspace,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -1104,6 +1153,7 @@ pub struct WindowRule {
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
+    pub location: Option<Position>,
     pub border: BorderOverrides,
     pub blur: BlurOverrides,
     pub shadow: ShadowOverrides,
@@ -1116,6 +1166,7 @@ pub struct WindowRule {
     pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
     pub vrr: Option<bool>,      // only effective when the window is on the primary plane
+    pub skip_focus: Option<bool>,
 }
 
 // NOTE: For layer shells we by default disable blur and shadow
@@ -1303,6 +1354,21 @@ impl Into<SmithayTransform> for OutputTransform {
     }
 }
 
+impl From<SmithayTransform> for OutputTransform {
+    fn from(value: SmithayTransform) -> Self {
+        match value {
+            SmithayTransform::Normal => Self::Normal,
+            SmithayTransform::_90 => Self::_90,
+            SmithayTransform::_180 => Self::_180,
+            SmithayTransform::_270 => Self::_270,
+            SmithayTransform::Flipped => Self::Flipped,
+            SmithayTransform::Flipped90 => Self::Flipped90,
+            SmithayTransform::Flipped180 => Self::Flipped180,
+            SmithayTransform::Flipped270 => Self::Flipped270,
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum VrrMode {
@@ -1314,9 +1380,15 @@ pub enum VrrMode {
 
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-pub struct OutputPosition {
+pub struct Position {
     pub x: i32,
     pub y: i32,
+}
+
+impl Into<smithay::utils::Point<i32, Logical>> for Position {
+    fn into(self) -> smithay::utils::Point<i32, Logical> {
+        (self.x, self.y).into()
+    }
 }
 
 #[derive(Default, Debug, Clone, Deserialize, PartialEq)]
@@ -1329,7 +1401,7 @@ pub struct Output {
     pub mode: Option<(u16, u16, Option<f64>)>,
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
-    pub position: Option<OutputPosition>,
+    pub position: Option<Position>,
     pub vrr: VrrMode,
 }
 

@@ -24,6 +24,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickLayerShell => fht_compositor_ipc::Request::PickLayerShell,
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
+        cli::Request::CursorPosition => fht_compositor_ipc::Request::CursorPosition,
         cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
     };
 
@@ -87,6 +88,9 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
                     Ok(serde_json::json!(null).to_string())
                 }
             },
+            fht_compositor_ipc::Response::CursorPosition { x, y } => {
+                Ok(serde_json::json!({ "x": x, "y": y }).to_string())
+            }
             fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
         println!("{}", json_buffer);
@@ -252,6 +256,9 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
                 writeln!(&mut writer, "Pick window request was cancelled")?
             }
         },
+        fht_compositor_ipc::Response::CursorPosition { x, y } => {
+            writeln!(&mut writer, "Cursor position: {x}, {y}")?;
+        }
         fht_compositor_ipc::Response::Error(err) => anyhow::bail!(err.clone()),
         fht_compositor_ipc::Response::Noop => (),
     }
