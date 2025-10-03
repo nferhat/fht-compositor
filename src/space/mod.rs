@@ -158,6 +158,18 @@ impl Space {
         }
     }
 
+    /// Get the primary [`Monitor`] index.
+    pub fn primary_monitor_idx(&self) -> usize {
+        self.primary_idx
+    }
+
+    /// Get the active [`Monitor`] index.
+    ///
+    /// This should be the monitor that has the pointer cursor in its bounds.
+    pub fn active_monitor_idx(&self) -> usize {
+        self.active_idx
+    }
+
     /// Get an iterator over the [`Space`]'s tracked [`Monitor`](s)
     pub fn monitors(&self) -> impl ExactSizeIterator<Item = &Monitor> {
         self.monitors.iter()

@@ -1856,6 +1856,74 @@ impl Fht {
             });
         }
 
+        // Finally diff space.
+        {
+            let space = &self.space;
+            let mut changed = compositor_state.space.primary_idx != space.primary_monitor_idx();
+            changed |= compositor_state.space.active_idx != space.primary_monitor_idx();
+            let mut removed_workspaces = Vec::<usize>::new();
+            // For monitors, we are assured the output name doesn't change aswell as workspace IDs
+            // (we don't support moving workspaces)
+            if !changed {
+                for (name, ipc_mon) in &compositor_state.space.monitors {
+                    let Some(mon) = space.monitors().find(|mon| mon.output().name() == *name)
+                    else {
+                        // We can't find the monitor, just override everything since it's missing
+                        // (in this case we have disconnected output)
+                        removed_workspaces.extend(&ipc_mon.workspaces);
+                        changed = true;
+                        break;
+                    };
+
+                    changed |= ipc_mon.active_workspace_idx != mon.active_idx;
+                    changed |= ipc_mon.active != mon.active();
+
+                    if changed {
+                        break;
+                    }
+                }
+            }
+
+            // Broadcast removed workspaces from disconnected monitors.
+            events.extend(
+                removed_workspaces
+                    .into_iter()
+                    .map(|id| fht_compositor_ipc::Event::WorkspaceRemoved { id }),
+            );
+
+            if changed {
+                // resend the new space.
+                let monitors = space
+                    .monitors()
+                    .map(|mon| {
+                        let workspaces: [usize; 9] = mon
+                            .workspaces()
+                            .map(|ws| *ws.id())
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .expect("always 9 workspaces per monitor");
+
+                        (
+                            mon.output().name(),
+                            fht_compositor_ipc::Monitor {
+                                output: mon.output().name(),
+                                workspaces,
+                                active: mon.active(),
+                                active_workspace_idx: mon.active_workspace_idx(),
+                            },
+                        )
+                    })
+                    .collect();
+
+                let space = fht_compositor_ipc::Space {
+                    monitors,
+                    active_idx: space.primary_monitor_idx(),
+                    primary_idx: space.active_monitor_idx(),
+                };
+                events.push(fht_compositor_ipc::Event::Space(space));
+            }
+        }
+
         drop(compositor_state); // explicit drop since borrow checker dumb
         if let Err(err) = ipc_server.push_events(events, &self.scheduler) {
             error!(?err, "Failed to broadcast IPC events");
