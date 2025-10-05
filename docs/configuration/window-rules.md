@@ -170,6 +170,13 @@ floating = true
 
 ---
 
+
+#### `location.x`, `location.y`
+
+The position to open the tile in, if its floating. This takes precedence over the `centered` parameter.
+
+---
+
 #### `border`, `blur`, `shadow`
 
 These values take the same fields as their versions in the [decorations configuration](/configuration/decorations),
@@ -238,3 +245,13 @@ is-floating = true
 Whether this window can trigger on-demand [VRR](/configuration/outputs#vrr). This window rule will
 only trigger if the window is scanned out on the primary plane (which most likely means the window
 is fullscreened)
+
+---
+
+### `skip-focus`
+
+Don't focus this window immediately when it gets opened, regardless of the
+[`general.focus-follows`](/configuration/general#focus-new-windows) setting.
+
+This is a hack for "notification windows" for XWwayland programs, such as
+[gpu-screen-recorder](https://git.dec05eba.com/gpu-screen-recorder-ui/about/).

@@ -240,13 +240,15 @@ impl EffectsFramebuffers {
         let tex_fb = renderer.bind(&mut self.effects).unwrap();
         let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
-        renderer.blit(
-            &tex_fb,
-            &mut optimized_blur_fb,
-            Rectangle::from_size(output_rect.size),
-            Rectangle::from_size(output_rect.size),
-            TextureFilter::Linear,
-        )?;
+        renderer
+            .blit(
+                &tex_fb,
+                &mut optimized_blur_fb,
+                Rectangle::from_size(output_rect.size),
+                Rectangle::from_size(output_rect.size),
+                TextureFilter::Linear,
+            )?
+            .wait()?;
 
         Ok(())
     }

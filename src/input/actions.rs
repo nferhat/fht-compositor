@@ -450,6 +450,11 @@ impl State {
                 let Some(window) = active.active_window() else {
                     return;
                 };
+
+                // Keep floating position.
+                let is_floating = !window.tiled();
+                let location = is_floating.then(|| active.tile_location(&window).unwrap());
+
                 if active.remove_window(&window, true) {
                     if let Some(window) = active.active_window() {
                         // Focus the new one now
@@ -458,7 +463,8 @@ impl State {
 
                     let idx = (*idx).clamp(0, 9);
                     let mon = self.fht.space.active_monitor_mut();
-                    mon.workspace_mut_by_index(idx).insert_window(window, true);
+                    mon.workspace_mut_by_index(idx)
+                        .insert_window(window, location, true);
                 }
             }
             KeyActionType::None => (), // disabled the key combo

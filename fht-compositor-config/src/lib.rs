@@ -22,7 +22,7 @@ use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
 };
 use smithay::reexports::input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
-use smithay::utils::Transform as SmithayTransform;
+use smithay::utils::{Logical, Transform as SmithayTransform};
 use toml::{Table, Value};
 
 static DEFAULT_CONFIG_CONTENTS: &str = include_str!("../../res/compositor.toml");
@@ -1151,6 +1151,7 @@ pub struct WindowRule {
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
+    pub location: Option<Position>,
     pub border: BorderOverrides,
     pub blur: BlurOverrides,
     pub shadow: ShadowOverrides,
@@ -1163,6 +1164,7 @@ pub struct WindowRule {
     pub ontop: Option<bool>,
     pub centered: Option<bool>, // only effective if floating == Some(true)
     pub vrr: Option<bool>,      // only effective when the window is on the primary plane
+    pub skip_focus: Option<bool>,
 }
 
 // NOTE: For layer shells we by default disable blur and shadow
@@ -1350,6 +1352,21 @@ impl Into<SmithayTransform> for OutputTransform {
     }
 }
 
+impl From<SmithayTransform> for OutputTransform {
+    fn from(value: SmithayTransform) -> Self {
+        match value {
+            SmithayTransform::Normal => Self::Normal,
+            SmithayTransform::_90 => Self::_90,
+            SmithayTransform::_180 => Self::_180,
+            SmithayTransform::_270 => Self::_270,
+            SmithayTransform::Flipped => Self::Flipped,
+            SmithayTransform::Flipped90 => Self::Flipped90,
+            SmithayTransform::Flipped180 => Self::Flipped180,
+            SmithayTransform::Flipped270 => Self::Flipped270,
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum VrrMode {
@@ -1361,9 +1378,15 @@ pub enum VrrMode {
 
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
-pub struct OutputPosition {
+pub struct Position {
     pub x: i32,
     pub y: i32,
+}
+
+impl Into<smithay::utils::Point<i32, Logical>> for Position {
+    fn into(self) -> smithay::utils::Point<i32, Logical> {
+        (self.x, self.y).into()
+    }
 }
 
 #[derive(Default, Debug, Clone, Deserialize, PartialEq)]
@@ -1376,7 +1399,7 @@ pub struct Output {
     pub mode: Option<(u16, u16, Option<f64>)>,
     pub transform: Option<OutputTransform>,
     pub scale: Option<i32>,
-    pub position: Option<OutputPosition>,
+    pub position: Option<Position>,
     pub vrr: VrrMode,
 }
 

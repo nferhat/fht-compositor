@@ -4,6 +4,7 @@
 // Licensed under GPL-3.0
 
 use anyhow::Context;
+use fht_compositor_config::VrrMode;
 use smithay::{
     output::{Output, WeakOutput},
     reexports::{
@@ -38,7 +39,7 @@ use smithay::{
     },
 };
 
-use crate::output::OutputExt;
+use crate::state::State;
 
 const VERSION: u32 = 4;
 
@@ -85,7 +86,7 @@ pub struct PendingOutputHeadConfiguration {
     pub position: Option<Point<i32, Logical>>,
     pub transform: Option<Transform>,
     pub scale: Option<f64>,
-    pub adaptive_sync: Option<bool>,
+    pub adaptive_sync: Option<fht_compositor_config::VrrMode>,
 }
 
 #[derive(Debug)]
@@ -96,8 +97,7 @@ pub enum OutputConfiguration {
         position: Option<Point<i32, Logical>>,
         transform: Option<Transform>,
         scale: Option<f64>,
-        #[allow(dead_code)] // FIXME: We don't support VRR yet
-        adaptive_sync: Option<bool>,
+        adaptive_sync: Option<fht_compositor_config::VrrMode>,
     },
 }
 
@@ -114,7 +114,7 @@ pub struct OutputData {
     position: Point<i32, Logical>,
     transform: Transform,
     scale: f64,
-    _adaptive_sync: bool,
+    adaptive_sync: Option<VrrMode>,
 }
 
 impl OutputManagementManagerState {
@@ -122,7 +122,7 @@ impl OutputManagementManagerState {
     ///
     /// [`OutputManagementManagerState::update`] needs to be called afterwards to apply the new
     /// state.
-    pub fn add_head<D>(&mut self, output: &Output)
+    pub fn add_head<D>(&mut self, output: &Output, vrr_enabled: Option<VrrMode>)
     where
         D: Dispatch<ZwlrOutputHeadV1, Output>
             + Dispatch<ZwlrOutputModeV1, Mode>
@@ -150,7 +150,7 @@ impl OutputManagementManagerState {
             position: output.current_location(),
             transform: output.current_transform(),
             scale: output.current_scale().fractional_scale(),
-            _adaptive_sync: false, // TODO:
+            adaptive_sync: vrr_enabled,
         };
 
         self.outputs.insert(output.downgrade(), output_data);
@@ -212,6 +212,7 @@ impl OutputManagementManagerState {
                                 }
                             }
                         }
+
                         let new_loc = output.current_location();
                         head.position(new_loc.x, new_loc.y);
                         output_data.position = new_loc;
@@ -228,144 +229,154 @@ impl OutputManagementManagerState {
             }
         }
     }
+}
 
-    /// Update output management state.
-    ///
-    /// This needs to be called whenever output state changes to notify clients of the new state.
-    pub fn update<D>(&mut self)
-    where
-        D: Dispatch<ZwlrOutputHeadV1, Output>
-            + Dispatch<ZwlrOutputModeV1, Mode>
-            + OutputManagementHandler
-            + 'static,
-    {
-        for output in self.removed_outputs.drain() {
-            let Some(output) = output.upgrade() else {
-                continue;
-            };
-            for data in self.managers.values_mut() {
-                let heads = data.heads.keys().cloned().collect::<Vec<_>>();
-                for head in heads {
-                    if head.data::<Output>() == Some(&output) {
-                        let modes = data.heads.remove(&head);
-                        if let Some(modes) = modes {
-                            for mode in modes {
-                                mode.finished();
-                            }
+/// Update output management state.
+///
+/// This needs to be called whenever output state changes to notify clients of the new state.
+pub fn update(state: &mut State) {
+    let fht = &mut state.fht;
+    let manager = &mut fht.output_management_manager_state;
+    for output in manager.removed_outputs.drain() {
+        let Some(output) = output.upgrade() else {
+            continue;
+        };
+        for data in manager.managers.values_mut() {
+            let heads = data.heads.keys().cloned().collect::<Vec<_>>();
+            for head in heads {
+                if head.data::<Output>() == Some(&output) {
+                    let modes = data.heads.remove(&head);
+                    if let Some(modes) = modes {
+                        for mode in modes {
+                            mode.finished();
                         }
-                        head.finished();
                     }
+                    head.finished();
                 }
             }
         }
+    }
 
-        let serial = u32::from(SERIAL_COUNTER.next_serial());
+    let serial = u32::from(SERIAL_COUNTER.next_serial());
 
-        self.outputs.retain(|output, output_data| {
-            let Some(output) = output.upgrade() else {
-                return false;
-            };
+    manager.outputs.retain(|output, output_data| {
+        let Some(output) = output.upgrade() else {
+            return false;
+        };
 
-            for (manager, manager_data) in self.managers.iter_mut() {
-                for (head, wlr_modes) in manager_data.heads.iter_mut() {
-                    if head.data::<Output>() != Some(&output) {
-                        continue;
-                    }
-
-                    let modes = output.modes();
-
-                    wlr_modes.retain(|wlr_mode| {
-                        if !modes.contains(wlr_mode.data::<Mode>().unwrap()) {
-                            wlr_mode.finished();
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
-                    for mode in modes {
-                        if !wlr_modes
-                            .iter()
-                            .any(|wlr_mode| wlr_mode.data::<Mode>().unwrap() == &mode)
-                        {
-                            let new_wlr_mode = create_mode_for_head::<D>(
-                                head,
-                                &self.display_handle,
-                                mode,
-                                output.preferred_mode() == Some(mode),
-                            );
-
-                            match new_wlr_mode {
-                                Ok(new_wlr_current_mode) => wlr_modes.push(new_wlr_current_mode),
-                                Err(err) => error!("Failed to create wlr mode: {err}"),
-                            }
-                        }
-                    }
-
-                    // enabled handled in `set_head_enabled`
-
-                    if output_data.enabled {
-                        if output.current_mode() != output_data.current_mode {
-                            if let Some(new_cur_mode) = output.current_mode() {
-                                let new_cur_wlr_mode = wlr_modes.iter().find(|wlr_mode| {
-                                    wlr_mode.data::<Mode>() == Some(&new_cur_mode)
-                                });
-
-                                match new_cur_wlr_mode {
-                                    Some(new_cur_wlr_mode) => {
-                                        head.current_mode(new_cur_wlr_mode);
-                                    }
-                                    None => {
-                                        let new_wlr_current_mode = create_mode_for_head::<D>(
-                                            head,
-                                            &self.display_handle,
-                                            new_cur_mode,
-                                            output.preferred_mode() == Some(new_cur_mode),
-                                        );
-
-                                        match new_wlr_current_mode {
-                                            Ok(new_wlr_current_mode) => {
-                                                head.current_mode(&new_wlr_current_mode);
-                                                wlr_modes.push(new_wlr_current_mode);
-                                            }
-                                            Err(err) => error!("Failed to create wlr mode: {err}"),
-                                        }
-                                    }
-                                }
-
-                                output_data.current_mode = Some(new_cur_mode);
-                            }
-                        }
-
-                        if output.current_location() != output_data.position {
-                            let new_loc = output.current_location();
-                            head.position(new_loc.x, new_loc.y);
-                            output_data.position = new_loc;
-                        }
-
-                        if output.current_transform() != output_data.transform {
-                            let new_transform = output.current_transform();
-                            head.transform(new_transform.into());
-                            output_data.transform = new_transform;
-                        }
-
-                        if output.current_scale().fractional_scale() != output_data.scale {
-                            let new_scale = output.current_scale().fractional_scale();
-                            head.scale(new_scale);
-                            output_data.scale = new_scale;
-                        }
-                    }
-
-                    // TODO: adaptive sync
+        for (manager, manager_data) in manager.managers.iter_mut() {
+            for (head, wlr_modes) in manager_data.heads.iter_mut() {
+                if head.data::<Output>() != Some(&output) {
+                    continue;
                 }
 
-                manager_data.serial = serial;
-                manager.done(serial);
+                let modes = output.modes();
+
+                wlr_modes.retain(|wlr_mode| {
+                    if !modes.contains(wlr_mode.data::<Mode>().unwrap()) {
+                        wlr_mode.finished();
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                for mode in modes {
+                    if !wlr_modes
+                        .iter()
+                        .any(|wlr_mode| wlr_mode.data::<Mode>().unwrap() == &mode)
+                    {
+                        let new_wlr_mode = create_mode_for_head::<State>(
+                            head,
+                            &fht.display_handle,
+                            mode,
+                            output.preferred_mode() == Some(mode),
+                        );
+
+                        match new_wlr_mode {
+                            Ok(new_wlr_current_mode) => wlr_modes.push(new_wlr_current_mode),
+                            Err(err) => error!("Failed to create wlr mode: {err}"),
+                        }
+                    }
+                }
+
+                // enabled handled in `set_head_enabled`
+
+                if output_data.enabled {
+                    if output.current_mode() != output_data.current_mode {
+                        if let Some(new_cur_mode) = output.current_mode() {
+                            let new_cur_wlr_mode = wlr_modes
+                                .iter()
+                                .find(|wlr_mode| wlr_mode.data::<Mode>() == Some(&new_cur_mode));
+
+                            match new_cur_wlr_mode {
+                                Some(new_cur_wlr_mode) => {
+                                    head.current_mode(new_cur_wlr_mode);
+                                }
+                                None => {
+                                    let new_wlr_current_mode = create_mode_for_head::<State>(
+                                        head,
+                                        &fht.display_handle,
+                                        new_cur_mode,
+                                        output.preferred_mode() == Some(new_cur_mode),
+                                    );
+
+                                    match new_wlr_current_mode {
+                                        Ok(new_wlr_current_mode) => {
+                                            head.current_mode(&new_wlr_current_mode);
+                                            wlr_modes.push(new_wlr_current_mode);
+                                        }
+                                        Err(err) => error!("Failed to create wlr mode: {err}"),
+                                    }
+                                }
+                            }
+
+                            output_data.current_mode = Some(new_cur_mode);
+                        }
+                    }
+
+                    if output.current_location() != output_data.position {
+                        let new_loc = output.current_location();
+                        head.position(new_loc.x, new_loc.y);
+                        output_data.position = new_loc;
+                    }
+
+                    if output.current_transform() != output_data.transform {
+                        let new_transform = output.current_transform();
+                        head.transform(new_transform.into());
+                        output_data.transform = new_transform;
+                    }
+
+                    if output.current_scale().fractional_scale() != output_data.scale {
+                        let new_scale = output.current_scale().fractional_scale();
+                        head.scale(new_scale);
+                        output_data.scale = new_scale;
+                    }
+
+                    let vrr_enabled = state
+                        .backend
+                        .vrr_enabled(&output)
+                        .map(|res| match res {
+                            true => VrrMode::On, // FIXME: Check if on-demand
+                            false => VrrMode::Off,
+                        })
+                        .unwrap_or_default();
+                    if Some(vrr_enabled) != output_data.adaptive_sync {
+                        head.adaptive_sync(match vrr_enabled {
+                            VrrMode::On => AdaptiveSyncState::Enabled,
+                            VrrMode::Off | VrrMode::OnDemand => AdaptiveSyncState::Disabled,
+                        });
+                        output_data.adaptive_sync = Some(vrr_enabled);
+                    }
+                }
             }
 
-            true
-        });
-    }
+            manager_data.serial = serial;
+            manager.done(serial);
+        }
+
+        true
+    });
 }
 
 fn advertise_output<D>(
@@ -1059,8 +1070,8 @@ where
 
                 let adaptive_sync = match state {
                     WEnum::Value(adaptive_sync) => match adaptive_sync {
-                        AdaptiveSyncState::Disabled => false,
-                        AdaptiveSyncState::Enabled => true,
+                        AdaptiveSyncState::Disabled => fht_compositor_config::VrrMode::Off,
+                        AdaptiveSyncState::Enabled => fht_compositor_config::VrrMode::On,
                         _ => unreachable!(),
                     },
                     WEnum::Unknown(val) => {
