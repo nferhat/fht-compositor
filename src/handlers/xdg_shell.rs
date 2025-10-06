@@ -222,11 +222,12 @@ impl XdgShellHandler for State {
     }
 
     fn maximize_request(&mut self, toplevel: ToplevelSurface) {
-        if toplevel
-            .current_state()
-            .capabilities
-            .contains(WmCapabilities::Maximize)
-        {
+        let can_maximize = toplevel.with_committed_state(|state| {
+            state.map_or(false, |state| {
+                state.capabilities.contains(WmCapabilities::Maximize)
+            })
+        });
+        if can_maximize {
             let wl_surface = toplevel.wl_surface();
             if let Some(window) = self.fht.space.find_window(wl_surface) {
                 if self.fht.space.maximize_window(
@@ -257,15 +258,17 @@ impl XdgShellHandler for State {
 
     fn fullscreen_request(
         &mut self,
-        surface: ToplevelSurface,
+        toplevel: ToplevelSurface,
         wl_output: Option<wl_output::WlOutput>,
     ) {
-        if surface
-            .current_state()
-            .capabilities
-            .contains(WmCapabilities::Fullscreen)
-        {
-            let wl_surface = surface.wl_surface();
+        let can_fullscreen = toplevel.with_committed_state(|state| {
+            state.map_or(false, |state| {
+                state.capabilities.contains(WmCapabilities::Fullscreen)
+            })
+        });
+
+        if can_fullscreen {
+            let wl_surface = toplevel.wl_surface();
             if let Some(window) = self.fht.space.find_window(wl_surface) {
                 if let Some(requested) = wl_output.as_ref().and_then(Output::from_resource) {
                     self.fht
@@ -280,7 +283,7 @@ impl XdgShellHandler for State {
             }
         }
 
-        surface.send_configure();
+        toplevel.send_configure();
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {

@@ -1439,9 +1439,9 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libdisplay-info"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4210cfe93a0dc37228e08105e3c13171e5af816f7bd39e00e3d3adcf2b487a2b"
+checksum = "59fd96dbb2381ff31f314f07accbdf8550febdcc5cd8761ecaf7c1763361c359"
 dependencies = [
  "bitflags 2.9.1",
  "libc",
@@ -1452,9 +1452,9 @@ dependencies = [
 
 [[package]]
 name = "libdisplay-info-derive"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea1cd31036b732a546d845f9485c56b1b606b5e476b0821c680dd66c8cd6fcee"
+checksum = "8dc2c710cf5819e91220a446d9e64acc6814386cc22c509c3f0df83c0b874a98"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1463,9 +1463,9 @@ dependencies = [
 
 [[package]]
 name = "libdisplay-info-sys"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f4f9264ece23c37ffa023ae635f48d588e1786745dad06dff10c9fb99dc646c"
+checksum = "26590d55b8819f9c6b0d95d9d12dc9edbfd1f2413e88814a33b631ac049bb51f"
 dependencies = [
  "semver",
  "system-deps 7.0.5",
@@ -2621,7 +2621,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/Smithay?rev=20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6#20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
+source = "git+https://github.com/smithay/Smithay?rev=9ccbd35f51842934f22b5a85ca0e3be1b99b27f2#9ccbd35f51842934f22b5a85ca0e3be1b99b27f2"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -2697,7 +2697,7 @@ dependencies = [
 [[package]]
 name = "smithay-drm-extras"
 version = "0.1.0"
-source = "git+https://github.com/smithay/Smithay?rev=20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6#20d2dacd71394b5f96f6ace0a70a6f20dc62c0c6"
+source = "git+https://github.com/smithay/Smithay?rev=9ccbd35f51842934f22b5a85ca0e3be1b99b27f2#9ccbd35f51842934f22b5a85ca0e3be1b99b27f2"
 dependencies = [
  "drm",
  "libdisplay-info",

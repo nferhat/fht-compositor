@@ -216,14 +216,14 @@ impl State {
                 // NOTE: We are checking from the topmost Overlay layer shell down to the lowest Top
                 // layer shell
                 for layer in self.fht.layer_shell_state.layer_surfaces().rev() {
-                    let data = with_states(layer.wl_surface(), |state| {
-                        *state
-                            .cached_state
-                            .get::<LayerSurfaceCachedState>()
-                            .current()
-                    });
-                    if data.keyboard_interactivity == KeyboardInteractivity::Exclusive
-                        && (data.layer == Layer::Top || data.layer == Layer::Overlay)
+                    let (keyboard_interactivity, wlr_layer) =
+                        with_states(layer.wl_surface(), |state| {
+                            let mut guard = state.cached_state.get::<LayerSurfaceCachedState>();
+                            let state = guard.current();
+                            (state.keyboard_interactivity, state.layer)
+                        });
+                    if keyboard_interactivity == KeyboardInteractivity::Exclusive
+                        && (wlr_layer == Layer::Top || wlr_layer == Layer::Overlay)
                     {
                         let surface = self.fht.space.outputs().find_map(|o| {
                             let layer_map = layer_map_for_output(o);
