@@ -976,6 +976,7 @@ name = "fht-compositor"
 version = "25.3.1"
 dependencies = [
  "anyhow",
+ "async-broadcast",
  "async-channel",
  "async-io",
  "bitflags 2.9.1",
