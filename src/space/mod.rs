@@ -36,7 +36,7 @@ mod closing_tile;
 mod monitor;
 pub mod shadow;
 mod tile;
-mod workspace;
+pub mod workspace;
 
 /// The workspace system [`Space`].
 pub struct Space {
