@@ -70,7 +70,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
-use crate::focus_target::PointerFocusTarget;
+use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::layer::MappedLayer;
@@ -82,7 +82,7 @@ use crate::portals::screencast::{
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
-use crate::space::{Space, WorkspaceId};
+use crate::space::{self, Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
 use crate::utils::{get_monotonic_time, RectCenterExt};
@@ -214,6 +214,9 @@ impl State {
                 .flush_clients()
                 .context("Failed to flush_clients!")?;
         }
+
+        // We do this after everything to make sure we send accurate state.
+        self.fht.refresh_ipc();
 
         Ok(())
     }
@@ -1699,6 +1702,243 @@ impl Fht {
                 }
             }
         }
+    }
+
+    pub fn refresh_ipc(&mut self) {
+        let Some(ipc_server) = &mut self.ipc_server else {
+            return;
+        };
+
+        let mut compositor_state = ipc_server.compositor_state.borrow_mut();
+        let keyboard_focus = self.keyboard.current_focus();
+        let is_focused = move |window: &Window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
+
+        let mut events = vec![];
+
+        let mut existing_windows = HashSet::new();
+        let mut focused_window_id = None;
+        let mut active_workspace_id = None;
+
+        for monitor in self.space.monitors() {
+            let output_name = monitor.output().name();
+            let mon_active = monitor.active();
+
+            for workspace in monitor.workspaces() {
+                let ws_id = workspace.id();
+                let active_tile_idx = workspace.active_tile_idx();
+
+                let make_ipc_window = |idx, tile: &space::Tile| {
+                    let window = tile.window();
+                    let location = tile.location() + tile.window_loc();
+                    let size = window.size();
+
+                    fht_compositor_ipc::Window {
+                        id: *window.id(),
+                        title: window.title(),
+                        app_id: window.app_id(),
+                        workspace_id: *ws_id,
+                        size: (size.w as u32, size.h as u32),
+                        location: location.into(),
+                        fullscreened: window.fullscreen(),
+                        maximized: window.maximized(),
+                        tiled: window.tiled(),
+                        activated: Some(idx) == active_tile_idx,
+                        focused: is_focused(window),
+                    }
+                };
+
+                // First diff windows.
+                for (idx, tile) in workspace.tiles().enumerate() {
+                    let id = tile.window().id();
+                    existing_windows.insert(*id);
+
+                    let entry = compositor_state.windows.entry(*id);
+                    let is_focused = entry
+                        .and_modify(|window| {
+                            let location = tile.location() + tile.window_loc();
+                            let size = tile.window().size();
+
+                            let mut changed = false;
+                            // FIXME: This is quite a lot of checking.
+                            changed |= tile.window().title() != window.title;
+                            changed |= tile.window().app_id() != window.app_id;
+                            changed |= tile.window().maximized() != window.maximized;
+                            changed |= tile.window().fullscreen() != window.fullscreened;
+                            changed |= tile.window().tiled() != window.tiled;
+                            changed |= *ws_id != window.workspace_id;
+                            changed |= window.location.0 != location.x;
+                            changed |= window.location.1 != location.y;
+                            changed |= window.size.0 != size.w as u32;
+                            changed |= window.size.1 != size.h as u32;
+
+                            if changed {
+                                *window = make_ipc_window(idx, tile);
+                                events
+                                    .push(fht_compositor_ipc::Event::WindowChanged(window.clone()));
+                            }
+                        })
+                        .or_insert_with(|| {
+                            let new_window = make_ipc_window(idx, tile);
+                            events
+                                .push(fht_compositor_ipc::Event::WindowChanged(new_window.clone()));
+                            new_window
+                        })
+                        .focused;
+                    if is_focused {
+                        focused_window_id = Some(*id);
+                    }
+                }
+
+                // Then diff the workspace.
+                let entry = compositor_state.workspaces.entry(*ws_id);
+                entry
+                    .and_modify(|ipc_ws| {
+                        let mut changed = false;
+                        changed |= output_name != ipc_ws.output;
+
+                        let current_windows: Vec<_> =
+                            workspace.windows().map(Window::id).map(|id| *id).collect();
+                        changed |= current_windows != ipc_ws.windows;
+                        changed |= workspace.active_tile_idx() != ipc_ws.active_window_idx;
+                        changed |=
+                            workspace.fullscreened_tile_idx() != ipc_ws.fullscreen_window_idx;
+                        changed |= workspace.mwfact() != ipc_ws.mwfact;
+                        changed |= workspace.nmaster() != ipc_ws.nmaster;
+
+                        if changed {
+                            let new_workspace = fht_compositor_ipc::Workspace {
+                                id: *ws_id,
+                                output: output_name.clone(),
+                                windows: current_windows,
+                                active_window_idx: workspace.active_tile_idx(),
+                                fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                                mwfact: workspace.mwfact(),
+                                nmaster: workspace.nmaster(),
+                            };
+                            *ipc_ws = new_workspace;
+                            events
+                                .push(fht_compositor_ipc::Event::WorkspaceChanged(ipc_ws.clone()));
+                        }
+                    })
+                    .or_insert_with(|| {
+                        let current_windows: Vec<_> =
+                            workspace.windows().map(Window::id).map(|id| *id).collect();
+                        let new_workspace = fht_compositor_ipc::Workspace {
+                            id: *ws_id,
+                            output: output_name.clone(),
+                            windows: current_windows,
+                            active_window_idx: workspace.active_tile_idx(),
+                            fullscreen_window_idx: workspace.fullscreened_tile_idx(),
+                            mwfact: workspace.mwfact(),
+                            nmaster: workspace.nmaster(),
+                        };
+                        events.push(fht_compositor_ipc::Event::WorkspaceChanged(
+                            new_workspace.clone(),
+                        ));
+                        new_workspace
+                    });
+                if mon_active && workspace.index() == monitor.active_idx {
+                    active_workspace_id = Some(*workspace.id());
+                }
+            }
+        }
+        // Now remove old windows.
+        let all_ids: Vec<_> = compositor_state.windows.keys().copied().collect();
+        for id in all_ids {
+            if !existing_windows.contains(&id) {
+                _ = compositor_state.windows.remove(&id);
+                events.push(fht_compositor_ipc::Event::WindowClosed { id })
+            }
+        }
+
+        // Update focused window and workspace IDs
+        if compositor_state.focused_window_id != focused_window_id {
+            compositor_state.focused_window_id = focused_window_id;
+            events.push(fht_compositor_ipc::Event::FocusedWindowChanged {
+                id: focused_window_id,
+            });
+        }
+        let active_workspace_id =
+            active_workspace_id.expect("There should always be a focused workspace");
+        if compositor_state.active_workspace_id != active_workspace_id {
+            compositor_state.active_workspace_id = active_workspace_id;
+            events.push(fht_compositor_ipc::Event::ActiveWorkspaceChanged {
+                id: active_workspace_id,
+            });
+        }
+
+        // Finally diff space.
+        {
+            let space = &self.space;
+            let mut changed = compositor_state.space.primary_idx != space.primary_monitor_idx();
+            changed |= compositor_state.space.active_idx != space.primary_monitor_idx();
+            let mut removed_workspaces = Vec::<usize>::new();
+            // For monitors, we are assured the output name doesn't change aswell as workspace IDs
+            // (we don't support moving workspaces)
+            if !changed {
+                for (name, ipc_mon) in &compositor_state.space.monitors {
+                    let Some(mon) = space.monitors().find(|mon| mon.output().name() == *name)
+                    else {
+                        // We can't find the monitor, just override everything since it's missing
+                        // (in this case we have disconnected output)
+                        removed_workspaces.extend(&ipc_mon.workspaces);
+                        changed = true;
+                        break;
+                    };
+
+                    changed |= ipc_mon.active_workspace_idx != mon.active_idx;
+                    changed |= ipc_mon.active != mon.active();
+
+                    if changed {
+                        break;
+                    }
+                }
+            }
+
+            // Broadcast removed workspaces from disconnected monitors.
+            events.extend(
+                removed_workspaces
+                    .into_iter()
+                    .map(|id| fht_compositor_ipc::Event::WorkspaceRemoved { id }),
+            );
+
+            if changed {
+                // resend the new space.
+                let monitors = space
+                    .monitors()
+                    .map(|mon| {
+                        let workspaces: [usize; 9] = mon
+                            .workspaces()
+                            .map(|ws| *ws.id())
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .expect("always 9 workspaces per monitor");
+
+                        (
+                            mon.output().name(),
+                            fht_compositor_ipc::Monitor {
+                                output: mon.output().name(),
+                                workspaces,
+                                active: mon.active(),
+                                active_workspace_idx: mon.active_workspace_idx(),
+                            },
+                        )
+                    })
+                    .collect();
+
+                let space = fht_compositor_ipc::Space {
+                    monitors,
+                    active_idx: space.primary_monitor_idx(),
+                    primary_idx: space.active_monitor_idx(),
+                };
+                events.push(fht_compositor_ipc::Event::Space(space));
+            }
+        }
+
+        drop(compositor_state); // explicit drop since borrow checker dumb
+        if let Err(err) = ipc_server.push_events(events, &self.scheduler) {
+            error!(?err, "Failed to broadcast IPC events");
+        };
     }
 
     pub fn refresh_idle_inhibit(&mut self) {

@@ -21,7 +21,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
-pub use tile::TileRenderElement;
+pub use tile::{Tile, TileRenderElement};
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
 
@@ -158,6 +158,18 @@ impl Space {
         }
     }
 
+    /// Get the primary [`Monitor`] index.
+    pub fn primary_monitor_idx(&self) -> usize {
+        self.primary_idx
+    }
+
+    /// Get the active [`Monitor`] index.
+    ///
+    /// This should be the monitor that has the pointer cursor in its bounds.
+    pub fn active_monitor_idx(&self) -> usize {
+        self.active_idx
+    }
+
     /// Get an iterator over the [`Space`]'s tracked [`Monitor`](s)
     pub fn monitors(&self) -> impl ExactSizeIterator<Item = &Monitor> {
         self.monitors.iter()
@@ -289,12 +301,6 @@ impl Space {
         self.monitors.iter().any(|mon| mon.output() == output)
     }
 
-    /// Get the active [`Workspace`].
-    pub fn active_workspace(&self) -> &Workspace {
-        let monitor = &self.monitors[self.active_idx];
-        monitor.active_workspace()
-    }
-
     /// Get the [`WorkspaceId`] of the active [`Workspace`].
     pub fn active_workspace_id(&self) -> WorkspaceId {
         let monitor = &self.monitors[self.active_idx];
@@ -321,21 +327,6 @@ impl Space {
         active_workspace.active_tile_mut()
     }
 
-    /// Get the active [`Monitor`] index of this [`Space`]
-    pub fn active_monitor_idx(&self) -> usize {
-        self.active_idx
-    }
-
-    /// Get the primary [`Monitor`] index of this [`Space`]
-    pub fn primary_monitor_idx(&self) -> usize {
-        self.primary_idx
-    }
-
-    /// Get the active [`Monitor`] of this [`Space`], if any.
-    pub fn active_monitor(&self) -> &Monitor {
-        &self.monitors[self.active_idx]
-    }
-
     /// Get the active [`Monitor`] of this [`Space`], if any.
     pub fn active_monitor_mut(&mut self) -> &mut Monitor {
         &mut self.monitors[self.active_idx]
@@ -359,13 +350,6 @@ impl Space {
     /// Get the primary [`Output`].
     pub fn primary_output(&self) -> &Output {
         self.monitors[self.primary_idx].output()
-    }
-
-    /// Get the [`Workspace`] associated with this [`WorkspaceId`].
-    pub fn workspace_for_id(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
-        self.monitors
-            .iter()
-            .find_map(|mon| mon.workspaces().find(|ws| ws.id() == workspace_id))
     }
 
     /// Get the [`Workspace`] associated with this [`WorkspaceId`].

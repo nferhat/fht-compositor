@@ -1,4 +1,4 @@
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{self, BufRead as _, BufReader, Write as _};
 
 use fht_compositor_ipc::{PickLayerShellResult, PickWindowResult};
 
@@ -8,6 +8,7 @@ use crate::cli;
 ///
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
 pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
+    let mut subscribe = false;
     let request = match request {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
@@ -26,6 +27,10 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
         cli::Request::CursorPosition => fht_compositor_ipc::Request::CursorPosition,
         cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
+        cli::Request::Subscribe => {
+            subscribe = true;
+            fht_compositor_ipc::Request::Subscribe
+        }
     };
 
     // This is just a re-implementation of fht-compositor-ipc/test_client with cleaner error
@@ -36,6 +41,26 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     let mut req = serde_json::to_string(&request).unwrap();
     req.push('\n'); // it is required to append a newline.
     stream.write_all(req.as_bytes())?;
+
+    // If we are subscribing, keep reading events, and we won't write to this anymore
+    if subscribe {
+        // We must use a buf reader to get an entire line
+        let mut buf_reader = BufReader::new(&mut stream);
+        let mut stdout = io::stdout();
+        loop {
+            let mut res_buf = String::new();
+            match buf_reader.read_line(&mut res_buf) {
+                // Client disconnected. Thank you @Byson94 for spotting this!
+                // Some clients send an empty buffer when disconnecting, which is, weird.
+                Ok(0) => break,
+                Ok(_) => (),
+                // The compositor exited. Nothing left to read.
+                Err(err) if err.kind() == io::ErrorKind::BrokenPipe => return Ok(()),
+                Err(err) => anyhow::bail!("Failed to read event from compositor: {err:?}"),
+            }
+            stdout.write(res_buf.as_bytes())?;
+        }
+    }
 
     let mut res_buf = String::new();
     {
@@ -188,23 +213,8 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
                 writeln!(&mut writer, "\t\tOutput: {}", monitor.output)?;
                 writeln!(&mut writer, "\t\tPrimary: {}", idx == *primary_idx)?;
                 writeln!(&mut writer, "\t\tActive: {}", idx == *active_idx)?;
-                writeln!(&mut writer, "\t\t---")?;
-                for (workspace_idx, workspace) in monitor.workspaces.iter().enumerate() {
-                    writeln!(&mut writer, "\t\tWorkspace #{workspace_idx}:")?;
-                    writeln!(&mut writer, "\t\t\tID: {}", workspace.id)?;
-                    writeln!(&mut writer, "\t\t\tWindows: {:?}", workspace.windows)?;
-                    writeln!(
-                        &mut writer,
-                        "\t\t\tMaster width factor: {}",
-                        workspace.mwfact
-                    )?;
-                    writeln!(
-                        &mut writer,
-                        "\t\t\tNumber of master windows: {}",
-                        workspace.nmaster
-                    )?;
-                    writeln!(&mut writer, "\t\t---")?;
-                }
+                writeln!(&mut writer, "\t\tWorkspaces: {:#?}", monitor.workspaces)?;
+                writeln!(&mut writer, "---")?;
             }
             //
         }
@@ -267,18 +277,12 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
 }
 
 fn print_window(
-    writer: &mut impl std::io::Write,
+    writer: &mut impl io::Write,
     window: &fht_compositor_ipc::Window,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     writeln!(writer, "Window #{}", window.id)?;
     writeln!(writer, "\tTitle: {:?}", window.title)?;
     writeln!(writer, "\tApplication ID: {:?}", window.app_id)?;
-    writeln!(writer, "\tCurrent output: {}", window.output)?;
-    writeln!(
-        writer,
-        "\tCurrent workspace index: {}",
-        window.workspace_idx
-    )?;
     writeln!(writer, "\tCurrent workspace ID: {}", window.workspace_id)?;
     writeln!(writer, "\tSize: ({}, {})", window.size.0, window.size.1)?;
     writeln!(
