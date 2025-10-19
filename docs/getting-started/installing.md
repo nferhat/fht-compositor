@@ -33,7 +33,7 @@ You will need the following system dependencies. Depending on your distribution,
 - `libwayland` and dependencies
 - `libxkbcommon` and dependencies
 - `mesa` with the appropriate OpenGL driver for you GPU.
-- In order to run the compositor from a TTY: `libudev`, `libinput`, `libgbm`, [`libseat`](https://git.sr.ht/~kennylevinsen/seatd), `libdrm` and `lib-displayinfo`
+- In order to run the compositor from a TTY: `libudev`, `libinput`, `libgbm`, [`libseat`](https://git.sr.ht/~kennylevinsen/seatd), `libdrm` and `lib-displayinfo>=0.3.0`
 - To use [XDG screencast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html): `pipewire`, `dbus`
 
 Then you can proceed with compiling.
