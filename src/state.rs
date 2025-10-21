@@ -1873,6 +1873,11 @@ impl Fht {
             let mut changed = compositor_state.space.primary_idx != space.primary_monitor_idx();
             changed |= compositor_state.space.active_idx != space.primary_monitor_idx();
             let mut removed_workspaces = Vec::<usize>::new();
+
+            // We have to check for length change for handling intial state (which sets monitors to
+            // an empty map {}), Otherwise we are never entering the loop.
+            changed |= compositor_state.space.monitors.len() != space.monitors().count();
+
             // For monitors, we are assured the output name doesn't change aswell as workspace IDs
             // (we don't support moving workspaces)
             if !changed {
@@ -1931,6 +1936,7 @@ impl Fht {
                     active_idx: space.primary_monitor_idx(),
                     primary_idx: space.active_monitor_idx(),
                 };
+                compositor_state.space = space.clone();
                 events.push(fht_compositor_ipc::Event::Space(space));
             }
         }
