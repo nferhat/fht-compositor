@@ -636,6 +636,7 @@ pub struct Fht {
     pub popups: PopupManager,
     pub root_surfaces: HashMap<WlSurface, WlSurface>,
     pub idle_inhibiting_surfaces: Vec<WlSurface>,
+    pub notified_idle_state: bool,
     pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
     pub lock_state: LockState,
 
@@ -873,6 +874,7 @@ impl Fht {
             popups: PopupManager::default(),
             root_surfaces: HashMap::default(),
             idle_inhibiting_surfaces: Vec::new(),
+            notified_idle_state: false,
 
             output_state: HashMap::new(),
             has_transient_output_changes: false,
@@ -916,6 +918,8 @@ impl Fht {
         crate::profile_function!();
         self.resolve_rules_for_all_windows_if_needed();
         self.refresh_idle_inhibit();
+        // We space out calls to idle-notify by each refresh call.
+        self.notified_idle_state = false;
 
         self.lock_state = match std::mem::take(&mut self.lock_state) {
             // Switch from pending to locked when we finished drawing a backdrop at least once.

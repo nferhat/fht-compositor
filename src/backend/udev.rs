@@ -251,6 +251,7 @@ impl UdevData {
                         }
                     }
 
+                    state.fht.idle_notify_activity();
                     state.fht.queue_redraw_all();
                 }
             })

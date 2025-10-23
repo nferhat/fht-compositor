@@ -280,6 +280,11 @@ impl State {
 
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
         crate::profile_function!();
+
+        // The spec doesn't specify which events should give activity, so just notify whenever
+        // there's something that happened from the user.
+        self.fht.idle_notify_activity();
+
         match event {
             InputEvent::DeviceAdded { device } => {
                 if device.has_capability(DeviceCapability::TabletTool) {
