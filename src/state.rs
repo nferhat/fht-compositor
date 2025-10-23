@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use calloop::futures::Scheduler;
+use calloop::timer::Timer;
 use fht_compositor_config::{
     BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides, VrrMode,
 };
@@ -20,7 +21,7 @@ use smithay::desktop::utils::{
 };
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
-use smithay::input::pointer::{CursorImageStatus, MotionEvent, PointerHandle};
+use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{self, LoopHandle, LoopSignal, RegistrationToken};
@@ -29,7 +30,7 @@ use smithay::reexports::wayland_server::backend::ClientData;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER};
+use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
@@ -85,13 +86,32 @@ use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{self, Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
-use crate::utils::{get_monotonic_time, RectCenterExt};
+use crate::utils::RectCenterExt;
 use crate::window::Window;
 use crate::{cli, ipc};
+
+/// State to check when was the last time we did a refresh on a main loop dispatch cycle.
+///
+/// To avoid flooding the Wayland socket with events, aswell as reducing redundant computation that
+/// is done every cycle (notably traversing the [`Space`] and refreshing [`Window`]s), we throttle
+/// when we do these expensive operations, yielding a much lower CPU usage.
+///
+/// This idea comes from cosmic-comp!
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LastRefresh {
+    None,
+    At(Instant),
+    Scheduled(RegistrationToken),
+}
+
+/// The minimum time to wait between each refresh. This number is pretty arbitrary and might be
+/// added as a debug option if it causes issues on some systems.
+pub const MINIMUM_WAIT_TIME: Duration = Duration::from_millis(75);
 
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
+    pub last_refresh: LastRefresh,
 }
 
 impl State {
@@ -145,19 +165,55 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self { fht, backend }
+        Self {
+            fht,
+            backend,
+            last_refresh: LastRefresh::None,
+        }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
         crate::profile_function!();
-        self.fht.space.refresh();
-        self.fht.popups.cleanup();
-        self.fht.refresh_idle_inhibit();
 
-        // This must be called before redrawing the outputs since the render elements depend on
-        // up-to-date focus and window rules, so update them before redrawing the outputs
+        {
+            crate::profile_scope!("flush_clients");
+            self.fht
+                .display_handle
+                .flush_clients()
+                .context("Failed to flush_clients!")?;
+        }
+
+        // Read LastRefresh doc comment
+        match self.last_refresh {
+            LastRefresh::Scheduled(_) => (), // wait for a future dispatch call
+            LastRefresh::At(instant)
+                if Instant::now().duration_since(instant) < MINIMUM_WAIT_TIME =>
+            {
+                if let Ok(token) = self.fht.loop_handle.insert_source(
+                    Timer::from_duration(MINIMUM_WAIT_TIME),
+                    |_, (), state| {
+                        state.last_refresh = LastRefresh::None;
+                        calloop::timer::TimeoutAction::Drop
+                    },
+                ) {
+                    self.last_refresh = LastRefresh::Scheduled(token);
+                } else {
+                    warn!("Failed to schedule periodic state refresh!");
+                    self.fht.refresh();
+                }
+            }
+            _ => {
+                // Enough time has passed for us todo an actual refresh
+                self.fht.refresh();
+                self.last_refresh = LastRefresh::At(Instant::now());
+            }
+        }
+
+        // Update keyboard and pointer focus **after** making sure there are no lock
+        // surfaces in fht.refresh() (or ensuring the pending one gets confirmed)
         self.update_keyboard_focus();
-        self.fht.resolve_rules_for_all_windows_if_needed();
+        // Same reasoning as above.
+        self.update_pointer_focus();
 
         {
             crate::profile_scope!("refresh_and_redraw_outputs");
@@ -183,69 +239,9 @@ impl State {
             for output in outputs_to_redraw {
                 self.redraw(output);
             }
-        };
-        self.fht.lock_state = match std::mem::take(&mut self.fht.lock_state) {
-            // Switch from pending to locked when we finished drawing a backdrop at least once.
-            LockState::Pending(locker)
-                if self.fht.space.outputs().all(|output| {
-                    self.fht
-                        .output_state
-                        .get(output)
-                        .unwrap()
-                        .lock_backdrop
-                        .is_some()
-                }) =>
-            {
-                locker.lock();
-                LockState::Locked
-            }
-            state => state,
-        };
-
-        // NOTE: If we cleared lock surface, `SessionLockHandler::unlock` will call
-        // `State::update_keyboard_focus` to appropriatly update the focus of the keyboard.
-        // This is done only to keep pointer contents updated.
-        self.update_pointer_focus();
-
-        {
-            crate::profile_scope!("flush_clients");
-            self.fht
-                .display_handle
-                .flush_clients()
-                .context("Failed to flush_clients!")?;
         }
-
-        // We do this after everything to make sure we send accurate state.
-        self.fht.refresh_ipc();
 
         Ok(())
-    }
-
-    /// Refresh the pointer focus.
-    pub fn update_pointer_focus(&mut self) {
-        crate::profile_scope!("refresh_pointer_focus");
-        // We try to update the pointer focus. If the new one is not the same as the previous one we
-        // encountered, we send a motion and frame event to the new one.
-        let pointer = self.fht.pointer.clone();
-        let pointer_loc = pointer.current_location();
-        let new_focus = self.fht.focus_target_under(pointer_loc);
-        if new_focus.as_ref().map(|(ft, _)| ft) == pointer.current_focus().as_ref() {
-            return; // No updates, keep going
-        }
-
-        pointer.motion(
-            self,
-            new_focus,
-            &MotionEvent {
-                location: pointer_loc,
-                serial: SERIAL_COUNTER.next_serial(),
-                time: get_monotonic_time().as_millis() as u32,
-            },
-        );
-        // After motion, try to activate new pointer constraint under surface
-        self.fht.activate_pointer_constraint();
-
-        pointer.frame(self);
     }
 
     pub fn new_client_state(&self) -> ClientState {
@@ -914,6 +910,35 @@ impl Fht {
             xdg_shell_state,
             xdg_foreign_state,
         }
+    }
+
+    fn refresh(&mut self) {
+        crate::profile_function!();
+        self.resolve_rules_for_all_windows_if_needed();
+        self.refresh_idle_inhibit();
+
+        self.lock_state = match std::mem::take(&mut self.lock_state) {
+            // Switch from pending to locked when we finished drawing a backdrop at least once.
+            LockState::Pending(locker)
+                if self.space.outputs().all(|output| {
+                    self.output_state
+                        .get(output)
+                        .unwrap()
+                        .lock_backdrop
+                        .is_some()
+                }) =>
+            {
+                locker.lock();
+                LockState::Locked
+            }
+            state => state,
+        };
+
+        // Periodic cleanup, nothing special.
+        self.space.refresh();
+        self.popups.cleanup();
+        // We do this after everything to make sure we send accurate state.
+        self.refresh_ipc();
     }
 
     pub fn add_output(

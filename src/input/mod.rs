@@ -26,6 +26,7 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::output::OutputExt;
 use crate::state::State;
+use crate::utils::get_monotonic_time;
 
 impl State {
     pub fn update_keyboard_focus(&mut self) {
@@ -140,6 +141,33 @@ impl State {
             // but seems like a hack more like anything else
             self.set_keyboard_focus(new_focus);
         }
+    }
+
+    /// Refresh the pointer focus.
+    pub fn update_pointer_focus(&mut self) {
+        crate::profile_scope!("refresh_pointer_focus");
+        // We try to update the pointer focus. If the new one is not the same as the previous one we
+        // encountered, we send a motion and frame event to the new one.
+        let pointer = self.fht.pointer.clone();
+        let pointer_loc = pointer.current_location();
+        let new_focus = self.fht.focus_target_under(pointer_loc);
+        if new_focus.as_ref().map(|(ft, _)| ft) == pointer.current_focus().as_ref() {
+            return; // No updates, keep going
+        }
+
+        pointer.motion(
+            self,
+            new_focus,
+            &MotionEvent {
+                location: pointer_loc,
+                serial: SERIAL_COUNTER.next_serial(),
+                time: get_monotonic_time().as_millis() as u32,
+            },
+        );
+        // After motion, try to activate new pointer constraint under surface
+        self.fht.activate_pointer_constraint();
+
+        pointer.frame(self);
     }
 
     fn handle_focus_follows_mouse(&mut self, under: Option<PointerFocusTarget>) {
