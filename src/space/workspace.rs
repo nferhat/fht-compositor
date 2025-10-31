@@ -1733,14 +1733,24 @@ impl Workspace {
         }
 
         let mut new_size = interactive_resize.initial_window_geometry.size;
+        let mut new_loc = interactive_resize.initial_window_geometry.loc;
+        // NOTE: We can work with the tile's location directly since moving the window will
+        // also move the tile by an equal amount.
+
         let (mut dx, mut dy) = (delta.x, delta.y);
+        // If we are grabbing from the left edge, we are expanding the window from the left.
+        // Due to how the coordinate system works, we inverse the delta to achieve this.
         if interactive_resize.edges.intersects(ResizeEdge::LEFT) {
-            // If we are grabbing from the left edge, we are expanding the window from the left.
-            // Due to how the coordinate system works, we inverse the delta to achieve this.
+            // Make sure to add the delta before switching though, because we are expanding the
+            // window from the right but also moving it left by the same amount
+            new_loc.x += dx;
             dx = -dx;
         }
+        // Same deal if we are gradding from the top.
         if interactive_resize.edges.intersects(ResizeEdge::TOP) {
-            // Same deal if we are gradding from the top.
+            // But here, we are expanding the window from the bottom and moving it up by the same
+            // amount
+            new_loc.y += dy;
             dy = -dy;
         }
 
@@ -1768,6 +1778,14 @@ impl Workspace {
 
         window.request_size(new_size);
         window.send_configure();
+
+        // Don't forget to move the tile!
+        let tile = self
+            .tiles
+            .iter_mut()
+            .find(|tile| tile.window() == window)
+            .unwrap();
+        tile.set_location(new_loc, false);
 
         true
     }
