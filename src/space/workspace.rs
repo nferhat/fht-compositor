@@ -9,7 +9,9 @@ use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::xdg::SurfaceCachedState;
 
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
@@ -1756,6 +1758,14 @@ impl Workspace {
             new_size.h += dy;
         }
 
+        // Clamp size to min/max
+        let (min_size, max_size) = with_states(&window.wl_surface().unwrap(), |data| {
+            let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
+            let surface_data = cached_state.current();
+            (surface_data.min_size, surface_data.max_size)
+        });
+        new_size = clamp_size(new_size, min_size, max_size);
+
         window.request_size(new_size);
         window.send_configure();
 
@@ -1997,4 +2007,30 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
             }
         })
         .collect()
+}
+
+/// Ensures a size is clamped between `min_size` and `max_size`
+///
+/// Due to how Wayland protocol is implemented, if a min/max size is equal to zero, we shouldn't
+/// take it into account.
+pub fn clamp_size(
+    mut size: Size<i32, Logical>,
+    min_size: Size<i32, Logical>,
+    max_size: Size<i32, Logical>,
+) -> Size<i32, Logical> {
+    if min_size.w > 0 {
+        size.w = size.w.max(min_size.w);
+    }
+    if max_size.w > 0 {
+        size.w = size.w.min(max_size.w);
+    }
+
+    if min_size.w > 0 {
+        size.w = size.w.max(min_size.w);
+    }
+    if max_size.w > 0 {
+        size.w = size.w.min(max_size.w);
+    }
+
+    size
 }
