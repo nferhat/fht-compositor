@@ -1757,6 +1757,7 @@ impl Workspace {
         }
 
         window.request_size(new_size);
+        window.send_configure();
 
         true
     }
