@@ -7,12 +7,13 @@ use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
 use smithay::utils::{Logical, Rectangle};
 
-use crate::renderer::blur::element::BlurElement;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
-use crate::renderer::{has_transparent_region, FhtRenderer};
+use crate::renderer::{blur, FhtRenderer};
 use crate::space::shadow::{self, Shadow};
 use crate::state::Fht;
+
+// FIXME: This removed blur but never added it back.
 
 /// A mapped [`LayerSurface`].
 #[derive(Debug)]
@@ -137,26 +138,10 @@ impl MappedLayer {
             .map(Into::into);
         let rv = rv.chain(shadow);
 
-        let blur = config.decorations.blur.with_overrides(&self.rules.blur);
-        let is_transparent = alpha < 1.0 || has_transparent_region(wl_surface, layer_geo.size);
-        let blur = (!blur.disabled() && is_transparent)
-            .then(|| {
-                BlurElement::new(
-                    renderer,
-                    &self.output,
-                    layer_geo,
-                    render_geo.loc,
-                    corner_radius,
-                    false, // FIXME: Configurable
-                    scale,
-                    alpha,
-                    blur,
-                )
-            })
-            .into_iter()
-            .map(Into::into);
+        // let blur = config.decorations.blur.with_overrides(&self.rules.blur);
+        // let is_transparent = alpha < 1.0 || has_transparent_region(wl_surface, layer_geo.size);
 
-        rv.chain(blur)
+        rv
     }
 }
 
@@ -271,7 +256,7 @@ crate::fht_render_elements! {
     LayerShellRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedWindowElement<R>,
-        Blur = BlurElement,
+        Blur = blur::BlurRegionRenderElement,
         Shadow = ShaderElement,
     }
 }

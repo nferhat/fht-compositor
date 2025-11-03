@@ -1,13 +1,64 @@
-//! Blurring algorithm and system integrated into smithay.
+//! Dual-kawase blur implementation for smithay for OpenGL-based renderers ([`GlesRenderer`],
+//! [`GlowRenderer`]). Implementation from the following sources
 //!
-//! It is not perfect at the moment but currently I am satisfied enough with how it looks. The
-//! actual underlying algorithm is Dual-Kawase, with downscaling then upscaling steps.
-//!
-//! - <https://github.com/alex47/Dual-Kawase-Blur>
 //! - <https://github.com/wlrfx/scenefx>
-//! - <https://www.shadertoy.com/view/3td3W8>
+//! - <https://github.com/alex47/Dual-Kawase-Blur>
+//! - <https://www.intel.com/content/www/us/en/developer/articles/technical/an-investigation-of-fast-real-time-gpu-based-image-blur-algorithms.html>
+//!
+//! # How is it implemented
+//!
+//! The important part of this implementation is the [`BlurRegion`], which should be kept around
+//! between render passes in order to do proper damage tracking. You update the region's state with
+//! the received damage for the render elements that should have blur behind.
+//!
+//! When generating a [`BlurRegionRenderElement`], it uses the accumulated damage until the `draw()`
+//! call to update the blurred contents texture (which is stored in the region) and then draws
+//! that texture to the output buffer.
+//!
+//! # Limitations of this implementation
+//!
+//! The main limitation here is that if something updates **outside** the base region but in the
+//! expanded blur area, the blur contents (which should sample from that region) will not get
+//! updated. This is mostly a limitation of smithay's damage tracker. And to be honest, I am not
+//! smart enough to make the necessary changes to make the DT account for that.
+//!
+//! ```
+//!                        *--------------------------------*
+//!                        |xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+//!                        |xxxxxxxx*--------------*xxxxxxxx|
+//!                        |xxxxxxxx|              |xxxxxxxx|
+//!                        |xxxxxxxx|    Region    |xxxxxxxx|
+//!                        |xxxxxxxx|              |xxxxxxxx|
+//!                        |xxxxxxxx*--------------*xxxxxxxx|
+//!                        |xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+//!                        *--------------------------------*
+//! ```
+//!
+//! Where xxx marks the expanded blur region
+//!
+//! # How to use it?
+//!
+//! ```no_run
+//! # // Excuse the sloppy rust code, I just need a reference on how I am supposed to render this
+//! fn render_elements(&self, ...) -> Vec<RenderElement> {
+//!    let mut ret = vec![];
+//!
+//!    let blur_region = self.blur_region;
+//!
+//!    let initial_render_elements: Vec<_> = /* whatever */;
+//!    let initial_render_elements_damage = /* depends, just get this */;
+//!    ret.extend(initial_render_elements.into_iter().map(Into::into));
+//!
+//!    // Update the blur region state with the new damage.
+//!    // On each draw call of the BlurRegionRenderElement, the damage is drained.
+//!    blur_region.update(initial_render_elements_damage);
+//!    let blur_region_element = blur_region.render(...);
+//!    initial_render_elements.push(blur_region_element.into());
+//!
+//!    ret
+//! }
+//! ```
 
-pub mod element;
 pub(super) mod shader;
 
 use std::borrow::BorrowMut;
@@ -15,24 +66,337 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use anyhow::Context;
+#[cfg(feature = "udev-backend")]
 use glam::Mat3;
-use shader::BlurShaders;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::AsRenderElements;
+use smithay::backend::renderer::element::{AsRenderElements, Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
 use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
-use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
+use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
+use smithay::backend::renderer::utils::{
+    CommitCounter, DamageBag, DamageSet, DamageSnapshot, OpaqueRegions,
+};
+use smithay::backend::renderer::{
+    Bind, Blit, ContextId, Frame, Offscreen, Renderer, Texture, TextureFilter,
+};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
-use smithay::utils::{Physical, Point, Rectangle, Size, Transform};
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use super::data::RendererData;
 use super::shaders::Shaders;
 use super::{render_elements, FhtRenderer};
+#[cfg(feature = "udev-backend")]
+use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 use crate::output::OutputExt;
+
+/// [`BlurRegion`] parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Parameters {
+    /// The border radius.
+    pub corner_radius: f32,
+    /// The number of blur passes.
+    pub passes: usize,
+    /// The blur radius of each pass.
+    pub radius: f32,
+}
+
+/// A blur region.
+///
+/// You should store this region and keep it updated with damage.
+#[derive(Debug)]
+pub struct BlurRegion {
+    id: Id,
+    /// Associated data for this region. Created whenever
+    inner: RefCell<Option<BlurRegionInner>>,
+    /// Parameters/configuration for this blur region
+    // NOTE: Animating these parameters would be REALLY expensive and pretty pointless.
+    parameters: Parameters,
+    // Since we need todo some handling when destroying the inner blur region, we should only reset
+    // when doing [`BlurRegion::render`], notably to detroy the framebuffer object we create.
+    should_reset: bool,
+}
+
+#[derive(Debug)]
+struct BlurRegionInner {
+    /// The texture backing this blur region.
+    ///
+    /// We store the contents of the buffer behind for two reasons:
+    /// 1. Avoid excessive blits when updating the buffer
+    /// 2. In case there was no damage between two draw passes, we can just re-use the buffer as
+    ///    it, shaving off a bit of (somewhat expensive) blur operations
+    ///
+    /// We also cache the framebuffer object created for this texture
+    buffer: (GlesTexture, u32),
+    /// The [`ContextId`] for the texture's renderer.
+    context_id: ContextId<GlesTexture>,
+    /// The accumulated damage between each draw call. When calling [`BlurRegion::render`], its
+    /// this damage bag that is passed onto the render element.
+    ///
+    /// The damage is relative to the backing texture's origin.
+    damage: DamageBag<i32, Buffer>,
+}
+
+impl BlurRegion {
+    /// Create a new [`BlurRegion`] with given [`Parameters`]
+    pub fn new(parameters: Parameters) -> Self {
+        Self {
+            id: Id::new(),
+            parameters,
+            inner: RefCell::default(),
+            // Doesn't really matter cause the inner isn't created yet.
+            should_reset: true,
+        }
+    }
+
+    /// Update the blur parameters of this region.
+    ///
+    /// Doing this will damage the full region, and recreates the buffer.
+    pub fn update_parameters(&mut self, parameters: Parameters) {
+        let changed = self.parameters != parameters;
+        if changed {
+            self.parameters = parameters;
+            // FIXME: We should only damage the corners if corner radius changed only.
+            self.should_reset = true;
+        }
+    }
+
+    /// Resize the blur region.
+    ///
+    /// Doing this will damage the full region, and recreates the buffer.
+    pub fn resize(&mut self, new_size: Size<i32, Logical>) {
+        let inner = self.inner.borrow_mut();
+        self.should_reset = inner.as_ref().map_or(true, |inner| {
+            let src_size = new_size.to_buffer(1, Transform::Normal);
+            inner.buffer.0.size() != src_size
+        });
+    }
+
+    /// Push a [`DamageSnapshot`] of damage to the [`BlurRegion`]
+    pub fn push_damage(&self, damage: impl IntoIterator<Item = Rectangle<i32, Buffer>>) {
+        let mut inner = self.inner.borrow_mut();
+        // On initial render we do a full damage pass.
+        let Some(inner) = inner.as_mut() else { return };
+
+        let expand_size =
+            (2f32.powi(self.parameters.passes as i32 + 1) * self.parameters.radius).ceil() as i32;
+        // Each damage rectangles sample from a region all around it. The amount is calculated
+        // above. Now just expand in every direction.
+        inner.damage.add(damage.into_iter().map(|mut rect| {
+            rect.size += (2 * expand_size, 2 * expand_size).into();
+            rect.loc -= (expand_size, expand_size).into();
+            rect
+        }));
+    }
+
+    pub fn render(
+        &self,
+        renderer: &mut impl FhtRenderer,
+        region: Rectangle<i32, Logical>,
+        alpha: f32,
+    ) -> anyhow::Result<BlurRegionRenderElement> {
+        crate::profile_function!();
+        let renderer = renderer.glow_renderer_mut();
+        let context_id = renderer.context_id();
+
+        let src_size = region.size;
+        let src_size = src_size.to_buffer(1, Transform::Normal);
+
+        let mut inner = self.inner.borrow_mut();
+        // We first must ensure that we created the inner state.
+        let mut reset = false;
+        if let Some(BlurRegionInner {
+            context_id: buffer_ctx_id,
+            buffer,
+            ..
+        }) = &mut *inner
+        {
+            // Reset if we are rendering in another renderer (IE another output) or if the size
+            // changed. For now, this causes full damage.
+            if *buffer_ctx_id != context_id {
+                trace!("Resetting blur buffer due to different context ID");
+                reset = true;
+            }
+
+            let buffer_size = buffer.0.size();
+            if buffer_size != src_size {
+                trace!("Resetting blur buffer due to size mismatch");
+                reset = true;
+            }
+        }
+        if self.should_reset {
+            trace!("Resetting blur buffer due to reset flag");
+        }
+
+        if reset {
+            if let Some(BlurRegionInner {
+                buffer: (_, mut fbo),
+                ..
+            }) = inner.take()
+            {
+                // Dont' forget to delete the previous FBO
+                let gles_renderer: &mut GlesRenderer = renderer.borrow_mut();
+                gles_renderer
+                    .with_context(|gl| unsafe { gl.DeleteFramebuffers(1, &mut fbo as *mut _) })?;
+            }
+        }
+
+        let inner = match &mut *inner {
+            Some(inner) => inner,
+            // The blur buffer should never be transparent,
+            None => {
+                let buffer = renderer.create_buffer(Format::Xrgb8888, src_size)?;
+                let fbo = create_fbo_for_texture(renderer.borrow_mut(), &buffer)?;
+
+                inner.get_or_insert(BlurRegionInner {
+                    buffer: (buffer, fbo),
+                    context_id: renderer.context_id(),
+                    damage: DamageBag::default(),
+                })
+            }
+        };
+
+        Ok(BlurRegionRenderElement {
+            context_id,
+            id: self.id.clone(),
+            buffer: inner.buffer.clone(),
+            // FIXME: Proper scaling
+            scale: Scale::from(1.0),
+            damage: inner.damage.snapshot(),
+            location: region.loc,
+            src: src_size,
+            alpha,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct BlurRegionRenderElement {
+    id: Id,
+    buffer: (GlesTexture, u32),
+    context_id: ContextId<GlesTexture>,
+    scale: Scale<f64>,
+    damage: DamageSnapshot<i32, Buffer>,
+    location: Point<i32, Logical>,
+    src: Size<i32, Buffer>,
+    alpha: f32,
+}
+
+impl BlurRegionRenderElement {
+    pub fn logical_size(&self) -> Size<i32, Logical> {
+        self.src
+            .to_f64()
+            .to_logical(self.scale, Transform::Normal)
+            .to_i32_round()
+    }
+
+    fn damage_since(&self, commit: Option<CommitCounter>) -> DamageSet<i32, Buffer> {
+        self.damage
+            .damage_since(commit)
+            .unwrap_or_else(|| DamageSet::from_slice(&[Rectangle::from_size(self.buffer.0.size())]))
+    }
+}
+
+impl Element for BlurRegionRenderElement {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.damage.current_commit()
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        Rectangle::from_size(self.src).to_f64()
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        let logical_geo = Rectangle::new(self.location, self.logical_size());
+        logical_geo.to_physical_precise_round(scale)
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
+        self.location.to_physical_precise_round(scale)
+    }
+
+    fn transform(&self) -> Transform {
+        Transform::Normal
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        let texture_size = self.buffer.0.size().to_f64();
+        let src = self.src();
+
+        self.damage_since(commit)
+            .into_iter()
+            .filter_map(|region| {
+                let mut region = region.to_f64().intersection(src)?;
+
+                region.loc -= src.loc;
+                region = region.upscale(texture_size / src.size);
+
+                let logical = region.to_logical(self.scale, Transform::Normal, &src.size);
+                Some(logical.to_physical_precise_up(scale))
+            })
+            .collect()
+    }
+
+    fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        // No opaque regions here.
+        OpaqueRegions::default()
+    }
+
+    fn alpha(&self) -> f32 {
+        self.alpha
+    }
+
+    fn kind(&self) -> Kind {
+        // It's obvious why we should not use Cursor element kind.
+        // However, for ScanoutCandidate, the blur buffer is always drawn behind something (a
+        // window, layer-shell, or whatever)
+        Kind::Unspecified
+    }
+}
+
+impl RenderElement<GlowRenderer> for BlurRegionRenderElement {
+    fn draw(
+        &self,
+        frame: &mut GlowFrame<'_, '_>,
+        _src: Rectangle<f64, Buffer>,
+        _dst: Rectangle<i32, Physical>,
+        _damage: &[Rectangle<i32, Physical>],
+        _opaque_regions: &[Rectangle<i32, Physical>],
+    ) -> Result<(), GlesError> {
+        if frame.context_id() != self.context_id {
+            warn!("trying to render texture from different renderer");
+            return Ok(());
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "udev-backend")]
+impl<'a> RenderElement<UdevRenderer<'a>> for BlurRegionRenderElement {
+    fn draw(
+        &self,
+        frame: &mut UdevFrame<'a, '_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+    ) -> Result<(), UdevRenderError> {
+        let gles_frame = frame.as_mut();
+        RenderElement::<GlowRenderer>::draw(&self, gles_frame, src, dst, damage, opaque_regions)?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum CurrentBuffer {
@@ -438,6 +802,44 @@ fn render_blur_pass_with_frame(
     Ok(())
 }
 
+/// Create a framebuffer object for a texture.
+fn create_fbo_for_texture(
+    renderer: &mut GlesRenderer,
+    texture: &GlesTexture,
+) -> Result<u32, GlesError> {
+    unsafe {
+        renderer.egl_context().make_current()?;
+    }
+
+    // FIXME: In smithay GlesRenderer::bind_texture, we wait for the texture sync before doing
+    // the operations, but here, we don't have access to the private sync_points.
+    let mut fbo = 0;
+    let tex_id = texture.tex_id();
+    renderer.with_context(|gl| unsafe {
+        gl.GenFramebuffers(1, &mut fbo);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, fbo);
+        gl.FramebufferTexture2D(
+            ffi::FRAMEBUFFER,
+            ffi::COLOR_ATTACHMENT0,
+            ffi::TEXTURE_2D,
+            tex_id,
+            0,
+        );
+
+        // Check for error status. Also reset since we don't really need the framebuffer immediatly
+        let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+
+        if status != ffi::FRAMEBUFFER_COMPLETE {
+            gl.DeleteFramebuffers(1, &mut fbo);
+            return Err(GlesError::FramebufferBindingError);
+        }
+
+        Ok(fbo)
+    })?
+}
+
+/*
 // Renders a blur pass using gl code bypassing smithay's Frame mechanisms
 //
 // When rendering blur in real-time (for windows, for example) there should not be a wait for
@@ -750,3 +1152,4 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     Ok(fx_buffers.effects.clone())
 }
+*/
