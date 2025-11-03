@@ -10,6 +10,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::Renderer as _;
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
@@ -23,13 +24,13 @@ use super::closing_tile::ClosingTile;
 use super::{border, shadow, Config};
 use crate::egui::EguiRenderElement;
 use crate::output::OutputExt;
-use crate::renderer::blur::element::BlurElement;
+use crate::renderer::blur::BlurRegion;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::{ShaderElement, Shaders};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
-use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
+use crate::renderer::{blur, has_transparent_region, render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -70,6 +71,9 @@ pub struct Tile {
     /// The box shadow around this tile.
     shadow: shadow::Shadow,
 
+    /// The blurred region behind this tile.
+    blur_region: BlurRegion,
+
     /// Extra damage bag to apply when the tile corners are being rounded.
     /// This is due to an implementation detail of [`RoundedWindowElement`]
     extra_damage: ExtraDamage,
@@ -96,7 +100,7 @@ crate::fht_render_elements! {
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
         Decoration = ShaderElement,
-        Blur = BlurElement,
+        Blur = blur::BlurRegionRenderElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
     }
@@ -112,6 +116,7 @@ impl Tile {
         // Compute initial border state
         let border = config.border.with_overrides(&rules.border);
         let shadow = config.shadow.with_overrides(&rules.shadow);
+        let blur = config.blur.with_overrides(&rules.blur);
         let border_parameters = super::border::Parameters {
             color: border.normal_color,
             corner_radius: border.radius,
@@ -123,6 +128,11 @@ impl Tile {
             blur_sigma: shadow.sigma,
             corner_radius: border.radius,
             color: shadow.color,
+        };
+        let blur_parameters = blur::Parameters {
+            corner_radius: border.radius,
+            passes: blur.passes,
+            radius: blur.radius,
         };
         let border_geometry = Rectangle::from_size(Size::from((
             size.w + border_parameters.thickness * 2,
@@ -144,6 +154,7 @@ impl Tile {
                 config.border_animation.as_ref(),
             ),
             shadow: shadow::Shadow::new(border_geometry, shadow_parameters),
+            blur_region: BlurRegion::new(blur_parameters),
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             config,
@@ -185,6 +196,8 @@ impl Tile {
         let rules = self.window.rules();
         let mut border = self.config.border.with_overrides(&rules.border);
         let mut shadow = self.config.shadow.with_overrides(&rules.shadow);
+        let mut blur = self.config.blur.with_overrides(&rules.blur);
+
         drop(rules);
 
         let is_fullscreen = self.window.fullscreen();
@@ -217,6 +230,13 @@ impl Tile {
             corner_radius,
             color: shadow.color,
         });
+
+        self.blur_region.update_parameters(blur::Parameters {
+            corner_radius,
+            passes: blur.passes,
+            radius: blur.radius,
+        });
+
         // Keep the geometry updated, though if there's a mismatch the render function will handle
         // that for us (in the case of a opening animation, for example)
         let visual_geometry = self.visual_geometry();
@@ -226,6 +246,7 @@ impl Tile {
         );
         self.border.set_geometry(visual_geometry);
         self.shadow.set_geometry(window_geometry);
+        self.blur_region.resize(window_geometry.size);
     }
 
     /// Get a reference to the [`Window`] of this [`Tile`].
@@ -712,7 +733,18 @@ impl Tile {
             elements.extend(window_elements);
         };
 
-        // elements.extend();
+        // FIXME: This doesn't account for the scale applied by the resize animation.
+        // To be honest I don't really know how to handle that properly.
+        let log = self.window.app_id().unwrap_or_default() == "Alacritty";
+        self.window.with_surfaces(|_, data| {
+            if let Some(data_ref) = data.data_map.get::<RendererSurfaceStateUserData>() {
+                let guard = data_ref.lock().unwrap();
+                let damage_snapshot = guard.damage();
+                // FIXME: Take into account opaque regions
+                let damage = damage_snapshot.raw().flatten().copied();
+                self.blur_region.push_damage(damage);
+            };
+        });
 
         elements
     }
@@ -860,42 +892,12 @@ impl Tile {
             .map(Into::into)
             .into_iter();
 
-        let blur_element = (!blur.disabled() && self.has_transparent_region())
-            .then(|| {
-                // Optimized blur uses a pre-blurred texture containing background and bottom
-                // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
-                // window.
-                //
-                // When a window is tiled, it will most likely only display the background, IE there
-                // are no windows behind it, so we win quit a lot of performance when enabling
-                // optimized blur here since tiled windows are *huge*
-                //
-                // Floating windows on the other hand might have other windows below it, so they
-                // don't use optimized. They are also (in comparaison) relatively
-                // small, so its even better
-                //
-                // HACK: Since the true blur implementation is quite expensive as of right now, we
-                // use optimized blur by default. Unless the user asks for it.
-                let optimized = optimized_blur.unwrap_or(true);
-
-                // render_offset is from the workspace, to account for switching animations
-                let sample_area =
-                    Rectangle::new(window_geometry.loc + render_offset, window_geometry.size);
-
-                BlurElement::new(
-                    renderer,
-                    output,
-                    sample_area,
-                    window_geometry.loc.to_physical(scale),
-                    border_radius,
-                    optimized,
-                    scale,
-                    alpha,
-                    blur,
-                )
-                .into()
-            })
-            .into_iter();
+        let blur_element = self
+            .blur_region
+            .render(renderer, window_geometry, alpha)
+            .inspect_err(|err| error!(?err, "Failed to create blur element"))
+            .into_iter()
+            .map(Into::into);
 
         opening_element
             .into_iter()
