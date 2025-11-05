@@ -5,6 +5,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::rc::Rc;
 
 use anyhow::Context;
+use async_channel::Sender;
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -32,11 +33,8 @@ mod subscribe;
 pub struct Server {
     // The UnixSocket server that receives incoming clients
     listener_token: RegistrationToken,
-    pub compositor_state: Rc<RefCell<subscribe::CompositorState>>,
-    event_broadcaster: (
-        async_broadcast::Sender<fht_compositor_ipc::Event>,
-        async_broadcast::Receiver<fht_compositor_ipc::Event>,
-    ),
+    compositor_state: Rc<RefCell<subscribe::CompositorState>>,
+    subscribed_clients: Vec<Sender<fht_compositor_ipc::Event>>,
     dispatcher: Dispatcher<'static, Generic<UnixListener>, State>,
 }
 
@@ -50,18 +48,24 @@ impl Server {
     pub fn push_events(
         &mut self,
         events: impl IntoIterator<Item = fht_compositor_ipc::Event> + 'static,
-        scheduler: &calloop::futures::Scheduler<()>,
-    ) -> anyhow::Result<()> {
-        let broadcaster = self.event_broadcaster.0.clone();
-        scheduler.schedule(async move {
-            for event in events {
-                if let Err(err) = broadcaster.broadcast(event).await {
-                    error!(?err, "Failed to broadcast IPC event")
+    ) {
+        let mut to_disconnect = vec![];
+        for event in events {
+            for (idx, sender) in self.subscribed_clients.iter().enumerate() {
+                match sender.try_send(event.clone()) {
+                    Ok(()) => (),
+                    Err(err) => {
+                        error!(?err, "Failed to send event to subscribed client");
+                        to_disconnect.push(idx);
+                    }
                 }
             }
-        })?;
+        }
 
-        Ok(())
+        for idx in to_disconnect.into_iter().rev() {
+            self.subscribed_clients.swap_remove(idx);
+            // The client will automatically stop since it will exit out of the recv().await loop
+        }
     }
 }
 
@@ -117,20 +121,13 @@ pub fn start(
                 let Some(ipc_server) = &mut state.fht.ipc_server else {
                     unreachable!()
                 };
-                let event_rx = ipc_server.event_broadcaster.1.clone();
                 let scheduler = state.fht.scheduler.clone();
                 let to_compositor = to_compositor_.clone();
                 let compositor_state = ipc_server.compositor_state.clone();
 
                 let fut = async move {
-                    if let Err(err) = handle_new_client(
-                        socket,
-                        to_compositor,
-                        compositor_state,
-                        event_rx,
-                        scheduler,
-                    )
-                    .await
+                    if let Err(err) =
+                        handle_new_client(socket, to_compositor, compositor_state, scheduler).await
                     {
                         error!(?err, "Failed to handle IPC client");
                     }
@@ -156,7 +153,7 @@ pub fn start(
     Ok(Server {
         dispatcher,
         compositor_state: Default::default(),
-        event_broadcaster: async_broadcast::broadcast(1024),
+        subscribed_clients: vec![],
         listener_token: token,
     })
 }
@@ -165,7 +162,6 @@ async fn handle_new_client(
     stream: Async<'static, UnixStream>,
     to_compositor: calloop::channel::Sender<ClientRequest>,
     compositor_state: Rc<RefCell<subscribe::CompositorState>>,
-    event_rx: async_broadcast::Receiver<fht_compositor_ipc::Event>,
     scheduler: calloop::futures::Scheduler<()>,
 ) -> anyhow::Result<()> {
     crate::profile_function!();
@@ -226,14 +222,14 @@ async fn handle_new_client(
 
     // If we do subscribe, we create a channel on which the compositor can inform us when state
     // changes. When there are any changes, we get pinged and do the diffing.
-    let (initial_tx, initial_rx) = async_channel::bounded(1);
+    let (event_tx, event_rx) = async_channel::unbounded();
     let fut = async move {
-        if let Err(err) = subscribe::start_subscribing(event_rx, initial_rx, writer).await {
+        if let Err(err) = subscribe::start_subscribing(event_rx, writer).await {
             warn!(?err, "Error during client subscription")
         }
     };
     scheduler.schedule(fut)?;
-    to_compositor.send(ClientRequest::NewSubscriber(initial_tx))?;
+    to_compositor.send(ClientRequest::NewSubscriber(event_tx))?;
 
     Ok(())
 }
@@ -247,7 +243,7 @@ enum ClientRequest {
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
     ),
-    NewSubscriber(async_channel::Sender<subscribe::CompositorState>),
+    NewSubscriber(async_channel::Sender<fht_compositor_ipc::Event>),
 }
 
 async fn handle_request(
@@ -466,16 +462,37 @@ impl State {
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;
             }
-            ClientRequest::NewSubscriber(initial_tx) => {
-                let Some(ipc_server) = &self.fht.ipc_server else {
+            ClientRequest::NewSubscriber(event_tx) => {
+                let Some(ipc_server) = &mut self.fht.ipc_server else {
                     unreachable!()
                 };
-                let initial_state = ipc_server.compositor_state.borrow().clone();
+
+                let initial_state = ipc_server.compositor_state.borrow();
+                let initial_events = [
+                    fht_compositor_ipc::Event::Windows(initial_state.windows.clone()),
+                    fht_compositor_ipc::Event::FocusedWindowChanged {
+                        id: initial_state.focused_window_id,
+                    },
+                    fht_compositor_ipc::Event::Workspaces(initial_state.workspaces.clone()),
+                    fht_compositor_ipc::Event::ActiveWorkspaceChanged {
+                        id: initial_state.active_workspace_id,
+                    },
+                    fht_compositor_ipc::Event::Space(initial_state.space.clone()),
+                    fht_compositor_ipc::Event::LayerShells(initial_state.layer_shells.clone()),
+                ];
+
+                // First broadcast initial state
+                let tx_ = event_tx.clone();
                 let fut = async move {
-                    if let Err(err) = initial_tx.send(initial_state).await {
-                        error!(?err, "Failed to send initial state to subscribed client");
+                    for event in initial_events {
+                        if let Err(err) = tx_.send(event).await {
+                            error!(?err, "Failed to send initial state to subscribed client");
+                        }
                     }
                 };
+
+                // Then push the event sender into the ones we are updating
+                ipc_server.subscribed_clients.push(event_tx);
 
                 self.fht.scheduler.schedule(fut)?;
             }
