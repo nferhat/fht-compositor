@@ -71,7 +71,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
-use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
+use crate::focus_target::PointerFocusTarget;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::layer::MappedLayer;
@@ -1738,12 +1738,9 @@ impl Fht {
             return;
         };
 
-        let mut compositor_state = ipc_server.compositor_state.borrow_mut();
-        let keyboard_focus = self.keyboard.current_focus();
-        let is_focused = move |window: &Window| matches!(&keyboard_focus, Some(KeyboardFocusTarget::Window(w)) if w == window);
-
+        // Accumulated events during this cycle
         let mut events = vec![];
-
+        let mut compositor_state = ipc_server.compositor_state.borrow_mut();
         let mut existing_windows = HashSet::new();
         let mut focused_window_id = None;
         let mut active_workspace_id = None;
@@ -1755,6 +1752,7 @@ impl Fht {
             for workspace in monitor.workspaces() {
                 let ws_id = workspace.id();
                 let active_tile_idx = workspace.active_tile_idx();
+                let workspace_active = mon_active && workspace.index() == monitor.active_idx;
 
                 let make_ipc_window = |idx, tile: &space::Tile| {
                     let window = tile.window();
@@ -1772,7 +1770,7 @@ impl Fht {
                         maximized: window.maximized(),
                         tiled: window.tiled(),
                         activated: Some(idx) == active_tile_idx,
-                        focused: is_focused(window),
+                        focused: workspace_active && Some(idx) == active_tile_idx,
                     }
                 };
 
@@ -1782,7 +1780,7 @@ impl Fht {
                     existing_windows.insert(*id);
 
                     let entry = compositor_state.windows.entry(*id);
-                    let is_focused = entry
+                    entry
                         .and_modify(|window| {
                             let location = tile.location() + tile.window_loc();
                             let size = tile.window().size();
@@ -1811,11 +1809,7 @@ impl Fht {
                             events
                                 .push(fht_compositor_ipc::Event::WindowChanged(new_window.clone()));
                             new_window
-                        })
-                        .focused;
-                    if is_focused {
-                        focused_window_id = Some(*id);
-                    }
+                        });
                 }
 
                 // Then diff the workspace.
@@ -1866,8 +1860,9 @@ impl Fht {
                         ));
                         new_workspace
                     });
-                if mon_active && workspace.index() == monitor.active_idx {
+                if workspace_active {
                     active_workspace_id = Some(*workspace.id());
+                    focused_window_id = workspace.active_window().map(|w| w.id()).map(|id| *id);
                 }
             }
         }
