@@ -2,6 +2,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Context;
@@ -15,6 +16,7 @@ use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
 };
 use smithay::reexports::rustix;
+use smithay::reexports::rustix::fs::unlink;
 use smithay::utils::{Point, Size, SERIAL_COUNTER};
 use smithay::wayland::seat::WaylandFocus;
 
@@ -33,6 +35,7 @@ mod subscribe;
 pub struct Server {
     // The UnixSocket server that receives incoming clients
     listener_token: RegistrationToken,
+    socket_path: PathBuf,
     compositor_state: Rc<RefCell<subscribe::CompositorState>>,
     subscribed_clients: Vec<Sender<fht_compositor_ipc::Event>>,
     dispatcher: Dispatcher<'static, Generic<UnixListener>, State>,
@@ -42,7 +45,7 @@ impl Server {
     pub fn close(self, loop_handle: &LoopHandle<'static, State>) {
         loop_handle.remove(self.listener_token);
         let _listener = Dispatcher::into_source_inner(self.dispatcher).unwrap();
-        // FIXME: Close socket?
+        _ = unlink(self.socket_path);
     }
 
     pub fn push_events(
@@ -152,6 +155,7 @@ pub fn start(
 
     Ok(Server {
         dispatcher,
+        socket_path,
         compositor_state: Default::default(),
         subscribed_clients: vec![],
         listener_token: token,
