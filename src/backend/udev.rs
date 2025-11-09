@@ -251,6 +251,7 @@ impl UdevData {
                         }
                     }
 
+                    state.fht.idle_notify_activity();
                     state.fht.queue_redraw_all();
                 }
             })
@@ -273,8 +274,11 @@ impl UdevData {
                 .expect("Please make sure that {user_path} is a render node!");
             let primary_node = primary_gpu
                 .node_with_type(NodeType::Primary)
-                .expect("Unable to get primary node from primary gpu node!")
-                .expect("Unable to get primary node from primary gpu node!");
+                .and_then(Result::ok)
+                .unwrap_or_else(|| {
+                    warn!("Unable to get primary node from primary gpu node! Falling back to primary gpu node.");
+                    primary_gpu
+                });
 
             (primary_gpu, primary_node)
         } else {
@@ -284,8 +288,11 @@ impl UdevData {
                 .expect("Failed to get primary gpu!");
             let primary_gpu = primary_node
                 .node_with_type(NodeType::Render)
-                .expect("Failed to get primary gpu node from primary node!")
-                .expect("Failed to get primary gpu node from primary node!");
+                .and_then(Result::ok)
+                .unwrap_or_else(|| {
+                    warn!("Unable to get primary node from primary gpu node! Falling back to primary gpu node.");
+                    primary_node
+                });
 
             (primary_gpu, primary_node)
         };

@@ -355,6 +355,17 @@ fn render_blur_pass_with_frame(
         gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+        gl.TexParameteri(
+            ffi::TEXTURE_2D,
+            ffi::TEXTURE_WRAP_S,
+            ffi::MIRRORED_REPEAT as i32,
+        );
+        gl.TexParameteri(
+            ffi::TEXTURE_2D,
+            ffi::TEXTURE_WRAP_T,
+            ffi::MIRRORED_REPEAT as i32,
+        );
+
         gl.UseProgram(program.program);
 
         gl.Uniform1i(program.uniform_tex, 0);

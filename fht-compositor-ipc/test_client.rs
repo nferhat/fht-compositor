@@ -19,7 +19,9 @@ fn write_req(stream: &mut UnixStream, req: Request) -> Response {
 fn main() {
     let (_, mut stream) = fht_compositor_ipc::connect().unwrap();
     // Example where we get two responses
-    dbg!(write_req(&mut stream, Request::Space));
-    dbg!(write_req(&mut stream, Request::LayerShells));
+    {
+        dbg!(write_req(&mut stream, Request::Space,));
+        dbg!(write_req(&mut stream, Request::LayerShells,));
+    }
     stream.set_nonblocking(false).unwrap();
 }

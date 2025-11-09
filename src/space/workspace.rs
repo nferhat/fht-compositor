@@ -9,7 +9,9 @@ use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::xdg::SurfaceCachedState;
 
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
@@ -1758,14 +1760,24 @@ impl Workspace {
         }
 
         let mut new_size = interactive_resize.initial_window_geometry.size;
+        let mut new_loc = interactive_resize.initial_window_geometry.loc;
+        // NOTE: We can work with the tile's location directly since moving the window will
+        // also move the tile by an equal amount.
+
         let (mut dx, mut dy) = (delta.x, delta.y);
+        // If we are grabbing from the left edge, we are expanding the window from the left.
+        // Due to how the coordinate system works, we inverse the delta to achieve this.
         if interactive_resize.edges.intersects(ResizeEdge::LEFT) {
-            // If we are grabbing from the left edge, we are expanding the window from the left.
-            // Due to how the coordinate system works, we inverse the delta to achieve this.
+            // Make sure to add the delta before switching though, because we are expanding the
+            // window from the right but also moving it left by the same amount
+            new_loc.x += dx;
             dx = -dx;
         }
+        // Same deal if we are gradding from the top.
         if interactive_resize.edges.intersects(ResizeEdge::TOP) {
-            // Same deal if we are gradding from the top.
+            // But here, we are expanding the window from the bottom and moving it up by the same
+            // amount
+            new_loc.y += dy;
             dy = -dy;
         }
 
@@ -1783,7 +1795,24 @@ impl Workspace {
             new_size.h += dy;
         }
 
+        // Clamp size to min/max
+        let (min_size, max_size) = with_states(&window.wl_surface().unwrap(), |data| {
+            let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
+            let surface_data = cached_state.current();
+            (surface_data.min_size, surface_data.max_size)
+        });
+        new_size = clamp_size(new_size, min_size, max_size);
+
         window.request_size(new_size);
+        window.send_configure();
+
+        // Don't forget to move the tile!
+        let tile = self
+            .tiles
+            .iter_mut()
+            .find(|tile| tile.window() == window)
+            .unwrap();
+        tile.set_location(new_loc, false);
 
         true
     }
@@ -2196,4 +2225,30 @@ fn proportion_length(proportions: &[f64], length: i32) -> Vec<i32> {
             }
         })
         .collect()
+}
+
+/// Ensures a size is clamped between `min_size` and `max_size`
+///
+/// Due to how Wayland protocol is implemented, if a min/max size is equal to zero, we shouldn't
+/// take it into account.
+pub fn clamp_size(
+    mut size: Size<i32, Logical>,
+    min_size: Size<i32, Logical>,
+    max_size: Size<i32, Logical>,
+) -> Size<i32, Logical> {
+    if min_size.w > 0 {
+        size.w = size.w.max(min_size.w);
+    }
+    if max_size.w > 0 {
+        size.w = size.w.min(max_size.w);
+    }
+
+    if min_size.w > 0 {
+        size.w = size.w.max(min_size.w);
+    }
+    if max_size.w > 0 {
+        size.w = size.w.min(max_size.w);
+    }
+
+    size
 }
