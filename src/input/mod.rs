@@ -933,11 +933,11 @@ impl State {
                 self.fht.current_swipe_fingers = Some(event.fingers());
                 self.fht.gesture_action_executed = false;
                 
-                let current_workspace_idx = self.fht.space.active_monitor().active_workspace_idx();
+                let current_workspace_idx = self.fht.space.active_workspace_id();
                 let active_workspace = self.fht.space.active_workspace_mut();
                 active_workspace.start_swipe_gesture(
                     event.fingers(),
-                    current_workspace_idx,
+                    *current_workspace_idx,
                     &self.fht.config.animations.workspace_switch,
                 );
 
@@ -985,10 +985,10 @@ impl State {
                         );
                         
                         if has_workspace_binding && matches!(direction, GestureDirection::Left | GestureDirection::Right) {
-                            let current_ws_idx = self.fht.space.active_monitor().active_workspace_idx();
+                            let current_ws_idx = self.fht.space.active_workspace_id();
                             let at_limit = match direction {
-                                GestureDirection::Left => current_ws_idx >= 8,
-                                GestureDirection::Right => current_ws_idx == 0,
+                                GestureDirection::Left => *current_ws_idx >= 8,
+                                GestureDirection::Right => *current_ws_idx == 0,
                                 _ => false,
                             };
                             
