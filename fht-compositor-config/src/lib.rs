@@ -257,7 +257,9 @@ pub enum ComplexKeyAction {
     FocusPreviousWorkspace,
     CloseFocusedWindow,
     None,
-    RunCommand(String),
+    #[serde(alias = "run-command")]
+    RunCommandLine(String),
+    Run(Vec<String>),
     ChangeMwfact(f64),
     ChangeNmaster(i32),
     ChangeWindowProportion(f64),

@@ -519,6 +519,12 @@ impl State {
     fn handle_ipc_action(&mut self, action: fht_compositor_ipc::Action) -> anyhow::Result<()> {
         match action {
             fht_compositor_ipc::Action::Quit => self.fht.stop = true,
+            fht_compositor_ipc::Action::RunCommandLine { command_line } => {
+                crate::utils::spawn(command_line);
+            }
+            fht_compositor_ipc::Action::Run { command } => {
+                crate::utils::spawn_args(command);
+            }
             fht_compositor_ipc::Action::ReloadConfig => self.reload_config(),
             fht_compositor_ipc::Action::SelectNextLayout { workspace_id } => {
                 let workspace = match workspace_id {

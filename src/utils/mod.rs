@@ -1,7 +1,5 @@
-use std::ffi::OsStr;
-use std::mem::MaybeUninit;
-use std::os::unix::process::CommandExt;
-use std::process::{self, Command, Stdio};
+use std::ffi::{OsStr, OsString};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 mod spawn;
@@ -68,16 +66,16 @@ where
     }
 }
 
-pub fn spawn(cmdline: &str) {
+pub fn spawn(cmdline: impl Into<OsString>) {
     crate::profile_function!();
 
     // To spawn a commandline, just evaluate it through sh. There are several advantages of doing
     // this instead of using a command+arguments. Notably, this allows us to take advantage of
     // shell expantions, like $ENV_VARIABLES.
     let command = vec![
-        String::from("/bin/sh"),
-        String::from("-c"),
-        String::from(cmdline),
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        cmdline.into(),
     ];
 
     spawn_args(command);

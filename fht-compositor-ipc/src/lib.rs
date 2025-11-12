@@ -412,6 +412,21 @@ pub enum Layer {
 pub enum Action {
     /// Exit the compositor.
     Quit,
+    /// Run a command inside the compositor.
+    #[serde(alias = "run-command")]
+    RunCommandLine {
+        /// The commandline to run. This is evaluated using `sh -c '<command-line>'`
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "command-line")]
+        command_line: String,
+    },
+    /// Run a command inside the compositor.
+    Run {
+        /// The command to run.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "command")]
+        command: Vec<String>,
+    },
     /// Reload compositor configuration.
     ReloadConfig,
     /// Select the next available layout in a [`Workspace`]

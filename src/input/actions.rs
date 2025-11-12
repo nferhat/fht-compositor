@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use fht_compositor_config::{KeyPattern, MouseAction, WorkspaceLayout};
+use fht_compositor_config::{
+    ComplexKeyAction, KeyPattern, MouseAction, SimpleKeyAction, WorkspaceLayout,
+};
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -22,7 +24,8 @@ use crate::utils::RectCenterExt;
 pub enum KeyActionType {
     Quit,
     ReloadConfig,
-    RunCommand(String),
+    RunCommandLine(String),
+    Run(Vec<String>),
     SelectNextLayout,
     SelectPreviousLayout,
     ChangeMwfact(f64),
@@ -84,56 +87,30 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 allow_while_locked = false; // by default, key actions should not run.
                 repeat = false;
                 r#type = match value {
-                    fht_compositor_config::SimpleKeyAction::Quit => KeyActionType::Quit,
-                    fht_compositor_config::SimpleKeyAction::ReloadConfig => {
-                        KeyActionType::ReloadConfig
-                    }
-                    fht_compositor_config::SimpleKeyAction::SelectNextLayout => {
-                        KeyActionType::SelectNextLayout
-                    }
-                    fht_compositor_config::SimpleKeyAction::SelectPreviousLayout => {
-                        KeyActionType::SelectPreviousLayout
-                    }
-                    fht_compositor_config::SimpleKeyAction::MaximizeFocusedWindow => {
-                        KeyActionType::MaximizeFocusedWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::FullscreenFocusedWindow => {
+                    SimpleKeyAction::Quit => KeyActionType::Quit,
+                    SimpleKeyAction::ReloadConfig => KeyActionType::ReloadConfig,
+                    SimpleKeyAction::SelectNextLayout => KeyActionType::SelectNextLayout,
+                    SimpleKeyAction::SelectPreviousLayout => KeyActionType::SelectPreviousLayout,
+                    SimpleKeyAction::MaximizeFocusedWindow => KeyActionType::MaximizeFocusedWindow,
+                    SimpleKeyAction::FullscreenFocusedWindow => {
                         KeyActionType::FullscreenFocusedWindow
                     }
-                    fht_compositor_config::SimpleKeyAction::FloatFocusedWindow => {
-                        KeyActionType::FloatFocusedWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::FocusNextWindow => {
-                        KeyActionType::FocusNextWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::CenterFloatingWindow => {
-                        KeyActionType::CenterFloatingWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::FocusPreviousWindow => {
-                        KeyActionType::FocusPreviousWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::SwapWithNextWindow => {
-                        KeyActionType::SwapWithNextWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::SwapWithPreviousWindow => {
+                    SimpleKeyAction::FloatFocusedWindow => KeyActionType::FloatFocusedWindow,
+                    SimpleKeyAction::FocusNextWindow => KeyActionType::FocusNextWindow,
+                    SimpleKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow,
+                    SimpleKeyAction::FocusPreviousWindow => KeyActionType::FocusPreviousWindow,
+                    SimpleKeyAction::SwapWithNextWindow => KeyActionType::SwapWithNextWindow,
+                    SimpleKeyAction::SwapWithPreviousWindow => {
                         KeyActionType::SwapWithPreviousWindow
                     }
-                    fht_compositor_config::SimpleKeyAction::FocusNextOutput => {
-                        KeyActionType::FocusNextOutput
-                    }
-                    fht_compositor_config::SimpleKeyAction::FocusPreviousOutput => {
-                        KeyActionType::FocusPreviousOutput
-                    }
-                    fht_compositor_config::SimpleKeyAction::CloseFocusedWindow => {
-                        KeyActionType::CloseFocusedWindow
-                    }
-                    fht_compositor_config::SimpleKeyAction::FocusNextWorkspace => {
-                        KeyActionType::FocusNextWorkspace
-                    }
-                    fht_compositor_config::SimpleKeyAction::FocusPreviousWorkspace => {
+                    SimpleKeyAction::FocusNextOutput => KeyActionType::FocusNextOutput,
+                    SimpleKeyAction::FocusPreviousOutput => KeyActionType::FocusPreviousOutput,
+                    SimpleKeyAction::CloseFocusedWindow => KeyActionType::CloseFocusedWindow,
+                    SimpleKeyAction::FocusNextWorkspace => KeyActionType::FocusNextWorkspace,
+                    SimpleKeyAction::FocusPreviousWorkspace => {
                         KeyActionType::FocusPreviousWorkspace
                     }
-                    fht_compositor_config::SimpleKeyAction::None => KeyActionType::None,
+                    SimpleKeyAction::None => KeyActionType::None,
                 };
             }
             fht_compositor_config::KeyActionDesc::Complex {
@@ -144,78 +121,47 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                 allow_while_locked = allow_while_locked_value;
                 repeat = repeat_value;
                 r#type = match action {
-                    fht_compositor_config::ComplexKeyAction::Quit => KeyActionType::Quit,
-                    fht_compositor_config::ComplexKeyAction::ReloadConfig => {
-                        KeyActionType::ReloadConfig
-                    }
-                    fht_compositor_config::ComplexKeyAction::SelectNextLayout => {
-                        KeyActionType::SelectNextLayout
-                    }
-                    fht_compositor_config::ComplexKeyAction::SelectPreviousLayout => {
-                        KeyActionType::SelectPreviousLayout
-                    }
-                    fht_compositor_config::ComplexKeyAction::MaximizeFocusedWindow => {
-                        KeyActionType::MaximizeFocusedWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::FullscreenFocusedWindow => {
+                    ComplexKeyAction::Quit => KeyActionType::Quit,
+                    ComplexKeyAction::ReloadConfig => KeyActionType::ReloadConfig,
+                    ComplexKeyAction::SelectNextLayout => KeyActionType::SelectNextLayout,
+                    ComplexKeyAction::SelectPreviousLayout => KeyActionType::SelectPreviousLayout,
+                    ComplexKeyAction::MaximizeFocusedWindow => KeyActionType::MaximizeFocusedWindow,
+                    ComplexKeyAction::FullscreenFocusedWindow => {
                         KeyActionType::FullscreenFocusedWindow
                     }
-                    fht_compositor_config::ComplexKeyAction::FloatFocusedWindow => {
-                        KeyActionType::FloatFocusedWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::CenterFloatingWindow => {
-                        KeyActionType::CenterFloatingWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::MoveFloatingWindow(change) => {
+                    ComplexKeyAction::FloatFocusedWindow => KeyActionType::FloatFocusedWindow,
+                    ComplexKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow,
+                    ComplexKeyAction::MoveFloatingWindow(change) => {
                         KeyActionType::MoveFloatingWindow(change)
                     }
-                    fht_compositor_config::ComplexKeyAction::ResizeFloatingWindow(change) => {
+                    ComplexKeyAction::ResizeFloatingWindow(change) => {
                         KeyActionType::ResizeFloatingWindow(change)
                     }
-                    fht_compositor_config::ComplexKeyAction::FocusNextWindow => {
-                        KeyActionType::FocusNextWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::FocusPreviousWindow => {
-                        KeyActionType::FocusPreviousWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::SwapWithNextWindow => {
-                        KeyActionType::SwapWithNextWindow
-                    }
-                    fht_compositor_config::ComplexKeyAction::SwapWithPreviousWindow => {
+                    ComplexKeyAction::FocusNextWindow => KeyActionType::FocusNextWindow,
+                    ComplexKeyAction::FocusPreviousWindow => KeyActionType::FocusPreviousWindow,
+                    ComplexKeyAction::SwapWithNextWindow => KeyActionType::SwapWithNextWindow,
+                    ComplexKeyAction::SwapWithPreviousWindow => {
                         KeyActionType::SwapWithPreviousWindow
                     }
-                    fht_compositor_config::ComplexKeyAction::FocusNextOutput => {
-                        KeyActionType::FocusNextOutput
-                    }
-                    fht_compositor_config::ComplexKeyAction::FocusPreviousOutput => {
-                        KeyActionType::FocusPreviousOutput
-                    }
-                    fht_compositor_config::ComplexKeyAction::FocusNextWorkspace => {
-                        KeyActionType::FocusNextWorkspace
-                    }
-                    fht_compositor_config::ComplexKeyAction::FocusPreviousWorkspace => {
+                    ComplexKeyAction::FocusNextOutput => KeyActionType::FocusNextOutput,
+                    ComplexKeyAction::FocusPreviousOutput => KeyActionType::FocusPreviousOutput,
+                    ComplexKeyAction::FocusNextWorkspace => KeyActionType::FocusNextWorkspace,
+                    ComplexKeyAction::FocusPreviousWorkspace => {
                         KeyActionType::FocusPreviousWorkspace
                     }
-                    fht_compositor_config::ComplexKeyAction::CloseFocusedWindow => {
-                        KeyActionType::CloseFocusedWindow
+                    ComplexKeyAction::CloseFocusedWindow => KeyActionType::CloseFocusedWindow,
+                    ComplexKeyAction::None => KeyActionType::None,
+                    ComplexKeyAction::RunCommandLine(cmdline) => {
+                        KeyActionType::RunCommandLine(cmdline)
                     }
-                    fht_compositor_config::ComplexKeyAction::None => KeyActionType::None,
-                    fht_compositor_config::ComplexKeyAction::RunCommand(cmd) => {
-                        KeyActionType::RunCommand(cmd)
-                    }
-                    fht_compositor_config::ComplexKeyAction::ChangeMwfact(delta) => {
-                        KeyActionType::ChangeMwfact(delta)
-                    }
-                    fht_compositor_config::ComplexKeyAction::ChangeNmaster(delta) => {
-                        KeyActionType::ChangeNmaster(delta)
-                    }
-                    fht_compositor_config::ComplexKeyAction::ChangeWindowProportion(delta) => {
+                    ComplexKeyAction::Run(command) => KeyActionType::Run(command),
+                    ComplexKeyAction::ChangeMwfact(delta) => KeyActionType::ChangeMwfact(delta),
+                    ComplexKeyAction::ChangeNmaster(delta) => KeyActionType::ChangeNmaster(delta),
+                    ComplexKeyAction::ChangeWindowProportion(delta) => {
                         KeyActionType::ChangeProportion(delta)
                     }
-                    fht_compositor_config::ComplexKeyAction::FocusWorkspace(idx) => {
-                        KeyActionType::FocusWorkspace(idx)
-                    }
-                    fht_compositor_config::ComplexKeyAction::SendToWorkspace(idx) => {
+                    ComplexKeyAction::FocusWorkspace(idx) => KeyActionType::FocusWorkspace(idx),
+                    ComplexKeyAction::SendToWorkspace(idx) => {
                         KeyActionType::SendFocusedWindowToWorkspace(idx)
                     }
                 };
@@ -244,7 +190,8 @@ impl State {
         match &action.r#type {
             KeyActionType::Quit => self.fht.stop = true,
             KeyActionType::ReloadConfig => self.reload_config(),
-            KeyActionType::RunCommand(cmd) => crate::utils::spawn(cmd),
+            KeyActionType::RunCommandLine(cmdline) => crate::utils::spawn(cmdline),
+            KeyActionType::Run(command) => crate::utils::spawn_args(command.clone()),
             KeyActionType::SelectNextLayout => self.fht.space.select_next_layout(true),
             KeyActionType::SelectPreviousLayout => self.fht.space.select_previous_layout(true),
             KeyActionType::ChangeMwfact(delta) => self.fht.space.change_mwfact(*delta, true),
