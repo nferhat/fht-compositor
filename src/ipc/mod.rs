@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Context;
-use async_channel::Sender;
+use async_channel::{Sender, TrySendError};
 use calloop::io::Async;
 use fht_compositor_ipc::Response;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
@@ -57,14 +57,25 @@ impl Server {
             for (idx, sender) in self.subscribed_clients.iter().enumerate() {
                 match sender.try_send(event.clone()) {
                     Ok(()) => (),
-                    Err(err) => {
-                        error!(?err, "Failed to send event to subscribed client");
+                    Err(TrySendError::Full(_)) => {
+                        // In this case for some reason the I/O on the client side is not reading
+                        // events fast enough, so events are getting stuck in the (quite generous)
+                        // event queue.
+                        //
+                        // I've noticed that this happens quite a lot with quickshell.
+                        warn!("IPC client event channel is full, closing...");
+                        to_disconnect.push(idx);
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        // The channel is closed, disconnect basically. Nothing else todo.
+                        error!("Failed to send event to subscribed client");
                         to_disconnect.push(idx);
                     }
                 }
             }
         }
 
+        to_disconnect.dedup();
         for idx in to_disconnect.into_iter().rev() {
             self.subscribed_clients.swap_remove(idx);
             // The client will automatically stop since it will exit out of the recv().await loop
