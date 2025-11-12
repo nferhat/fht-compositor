@@ -1,7 +1,10 @@
+use std::ffi::OsStr;
 use std::mem::MaybeUninit;
 use std::os::unix::process::CommandExt;
-use std::process::Stdio;
+use std::process::{self, Command, Stdio};
 use std::time::Duration;
+
+mod spawn;
 
 use smithay::reexports::rustix;
 use smithay::reexports::wayland_server::backend::Credentials;
@@ -22,65 +25,40 @@ pub fn get_monotonic_time() -> Duration {
     Duration::new(timespec.tv_sec as u64, timespec.tv_nsec as u32)
 }
 
-pub fn spawn(cmd: &str) {
-    let cmd = cmd.to_string();
+pub fn spawn_args<S>(command: Vec<S>)
+where
+    S: AsRef<OsStr> + Send + 'static,
+{
     crate::profile_function!();
+    if command.is_empty() {
+        return;
+    }
+
     let res = std::thread::Builder::new()
         .name("Command spawner".to_string())
         .spawn(move || {
-            let mut command = std::process::Command::new("/bin/sh");
-            command.args(["-c", &cmd]);
-            // Disable all IO.
-            command
+            let (command, args) = command.split_first().unwrap();
+            let mut process = Command::new(command);
+            process
+                .args(args)
+                // Disable all IO.
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
 
-            // Double for in order to avoid the command being a child of fht-compositor.
-            // This will allow us to avoid creating zombie processes.
-            //
-            // This also lets us not waitpid from the child
-            unsafe {
-                command.pre_exec(|| {
-                    match libc::fork() {
-                        -1 => return Err(std::io::Error::last_os_error()),
-                        0 => (),
-                        _ => libc::_exit(0),
+            // FIXME: We don't sync up the environment with the one in the configuration.
+            // On each config reload, we should sync up with some static variable and use that
+            // instead.
+            if let Some(mut child) = spawn::do_spawn(command.as_ref(), process) {
+                match child.wait() {
+                    Ok(status) => {
+                        if !status.success() {
+                            warn!(?status, "Child did not exit successfully");
+                        }
                     }
-
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
+                    Err(err) => {
+                        warn!(?err, "Error waiting for child");
                     }
-
-                    // Reset signal handlers.
-                    let mut signal_set = MaybeUninit::uninit();
-                    libc::sigemptyset(signal_set.as_mut_ptr());
-                    libc::sigprocmask(
-                        libc::SIG_SETMASK,
-                        signal_set.as_mut_ptr(),
-                        std::ptr::null_mut(),
-                    );
-
-                    Ok(())
-                });
-            }
-
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(err) => {
-                    warn!(?err, ?cmd, "Error spawning command");
-                    return;
-                }
-            };
-
-            match child.wait() {
-                Ok(status) => {
-                    if !status.success() {
-                        warn!(?status, "Child didn't exit sucessfully")
-                    }
-                }
-                Err(err) => {
-                    warn!(?err, "Failed to wait for child")
                 }
             }
         });
@@ -88,6 +66,21 @@ pub fn spawn(cmd: &str) {
     if let Err(err) = res {
         warn!(?err, "Failed to create command spawner for command")
     }
+}
+
+pub fn spawn(cmdline: &str) {
+    crate::profile_function!();
+
+    // To spawn a commandline, just evaluate it through sh. There are several advantages of doing
+    // this instead of using a command+arguments. Notably, this allows us to take advantage of
+    // shell expantions, like $ENV_VARIABLES.
+    let command = vec![
+        String::from("/bin/sh"),
+        String::from("-c"),
+        String::from(cmdline),
+    ];
+
+    spawn_args(command);
 }
 
 pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {

@@ -7,9 +7,11 @@
 #[macro_use]
 extern crate tracing;
 
+use std::env;
 use std::error::Error;
 use std::process::Command;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
@@ -46,6 +48,10 @@ mod window;
 static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
     tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
+/// Whether we are running as systemd service.
+#[allow(unused)]
+static RUNNING_AS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
+
 fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // Do not allow the user to build a useless compositor.
     //
@@ -66,6 +72,12 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         .compact()
         .with_env_filter(filter)
         .init();
+
+    if env::var_os("NOTIFY_SOCKET").is_some() {
+        RUNNING_AS_SYSTEMD_SERVICE.store(true, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(feature = "systemd"))]
+        warn!("Running as a systemd service but systemd support was compiled out. Did you compile the compositor correctly?");
+    }
 
     let cli = cli::Cli::parse();
     match cli.command {
