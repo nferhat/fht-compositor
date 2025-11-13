@@ -952,7 +952,7 @@ impl State {
                 
                 let active_monitor = self.fht.space.active_monitor_mut();
                 
-                if !active_monitor.is_swipe_active {
+                if !active_monitor.swipe_state.is_some() {
                     let pointer = self.fht.pointer.clone();
                     pointer.gesture_swipe_update(
                         self,

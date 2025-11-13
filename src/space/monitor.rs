@@ -46,8 +46,6 @@ pub struct Monitor {
     pub config: Rc<Config>,
     /// Swipe gesture state for the current swipe, if applicable
     pub swipe_state: Option<MonitorSwipeState>,
-    /// If swipe is active
-    pub is_swipe_active: bool,
 }
 
 pub struct MonitorRenderResult<R: FhtRenderer> {
@@ -83,7 +81,6 @@ impl Monitor {
             is_active: false,
             config,
             swipe_state: None,
-            is_swipe_active: false,
         }
     }
 
@@ -283,8 +280,6 @@ impl Monitor {
             output_geometry.size.h as f64,
         );
 
-        self.is_swipe_active = true;
-
         self.swipe_state = Some(MonitorSwipeState {
             direction: None,
             fingers,
@@ -345,7 +340,6 @@ impl Monitor {
 
         let Some(direction) = state.direction else {
             self.swipe_state.take();
-            self.is_swipe_active = false;
             return None;
         };
 
@@ -370,7 +364,6 @@ impl Monitor {
 
         if at_limit {
             self.swipe_state.take();
-            self.is_swipe_active = false;
             return None;
         }
 
@@ -380,19 +373,16 @@ impl Monitor {
                 && abs_progress >= cancel_threshold);
 
         if should_trigger {
-            self.is_swipe_active = false;
             Some(match direction {
                 GestureDirection::Left | GestureDirection::Up => GestureAction::FocusNextWorkspace,
                 GestureDirection::Right | GestureDirection::Down => GestureAction::FocusPreviousWorkspace,
                 _ => {
                     self.swipe_state.take();
-                    self.is_swipe_active = false;
                     return None;
                 }
             })
         } else {
             self.swipe_state.take();
-            self.is_swipe_active = false;
             None
         }
     }
