@@ -163,7 +163,7 @@ all-portals = ["xdg-screencast-portal"]
 xdg-screencast-portal = ["pipewire", "dbus", "smithay/backend_gbm"]
 
 # Enable integration with systemd.
-systemd = ["dep:sd-notify"]
+systemd = ["dep:sd-notify", "dbus"]
 
 # }}}
 
