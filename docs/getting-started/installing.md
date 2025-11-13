@@ -9,12 +9,13 @@ If you are using Nix(OS) with [Nix Flakes](https://nixos.wiki/wiki/flakes) enabl
 and the [example Nix flakes setup](./example-nix-setup)
 
 == Arch (AUR)
+
+Thanks to [Kevin](https://github.com/tokyob0t/), we now have an up-to-date Arch package!
+
 ```sh
 paru -S fht-compositor-git
 # Needed for screencast to work
 paru -S fht-share-picker-git
-# Recommended
-paru -S uwsm
 ```
 :::
 
