@@ -4,7 +4,17 @@ Gesture bindings allow you to bind actions to multi-finger swipe gestures on tou
 
 ## gesture patterns
 
-`finger_numbers-direction = "action"`: A gesture with `finger_numbers` fingers swiping in `direction` to make the `action`. For example, `3-left` means a three-finger swipe upwards.
+`action = { fingers = finger_numbers, direction = swipe_direction, min_swipe_distance = distance}`: A gesture with `finger_numbers` fingers swiping in `swipe_direction` to make the `action`. The `min_swipe_distance` is optional and specifies the minimum distance (arbitrary units) the fingers must move to trigger the action.
+
+example:
+
+```toml
+[gesturebinds]
+focus-next-workspace = { fingers = 4, direction = "left", min-swipe-distance = 1 }
+focus-previous-workspace = { fingers = 4, direction = "right", min-swipe-distance = 1 }
+fullscreen-focused-window = { fingers = 4, direction = "up", min-swipe-distance = 3 }
+float-focused-window = { fingers = 4, direction = "down", min-swipe-distance = 5 }
+```
 
 ## Available gesture actions
 - `close-focused-window`: Closes the currently focused window.
