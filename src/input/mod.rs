@@ -6,7 +6,7 @@ pub mod swap_tile_grab;
 use std::time::Duration;
 
 pub use actions::*;
-use fht_compositor_config::{GestureAction, GestureDirection, GesturePattern, KeyPattern};
+use fht_compositor_config::{GestureAction, GestureDirection, GesturePattern, KeyPattern, WorkspaceSwitchAnimationDirection};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
     GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,
@@ -27,7 +27,6 @@ use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::output::OutputExt;
-use crate::space::workspace::RenderOffsetAnimation;
 use crate::state::State;
 use crate::utils::get_monotonic_time;
 
@@ -933,13 +932,8 @@ impl State {
                 self.fht.current_swipe_fingers = Some(event.fingers());
                 self.fht.gesture_action_executed = false;
                 
-                let current_workspace_idx = self.fht.space.active_workspace_id();
-                let active_workspace = self.fht.space.active_workspace_mut();
-                active_workspace.start_swipe_gesture(
-                    event.fingers(),
-                    *current_workspace_idx,
-                    &self.fht.config.animations.workspace_switch,
-                );
+                let active_monitor = self.fht.space.active_monitor_mut();
+                active_monitor.start_swipe_gesture(event.fingers(), &self.fht.config.animations.workspace_switch);
 
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
@@ -956,57 +950,77 @@ impl State {
                 let fingers = self.fht.current_swipe_fingers.unwrap_or(0);
                 let delta = event.delta();
                 
-                let active_workspace = self.fht.space.active_workspace_mut();
+                let active_monitor = self.fht.space.active_monitor_mut();
                 
-                if let Some(RenderOffsetAnimation::GestureTracking { 
-                    ref gesture_state, 
-                    .. 
-                }) = &active_workspace.render_offset_animation {
+                if !active_monitor.is_swipe_active {
+                    let pointer = self.fht.pointer.clone();
+                    pointer.gesture_swipe_update(
+                        self,
+                        &pointer::GestureSwipeUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                        },
+                    );
+                    return;
+                }
+                
+                let swipe_state = active_monitor.swipe_state.as_ref().unwrap();
+                let total_distance = (swipe_state.total_offset.x.powi(2) + swipe_state.total_offset.y.powi(2)).sqrt();
+                
+                if total_distance < swipe_state.direction_detection_threshold {
+                    let active_monitor = self.fht.space.active_monitor_mut();
+                    active_monitor.update_swipe_gesture(
+                        Point::from((delta.x, delta.y)),
+                        Duration::from_millis(event.time_msec() as u64),
+                        None,
+                    );
+                } else {
+                    let swipe_state = active_monitor.swipe_state.as_ref().unwrap();
+                    let direction = match swipe_state.animation_direction {
+                        WorkspaceSwitchAnimationDirection::Horizontal => {
+                            if swipe_state.total_offset.x > 0.0 { 
+                                GestureDirection::Right 
+                            } else { 
+                                GestureDirection::Left 
+                            }
+                        }
+                        WorkspaceSwitchAnimationDirection::Vertical => {
+                            if swipe_state.total_offset.y > 0.0 { 
+                                GestureDirection::Down 
+                            } else { 
+                                GestureDirection::Up 
+                            }
+                        }
+                    };
                     
-                    let total_distance = (gesture_state.total_offset.x.powi(2) + gesture_state.total_offset.y.powi(2)).sqrt();
+                    let pattern = GesturePattern { fingers, direction };
+                    let has_workspace_binding = matches!(
+                        self.fht.config.gesturebinds.get(&pattern),
+                        Some(GestureAction::FocusNextWorkspace | GestureAction::FocusPreviousWorkspace)
+                    );
                     
-                    if total_distance < gesture_state.direction_detection_threshold {
-                        active_workspace.update_swipe_gesture(
-                            Point::from((delta.x, delta.y)),
-                            Duration::from_millis(event.time_msec() as u64),
-                            None,
-                        );
-                    } else {
-                        let direction = if gesture_state.total_offset.x.abs() > gesture_state.total_offset.y.abs() {
-                            if gesture_state.total_offset.x > 0.0 { GestureDirection::Right } else { GestureDirection::Left }
-                        } else {
-                            if gesture_state.total_offset.y > 0.0 { GestureDirection::Down } else { GestureDirection::Up }
+                    if has_workspace_binding {
+                        let current_ws_idx = active_monitor.active_idx;
+                        let at_limit = match direction {
+                            GestureDirection::Left | GestureDirection::Up => current_ws_idx >= 8,
+                            GestureDirection::Right | GestureDirection::Down => current_ws_idx == 0,
+                            _ => false,
                         };
                         
-                        let pattern = GesturePattern { fingers, direction };
-                        let has_workspace_binding = matches!(
-                            self.fht.config.gesturebinds.get(&pattern),
-                            Some(GestureAction::FocusNextWorkspace | GestureAction::FocusPreviousWorkspace)
-                        );
-                        
-                        if has_workspace_binding && matches!(direction, GestureDirection::Left | GestureDirection::Right) {
-                            let current_ws_idx = self.fht.space.active_workspace_id();
-                            let at_limit = match direction {
-                                GestureDirection::Left => *current_ws_idx >= 8,
-                                GestureDirection::Right => *current_ws_idx == 0,
-                                _ => false,
-                            };
-                            
-                            if !at_limit {
-                                let active_workspace = self.fht.space.active_workspace_mut();
-                                active_workspace.update_swipe_gesture(
-                                    Point::from((delta.x, delta.y)),
-                                    Duration::from_millis(event.time_msec() as u64),
-                                    Some(direction),
-                                );
-                                self.fht.queue_redraw_all();
-                            }
-                        } else {
-                            if !self.fht.gesture_action_executed {
-                                if let Some(action) = self.fht.config.gesturebinds.get(&pattern) {
-                                    self.process_gesture_action(action.clone());
-                                    self.fht.gesture_action_executed = true;
-                                }
+                        if !at_limit {
+                            let active_monitor = self.fht.space.active_monitor_mut();
+                            active_monitor.update_swipe_gesture(
+                                Point::from((delta.x, delta.y)),
+                                Duration::from_millis(event.time_msec() as u64),
+                                Some(direction),
+                            );
+                            self.fht.queue_redraw_all();
+                        }
+                    } else {
+                        if !self.fht.gesture_action_executed {
+                            if let Some(action) = self.fht.config.gesturebinds.get(&pattern) {
+                                self.process_gesture_action(action.clone());
+                                self.fht.gesture_action_executed = true;
                             }
                         }
                     }
@@ -1022,14 +1036,9 @@ impl State {
                 );
             }
             InputEvent::GestureSwipeEnd { event } => {
-                let animation_config = &self.fht.config.animations.workspace_switch;
-                
-                if !animation_config.disable {
-                    let active_workspace = self.fht.space.active_workspace_mut();
-                    
-                    if let Some(action) = active_workspace.end_swipe_gesture(&animation_config) {
-                        self.process_gesture_action(action);
-                    }
+                let active_monitor = self.fht.space.active_monitor_mut();
+                if let Some(action) = active_monitor.end_swipe_gesture() {
+                    self.process_gesture_action(action);
                 }
                 
                 self.fht.current_swipe_fingers = None;

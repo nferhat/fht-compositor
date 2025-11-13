@@ -33,7 +33,7 @@ use crate::window::Window;
 
 mod border;
 mod closing_tile;
-mod monitor;
+pub mod monitor;
 pub mod shadow;
 mod tile;
 pub mod workspace;
