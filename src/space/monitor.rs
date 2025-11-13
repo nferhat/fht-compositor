@@ -221,6 +221,7 @@ impl Monitor {
                         }
                     }
                 };
+                self.swipe_state.take();
             }
         }
 
@@ -338,11 +339,13 @@ impl Monitor {
 
     /// End the swipe gesture and determine the action to take
     pub fn end_swipe_gesture(&mut self) -> Option<GestureAction> {
-        let state = self.swipe_state.take()?;
-
-        self.is_swipe_active = false;
+        let Some(state) = &self.swipe_state else {
+            return None;
+        };
 
         let Some(direction) = state.direction else {
+            self.swipe_state.take();
+            self.is_swipe_active = false;
             return None;
         };
 
@@ -366,6 +369,8 @@ impl Monitor {
         };
 
         if at_limit {
+            self.swipe_state.take();
+            self.is_swipe_active = false;
             return None;
         }
 
@@ -375,16 +380,19 @@ impl Monitor {
                 && abs_progress >= cancel_threshold);
 
         if should_trigger {
+            self.is_swipe_active = false;
             Some(match direction {
-                GestureDirection::Left | GestureDirection::Up => {
-                    GestureAction::FocusNextWorkspace
+                GestureDirection::Left | GestureDirection::Up => GestureAction::FocusNextWorkspace,
+                GestureDirection::Right | GestureDirection::Down => GestureAction::FocusPreviousWorkspace,
+                _ => {
+                    self.swipe_state.take();
+                    self.is_swipe_active = false;
+                    return None;
                 }
-                GestureDirection::Right | GestureDirection::Down => {
-                    GestureAction::FocusPreviousWorkspace
-                }
-                _ => return None,
             })
         } else {
+            self.swipe_state.take();
+            self.is_swipe_active = false;
             None
         }
     }
