@@ -22,8 +22,6 @@ impl Fht {
             return;
         }
 
-        // FIXME: This can result in empty title/app-id, but that's how cosmic-comp handles it,
-        // apparently. Protocol spec does not say anything about this
         let app_id = window.app_id().unwrap_or_else(|| {
             warn!(window = ?window.id(), "Window without app_id");
             Default::default()
