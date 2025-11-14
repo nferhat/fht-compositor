@@ -520,10 +520,14 @@ impl State {
         match action {
             fht_compositor_ipc::Action::Quit => self.fht.stop = true,
             fht_compositor_ipc::Action::RunCommandLine { command_line } => {
-                crate::utils::spawn(command_line);
+                let (token, _token_data) =
+                    self.fht.xdg_activation_state.create_external_token(None);
+                crate::utils::spawn(command_line, Some(token.clone()));
             }
             fht_compositor_ipc::Action::Run { command } => {
-                crate::utils::spawn_args(command);
+                let (token, _token_data) =
+                    self.fht.xdg_activation_state.create_external_token(None);
+                crate::utils::spawn_args(command.clone(), Some(token.clone()));
             }
             fht_compositor_ipc::Action::ReloadConfig => self.reload_config(),
             fht_compositor_ipc::Action::SelectNextLayout { workspace_id } => {

@@ -306,7 +306,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // Since we are already listening on a socket, so they can connect to the compositor, and will
     // be ready (hopefully) on the first rendered frame.
     for cmd in &state.fht.config.autostart {
-        utils::spawn(cmd);
+        // For startup applications, we don't want them to fight for activation status
+        utils::spawn(cmd, None);
     }
 
     event_loop

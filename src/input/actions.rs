@@ -190,8 +190,16 @@ impl State {
         match &action.r#type {
             KeyActionType::Quit => self.fht.stop = true,
             KeyActionType::ReloadConfig => self.reload_config(),
-            KeyActionType::RunCommandLine(cmdline) => crate::utils::spawn(cmdline),
-            KeyActionType::Run(command) => crate::utils::spawn_args(command.clone()),
+            KeyActionType::RunCommandLine(cmdline) => {
+                let (token, _token_data) =
+                    self.fht.xdg_activation_state.create_external_token(None);
+                crate::utils::spawn(cmdline, Some(token.clone()));
+            }
+            KeyActionType::Run(command) => {
+                let (token, _token_data) =
+                    self.fht.xdg_activation_state.create_external_token(None);
+                crate::utils::spawn_args(command.clone(), Some(token.clone()));
+            }
             KeyActionType::SelectNextLayout => self.fht.space.select_next_layout(true),
             KeyActionType::SelectPreviousLayout => self.fht.space.select_previous_layout(true),
             KeyActionType::ChangeMwfact(delta) => self.fht.space.change_mwfact(*delta, true),
