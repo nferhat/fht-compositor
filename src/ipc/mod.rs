@@ -654,8 +654,6 @@ impl State {
                 };
 
                 if window.tiled() {
-                    // FIXME: Figure out whether we should error or actually tell the user about
-                    // the fact the window is not floating? Key-actions just ignore silently
                     return Ok(());
                 }
 
@@ -680,8 +678,6 @@ impl State {
                 };
 
                 if tile.window().tiled() {
-                    // FIXME: Figure out whether we should error or actually tell the user about
-                    // the fact the window is not floating? Key-actions just ignore silently
                     return Ok(());
                 }
 

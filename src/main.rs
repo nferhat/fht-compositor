@@ -199,7 +199,6 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         // XDG_SESSION_TYPE is inferred by many applications to enable wayland support
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
         // Some other programs are just annoying and need a separate variable
-        // FIXME: Document this and let the user enable these themselves?
         std::env::set_var("MOZ_ENABLE_WAYLAND", "1");
         std::env::set_var("_JAVA_AWT_NONREPARENTING", "1");
 
