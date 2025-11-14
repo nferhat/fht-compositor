@@ -16,6 +16,7 @@ use smithay::wayland::compositor::{
 use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
 use smithay::wayland::shell::xdg::{
     SurfaceCachedState, XdgPopupSurfaceData, XdgToplevelSurfaceData,
 };
@@ -190,7 +191,12 @@ impl State {
                         .unwrap()
                         .lock()
                         .unwrap();
-                    state.modal
+                    // FIXME: Maybe handle modals better? For example we could put them inside the
+                    // parent tile and not allow focus of the tile until the modal is closed?
+                    matches!(
+                        state.dialog_hint,
+                        ToplevelDialogHint::Dialog | ToplevelDialogHint::Modal
+                    )
                 });
 
                 // We only honor our floating heuristics if we dont have a fullscreen/maximized
