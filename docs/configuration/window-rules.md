@@ -26,10 +26,33 @@ LibreWolf windows
 match-app-id = ["Alacritty", "LibreWolf"]
 maximized = true
 ```
+### Getting window information
 
-<!-- FIXME: Use the IPC in order to get title and app-id
-    There will be an action called `pick-window` or `select-window`
-    Using it you can get the window ID under the cursor. -->
+In order to get the string values to set inside the match part, you must know the title/app-id of windows, luckily,
+with the IPC, you can use the following snippet to fetch that!
+
+```bash
+# pick-window will let you click on a window on the screen.
+fht-compositor ipc window --id $(fht-compositor ipc -j pick-window)
+```
+
+This will in return print something like this
+
+```
+Window #18
+        Title: Some("fht-compositor ipc w ~")
+        Application ID: Some("com.mitchellh.ghostty")
+        Current workspace ID: 0
+        Size: (1237, 1374)
+        Location: (1290, 33)
+        Fullscreened: false
+        Maximized: false
+        Tiled: true
+        Activated: true
+        Focused: true
+```
+
+Here's all the data you have to write your match conditions!
 
 ---
 
