@@ -16,7 +16,7 @@ instead you move individual windows from/to workspaces or outputs.
 
 ## Advantages of this system
 
-Windows are organized in a predictible fashion, and you have full knowledge and control on where they are and where they go.
+Windows are organized in a predictable fashion, and you have full knowledge and control on where they are and where they go.
 Workspaces are always available for window rules and custom scripts (for example to create scratchpad workspaces).
 
 ## Example workflow
@@ -27,7 +27,7 @@ I am currently *working* on), second is for the web browser, third is for chat c
 Fractal, etc.) sixth is for video games, etc.
 
 This streamlined workflow allows me to switch working context **very** fast using keybinds, since I have keybinds
-engrained in my mind, I can switly get to my browser to search up documentation, quickly respond to a notification from
+engrained in my mind, I can swiftly get to my browser to search up documentation, quickly respond to a notification from
 a chat client, and more.
 
 If you want, you can even disable [animations](/configuration/animations) to make this even more immediate.
