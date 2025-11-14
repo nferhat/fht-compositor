@@ -107,7 +107,9 @@ impl Fht {
                 Point::default(),
                 scale,
                 1.0,
-                Kind::Unspecified,
+                // a lock surface is going to cover the entire screen, might aswell try to scan it
+                // out if its possible, though it might be first placed on the primary plane.
+                Kind::ScanoutCandidate,
             ));
         }
 

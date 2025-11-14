@@ -124,6 +124,8 @@ impl ClosingTile {
             Some(progress.clamp(0., 1.) as f32 * alpha),
             None,
             None,
+            // No point in trying to scanout a closing tile since it will fade away and stop
+            // existing really fast.
             Kind::Unspecified,
         )
         .into();

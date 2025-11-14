@@ -549,7 +549,7 @@ impl Window {
             location,
             scale,
             alpha,
-            element::Kind::Unspecified,
+            element::Kind::ScanoutCandidate,
         )
     }
 
@@ -574,7 +574,7 @@ impl Window {
                     location + offset,
                     scale,
                     alpha,
-                    element::Kind::Unspecified,
+                    element::Kind::ScanoutCandidate,
                 )
             })
             .collect()
