@@ -1,6 +1,6 @@
 use smithay::delegate_xdg_dialog;
 use smithay::utils::Rectangle;
-use smithay::wayland::shell::xdg::dialog::XdgDialogHandler;
+use smithay::wayland::shell::xdg::dialog::{ToplevelDialogHint, XdgDialogHandler};
 use smithay::wayland::shell::xdg::ToplevelSurface;
 
 use crate::output::OutputExt;
@@ -8,7 +8,7 @@ use crate::state::State;
 use crate::utils::RectCenterExt;
 
 impl XdgDialogHandler for State {
-    fn modal_changed(&mut self, toplevel: ToplevelSurface, is_modal: bool) {
+    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, hint: ToplevelDialogHint) {
         let Some(workspace) = self
             .fht
             .space
@@ -19,6 +19,7 @@ impl XdgDialogHandler for State {
         };
         let output_rect = Rectangle::from_size(workspace.output().geometry().size);
 
+        let is_modal = matches!(hint, ToplevelDialogHint::Dialog | ToplevelDialogHint::Modal);
         if !is_modal {
             // I mean, we kinda don't care if its not.
             return;
