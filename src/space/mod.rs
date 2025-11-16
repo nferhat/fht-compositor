@@ -879,7 +879,7 @@ impl Space {
                     // Make the tile slightly smaller, just for aesthetic urposes and give a visual
                     // clue that we grabbed it and is not in a swap state.
                     if tile.window().tiled()
-                        || workspace.current_layout()
+                        && workspace.current_layout()
                             != fht_compositor_config::WorkspaceLayout::Floating
                     {
                         let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
