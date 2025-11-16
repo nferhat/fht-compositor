@@ -478,11 +478,11 @@ impl State {
                         location: pointer_loc,
                     };
 
-                    if self
-                        .fht
-                        .space
-                        .start_interactive_swap(&window, pointer_loc.to_i32_round())
-                    {
+                    if self.fht.space.start_interactive_swap(
+                        &window,
+                        pointer_loc.to_i32_round(),
+                        true,
+                    ) {
                         let grab = SwapTileGrab { window, start_data };
                         pointer.set_grab(self, grab, serial, Focus::Clear);
                         self.fht

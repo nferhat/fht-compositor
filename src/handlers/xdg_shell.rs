@@ -106,11 +106,13 @@ impl XdgShellHandler for State {
         };
 
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
-            if self
-                .fht
-                .space
-                .start_interactive_swap(&window, start_data.location.to_i32_round())
-            {
+            if self.fht.space.start_interactive_swap(
+                &window,
+                start_data.location.to_i32_round(),
+                // Disable move window since when a move_request happens, its most likely that you
+                // grabbed the window from a titlebar, so keep the cursor there.
+                false,
+            ) {
                 let grab = SwapTileGrab { window, start_data };
                 pointer.set_grab(self, grab, serial, Focus::Clear);
                 self.fht

@@ -862,6 +862,7 @@ impl Space {
         &mut self,
         window: &Window,
         pointer_loc: Point<i32, Logical>,
+        center_window: bool,
     ) -> bool {
         if self.interactive_swap.is_some() {
             return false;
@@ -876,17 +877,20 @@ impl Space {
                         false,
                     );
 
-                    // Make the tile slightly smaller, just for aesthetic urposes and give a visual
-                    // clue that we grabbed it and is not in a swap state.
-                    if tile.window().tiled()
-                        && workspace.current_layout()
-                            != fht_compositor_config::WorkspaceLayout::Floating
-                    {
-                        let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
-                        let new_loc = pointer_loc - new_size.downscale(2);
-                        tile.set_geometry(Rectangle::new(new_loc, new_size), true);
-                    } else {
-                        tile.set_location(pointer_loc - tile.size().downscale(2), true);
+                    if center_window {
+                        // Make the tile slightly smaller, just for aesthetic urposes and give a
+                        // visual clue that we grabbed it and is not in a
+                        // swap state.
+                        if tile.window().tiled()
+                            && workspace.current_layout()
+                                != fht_compositor_config::WorkspaceLayout::Floating
+                        {
+                            let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
+                            let new_loc = pointer_loc - new_size.downscale(2);
+                            tile.set_geometry(Rectangle::new(new_loc, new_size), true);
+                        } else {
+                            tile.set_location(pointer_loc - tile.size().downscale(2), true);
+                        }
                     }
 
                     let output = workspace.output().clone();
