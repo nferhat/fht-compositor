@@ -503,6 +503,28 @@ impl Space {
         None
     }
 
+    /// Activate the workspace associated with this [`WorkspaceId`]
+    pub fn activate_workspace(&mut self, workspace_id: WorkspaceId, animate: bool) -> bool {
+        let mut ret = false;
+        let mut new_monitor_idx = None;
+
+        for (monitor_idx, monitor) in self.monitors.iter_mut().enumerate() {
+            let idx = monitor.workspaces().position(|ws| ws.id() == workspace_id);
+            if let Some(new_workspace_idx) = idx {
+                ret = true;
+                monitor.set_active_workspace_idx(new_workspace_idx, animate);
+                new_monitor_idx = Some(monitor_idx);
+                break;
+            }
+        }
+
+        if let Some(new_monitor_idx) = new_monitor_idx {
+            self.active_idx = new_monitor_idx;
+        }
+
+        ret
+    }
+
     /// Activate a [`Window`].
     pub fn activate_window(&mut self, window: &Window, animate: bool) -> bool {
         let mut ret = false;
