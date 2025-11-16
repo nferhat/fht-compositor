@@ -78,6 +78,7 @@ use crate::output::{self, OutputExt, RedrawState};
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
+use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -216,6 +217,7 @@ impl State {
             }
         }
 
+        ext_workspace::refresh(&mut self.fht);
         // Update keyboard and pointer focus **after** making sure there are no lock
         // surfaces in fht.refresh() (or ensuring the pending one gets confirmed)
         self.update_keyboard_focus();
@@ -783,6 +785,9 @@ pub struct Fht {
     pub notified_idle_state: bool,
     pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
     pub lock_state: LockState,
+    // Gesturebinds state
+    pub current_swipe_fingers: Option<u32>,
+    pub gesture_action_executed: bool,
 
     pub output_state: HashMap<Output, output::OutputState>,
     // Keep track whether we did some transient output changes.
@@ -844,9 +849,7 @@ pub struct Fht {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
-
-    pub current_swipe_fingers: Option<u32>,
-    pub gesture_action_executed: bool,
+    pub ext_workspace_manager_state: ExtWorkspaceManagerState,
 }
 
 impl Fht {
@@ -904,6 +907,12 @@ impl Fht {
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
+        let ext_workspace_manager_state = ExtWorkspaceManagerState::new::<State, _>(dh, |client| {
+            // Only allow clients that aren't running inside a SC
+            client
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
+        });
         ContentTypeState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(dh);
         TextInputManagerState::new::<State>(dh);
@@ -1008,6 +1017,8 @@ impl Fht {
             root_surfaces: HashMap::default(),
             idle_inhibiting_surfaces: Vec::new(),
             notified_idle_state: false,
+            current_swipe_fingers: None,
+            gesture_action_executed: false,
 
             output_state: HashMap::new(),
             has_transient_output_changes: false,
@@ -1045,9 +1056,7 @@ impl Fht {
             xdg_activation_state,
             xdg_shell_state,
             xdg_foreign_state,
-
-            current_swipe_fingers: None,
-            gesture_action_executed: false,
+            ext_workspace_manager_state,
         }
     }
 
