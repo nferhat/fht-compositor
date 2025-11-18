@@ -933,7 +933,7 @@ impl State {
                 self.fht.gesture_action_executed = false;
                 
                 let active_monitor = self.fht.space.active_monitor_mut();
-                active_monitor.start_swipe_gesture(event.fingers(), &self.fht.config.animations.workspace_switch);
+                active_monitor.start_swipe_gesture(&self.fht.config.animations.workspace_switch);
 
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
@@ -952,7 +952,7 @@ impl State {
 
                 let active_monitor = self.fht.space.active_monitor_mut();
 
-                // Si le moniteur n'est pas en swipe, on transfère au client
+                // If we don't have a swipe state, just forward the event to the client
                 let Some(swipe_state) = active_monitor.swipe_state.as_ref() else {
                     let pointer = self.fht.pointer.clone();
                     pointer.gesture_swipe_update(

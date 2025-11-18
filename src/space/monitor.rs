@@ -19,10 +19,7 @@ const WORKSPACE_COUNT: usize = 9;
 #[derive(Debug)]
 pub struct MonitorSwipeState {
     pub direction: Option<GestureDirection>,
-    pub fingers: u32,
     pub total_offset: Point<f64, smithay::utils::Logical>,
-    pub screen_width: f64,
-    pub screen_height: f64,
     pub swipe_distance: f64,
     pub cancel_ratio: f64,
     pub min_speed_to_force: f64,
@@ -271,21 +268,19 @@ impl Monitor {
     /// Start a swipe gesture at the monitor level
     pub fn start_swipe_gesture(
         &mut self,
-        fingers: u32,
         animation_config: &WorkspaceSwitchAnimation,
     ) {
-        let output_geometry = self.output.geometry();
-        let (screen_width, screen_height) = (
-            output_geometry.size.w as f64,
-            output_geometry.size.h as f64,
-        );
+        let previous_offset = if let Some(previous_swipe) = self.swipe_state.take() {
+            previous_swipe.total_offset
+        } else if let Some(current_offset) = self.active_workspace().render_offset() {
+            Point::from((current_offset.x as f64, current_offset.y as f64))
+        } else {
+            Point::from((0.0, 0.0))
+        };
 
         self.swipe_state = Some(MonitorSwipeState {
             direction: None,
-            fingers,
-            total_offset: Point::from((0.0, 0.0)),
-            screen_width,
-            screen_height,
+            total_offset: previous_offset,
             swipe_distance: animation_config.swipe_distance,
             cancel_ratio: animation_config.swipe_cancel_ratio,
             min_speed_to_force: animation_config.swipe_min_speed_to_force,

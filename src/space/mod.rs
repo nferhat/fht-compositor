@@ -33,10 +33,10 @@ use crate::window::Window;
 
 mod border;
 mod closing_tile;
-pub mod monitor;
+mod monitor;
 pub mod shadow;
 mod tile;
-pub mod workspace;
+mod workspace;
 
 /// The workspace system [`Space`].
 pub struct Space {
