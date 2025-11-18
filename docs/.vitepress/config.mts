@@ -7,6 +7,8 @@ export default defineConfig({
   description: "A dynamic tiling Wayland compositor.",
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
+    search: { provider: "local" },
+
     nav: [
       { text: "Home", link: "/" },
       { text: "Getting started", link: "/getting-started/introduction" },
