@@ -329,12 +329,11 @@ impl Monitor {
 
     /// End the swipe gesture and determine the action to take
     pub fn end_swipe_gesture(&mut self) -> Option<GestureAction> {
-        let Some(state) = &self.swipe_state else {
+        let Some(state) = self.swipe_state.take() else {
             return None;
         };
 
         let Some(direction) = state.direction else {
-            self.swipe_state.take();
             return None;
         };
 
@@ -358,7 +357,7 @@ impl Monitor {
         };
 
         if at_limit {
-            self.swipe_state.take();
+            self.cancel_swipe_animation(state);
             return None;
         }
 
@@ -372,13 +371,68 @@ impl Monitor {
                 GestureDirection::Left | GestureDirection::Up => GestureAction::FocusNextWorkspace,
                 GestureDirection::Right | GestureDirection::Down => GestureAction::FocusPreviousWorkspace,
                 _ => {
-                    self.swipe_state.take();
                     return None;
                 }
             })
         } else {
-            self.swipe_state.take();
+            self.cancel_swipe_animation(state);
             None
+        }
+    }
+
+    fn cancel_swipe_animation(&mut self, swipe_state: MonitorSwipeState) {
+        if let Some((config, _)) = &self.config.workspace_switch_animation {
+            let output_size = self.output.geometry().size;
+            let current_offset = match swipe_state.animation_direction {
+                WorkspaceSwitchAnimationDirection::Horizontal => {
+                    Point::from((swipe_state.total_offset.x as i32, 0))
+                }
+                WorkspaceSwitchAnimationDirection::Vertical => {
+                    Point::from((0, swipe_state.total_offset.y as i32))
+                }
+            };
+
+            // Animate the current workspace back to the center
+            self.workspaces[self.active_idx].start_render_offset_animation(
+                current_offset,
+                Point::default(),
+                config,
+            );
+
+            // Animate the adjacent workspace back to its original position off-screen
+            let (adjacent_idx, adjacent_base_offset) = match swipe_state.direction {
+                Some(GestureDirection::Left) | Some(GestureDirection::Up) => {
+                    if self.active_idx < WORKSPACE_COUNT - 1 {
+                        let offset = match swipe_state.animation_direction {
+                            WorkspaceSwitchAnimationDirection::Horizontal => Point::from((output_size.w, 0)),
+                            WorkspaceSwitchAnimationDirection::Vertical => Point::from((0, output_size.h)),
+                        };
+                        (Some(self.active_idx + 1), offset)
+                    } else {
+                        (None, Point::default())
+                    }
+                }
+                Some(GestureDirection::Right) | Some(GestureDirection::Down) => {
+                    if self.active_idx > 0 {
+                        let offset = match swipe_state.animation_direction {
+                            WorkspaceSwitchAnimationDirection::Horizontal => Point::from((-output_size.w, 0)),
+                            WorkspaceSwitchAnimationDirection::Vertical => Point::from((0, -output_size.h)),
+                        };
+                        (Some(self.active_idx - 1), offset)
+                    } else {
+                        (None, Point::default())
+                    }
+                }
+                _ => (None, Point::default()),
+            };
+
+            if let Some(idx) = adjacent_idx {
+                self.workspaces[idx].start_render_offset_animation(
+                    adjacent_base_offset + current_offset,
+                    adjacent_base_offset,
+                    config,
+                );
+            }
         }
     }
 
