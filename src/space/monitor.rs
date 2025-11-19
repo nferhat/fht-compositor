@@ -329,11 +329,10 @@ impl Monitor {
 
     /// End the swipe gesture and determine the action to take
     pub fn end_swipe_gesture(&mut self) -> Option<GestureAction> {
-        let Some(state) = self.swipe_state.take() else {
-            return None;
-        };
+        let state = self.swipe_state.as_ref()?;
 
         let Some(direction) = state.direction else {
+            self.swipe_state.take();
             return None;
         };
 
@@ -345,7 +344,6 @@ impl Monitor {
         let abs_progress = progress.abs();
         let cancel_threshold = state.swipe_distance * state.cancel_ratio;
 
-        // Are we at the workspace limits?
         let at_limit = match direction {
             GestureDirection::Left | GestureDirection::Up => {
                 state.initial_workspace_idx >= WORKSPACE_COUNT - 1
@@ -357,11 +355,12 @@ impl Monitor {
         };
 
         if at_limit {
-            self.cancel_swipe_animation(state);
+            if let Some(state) = self.swipe_state.take() {
+                self.cancel_swipe_animation(state);
+            }
             return None;
         }
 
-        // DDetermine if we should trigger the workspace change
         let should_trigger = abs_progress >= state.swipe_distance
             || (state.current_velocity >= state.min_speed_to_force
                 && abs_progress >= cancel_threshold);
@@ -371,11 +370,14 @@ impl Monitor {
                 GestureDirection::Left | GestureDirection::Up => GestureAction::FocusNextWorkspace,
                 GestureDirection::Right | GestureDirection::Down => GestureAction::FocusPreviousWorkspace,
                 _ => {
+                    self.swipe_state.take();
                     return None;
                 }
             })
         } else {
-            self.cancel_swipe_animation(state);
+            if let Some(state) = self.swipe_state.take() {
+                self.cancel_swipe_animation(state);
+            }
             None
         }
     }
