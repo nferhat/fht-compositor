@@ -999,6 +999,22 @@ fn default_workspace_switch_curve() -> AnimationCurve {
     fht_animation::SpringCurve::new(1.0, false, 0.85, 1.0, 600.0, Some(0.0001)).into()
 }
 
+const fn default_swipe_distance() -> f64 {
+    200.0
+}
+
+const fn default_swipe_cancel_ratio() -> f64 {
+    0.3
+}
+
+const fn default_swipe_min_speed_to_force() -> f64 {
+    500.0
+}
+
+const fn default_direction_detection_threshold() -> f64 {
+    5.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorkspaceSwitchAnimation {
@@ -1013,9 +1029,13 @@ pub struct WorkspaceSwitchAnimation {
         deserialize_with = "deserialize_duration_millis"
     )]
     pub duration: Duration,
+    #[serde(default = "default_swipe_distance")]
     pub swipe_distance: f64,
+    #[serde(default = "default_swipe_cancel_ratio")]
     pub swipe_cancel_ratio: f64,
+    #[serde(default = "default_swipe_min_speed_to_force")]
     pub swipe_min_speed_to_force: f64,
+    #[serde(default = "default_direction_detection_threshold")]
     pub direction_detection_threshold: f64,
 }
 
@@ -1026,10 +1046,10 @@ impl Default for WorkspaceSwitchAnimation {
             curve: default_workspace_switch_curve(),
             duration: default_workspace_switch_animation_duration(),
             direction: WorkspaceSwitchAnimationDirection::Horizontal,
-            swipe_distance: 200.0,
-            swipe_cancel_ratio: 0.3,
-            swipe_min_speed_to_force: 500.0,
-            direction_detection_threshold: 5.0,
+            swipe_distance: default_swipe_distance(),
+            swipe_cancel_ratio: default_swipe_cancel_ratio(),
+            swipe_min_speed_to_force: default_swipe_min_speed_to_force(),
+            direction_detection_threshold: default_direction_detection_threshold(),
         }
     }
 }
