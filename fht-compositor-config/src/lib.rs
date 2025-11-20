@@ -77,6 +77,7 @@ pub struct Config {
     pub layer_rules: Vec<LayerRule>,
     pub outputs: HashMap<String, Output>,
     pub debug: Debug,
+    pub gesturebinds: HashMap<GestureAction, GesturePattern>,
 }
 
 // Custom default implementation to use default_keybinds() as the true default
@@ -98,6 +99,7 @@ impl Default for Config {
             layer_rules: Default::default(),
             outputs: HashMap::new(),
             debug: Default::default(),
+            gesturebinds: Default::default(),
         }
     }
 }
@@ -997,6 +999,22 @@ fn default_workspace_switch_curve() -> AnimationCurve {
     fht_animation::SpringCurve::new(1.0, false, 0.85, 1.0, 600.0, Some(0.0001)).into()
 }
 
+const fn default_swipe_distance() -> f64 {
+    200.0
+}
+
+const fn default_swipe_cancel_ratio() -> f64 {
+    0.3
+}
+
+const fn default_swipe_min_speed_to_force() -> f64 {
+    500.0
+}
+
+const fn default_direction_detection_threshold() -> f64 {
+    5.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorkspaceSwitchAnimation {
@@ -1011,6 +1029,14 @@ pub struct WorkspaceSwitchAnimation {
         deserialize_with = "deserialize_duration_millis"
     )]
     pub duration: Duration,
+    #[serde(default = "default_swipe_distance")]
+    pub swipe_distance: f64,
+    #[serde(default = "default_swipe_cancel_ratio")]
+    pub swipe_cancel_ratio: f64,
+    #[serde(default = "default_swipe_min_speed_to_force")]
+    pub swipe_min_speed_to_force: f64,
+    #[serde(default = "default_direction_detection_threshold")]
+    pub direction_detection_threshold: f64,
 }
 
 impl Default for WorkspaceSwitchAnimation {
@@ -1020,6 +1046,10 @@ impl Default for WorkspaceSwitchAnimation {
             curve: default_workspace_switch_curve(),
             duration: default_workspace_switch_animation_duration(),
             direction: WorkspaceSwitchAnimationDirection::Horizontal,
+            swipe_distance: default_swipe_distance(),
+            swipe_cancel_ratio: default_swipe_cancel_ratio(),
+            swipe_min_speed_to_force: default_swipe_min_speed_to_force(),
+            direction_detection_threshold: default_direction_detection_threshold(),
         }
     }
 }
@@ -1450,6 +1480,110 @@ impl Default for Debug {
             draw_opaque_regions: false,
             debug_overlay: false,
             tile_debug_overlay: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Hash, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GesturePattern {
+    pub fingers: u32,
+    pub direction: GestureDirection,
+    pub min_swipe_distance: u64,
+}
+impl Default for GesturePattern {
+    fn default() -> Self {
+        Self {
+            fingers: 3,
+            direction: GestureDirection::None,
+            min_swipe_distance: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GestureDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+    None,
+}
+impl<'de> Deserialize<'de> for GestureDirection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "left" => Ok(GestureDirection::Left),
+            "right" => Ok(GestureDirection::Right),
+            "up" => Ok(GestureDirection::Up),
+            "down" => Ok(GestureDirection::Down),
+            "none" => Ok(GestureDirection::None),
+            _ => Err(serde::de::Error::unknown_variant(
+                &s,
+                &["left", "right", "up", "down", "vertical", "horizontal", "none"],
+            )),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GestureAction {
+    CloseFocusedWindow,
+    FloatFocusedWindow,
+    FocusNextOutput,
+    FocusNextWindow,
+    FocusNextWorkspace,
+    FocusPreviousOutput,
+    FocusPreviousWindow,
+    FocusPreviousWorkspace,
+    FullscreenFocusedWindow,
+    SelectNextLayout,
+    SelectPreviousLayout,
+    SwapWithNextWindow,
+    SwapWithPreviousWindow,
+}
+impl<'de> Deserialize<'de> for GestureAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "close-focused-window" => Ok(GestureAction::CloseFocusedWindow),
+            "float-focused-window" => Ok(GestureAction::FloatFocusedWindow),
+            "focus-next-output" => Ok(GestureAction::FocusNextOutput),
+            "focus-next-window" => Ok(GestureAction::FocusNextWindow),
+            "focus-next-workspace" => Ok(GestureAction::FocusNextWorkspace),
+            "focus-previous-output" => Ok(GestureAction::FocusPreviousOutput),
+            "focus-previous-window" => Ok(GestureAction::FocusPreviousWindow),
+            "focus-previous-workspace" => Ok(GestureAction::FocusPreviousWorkspace),
+            "fullscreen-focused-window" => Ok(GestureAction::FullscreenFocusedWindow),
+            "select-next-layout" => Ok(GestureAction::SelectNextLayout),
+            "select-previous-layout" => Ok(GestureAction::SelectPreviousLayout),
+            "swap-with-next-window" => Ok(GestureAction::SwapWithNextWindow),
+            "swap-with-previous-window" => Ok(GestureAction::SwapWithPreviousWindow),
+            _ => Err(serde::de::Error::unknown_variant(
+                &s,
+                &[
+                    "close-focused-window",
+                    "float-focused-window",
+                    "focus-next-output",
+                    "focus-next-window",
+                    "focus-next-workspace",
+                    "focus-previous-output",
+                    "focus-previous-window",
+                    "focus-previous-workspace",
+                    "fullscreen-focused-window",
+                    "select-next-layout",
+                    "select-previous-layout",
+                    "swap-with-next-window",
+                    "swap-with-previous-window",
+                ],
+            )),
         }
     }
 }
