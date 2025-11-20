@@ -52,7 +52,7 @@ export default defineConfig({
           { text: "General", link: "/configuration/general" },
           { text: "Input", link: "/configuration/input" },
           { text: "Keybindings", link: "/configuration/keybindings" },
-          { text: "Mousebindings", link: "/configuration/Mousebindings" },
+          { text: "Mousebindings", link: "/configuration/mousebindings" },
           { text: "Window rules", link: "/configuration/window-rules" },
           { text: "Layer rules", link: "/configuration/layer-rules" },
           { text: "Outputs", link: "/configuration/outputs" },
