@@ -654,6 +654,8 @@ pub enum WorkspaceLayout {
     Tile,
     BottomStack,
     CenteredMaster,
+    BinaryTree,
+    SpiralTree,
     Floating,
 }
 
