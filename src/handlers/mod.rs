@@ -11,6 +11,7 @@ mod dnd;
 mod drm_lease;
 #[cfg(feature = "udev-backend")]
 mod drm_syncobj;
+mod ext_workspace;
 mod foreign_toplevel_list;
 mod fractional_scale;
 mod idle_inhibit;
