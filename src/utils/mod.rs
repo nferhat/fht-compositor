@@ -9,6 +9,7 @@ use smithay::reexports::wayland_server::backend::Credentials;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
 use smithay::utils::{Coordinate, Point, Rectangle};
+use smithay::wayland::xdg_activation::XdgActivationToken;
 
 #[cfg(feature = "xdg-screencast-portal")]
 pub mod pipewire;
@@ -23,7 +24,7 @@ pub fn get_monotonic_time() -> Duration {
     Duration::new(timespec.tv_sec as u64, timespec.tv_nsec as u32)
 }
 
-pub fn spawn_args<S>(command: Vec<S>)
+pub fn spawn_args<S>(command: Vec<S>, xdg_activation_token: Option<XdgActivationToken>)
 where
     S: AsRef<OsStr> + Send + 'static,
 {
@@ -43,6 +44,16 @@ where
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
+
+            if let Some(token) = xdg_activation_token.as_ref() {
+                // Per the xdg-activation protocol definition, as seen
+                // <https://wayland.app/protocols/xdg-activation-v1>, setting XDG_ACTIVATION_TOKEN
+                // is one established way to inform launched child processes about one.
+                process.env("XDG_ACTIVATION_TOKEN", token.as_str());
+                // <https://specifications.freedesktop.org/startup-notification/0.1/>
+                // It also seems to be picked up by GTK/GDK.
+                process.env("DESKTOP_STARTUP_ID", token.as_str());
+            }
 
             // FIXME: We don't sync up the environment with the one in the configuration.
             // On each config reload, we should sync up with some static variable and use that
@@ -66,7 +77,7 @@ where
     }
 }
 
-pub fn spawn(cmdline: impl Into<OsString>) {
+pub fn spawn(cmdline: impl Into<OsString>, xdg_activation_token: Option<XdgActivationToken>) {
     crate::profile_function!();
 
     // To spawn a commandline, just evaluate it through sh. There are several advantages of doing
@@ -78,7 +89,7 @@ pub fn spawn(cmdline: impl Into<OsString>) {
         cmdline.into(),
     ];
 
-    spawn_args(command);
+    spawn_args(command, xdg_activation_token);
 }
 
 pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {

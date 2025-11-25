@@ -192,6 +192,7 @@ impl Tile {
         if is_fullscreen {
             // Disable border for fullscreened windos
             border.radius = 0.0;
+            border.thickness = 0;
             shadow.disable = true;
         }
 
@@ -646,6 +647,10 @@ impl Tile {
                     // NOTE: we changed the size to curr_size by now
                     Some(window_geometry.size),
                     None,
+                    // Here, when we are animating, we don't mark this as a scanout candidate, even
+                    // though the rendered window elements are marked as so, this is because it can
+                    // be pretty wasteful to put scan them out on overlay planes when they are
+                    // resizing constantly.
                     Kind::Unspecified,
                 );
 
@@ -786,6 +791,10 @@ impl Tile {
                     None,
                     None,
                     None,
+                    // Here, when we are animating, we don't mark this as a scanout candidate, even
+                    // though the rendered window elements are marked as so, this is because it can
+                    // be pretty wasteful to put scan them out on overlay planes when they are
+                    // resizing constantly.
                     Kind::Unspecified,
                 )
                 .into();
