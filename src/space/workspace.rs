@@ -56,6 +56,9 @@ struct InteractiveResize {
 }
 
 #[derive(Debug)]
+pub struct RenderOffsetAnimation(Animation<[i32; 2]>);
+
+#[derive(Debug)]
 pub struct Workspace {
     /// The unique ID of this workspace.
     id: WorkspaceId,
@@ -125,11 +128,12 @@ pub struct Workspace {
     /// user experience.
     has_transient_layout_changes: bool,
 
-    /// Render offset of this workspace.
+    /// An animation that runs when fullscreening/unfullscreening a window.
     ///
-    /// This is used to achieve workspace switch animations, this relocates all the generated
-    /// render elements from [`Workspace::render`].
-    render_offset: Option<Animation<[i32; 2]>>,
+    /// This is used to achieve a smooth transition in and out of fullscreen.
+    /// The animation moves the workspace render offset from 0 to the output width (or
+    /// negative width) depending on the direction of the workspace switch.
+    pub render_offset_animation: Option<RenderOffsetAnimation>,
 
     /// Fade out animations for non-fullscreen windows.
     ///
@@ -166,7 +170,7 @@ impl Workspace {
             nmaster: config.nmaster,
             gaps: config.gaps,
             has_transient_layout_changes: false,
-            render_offset: None,
+            render_offset_animation: None,
             fullscreen_fade_animation: None,
             interactive_resize: None,
             config: Rc::clone(config),
@@ -1813,10 +1817,10 @@ impl Workspace {
 
     /// Returns the current value of the render offset
     pub fn render_offset(&self) -> Option<Point<i32, Logical>> {
-        self.render_offset
-            .as_ref()
-            .map(Animation::value)
-            .map(|&[x, y]| Point::from((x, y)))
+        self.render_offset_animation.as_ref().map(|anim| {
+            let [x, y] = *anim.0.value();
+            Point::from((x, y))
+        })
     }
 
     /// Start a render offset animation
@@ -1826,19 +1830,18 @@ impl Workspace {
         end: Point<i32, Logical>,
         animation_config: &super::AnimationConfig,
     ) {
-        if let Some(animation) = self.render_offset.take() {
-            let [x, y] = *animation.value();
-            start = Point::from((x, y));
+        if let Some(current_offset) = self.render_offset() {
+            start = current_offset;
         }
 
-        self.render_offset = Some(
+        self.render_offset_animation = Some(RenderOffsetAnimation(
             Animation::new(
                 [start.x, start.y],
                 [end.x, end.y],
                 animation_config.duration,
             )
-            .with_curve(animation_config.curve),
-        );
+            .with_curve(animation_config.curve)
+        ));
     }
 
     /// Advance animations for this [`Workspace`]
@@ -1846,9 +1849,14 @@ impl Workspace {
         crate::profile_function!();
         let mut running = false;
 
-        let _ = self.render_offset.take_if(|a| a.is_finished());
-        if let Some(animation) = &mut self.render_offset {
-            animation.tick(target_presentation_time);
+        if let Some(anim) = &self.render_offset_animation {
+            if anim.0.is_finished() {
+                self.render_offset_animation = None;
+            }
+        }
+
+        if let Some(ref mut anim) = &mut self.render_offset_animation {
+            anim.0.tick(target_presentation_time);
             running = true;
         }
 

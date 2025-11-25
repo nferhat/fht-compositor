@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fht_compositor_config::{
-    ComplexKeyAction, KeyPattern, MouseAction, SimpleKeyAction, WorkspaceLayout,
+    ComplexKeyAction, GestureAction, KeyPattern, MouseAction, SimpleKeyAction, WorkspaceLayout,
 };
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
@@ -593,6 +593,168 @@ impl State {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = mon.active_workspace_idx().saturating_sub(1);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+        }
+    }
+    pub fn process_gesture_action(&mut self, action: GestureAction) {
+        match action {
+            GestureAction::FocusNextWorkspace => {
+                        let mon = self.fht.space.active_monitor_mut();
+                        let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
+                        if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                            self.set_keyboard_focus(Some(window));
+                        }
+                    }
+            GestureAction::FocusPreviousWorkspace => {
+                        let mon = self.fht.space.active_monitor_mut();
+                        let idx = mon.active_workspace_idx().saturating_sub(1);
+                        if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                            self.set_keyboard_focus(Some(window));
+                        }
+                    }
+            GestureAction::CloseFocusedWindow => {
+                if let Some(window) = self.fht.space.active_window() {
+                    window.toplevel().send_close();
+                }
+            },
+            GestureAction::FloatFocusedWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(tile) = active.active_tile() {
+                    let prev = tile.window().tiled();
+                    tile.window().request_tiled(!prev);
+                }
+                active.arrange_tiles(true);
+            }
+            GestureAction::FocusNextOutput => {
+                let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
+                let outputs_len = outputs.len();
+                if outputs_len < 2 {
+                    return;
+                }
+
+                let output = self.fht.space.active_output().clone();
+                let current_output_idx = outputs
+                    .iter()
+                    .position(|o| *o == output)
+                    .expect("Focused output is not registered");
+
+                let mut next_output_idx = current_output_idx + 1;
+                if next_output_idx == outputs_len {
+                    next_output_idx = 0;
+                }
+
+                let output = outputs.into_iter().nth(next_output_idx).unwrap();
+                let config = Arc::clone(&self.fht.config);
+                if config.general.cursor_warps {
+                    let center = output.geometry().center();
+                    self.move_pointer(center.to_f64());
+                }
+                if let Some(window) = self.fht.space.set_active_output(&output) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            GestureAction::FocusNextWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_next_tile(true) {
+                    let config = Arc::clone(&self.fht.config);
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            GestureAction::FocusPreviousOutput => {
+                let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();
+                let outputs_len = outputs.len();
+                if outputs_len < 2 {
+                    return;
+                }
+
+                let output = self.fht.space.active_output().clone();
+                let current_output_idx = outputs
+                    .iter()
+                    .position(|o| *o == output)
+                    .expect("Focused output is not registered");
+
+                let next_output_idx = match current_output_idx.checked_sub(1) {
+                    Some(idx) => idx,
+                    None => outputs_len - 1,
+                };
+
+                let output = outputs.into_iter().nth(next_output_idx).unwrap();
+                let config = Arc::clone(&self.fht.config);
+                if config.general.cursor_warps {
+                    let center = output.geometry().center();
+                    self.move_pointer(center.to_f64());
+                }
+                if let Some(window) = self.fht.space.set_active_output(&output) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            GestureAction::FocusPreviousWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_previous_tile(true) {
+                    let config = Arc::clone(&self.fht.config);
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            GestureAction::FullscreenFocusedWindow => {
+                if let Some(window) = self.fht.space.active_window() {
+                    if window.fullscreen() {
+                        // Workspace will take care of removing fullscreen
+                        window.request_fullscreen(false);
+                    } else {
+                        window.request_fullscreen(true);
+                        self.fht.space.fullscreen_window(&window, true);
+                    }
+                }
+            }
+            GestureAction::SelectNextLayout => {
+                self.fht.space.select_next_layout(true)
+            }
+            GestureAction::SelectPreviousLayout => {
+                self.fht.space.select_previous_layout(true)
+            }
+            GestureAction::SwapWithNextWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_active_tile_with_next(true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    let config = Arc::clone(&self.fht.config);
+                    if config.general.cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            GestureAction::SwapWithPreviousWindow => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_active_tile_with_previous(true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    let config = Arc::clone(&self.fht.config);
+                    if config.general.cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64())
+                    }
                     self.set_keyboard_focus(Some(window));
                 }
             }
