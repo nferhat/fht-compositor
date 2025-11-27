@@ -103,7 +103,6 @@ libdisplay-info = "0.3.0"
 drm-ffi = "0.9.0"
 sd-notify = { version = "0.4.5", optional = true }
 futures-util = { version = "0.3.31", features = ["std", "io"] }
-wayland-protocols-wlr = { version = "0.3.9", features = ["client", "server"] }
 [dependencies.pipewire]
 git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git"
 rev = "fd3d8f7861a29c2eeaa4c393402e013578bb36d9"

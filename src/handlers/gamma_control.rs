@@ -2,6 +2,7 @@ use std::os::fd::{FromRawFd, IntoRawFd};
 use std::io::Read;
 
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols_wlr;
 use smithay::reexports::wayland_server::{
     protocol::wl_output::WlOutput,
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
