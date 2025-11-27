@@ -38,3 +38,4 @@ mod xdg_decoration;
 mod xdg_dialog;
 mod xdg_foreign;
 mod xdg_shell;
+pub mod gamma_control;
