@@ -3,8 +3,10 @@ pub mod pick_surface_grab;
 pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
+use std::time::Duration;
+
 pub use actions::*;
-use fht_compositor_config::KeyPattern;
+use fht_compositor_config::{GestureAction, GestureDirection, KeyPattern};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
     GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,
@@ -927,6 +929,12 @@ impl State {
                 }
             }
             InputEvent::GestureSwipeBegin { event } => {
+                self.fht.current_swipe_fingers = Some(event.fingers());
+                self.fht.gesture_action_executed = false;
+                
+                let active_monitor = self.fht.space.active_monitor_mut();
+                active_monitor.start_swipe_gesture(&self.fht.config.animations.workspace_switch);
+
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
                 pointer.gesture_swipe_begin(
@@ -939,16 +947,149 @@ impl State {
                 );
             }
             InputEvent::GestureSwipeUpdate { event } => {
-                let pointer = self.fht.pointer.clone();
-                pointer.gesture_swipe_update(
-                    self,
-                    &pointer::GestureSwipeUpdateEvent {
-                        time: event.time_msec(),
-                        delta: GestureSwipeUpdateEvent::delta(&event),
-                    },
-                );
+                let fingers = self.fht.current_swipe_fingers.unwrap_or(0);
+                let delta = event.delta();
+
+                let active_monitor = self.fht.space.active_monitor_mut();
+
+                // If we don't have a swipe state, just forward the event to the client
+                let Some(swipe_state) = active_monitor.swipe_state.as_ref() else {
+                    let pointer = self.fht.pointer.clone();
+                    pointer.gesture_swipe_update(
+                        self,
+                        &pointer::GestureSwipeUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                        },
+                    );
+                    return;
+                };
+
+                let total_distance = (swipe_state.total_offset.x.powi(2)
+                    + swipe_state.total_offset.y.powi(2))
+                    .sqrt();
+
+                // Detection of gesture direction
+                let detected_direction = if let Some(dir) = swipe_state.direction {
+                    dir // Already determined
+                } else if total_distance > swipe_state.direction_detection_threshold {
+                    if swipe_state.total_offset.x.abs() > swipe_state.total_offset.y.abs() {
+                        // Horizontal
+                        if swipe_state.total_offset.x > 0.0 {
+                            GestureDirection::Right
+                        } else {
+                            GestureDirection::Left
+                        }
+                    } else {
+                        // Vertical
+                        if swipe_state.total_offset.y > 0.0 {
+                            GestureDirection::Down
+                        } else {
+                            GestureDirection::Up
+                        }
+                    }
+                } else {
+                    let active_monitor = self.fht.space.active_monitor_mut();
+                    active_monitor.update_swipe_gesture(
+                        Point::from((delta.x, delta.y)),
+                        Duration::from_millis(event.time_msec() as u64),
+                        None,
+                    );
+                    
+                    // We also transfer to the client while waiting
+                    let pointer = self.fht.pointer.clone();
+                    pointer.gesture_swipe_update(
+                        self,
+                        &pointer::GestureSwipeUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                        },
+                    );
+                    return;
+                };
+
+                let mut action_handled = false;
+
+                if !self.fht.gesture_action_executed {
+                    for (action, pattern) in &self.fht.config.gesturebinds {
+                        if pattern.fingers != fingers {
+                            continue;
+                        }
+
+                        if total_distance < (pattern.min_swipe_distance as f64) {
+                            continue;
+                        }
+
+                        if pattern.direction != GestureDirection::None
+                            && pattern.direction != detected_direction
+                        {
+                            continue;
+                        }
+
+                        action_handled = true;
+
+                        match action {
+                            // Special case: Workspace Switch
+                            GestureAction::FocusNextWorkspace | 
+                            GestureAction::FocusPreviousWorkspace => {
+                                // We check that the config is logical
+                                let valid_action = match (action, detected_direction) {
+                                    (GestureAction::FocusNextWorkspace, GestureDirection::Left) => true,
+                                    (GestureAction::FocusNextWorkspace, GestureDirection::Up) => true,
+                                    (GestureAction::FocusPreviousWorkspace, GestureDirection::Right) => true,
+                                    (GestureAction::FocusPreviousWorkspace, GestureDirection::Down) => true,
+                                    _ => false, // Ex: bind "next" sur un swipe "right" (pas logique)
+                                };
+
+                                if valid_action {
+                                    let current_ws_idx = active_monitor.active_idx;
+                                    let at_limit = match detected_direction {
+                                        GestureDirection::Left | GestureDirection::Up => current_ws_idx >= 8,
+                                        GestureDirection::Right | GestureDirection::Down => current_ws_idx == 0,
+                                        _ => false,
+                                    };
+
+                                    if !at_limit {
+                                        let active_monitor = self.fht.space.active_monitor_mut();
+                                        active_monitor.update_swipe_gesture(
+                                            Point::from((delta.x, delta.y)),
+                                            Duration::from_millis(event.time_msec() as u64),
+                                            Some(detected_direction),
+                                        );
+                                        self.fht.queue_redraw_all();
+                                    }
+                                }
+                            }
+
+                                // Cas généraux : toutes les autres actions
+                            _ => {
+                                self.process_gesture_action(action.clone());
+                                self.fht.gesture_action_executed = true;
+                            }
+                        }
+                        
+                        break;
+                    }
+                }
+
+                if !action_handled {
+                    let pointer = self.fht.pointer.clone();
+                    pointer.gesture_swipe_update(
+                        self,
+                        &pointer::GestureSwipeUpdateEvent {
+                            time: event.time_msec(),
+                            delta: event.delta(),
+                        },
+                    );
+                }
             }
             InputEvent::GestureSwipeEnd { event } => {
+                let active_monitor = self.fht.space.active_monitor_mut();
+                if let Some(action) = active_monitor.end_swipe_gesture() {
+                    self.process_gesture_action(action);
+                }
+                
+                self.fht.current_swipe_fingers = None;
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.fht.pointer.clone();
                 pointer.gesture_swipe_end(
