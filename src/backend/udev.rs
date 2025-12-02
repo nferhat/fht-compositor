@@ -69,6 +69,7 @@ use smithay::reexports::drm::control::{
 };
 
 use crate::frame_clock::FrameClock;
+use crate::handlers::gamma_control::GammaControlState;
 use crate::output::RedrawState;
 use crate::protocols::output_management;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -142,6 +143,8 @@ pub struct UdevData {
     pub devices: HashMap<DrmNode, Device>,
     pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
+    #[allow(dead_code)]
+    pub gamma_control_manager_state: GammaControlState
 }
 
 impl UdevData {
@@ -307,6 +310,10 @@ impl UdevData {
             "Found primary GPU for rendering!"
         );
 
+        let gamma_control_manager_state = GammaControlState::new::<State>(
+            &state.display_handle,
+        );
+
         let mut data = UdevData {
             primary_gpu,
             primary_node,
@@ -316,6 +323,7 @@ impl UdevData {
             syncobj_state: None,
             dmabuf_global: None,
             _registration_tokens: vec![udev_token, session_token, libinput_token],
+            gamma_control_manager_state,
         };
 
         // HACK: You want the wl_seat name to be the same as the libseat session name, so, eh...

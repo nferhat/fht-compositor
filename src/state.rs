@@ -80,7 +80,6 @@ use crate::output::{self, OutputExt, RedrawState};
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
-use crate::handlers::gamma_control::GammaControlState;
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -698,8 +697,6 @@ pub struct Fht {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
-    #[allow(dead_code)]
-    pub gamma_control_manager_state: GammaControlState
 }
 
 impl Fht {
@@ -849,8 +846,6 @@ impl Fht {
         };
 
         let space = Space::new(&config);
-
-        let gamma_control_manager_state = GammaControlState::new::<State>(dh);
         
 
         Self {
@@ -917,7 +912,6 @@ impl Fht {
             xdg_activation_state,
             xdg_shell_state,
             xdg_foreign_state,
-            gamma_control_manager_state,
         }
     }
 
