@@ -62,7 +62,7 @@ impl Dispatch<ZwlrGammaControlManagerV1, ()> for State {
 
                 if let Some(out) = Output::from_resource(&wl_output) {
                     let gamma_control = data_init.init(id, out.clone());
-                    let size = state.backend.gamma_size(&out).unwrap_or(0) as u32;
+                    let size = state.backend.udev().gamma_size(&out).unwrap_or(0) as u32;
                     gamma_control.gamma_size(size);
                 } else {
                     if let Some(out) = state.fht.space.outputs().next() {
@@ -88,7 +88,7 @@ impl Dispatch<ZwlrGammaControlV1, Output> for State {
     ) {
         match request {
             zwlr_gamma_control_v1::Request::SetGamma { fd } => {
-                let size = state.backend.gamma_size(output).unwrap_or(0);
+                let size = state.backend.udev().gamma_size(output).unwrap_or(0);
                 if size == 0 {
                     gamma_control.failed();
                     return;
@@ -117,7 +117,7 @@ impl Dispatch<ZwlrGammaControlV1, Output> for State {
                 let g = to_u16_vec(g_bytes);
                 let b = to_u16_vec(b_bytes);
 
-                if let Err(err) = state.backend.set_gamma(output, r, g, b) {
+                if let Err(err) = state.backend.udev().set_gamma(output, r, g, b) {
                     tracing::error!(?err, "Echec lors de l'application du gamma");
                     gamma_control.failed();
                 }

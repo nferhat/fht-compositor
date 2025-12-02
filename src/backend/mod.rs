@@ -205,32 +205,4 @@ impl Backend {
             _ => unreachable!(),
         }
     }
-
-    pub fn set_gamma(
-        &mut self,
-        output: &Output,
-        r: Vec<u16>,
-        g: Vec<u16>,
-        b: Vec<u16>,
-    ) -> anyhow::Result<()> {
-        match self {
-            #[cfg(feature = "udev-backend")]
-            Self::Udev(data) => data.set_gamma(output, r, g, b),
-            #[cfg(not(feature = "udev-backend"))]
-            _ => unreachable!(),
-            #[cfg(all(feature = "udev-backend", any(feature = "winit-backend", feature = "headless-backend")))]
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn gamma_size(&self, output: &Output) -> Option<usize> {
-        match self {
-            #[cfg(feature = "udev-backend")]
-            Self::Udev(data) => data.gamma_size(output).ok(),
-            #[cfg(not(feature = "udev-backend"))]
-            _ => None,
-            #[cfg(all(feature = "udev-backend", any(feature = "winit-backend", feature = "headless-backend")))]
-            _ => None,
-        }
-    }
 }
