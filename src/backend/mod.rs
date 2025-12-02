@@ -216,11 +216,9 @@ impl Backend {
         match self {
             #[cfg(feature = "udev-backend")]
             Self::Udev(data) => data.set_gamma(output, r, g, b),
-            #[cfg(feature = "winit-backend")]
-            Self::Winit(_) => Ok(()),
-            #[cfg(feature = "headless-backend")]
-            Self::Headless(_) => Ok(()),
-            #[allow(unreachable_patterns)]
+            #[cfg(not(feature = "udev-backend"))]
+            _ => unreachable!(),
+            #[cfg(all(feature = "udev-backend", any(feature = "winit-backend", feature = "headless-backend")))]
             _ => unreachable!(),
         }
     }
@@ -229,6 +227,9 @@ impl Backend {
         match self {
             #[cfg(feature = "udev-backend")]
             Self::Udev(data) => data.gamma_size(output).ok(),
+            #[cfg(not(feature = "udev-backend"))]
+            _ => None,
+            #[cfg(all(feature = "udev-backend", any(feature = "winit-backend", feature = "headless-backend")))]
             _ => None,
         }
     }
