@@ -1,6 +1,7 @@
 /target
 # Useless log files in the repo
 std*
+logs
 # when building with nix
 /result
 # direnv cache
@@ -11,3 +12,6 @@ std*
 docs/node_modules
 docs/.vitepress/cache
 docs/.vitepress/dist
+
+# For local testing
+compositor.toml
