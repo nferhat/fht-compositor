@@ -621,6 +621,8 @@ pub struct Fht {
     pub pointer: PointerHandle<State>,
     pub clock: Clock<Monotonic>,
     pub suppressed_keys: HashSet<Keysym>,
+    pub current_swipe_fingers: Option<u32>,
+    pub gesture_action_executed: bool,
     // We store both the timer and the keysym used to trigger the key action.
     // When we remove the keysym from suppressed keys we stop it.
     pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
@@ -867,6 +869,8 @@ impl Fht {
             clock,
             suppressed_keys: HashSet::new(),
             repeated_keyaction_timer: None,
+            current_swipe_fingers: None,
+            gesture_action_executed: false,
             seat,
             devices: vec![],
             seat_state,

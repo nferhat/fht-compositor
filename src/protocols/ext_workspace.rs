@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use smithay::output::Output;
 use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::{DataInit, New, Resource};
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1};
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1};
@@ -162,7 +163,7 @@ impl ExtWorkspaceData {
 pub fn refresh(state: &mut State) {
     crate::profile_function!();
 
-    let manager_state = &mut state.fht.ext_workspace_manager;
+    let manager_state = &mut state.fht.ext_workspace_manager_state;
     let mut changed = false;
 
     // Remove workspace groups of removed outputs.
@@ -203,7 +204,6 @@ pub fn refresh(state: &mut State) {
 
     // At the end notify changes.
     if changed {
-        dbg!("Notifying changes");
         notify_changes(manager_state);
     }
 }
@@ -340,6 +340,36 @@ fn refresh_workspace_group(manager_state: &mut ExtWorkspaceManagerState, output:
 
     manager_state.workspace_groups.insert(output.clone(), data);
     true
+}
+
+pub fn on_output_bound(state: &mut State, output: &Output, wl_output: &WlOutput) {
+    let Some(client) = wl_output.client() else {
+        return;
+    };
+
+    let mut sent = false;
+
+    let protocol_state = &mut state.fht.ext_workspace_manager_state;
+    if let Some(data) = protocol_state.workspace_groups.get_mut(output) {
+        for group in &mut data.instances {
+            if group.client().as_ref() != Some(&client) {
+                continue;
+            }
+
+            group.output_enter(wl_output);
+            sent = true;
+        }
+    }
+
+    if !sent {
+        return;
+    }
+
+    for manager in protocol_state.instances.keys() {
+        if manager.client().as_ref() == Some(&client) {
+            manager.done();
+        }
+    }
 }
 
 impl<D> GlobalDispatch<ExtWorkspaceManagerV1, ExtWorkspaceGlobalData, D>
