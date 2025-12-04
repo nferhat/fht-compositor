@@ -22,7 +22,6 @@ pub struct Border {
     // We store the parameters with the struct
     parameters: Parameters,
     // And we animate each of them below
-    thickness: Animation<i32>,
     corner_radius: Animation<f32>,
     color: Animation<fht_compositor_config::Color>,
 }
@@ -57,7 +56,6 @@ impl Border {
             geometry,
             parameters,
             // Each animation starts as empty
-            thickness: Animation::new(thickness, thickness, *duration).with_curve(*curve),
             corner_radius: Animation::new(radius, radius, *duration).with_curve(*curve),
             color: Animation::new(color, color, *duration).with_curve(*curve),
         }
@@ -66,11 +64,6 @@ impl Border {
     /// Advance the animations of this [`Border`], returning whether animations are ongoing or not.
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         let mut ongoing = false;
-
-        if !self.thickness.is_finished() {
-            self.thickness.tick(target_presentation_time);
-            ongoing = true;
-        }
 
         if !self.color.is_finished() {
             self.color.tick(target_presentation_time);
@@ -112,11 +105,6 @@ impl Border {
         // happening while the config update (say the user changed both border color and
         // animation config at once)
 
-        self.thickness = self
-            .thickness
-            .clone()
-            .with_duration(*duration)
-            .with_curve(*curve);
         self.corner_radius = self
             .corner_radius
             .clone()
@@ -141,10 +129,6 @@ impl Border {
         self.color.end = parameters.color;
         self.color.restart();
 
-        self.thickness.start = *self.thickness.value();
-        self.thickness.end = parameters.thickness;
-        self.thickness.restart();
-
         self.corner_radius.start = *self.corner_radius.value();
         self.corner_radius.end = parameters.corner_radius;
         self.corner_radius.restart();
@@ -165,7 +149,7 @@ impl Border {
         Parameters {
             color: *self.color.value(),
             corner_radius: *self.corner_radius.value(),
-            thickness: *self.thickness.value(),
+            thickness: self.parameters.thickness,
         }
     }
 
@@ -206,7 +190,7 @@ impl Border {
     ///
     /// If returns `None`, the border should not be rendered.
     pub fn render(&self, renderer: &mut impl FhtRenderer, alpha: f32) -> Option<ShaderElement> {
-        if *self.thickness.value() == 0 {
+        if self.parameters.thickness == 0 {
             return None;
         }
 

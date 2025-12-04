@@ -192,6 +192,7 @@ impl Tile {
         if is_fullscreen {
             // Disable border for fullscreened windos
             border.radius = 0.0;
+            border.thickness = 0;
             shadow.disable = true;
         }
 

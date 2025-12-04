@@ -68,6 +68,8 @@ struct InteractiveSwap {
     tile: tile::Tile,
     /// We need to track on which outputs the tile is visible on, to render it accordingly.
     overlap_outputs: Vec<Output>,
+    /// The last output we rendered on.
+    last_output: Option<Output>,
 }
 
 impl Space {
@@ -884,6 +886,7 @@ impl Space {
         &mut self,
         window: &Window,
         pointer_loc: Point<i32, Logical>,
+        center_window: bool,
     ) -> bool {
         if self.interactive_swap.is_some() {
             return false;
@@ -898,23 +901,27 @@ impl Space {
                         false,
                     );
 
-                    // Make the tile slightly smaller, just for aesthetic urposes and give a visual
-                    // clue that we grabbed it and is not in a swap state.
-                    if tile.window().tiled()
-                        || workspace.current_layout()
-                            != fht_compositor_config::WorkspaceLayout::Floating
-                    {
-                        let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
-                        let new_loc = pointer_loc - new_size.downscale(2);
-                        tile.set_geometry(Rectangle::new(new_loc, new_size), true);
-                    } else {
-                        tile.set_location(pointer_loc - tile.size().downscale(2), true);
+                    if center_window {
+                        // Make the tile slightly smaller, just for aesthetic urposes and give a
+                        // visual clue that we grabbed it and is not in a
+                        // swap state.
+                        if tile.window().tiled()
+                            && workspace.current_layout()
+                                != fht_compositor_config::WorkspaceLayout::Floating
+                        {
+                            let new_size = tile.size().to_f64().upscale(0.8).to_i32_round();
+                            let new_loc = pointer_loc - new_size.downscale(2);
+                            tile.set_geometry(Rectangle::new(new_loc, new_size), true);
+                        } else {
+                            tile.set_location(pointer_loc - tile.size().downscale(2), true);
+                        }
                     }
 
                     let output = workspace.output().clone();
                     self.interactive_swap = Some(InteractiveSwap {
                         tile,
-                        overlap_outputs: vec![output],
+                        overlap_outputs: vec![output.clone()],
+                        last_output: Some(output),
                     });
                     return true;
                 }
@@ -972,15 +979,23 @@ impl Space {
             return;
         }
 
-        let monitor_under_idx = self
-            .monitors
-            .iter_mut()
-            .position(|mon| {
-                mon.output()
-                    .geometry()
-                    .contains(cursor_position.to_i32_round())
+        let monitor_under_idx = self.monitors.iter_mut().position(|mon| {
+            mon.output()
+                .geometry()
+                .contains(cursor_position.to_i32_round())
+        });
+
+        let monitor_under_idx = monitor_under_idx.or_else(|| {
+            self.monitors.iter().position(|mon| {
+                // Try to compare with the latest output the cursor was on.
+                Some(mon.output()) == interactive_swap.last_output.as_ref()
             })
-            .expect("Cursor position out of space!");
+        });
+
+        let Some(monitor_under_idx) = monitor_under_idx else {
+            unreachable!()
+        };
+
         let monitor_under = &mut self.monitors[monitor_under_idx];
         let output_loc = monitor_under.output().current_location();
         // Move the tile to the correct position relative to the output so that animation doesn't
@@ -1012,6 +1027,7 @@ impl Space {
             return vec![];
         }
 
+        interactive_swap.last_output = Some(output.clone());
         // Usually, the tile's location is local, but in our case it is global due to how
         // Space::handle_interactive_swap_motion is done.
         // We just have to offset by the output location to render it accurately.
@@ -1160,3 +1176,4 @@ impl AnimationConfig {
         enable.then_some(Self { duration, curve })
     }
 }
+
