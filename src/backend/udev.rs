@@ -43,7 +43,7 @@ use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
-use smithay::reexports::drm::control::{ModeFlags, ModeTypeFlags, ResourceHandle};
+use smithay::reexports::drm::control::{ModeFlags, ModeTypeFlags, ResourceHandle, property};
 use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
@@ -63,7 +63,13 @@ use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
+use std::any::Any;
+use smithay::reexports::drm::control::{
+    atomic::AtomicModeReq, AtomicCommitFlags, Device as ControlDevice,
+};
+
 use crate::frame_clock::FrameClock;
+use crate::handlers::gamma_control::GammaControlState;
 use crate::output::RedrawState;
 use crate::protocols::output_management;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -137,6 +143,8 @@ pub struct UdevData {
     pub devices: HashMap<DrmNode, Device>,
     pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
+    #[allow(dead_code)]
+    pub gamma_control_manager_state: GammaControlState
 }
 
 impl UdevData {
@@ -302,6 +310,10 @@ impl UdevData {
             "Found primary GPU for rendering!"
         );
 
+        let gamma_control_manager_state = GammaControlState::new::<State>(
+            &state.display_handle,
+        );
+
         let mut data = UdevData {
             primary_gpu,
             primary_node,
@@ -311,6 +323,7 @@ impl UdevData {
             syncobj_state: None,
             dmabuf_global: None,
             _registration_tokens: vec![udev_token, session_token, libinput_token],
+            gamma_control_manager_state,
         };
 
         // HACK: You want the wl_seat name to be the same as the libseat session name, so, eh...
@@ -908,6 +921,7 @@ impl UdevData {
             output_global,
             drm_output,
             dmabuf_feedback,
+            gamma_blob: None,
         };
 
         fht.queue_redraw(&surface.output);
@@ -1666,6 +1680,207 @@ impl UdevData {
 
         anyhow::bail!("No matching output found")
     }
+
+    pub fn gamma_size(&self, output: &Output) -> anyhow::Result<usize> {
+        let UdevOutputData { device, crtc } = output
+            .user_data()
+            .get::<UdevOutputData>()
+            .context("Invalid udev output")?;
+
+        let device = self.devices.get(device).context("Device not found")?;
+        let surface = device.surfaces.get(crtc).context("Surface not found")?;
+
+        let gamma_size = surface.drm_output.with_compositor(|compositor| -> anyhow::Result<usize> {
+            let drm_surface = compositor.surface();
+            let drm = drm_surface.device_fd();
+            
+            let crtc_info = drm.get_crtc(*crtc).context("Failed to get CRTC info")?;
+            Ok(crtc_info.gamma_length() as usize)
+        })?;
+
+        Ok(gamma_size)
+    }
+
+    pub fn set_gamma(
+        &mut self,
+        output: &Output,
+        r: Vec<u16>,
+        g: Vec<u16>,
+        b: Vec<u16>,
+    ) -> anyhow::Result<()> {
+        let name = output.name();
+        let len = r.len();
+        tracing::info!("Setting gamma on {} with {} entries", name, len);
+
+        let expected = self.gamma_size(output)?;
+        if expected != len {
+            anyhow::bail!(
+                "Gamma LUT size mismatch: expected {}, got {}",
+                expected,
+                len
+            );
+        }
+
+        let mut lut: Vec<DrmColorLut> = Vec::with_capacity(len);
+        for i in 0..len {
+            lut.push(DrmColorLut {
+                red: r[i],
+                green: g[i],
+                blue: b[i],
+                reserved: 0,
+            });
+        }
+
+        let UdevOutputData { device, crtc } = output
+            .user_data()
+            .get::<UdevOutputData>()
+            .context("Invalid output")?;
+
+        let device = self.devices.get_mut(device).context("Device not found")?;
+        let surface = device.surfaces.get_mut(crtc).context("Surface not found")?;
+
+        let result = surface.drm_output.with_compositor(|comp| {
+            let drm_surface = comp.surface();
+            let drm = drm_surface.device_fd();
+
+            let blob_id = {
+                use std::os::fd::AsRawFd;
+                
+                // Def of the IOCTL numbers (Linux standard)
+                const DRM_IOCTL_BASE: u64 = 0x64; // 'd'
+                const DRM_IOCTL_MODE_CREATE_BLOB_NR: u64 = 0xBD;
+
+                let data = lut.as_slice();
+                let length = (data.len() * std::mem::size_of::<DrmColorLut>()) as u32;
+                
+                let mut create_blob = drm_ffi::drm_mode_create_blob {
+                    data: data.as_ptr() as usize as u64,
+                    length,
+                    blob_id: 0,
+                };
+
+                // Calculation of the IOCTL number (_IOWR)
+                // This is the Rust translation of the C macro _IOWR('d', 0xBD, struct drm_mode_create_blob)
+                let ioctl_num = {
+                    const _IOC_NRBITS: u64 = 8;
+                    const _IOC_TYPEBITS: u64 = 8;
+                    const _IOC_SIZEBITS: u64 = 14;
+                    const _IOC_DIRBITS: u64 = 2;
+                    const _IOC_NRSHIFT: u64 = 0;
+                    const _IOC_TYPESHIFT: u64 = _IOC_NRSHIFT + _IOC_NRBITS;
+                    const _IOC_SIZESHIFT: u64 = _IOC_TYPESHIFT + _IOC_TYPEBITS;
+                    const _IOC_DIRSHIFT: u64 = _IOC_SIZESHIFT + _IOC_SIZEBITS;
+                    const _IOC_READ: u64 = 2;
+                    const _IOC_WRITE: u64 = 1;
+                    const _IOC_INOUT: u64 = _IOC_READ | _IOC_WRITE;
+                    
+                    let size = std::mem::size_of::<drm_ffi::drm_mode_create_blob>() as u64;
+
+                    (_IOC_INOUT << _IOC_DIRSHIFT) |
+                    ((size & ((1 << _IOC_SIZEBITS) - 1)) << _IOC_SIZESHIFT) |
+                    (DRM_IOCTL_BASE << _IOC_TYPESHIFT) |
+                    (DRM_IOCTL_MODE_CREATE_BLOB_NR << _IOC_NRSHIFT)
+                };
+
+                unsafe {
+                    if libc::ioctl(drm.as_raw_fd(), ioctl_num, &mut create_blob) != 0 {
+                        return Err(std::io::Error::last_os_error().into());
+                    }
+                }
+                create_blob.blob_id
+            };
+
+            let blob = property::Value::Blob(blob_id.into());
+            
+            tracing::debug!("Gamma blob = {}", blob_id);
+
+            let props = drm.get_properties(*crtc)?;
+            let (ids, vals) = props.as_props_and_values();
+
+            let mut gamma_lut_id = None;
+            let mut active_id = None;
+            let mut mode_id = None;
+            let mut degamma_id = None;
+            let mut ctm_id = None;
+
+            for (&id, &val) in ids.iter().zip(vals.iter()) {
+                if let Ok(info) = drm.get_property(id) {
+                    match info.name().to_str().unwrap_or("") {
+                        "GAMMA_LUT" => gamma_lut_id = Some(id),
+                        "ACTIVE" => active_id = Some((id, val)),
+                        "MODE_ID" => mode_id = Some((id, val)),
+                        "DEGAMMA_LUT" => degamma_id = Some((id, val)),
+                        "CTM" => ctm_id = Some((id, val)),
+                        _ => {}
+                    }
+                }
+            }
+
+            let gamma_lut_id = gamma_lut_id.context("This CRTC does not support gamma")?;
+
+            let mut req = AtomicModeReq::new();
+
+            req.add_property(*crtc, gamma_lut_id, property::Value::Blob(blob_id.into()));
+
+            if let Some((id, v)) = degamma_id {
+                if v != 0 {
+                    req.add_property(*crtc, id, property::Value::Blob(0u64));
+                }
+            }
+            if let Some((id, v)) = ctm_id {
+                if v != 0 {
+                    req.add_property(*crtc, id, property::Value::Blob(0u64));
+                }
+            }
+
+            let first = drm.atomic_commit(AtomicCommitFlags::empty(), req.clone());
+
+            if first.is_ok() {
+                tracing::debug!("Gamma applied without modeset");
+                return Ok(first.map(|_| blob));
+            }
+
+            tracing::debug!("Retrying with ALLOW_MODESET…");
+
+            if let Some((id, _)) = active_id {
+                req.add_property(*crtc, id, property::Value::Boolean(true));
+            }
+
+            if let Some((id, v)) = mode_id {
+                if v != 0 {
+                    req.add_property(*crtc, id, property::Value::Blob((v as u32).into()));
+                }
+            }
+
+            for conn in drm_surface.current_connectors() {
+                if let Ok(props) = drm.get_properties(conn) {
+                    let (cids, cvals) = props.as_props_and_values();
+                    for (&id, _) in cids.iter().zip(cvals.iter()) {
+                        if let Ok(info) = drm.get_property(id) {
+                            if info.name().to_str().unwrap_or("") == "CRTC_ID" {
+                                req.add_property(conn, id, property::Value::CRTC(Some(*crtc)));
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(drm.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req).map(|_| blob))
+        });
+
+        match result {
+            Ok(blob) => {
+                surface.gamma_blob = Some(Box::new(blob));
+                tracing::info!("Gamma applied successfully to {}", name);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Gamma failed: {:?}", e);
+                Err(e)
+            }
+        }
+    }
+
 }
 
 struct UdevOutputData {
@@ -1703,6 +1918,7 @@ pub struct Surface {
         DrmDeviceFd,
     >,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
+    pub gamma_blob: Option<Box<dyn Any>>,
 }
 
 fn get_surface_dmabuf_feedback(
@@ -2057,4 +2273,14 @@ fn generate_output_render_elements<'a>(
     }
 
     render_elements
+}
+
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct DrmColorLut {
+    pub red: u16,
+    pub green: u16,
+    pub blue: u16,
+    pub reserved: u16,
 }
