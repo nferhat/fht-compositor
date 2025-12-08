@@ -190,7 +190,7 @@ impl Fht {
         let has_blur = monitor.has_blur();
         let MonitorRenderResult {
             elements: monitor_elements,
-            render_above_top,
+            elements_above_top: monitor_elements_above_top,
         } = monitor.render(renderer, scale);
         // And interactive swap elements
         let interactive_move_elements = self.space.render_interactive_swap(renderer, output, scale);
@@ -223,26 +223,21 @@ impl Fht {
         extend_from_layer(&mut background, Layer::Bottom);
         extend_from_layer(&mut background, Layer::Background);
 
-        if render_above_top {
-            // First the actual monitor contents.
-            rv.elements
-                .extend(interactive_move_elements.into_iter().map(Into::into));
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-            // Then layer shells
-            rv.elements.extend(top);
-            rv.elements.extend(background);
-        } else {
-            // Otherwise, render in normal order.
-            rv.elements.extend(top);
-            // Then the actual monitor contents.
-            rv.elements
-                .extend(interactive_move_elements.into_iter().map(Into::into));
-            rv.elements
-                .extend(monitor_elements.into_iter().map(Into::into));
-            // And finally background stuff
-            rv.elements.extend(background);
-        }
+        // The tile we grab is always rendered above everything else.
+        rv.elements
+            .extend(interactive_move_elements.into_iter().map(Into::into));
+        // First elements that should be rendered above the top layer shell. We do this since there
+        // is a potential case where we switch between two workspaces where one has fullscreened
+        // tile and the other dont.
+        rv.elements
+            .extend(monitor_elements_above_top.into_iter().map(Into::into));
+        // Then the top layer shells
+        rv.elements.extend(top);
+        // The content that should be below the top layer shells
+        rv.elements
+            .extend(monitor_elements.into_iter().map(Into::into));
+        // And finally the rest of the layer shells
+        rv.elements.extend(background);
 
         // We don't need it anymore, and avoid deadlock down below.
         drop(layer_map);

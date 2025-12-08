@@ -1,7 +1,9 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use fht_compositor_config::{GestureAction, GestureDirection, WorkspaceSwitchAnimationDirection, WorkspaceSwitchAnimation};
+use fht_compositor_config::{
+    GestureAction, GestureDirection, WorkspaceSwitchAnimation, WorkspaceSwitchAnimationDirection,
+};
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::output::Output;
 use smithay::utils::Point;
@@ -48,8 +50,8 @@ pub struct Monitor {
 pub struct MonitorRenderResult<R: FhtRenderer> {
     /// The elements rendered from this result.
     pub elements: Vec<MonitorRenderElement<R>>,
-    /// Whether we should render the monitor layer above the top Layer shells
-    pub render_above_top: bool,
+    /// The elements to be rendered above the top layer.
+    pub elements_above_top: Vec<MonitorRenderElement<R>>,
 }
 
 fht_render_elements! {
@@ -148,7 +150,7 @@ impl Monitor {
         if animate {
             if let Some((config, direction)) = &self.config.workspace_switch_animation {
                 let (width, height) = self.output.geometry().size.into();
-                
+
                 // Get the current swipe offset if a swipe is active
                 let current_offset = if let Some(swipe_state) = &self.swipe_state {
                     match direction {
@@ -266,10 +268,7 @@ impl Monitor {
     }
 
     /// Start a swipe gesture at the monitor level
-    pub fn start_swipe_gesture(
-        &mut self,
-        animation_config: &WorkspaceSwitchAnimation,
-    ) {
+    pub fn start_swipe_gesture(&mut self, animation_config: &WorkspaceSwitchAnimation) {
         let previous_offset = if let Some(previous_swipe) = self.swipe_state.take() {
             previous_swipe.total_offset
         } else if let Some(current_offset) = self.active_workspace().render_offset() {
@@ -348,9 +347,7 @@ impl Monitor {
             GestureDirection::Left | GestureDirection::Up => {
                 state.initial_workspace_idx >= WORKSPACE_COUNT - 1
             }
-            GestureDirection::Right | GestureDirection::Down => {
-                state.initial_workspace_idx == 0
-            }
+            GestureDirection::Right | GestureDirection::Down => state.initial_workspace_idx == 0,
             _ => false,
         };
 
@@ -368,7 +365,9 @@ impl Monitor {
         if should_trigger {
             Some(match direction {
                 GestureDirection::Left | GestureDirection::Up => GestureAction::FocusNextWorkspace,
-                GestureDirection::Right | GestureDirection::Down => GestureAction::FocusPreviousWorkspace,
+                GestureDirection::Right | GestureDirection::Down => {
+                    GestureAction::FocusPreviousWorkspace
+                }
                 _ => {
                     self.swipe_state.take();
                     return None;
@@ -406,8 +405,12 @@ impl Monitor {
                 Some(GestureDirection::Left) | Some(GestureDirection::Up) => {
                     if self.active_idx < WORKSPACE_COUNT - 1 {
                         let offset = match swipe_state.animation_direction {
-                            WorkspaceSwitchAnimationDirection::Horizontal => Point::from((output_size.w, 0)),
-                            WorkspaceSwitchAnimationDirection::Vertical => Point::from((0, output_size.h)),
+                            WorkspaceSwitchAnimationDirection::Horizontal => {
+                                Point::from((output_size.w, 0))
+                            }
+                            WorkspaceSwitchAnimationDirection::Vertical => {
+                                Point::from((0, output_size.h))
+                            }
                         };
                         (Some(self.active_idx + 1), offset)
                     } else {
@@ -417,8 +420,12 @@ impl Monitor {
                 Some(GestureDirection::Right) | Some(GestureDirection::Down) => {
                     if self.active_idx > 0 {
                         let offset = match swipe_state.animation_direction {
-                            WorkspaceSwitchAnimationDirection::Horizontal => Point::from((-output_size.w, 0)),
-                            WorkspaceSwitchAnimationDirection::Vertical => Point::from((0, -output_size.h)),
+                            WorkspaceSwitchAnimationDirection::Horizontal => {
+                                Point::from((-output_size.w, 0))
+                            }
+                            WorkspaceSwitchAnimationDirection::Vertical => {
+                                Point::from((0, -output_size.h))
+                            }
                         };
                         (Some(self.active_idx - 1), offset)
                     } else {
@@ -442,7 +449,7 @@ impl Monitor {
     pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: i32) -> MonitorRenderResult<R> {
         crate::profile_function!();
         let mut elements = vec![];
-        let mut render_above_top = false;
+        let mut elements_above_top = vec![];
 
         // If a swipe gesture is in progress, render accordingly
         if let Some(swipe_state) = &self.swipe_state {
@@ -452,9 +459,12 @@ impl Monitor {
         // Normal behavior: render workspaces with their animations
         for (idx, workspace) in self.workspaces.iter().enumerate() {
             if idx == self.active_idx || workspace.render_offset().is_some() {
-                if !workspace.render_offset().is_some() {
-                    render_above_top |= workspace.fullscreened_tile().is_some();
-                }
+                let render_above_top = workspace.fullscreened_tile_idx().is_some();
+                let elements = if render_above_top {
+                    &mut elements_above_top
+                } else {
+                    &mut elements
+                };
 
                 let render_offset = workspace.render_offset();
                 let ws_elements = workspace
@@ -483,7 +493,7 @@ impl Monitor {
 
         MonitorRenderResult {
             elements,
-            render_above_top,
+            elements_above_top,
         }
     }
 
@@ -495,7 +505,7 @@ impl Monitor {
         swipe_state: &MonitorSwipeState,
     ) -> MonitorRenderResult<R> {
         let mut elements = vec![];
-        let render_above_top = false;
+        let mut elements_above_top = vec![];
 
         let output_size = self.output.geometry().size;
 
@@ -515,17 +525,23 @@ impl Monitor {
             .into_iter();
 
         let current_offset_physical = current_offset.to_physical(scale);
-        elements.extend(
-            current_ws_elements
-                .map(|e| {
-                    RelocateRenderElement::from_element(
-                        e.into(),
-                        current_offset_physical,
-                        Relocate::Relative,
-                    )
-                })
-                .map(Into::into),
-        );
+        let current_ws_elements = current_ws_elements
+            .map(|e| {
+                RelocateRenderElement::from_element(
+                    e.into(),
+                    current_offset_physical,
+                    Relocate::Relative,
+                )
+            })
+            .map(Into::into);
+        if self.workspaces[self.active_idx]
+            .fullscreened_tile_idx()
+            .is_some()
+        {
+            elements_above_top.extend(current_ws_elements);
+        } else {
+            elements.extend(current_ws_elements);
+        }
 
         // DDetermine which adjacent workspace to render
         let (adjacent_idx, adjacent_base_offset) = match swipe_state.direction {
@@ -572,22 +588,25 @@ impl Monitor {
                 .into_iter();
 
             let adjacent_offset_physical = adjacent_offset.to_physical(scale);
-            elements.extend(
-                adjacent_ws_elements
-                    .map(|e| {
-                        RelocateRenderElement::from_element(
-                            e.into(),
-                            adjacent_offset_physical,
-                            Relocate::Relative,
-                        )
-                    })
-                    .map(Into::into),
-            );
+            let adjacent_ws_elements = adjacent_ws_elements
+                .map(|e| {
+                    RelocateRenderElement::from_element(
+                        e.into(),
+                        adjacent_offset_physical,
+                        Relocate::Relative,
+                    )
+                })
+                .map(Into::into);
+            if self.workspaces[idx].fullscreened_tile_idx().is_some() {
+                elements_above_top.extend(adjacent_ws_elements);
+            } else {
+                elements.extend(adjacent_ws_elements);
+            }
         }
 
         MonitorRenderResult {
             elements,
-            render_above_top,
+            elements_above_top,
         }
     }
 }
