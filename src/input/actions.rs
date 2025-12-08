@@ -20,7 +20,7 @@ use crate::utils::RectCenterExt;
 ///
 /// A [`KeyAction`] needs additional data associated with it, for example, whether we should allow
 /// it to be executed while the compositor is locked.
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum KeyActionType {
     Quit,
     ReloadConfig,
@@ -48,6 +48,7 @@ pub enum KeyActionType {
     SendFocusedWindowToWorkspace(usize),
     FocusNextWorkspace,
     FocusPreviousWorkspace,
+    #[default]
     None,
 }
 
@@ -601,24 +602,24 @@ impl State {
     pub fn process_gesture_action(&mut self, action: GestureAction) {
         match action {
             GestureAction::FocusNextWorkspace => {
-                        let mon = self.fht.space.active_monitor_mut();
-                        let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
-                        if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                            self.set_keyboard_focus(Some(window));
-                        }
-                    }
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
             GestureAction::FocusPreviousWorkspace => {
-                        let mon = self.fht.space.active_monitor_mut();
-                        let idx = mon.active_workspace_idx().saturating_sub(1);
-                        if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                            self.set_keyboard_focus(Some(window));
-                        }
-                    }
+                let mon = self.fht.space.active_monitor_mut();
+                let idx = mon.active_workspace_idx().saturating_sub(1);
+                if let Some(window) = mon.set_active_workspace_idx(idx, true) {
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
             GestureAction::CloseFocusedWindow => {
                 if let Some(window) = self.fht.space.active_window() {
                     window.toplevel().send_close();
                 }
-            },
+            }
             GestureAction::FloatFocusedWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(tile) = active.active_tile() {
@@ -726,12 +727,8 @@ impl State {
                     }
                 }
             }
-            GestureAction::SelectNextLayout => {
-                self.fht.space.select_next_layout(true)
-            }
-            GestureAction::SelectPreviousLayout => {
-                self.fht.space.select_previous_layout(true)
-            }
+            GestureAction::SelectNextLayout => self.fht.space.select_next_layout(true),
+            GestureAction::SelectPreviousLayout => self.fht.space.select_previous_layout(true),
             GestureAction::SwapWithNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if active.swap_active_tile_with_next(true, true) {
@@ -761,3 +758,4 @@ impl State {
         }
     }
 }
+

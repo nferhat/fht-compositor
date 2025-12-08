@@ -1523,12 +1523,19 @@ impl<'de> Deserialize<'de> for GestureDirection {
             "none" => Ok(GestureDirection::None),
             _ => Err(serde::de::Error::unknown_variant(
                 &s,
-                &["left", "right", "up", "down", "vertical", "horizontal", "none"],
+                &[
+                    "left",
+                    "right",
+                    "up",
+                    "down",
+                    "vertical",
+                    "horizontal",
+                    "none",
+                ],
             )),
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GestureAction {

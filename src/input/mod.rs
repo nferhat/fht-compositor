@@ -3,6 +3,7 @@ pub mod pick_surface_grab;
 pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 pub use actions::*;
@@ -15,7 +16,7 @@ use smithay::backend::input::{
     TabletToolTipEvent, TabletToolTipState,
 };
 use smithay::desktop::layer_map_for_output;
-use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
 use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
@@ -25,6 +26,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
+use crate::backend::Backend;
 use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::output::OutputExt;
 use crate::state::State;
@@ -338,12 +340,9 @@ impl State {
     fn on_keyboard_input<B: InputBackend>(&mut self, event: B::KeyboardKeyEvent) {
         let keycode = event.key_code();
         let key_state: KeyState = event.state();
-        trace!(?keycode, ?key_state, "Key");
         let serial = SERIAL_COUNTER.next_serial();
         let time = event.time_msec();
         let keyboard = self.fht.keyboard.clone();
-
-        let mut suppressed_keys = self.fht.suppressed_keys.clone();
 
         // First candidate: Top/Overlay layershells asking for **Exclusive** keyboard
         // interaction They basically grab the keyboard, blocking every
@@ -398,91 +397,48 @@ impl State {
             serial,
             time,
             |state, modifiers, handle| {
-                // Use the first raw keysym
-                //
-                // What does this mean? Basically a modified sym would also apply
-                // modifiers to the final [`Keysym`], which isnt good for user
-                // interactivity since a [`KeyPattern`] with ALT+SHIFT+1 is not 1 but with
-                // bang since 1 capital on QWERTY is bang
-                //
-                // This also ignores non-qwerty keyboards too, I have to think about this
-                // sometime
-                let keysym = *handle.raw_syms().first().unwrap();
+                // It has been proven to me that some people rather have their keybinds be affected
+                // by the layout they are currently using, this does mean that you'd have to adapt
+                // your keybinds in the config based on your layout.
+                let modified = handle.modified_sym();
+                let raw = handle.raw_latin_sym_or_raw_current_sym();
 
-                #[cfg(feature = "udev-backend")]
-                {
-                    use smithay::input::keyboard::Keysym;
-                    if key_state == KeyState::Pressed
-                        && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
-                            .contains(&handle.modified_sym().raw())
-                    {
-                        #[allow(irrefutable_let_patterns)]
-                        if let crate::backend::Backend::Udev(data) = &mut state.backend {
-                            data.switch_vt(
-                                (handle.modified_sym().raw() - Keysym::XF86_Switch_VT_1.raw() + 1)
-                                    as i32,
-                            );
-                            suppressed_keys.insert(keysym);
-                            return FilterResult::Intercept((
-                                KeyAction::none(),
-                                KeyPattern::default(),
-                            ));
-                        }
-                    }
+                // We handled a virtual terminal switch, no need to handle other keybinds.
+                if handle_vt_switch(&mut state.backend, key_state, modified) {
+                    state.fht.suppressed_keys.insert(modified);
+                    return FilterResult::Intercept((KeyPattern::default(), KeyAction::none()));
                 }
 
-                #[allow(unused_mut)]
-                let mut modifiers = *modifiers;
-                // Swap ALT and SUPER under the winit backend since you are probably running
-                // under a parent compositor that already has binds with the super key.
-                #[cfg(feature = "winit-backend")]
-                if matches!(&mut state.backend, crate::backend::Backend::Winit(_)) {
-                    modifiers = smithay::input::keyboard::ModifiersState {
-                        alt: modifiers.logo,
-                        logo: modifiers.alt,
-                        ..modifiers
-                    }
+                if inhibited {
+                    // FIXME: Add a way to override this for specific keybinds (this could be quite
+                    // bad if you couldn't reload your compositor config or quit)
+                    return FilterResult::Forward;
                 }
 
-                let key_pattern = fht_compositor_config::KeyPattern(modifiers.into(), keysym);
-                if key_state == KeyState::Pressed && !inhibited {
-                    let action = state
-                        .fht
-                        .config
-                        .keybinds
-                        .get(&key_pattern)
-                        .cloned()
-                        .map(Into::into);
-                    trace!(?keysym, ?key_pattern, ?action);
-
-                    if let Some(action) = action {
-                        suppressed_keys.insert(keysym);
-                        FilterResult::Intercept((action, key_pattern))
-                    } else {
-                        FilterResult::Forward
-                    }
-                } else if suppressed_keys.remove(&keysym) {
-                    // If the current repeat timer is for the following keysym, remove it
-                    // FIXME: Check this logic since sometimes (for obscure reasons) there
-                    // can be two keyactions running
+                // Handle repeating keybinds
+                // FIXME: handle this properly, this breaks if there are two repeating keybinds
+                if key_state == KeyState::Released {
                     if let Some((token, _)) = state
                         .fht
                         .repeated_keyaction_timer
-                        .take_if(|(_, k)| *k == keysym)
+                        .take_if(|(_, k)| Some(*k) == raw)
                     {
                         state.fht.loop_handle.remove(token);
                     }
-
-                    FilterResult::Intercept((KeyAction::none(), key_pattern))
-                } else {
-                    FilterResult::Forward
                 }
+
+                handle_key_action(
+                    &state.fht.config.keybinds,
+                    &mut state.fht.suppressed_keys,
+                    modifiers,
+                    key_state,
+                    raw,
+                )
             },
         );
 
-        self.fht.suppressed_keys = suppressed_keys;
-        if let Some((action, key_pattern)) = action {
-            self.process_key_action(action, key_pattern);
+        if let Some((key_pattern, key_action)) = action {
+            self.process_key_action(key_action, key_pattern);
         }
     }
 
@@ -1207,5 +1163,87 @@ impl State {
                 cancelled: event.cancelled(),
             },
         )
+    }
+}
+
+/// Returns `true` if a VT switch key has been handled.
+fn handle_vt_switch(backend: &mut Backend, key_state: KeyState, modified: Keysym) -> bool {
+    use smithay::input::keyboard::keysyms::*;
+
+    if key_state == KeyState::Released {
+        // We only do VT switch on presses.
+        return false;
+    }
+
+    #[cfg(feature = "udev-backend")]
+    #[allow(irrefutable_let_patterns)]
+    if let Backend::Udev(udev) = backend {
+        let vt_num = match modified.raw() {
+            modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
+                (modified - KEY_XF86Switch_VT_1 + 1) as i32
+            }
+            _ => return false,
+        };
+
+        udev.switch_vt(vt_num as i32);
+        return true;
+    }
+
+    // If we fall here, it's either the udev backend is disabled, or it's enabled and we are not
+    // running on it (IE. we are on winit)
+    return false;
+}
+
+fn handle_key_action(
+    keybinds: &HashMap<KeyPattern, fht_compositor_config::KeyActionDesc>,
+    suppressed: &mut HashSet<Keysym>,
+    modifiers: &ModifiersState,
+    key_state: KeyState,
+    keysym: Option<Keysym>,
+) -> FilterResult<(KeyPattern, KeyAction)> {
+    let Some(keysym) = keysym else {
+        // I don't know how we can have this case for regular keyboards.
+        return FilterResult::Forward;
+    };
+
+    let key_action = find_keyaction(keybinds, modifiers, keysym);
+    if key_state == KeyState::Pressed {
+        if let Some(res) = key_action {
+            suppressed.insert(keysym);
+            return FilterResult::Intercept(res);
+        } else {
+            // There's nothing matching here, we can forward to the client.
+            //
+            // This would be a good place to check for builtin keybinds, however we handle VT
+            // switching earlier (before event calling this function)
+            return FilterResult::Forward;
+        }
+    }
+
+    // In this case, we are releasing the key, check if there wasn't a previous keybind, since we
+    // should inhibit both the key down and key up event.
+    if suppressed.remove(&keysym) {
+        let key_pattern = key_action.map_or_else(Default::default, |(kp, _)| kp);
+        return FilterResult::Intercept((key_pattern, KeyAction::none()));
+    }
+
+    FilterResult::Forward
+}
+
+/// Try to find a given key action from the given [`ModifiersState`] and [`Keysym`]
+fn find_keyaction(
+    keybinds: &HashMap<KeyPattern, fht_compositor_config::KeyActionDesc>,
+    modifiers: &ModifiersState,
+    keysym: Keysym,
+) -> Option<(KeyPattern, KeyAction)> {
+    let key_pattern = KeyPattern((*modifiers).into(), keysym);
+    // NOTE: We don't filter for locked state and such here, it's handled when we are about to
+    // actually execute the keybind, so that we still intercept the key.
+    match keybinds.get(&key_pattern) {
+        Some(key_action) => {
+            trace!(?key_pattern, ?key_action, "Got matching key-action");
+            Some((key_pattern, key_action.clone().into()))
+        }
+        None => None,
     }
 }
