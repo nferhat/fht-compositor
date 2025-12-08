@@ -18,9 +18,8 @@ When opening PRs, you should always remember that:
   if I straight out refuse an idea.
   - Ideas that are  "out of scope" should be filtered out by opening a discussion/issue, or by discussing
     it on the matrix/discord server.
-- Try to architect your new code in a way that is "in line" with the rest of the compositor codebase. When
-  unclear (which is often especially if you are a new contributor), you can always request a review and
-  I'll try to give relevant examples.
+- Try to architect your new code in a way that is "in line" with the rest of the compositor codebase. Read
+  the [code style page](/developing/code-style) to get some information about that
 - Pull requests should always be focused on a single thing, let that be a new feature or bugfix.
 - Try to organize your commits into self-contained units
   - Consider squashing commits (to avoid small commits like "Fix constant X here", "Oversight there", ...)

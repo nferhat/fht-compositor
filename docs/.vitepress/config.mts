@@ -67,7 +67,8 @@ export default defineConfig({
         text: "Developing",
         items: [
           { text: "Creating issues", link: "/developing/issues" },
-          { text: "Contributing", link: "/developing/contributing" }
+          { text: "Contributing", link: "/developing/contributing" },
+          { text: "Code style", link: "/developing/code-style" },
         ],
       },
     ],
