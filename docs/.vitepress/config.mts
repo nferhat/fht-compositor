@@ -62,6 +62,14 @@ export default defineConfig({
           { text: "Animations", link: "/configuration/animations" },
         ],
       },
+
+      {
+        text: "Developing",
+        items: [
+          { text: "Creating issues", link: "/developing/issues" },
+          { text: "Contributing", link: "/developing/contributing" }
+        ],
+      },
     ],
 
     socialLinks: [
