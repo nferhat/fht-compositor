@@ -402,6 +402,24 @@ impl State {
     #[cfg(feature = "xdg-screencast-portal")]
     pub fn handle_screencast_request(&mut self, req: screencast::Request) {
         match req {
+            screencast::Request::CheckSource {
+                source,
+                results_render,
+            } => {
+                let valid = match source {
+                    ScreencastSource::Window { id } => {
+                        self.fht.space.windows().any(|w| w.id() == id)
+                    }
+                    ScreencastSource::Workspace { output, .. }
+                    | ScreencastSource::Output { name: output } => {
+                        self.fht.space.outputs().any(|o| o.name() == output)
+                    }
+                };
+
+                // Even if we can't send this, this would only cause us to force-pick a screencast
+                // source, which isn't the end of the world.
+                let _ = results_render.send_blocking(valid);
+            }
             screencast::Request::StartCast {
                 session_handle,
                 metadata_sender,

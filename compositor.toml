@@ -1,0 +1,310 @@
+# Default configuration for fht-compositor.
+# This is a good starter configuration in case you have never used the compositor
+# before. You should build yours on top of this one.
+# ---
+# You can find everything you want by reading the wiki!
+# https://nferhat.github.io/fht-compositor
+
+# Autostart
+# Command lines that are executed with `/bin/sh -c "<autostart string>"`
+# ---
+# NOTE: If you are on systemd you should not use this and instead bind
+# whatever you need to service files instead! This will provide many niceties like
+# logging and restart-on-failure
+autostart = [
+  # "/nix/store/n4cgxx5a88h8zf03zg76za7n5cahymmb-swaybg-1.2.1/bin/swaybg --mode fill -i /nix/store/az5imbyz9v7gfivf97dlpsz4rvqzi14b-wallpaper.jpg"
+]
+
+# imports = ["~/.config/fht/compositor-temp.toml"]
+
+outputs.DP-3.mode = "2560x1440@180"
+# outputs.DP-3.position = [200, 400]
+# outputs.DP-3.scale = 2
+debug.draw-damage = true
+
+# ---------------------------------------------------------
+
+# Environment variables
+#
+# Example:
+#
+# env = { DISPLAY = ":0" }
+env = { TEST = "123" }
+
+# ---------------------------------------------------------
+
+# Input configuration.
+# Config section: 2.5
+[input]
+# -%- Keyboard configurationto set it
+# per-device for now!
+#
+# SEE: man 7 xkeyboard-config
+[input.keyboard]
+layout = "us"
+rules = ""
+repeat-rate = 50
+repeat-delay = 250
+
+# Per device input configuration.
+# The keyboard and mouse field are the same as the root input.keyboard/mouse fields.
+#
+# The devide is identified using the key into the table, by the following order:
+# - The device pretty name (aka the readable name, which you would see in a device manager)
+# - The raw device path `/dev/input/XXXXX`
+#
+# You can use `libinput list-devices` to get a list of all your devices.
+
+# You can fully disable a device if needed. The following example disables what is usually
+# registered as a laptop's built-in keyboard
+# [input.per-device."AT Translated Set 2 keyboard"]
+# disable = true
+
+# [input.per-device."SynPS/2 Synaptics TouchPad"]
+# Per mouse configuration
+# mouse.tap-to-click = true
+
+# ---------------------------------------------------------
+
+# General compositor behaviour
+# Config section: 2.1
+[general]
+cursor-warps = true         # Move the cursor to newly opened windows
+focus-new-windows = true    # Give newly inserted windows keyboard focus
+focus-follows-mouse = false # When true, hovering over a window will focus it without clicking
+
+# The dynamic layouts, the core feature of fht-compositor.
+# ---
+# You can build up a list of layouts and configure them on-the-fly. The values here
+# for nmaster and mwfact are only the defaults! See the keybinds sections for more
+# information!
+#
+# By default we only enable the tile/master-stack layout, and a floating layout.
+nmaster = 1     # Only one master client
+layouts = ["tile", "floating"]
+inner-gaps = 20 # gaps between tiles
+outer-gaps = 20 # gaps around the screen
+
+# ---------------------------------------------------------
+
+# Decorations: I.E the pretty
+# See section 2.4: decorations
+# ---
+# All the decorations can be overriden on a per-window basis using window rules.
+# See window-rules below for examples!
+[decorations]
+# server-side is the best mode in the case you want to have a true tiled feeling, making clients
+# disable title bars and shadows.
+#
+# WARN: libadwaita and GNOME applications IGNORE this hint/mode, do not complain about them.
+# Just ask GNOME devs to implement xdg_decoration for this to actually work.
+decoration-mode = "force-server-side"
+
+# Border around windows! (You'd probably want to leave this on)
+[decorations.border]
+thickness = 2
+radius = 0
+# You can either use a gradient color or a solid color.
+# Refer to the docs for more details on how to use them.
+focused-color = "#6791c9"
+normal-color = "#222230"
+
+# Shadows! Very useful for floating windows.
+[decorations.shadow]
+disable = true
+color = "black" # by default its rgba(black, 0.5)
+sigma = 20
+floating-only = false # Up to you, I don't judge!
+
+# Blur, because yes!
+# NOTE: Blur can be expensive, and disabling blur on lower-end devices or when
+# performance is needed (for example video games) is HIGHLY recommended.
+# Disable it with window rules if that's the case, or entierly.
+[decorations.blur]
+# disable = true
+# About performance. More passes == more upscaling/downscaling == more GPU time wasted/used
+# to create blur texture == worse performance for other programs. More passes gives a more
+# blended/uniform look, which looks very similar to glass blurring
+passes = 2
+radius = 2
+# Add static noise to the final blur texture. Gives off the same effect as Windows' 11
+# Mica or Frost Glass looks.
+noise = 0.1
+
+# ---------------------------------------------------------
+
+# Animations. Makes everything smooooooooooooooth!
+# See section 2.6: animations
+[animations]
+# In case you don't need them, here's a global switch
+# Each animation kind have a disable section, for more fine-grained control.
+# Again refer to the documention for more details!
+# disable = true
+[animations.window-geometry]
+# duration = 5000
+# curve = "ease-in-out"
+
+# ---------------------------------------------------------
+
+# Key bindings.
+# See section 5.4: keybinds for a list!
+# ---
+# WARN: You should AT ALL times keep a bind to quit the compositor and reload the config.
+# Why? Since key bindings is the only section that the compositor does not fill by
+# default for you!
+# ---
+# Default keybinds are heavily influenced by DWM, and XMonad.
+[keybinds]
+# Most keybinds will not need an argument passed to them, so you can just use the following
+# syntax to bind those "simple" actions
+Super-q = "quit"
+Super-Ctrl-r = "reload-config"
+
+
+# Some other keybinds will require an action passed in, here is how you achieve that
+#
+# NOTE: run-command argument is a command line, executed in the same fashion as the autostart section
+# Example key actions that need an argument passed in
+Super-Return = { action = "run-command", arg = "alacritty" }
+Super-p = { action = "run-command", arg = "wofi --show drun" }
+Super-Shift-s = { action = "run-command", arg = """grim -g "`slurp -o`" - | wl-copy --type image/png""" }
+Super-Alt-l = { action = "run-command", arg = "gtklock" }
+
+# If you need to run an action even when the compositor is locked, here's how you can achieve this.
+XF86AudioRaiseVolume.action = "run-command"
+XF86AudioRaiseVolume.arg = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"
+XF86AudioRaiseVolume.allow-while-locked = true
+#############################################
+XF86AudioLowerVolume.action = "run-command"
+XF86AudioLowerVolume.arg = "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%-"
+XF86AudioLowerVolume.allow-while-locked = true
+
+# Focus management, defaults are similar to what DWM provides.
+Super-j = "focus-next-window"
+Super-k = "focus-previous-window"
+Super-Ctrl-j = "focus-next-output"
+Super-Ctrl-k = "focus-previous-output"
+
+# Window management
+Super-m = "maximize-focused-window"
+Super-f = "fullscreen-focused-window"
+Super-Shift-c = "close-focused-window"
+Super-Ctrl-Space = "float-focused-window"
+Super-Shift-j = "swap-with-next-window"
+Super-Shift-k = "swap-with-previous-window"
+
+# Transient layout changes.
+# These changes persist through configuration reloads
+Super-Space = "select-next-layout"
+Super-Shift-Space = "select-previous-layout"
+Super-h = { action = "change-mwfact", arg = -0.1 }
+Super-l = { action = "change-mwfact", arg = +0.1 }
+Super-Shift-h = { action = "change-nmaster", arg = +1 }
+Super-Shift-l = { action = "change-nmaster", arg = -1 }
+Super-i = { action = "change-window-proportion", arg = +0.5 }
+Super-o = { action = "change-window-proportion", arg = -0.5 }
+
+# Workspaces
+Super-1 = { action = "focus-workspace", arg = 0 }
+Super-2 = { action = "focus-workspace", arg = 1 }
+Super-3 = { action = "focus-workspace", arg = 2 }
+Super-4 = { action = "focus-workspace", arg = 3 }
+Super-5 = { action = "focus-workspace", arg = 4 }
+Super-6 = { action = "focus-workspace", arg = 5 }
+Super-7 = { action = "focus-workspace", arg = 6 }
+Super-8 = { action = "focus-workspace", arg = 7 }
+Super-9 = { action = "focus-workspace", arg = 8 }
+
+# Sending windows to workspaces
+Super-Shift-1 = { action = "send-to-workspace", arg = 0 }
+Super-Shift-2 = { action = "send-to-workspace", arg = 1 }
+Super-Shift-3 = { action = "send-to-workspace", arg = 2 }
+Super-Shift-4 = { action = "send-to-workspace", arg = 3 }
+Super-Shift-5 = { action = "send-to-workspace", arg = 4 }
+Super-Shift-6 = { action = "send-to-workspace", arg = 5 }
+Super-Shift-7 = { action = "send-to-workspace", arg = 6 }
+Super-Shift-8 = { action = "send-to-workspace", arg = 7 }
+Super-Shift-9 = { action = "send-to-workspace", arg = 8 }
+
+[keybinds.Super-Down]
+action = "move-floating-window"
+arg = [0, 50]
+repeat = true
+[keybinds.Super-Left]
+action = "move-floating-window"
+arg = [-50, 0]
+repeat = true
+[keybinds.Super-Right]
+action = "move-floating-window"
+arg = [50, 0]
+repeat = true
+[keybinds.Super-Up]
+action = "move-floating-window"
+arg = [0, -50]
+repeat = true
+
+# ---------------------------------------------------------
+
+# Mouse bindings
+# Refer to section 2.4: mousebinds
+[mousebinds]
+Super-Left = "swap-tile"
+Super-Right = "resize-tile"
+
+# ---------------------------------------------------------
+
+# Window rules
+# Refer to section 2.6: window rules
+# ---
+# Window rules are dynamic and always refresh and keep themselves up to date
+# Properties like on-workspace, is-focused, etc.
+#
+# The match strings are Regexes, so you can get creative with what you match
+# in the app-id or title. Nothing is impossible!
+
+# All windows on workspace 6 (so index 5) will be floating and centered
+# [[rules]]
+# on-workspace = 5
+# floating = true
+# centered = true
+
+# Web browsers get send on output eDP-1 on workspace 2
+# [[rules]]
+# match-app-id = ["LibreWolf", "Firefox"]
+# open-on-output = "eDP-1"
+# open-on-workspace = 1
+
+# Chat clients open on workspace 3
+[[rules]]
+match-app-id = ["Discord", "Telegram", ".*halloy.*"]
+# match-title = [".*Telegram.*"] # all of these are Regexes!
+open-on-workspace = 2
+
+# You can also have stricter rule sets using `match-all = true`, in order to make the rule
+# apply only if all criteria matches
+#
+# For example windows opening output HDMI-A-1 that are on workspace 5 must be
+# fullscreened.
+# [[rules]]
+# match-all = true
+# on-output = "HDMI-A-1"
+# on-workspace = 4
+# fullscreen = true
+
+[[rules]]
+match-app-id = ["com.saivert.pwvucontrol"]
+ontop = true
+# blur.optimized = true
+
+# ---------------------------------------------------------
+
+# Layer-shell rules
+# Refer to section 2.7: layer rules
+# ---
+# These are mostly used to enable effects on layer shells
+# Example here to enable blur for wofi
+# [[layer-rules]]
+# corner-radius = 25
+# match-namespace = ["wofi"]
+# blur = { disable = false, noise = 0, passes = 4, radius = 1 }
+# shadow = {  color = "black", disable = false }
