@@ -175,7 +175,7 @@ Swaps the currently focused window with next/previous window in the workspace. R
 
 #### `focus-next-output`, `focus-previous-output`
 
-Focus the next/previous output in the gloabl space. Outputs are ordered by the way they got detected/inserted.
+Focus the next/previous output in the global space. Outputs are ordered by the way they got detected/inserted.
 
 ---
 

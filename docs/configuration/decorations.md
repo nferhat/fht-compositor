@@ -9,7 +9,7 @@ still enhance the looks of the desktop session
 ## Borders
 
 Borders are an outline drawn around windows in a workspace. The focused window will get a different border color to indicate that it is focused and that
-it has active keyboard focus. Borders can also apply rounded corner radius aroud windows.
+it has active keyboard focus. Borders can also apply rounded corner radius around windows.
 
 #### `border.focused-color`, `border.normal-color`
 
@@ -78,7 +78,7 @@ though nothing stops you from using high number of passes with low blur values, 
 
 > [!CAUTION]
 > Higher blur passes will cause more rendering to happen, and thus put more strain on your GPU. It is recommended to keep this value below
-> 3 or 4, because otherwise it will *kill* your performance and framerates
+> 3 or 4, because otherwise it will *kill* your performance and frame rates
 
 ---
 
