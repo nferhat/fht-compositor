@@ -849,7 +849,6 @@ impl Fht {
         };
 
         let space = Space::new(&config);
-        
 
         Self {
             display_handle: dh.clone(),
