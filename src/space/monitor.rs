@@ -269,13 +269,7 @@ impl Monitor {
 
     /// Start a swipe gesture at the monitor level
     pub fn start_swipe_gesture(&mut self, animation_config: &WorkspaceSwitchAnimation) {
-        let previous_offset = if let Some(previous_swipe) = self.swipe_state.take() {
-            previous_swipe.total_offset
-        } else if let Some(current_offset) = self.active_workspace().render_offset() {
-            Point::from((current_offset.x as f64, current_offset.y as f64))
-        } else {
-            Point::from((0.0, 0.0))
-        };
+        let previous_offset = Point::from((0.0, 0.0));
 
         self.swipe_state = Some(MonitorSwipeState {
             direction: None,
