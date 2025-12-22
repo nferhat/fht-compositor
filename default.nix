@@ -20,6 +20,7 @@
   withUdevBackend ? true,
   withWinitBackend ? true,
   withXdgScreenCast ? true,
+  withXdgGlobalShortcuts ? true,
   withSystemd ? true,
   withProfiling ? false,
 }:
@@ -62,6 +63,7 @@ rustPlatform.buildRustPackage {
   # NOTE: Whenever adding features, don't forget to specify them here!!
   buildFeatures =
     lib.optional withXdgScreenCast "xdg-screencast-portal"
+    ++ lib.optional withXdgGlobalShortcuts "xdg-global-shortcuts-portal"
     ++ lib.optional withWinitBackend "winit-backend"
     ++ lib.optional withUdevBackend "udev-backend"
     ++ lib.optional withSystemd "systemd"
