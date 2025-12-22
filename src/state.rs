@@ -1945,6 +1945,8 @@ impl Fht {
 
     #[cfg(feature = "xdg-screencast-portal")]
     pub fn stop_cast(&mut self, id: CastId) {
+        use zbus::object_server::SignalEmitter;
+
         crate::profile_function!();
         let Some(pipewire) = self.pipewire.as_mut() else {
             return;
@@ -1963,19 +1965,9 @@ impl Fht {
         self.loop_handle.remove(cast.to_compositor_token); // remove calloop stream
         let _ = cast.stream.disconnect(); // even if this fails we dont use the stream anymore
 
-        let object_server = dbus_conn.object_server();
-        let Ok(interface) = object_server.interface::<_, ScreencastSession>(&cast.session_handle)
-        else {
-            warn!(?id, "Cast session doesn't exist");
-            return;
-        };
-
+        let signal_emitter = SignalEmitter::new(dbus_conn.inner(), &cast.session_handle).unwrap();
         async_io::block_on(async {
-            if let Err(err) = interface
-                .get()
-                .closed(interface.signal_emitter(), std::collections::HashMap::new())
-                .await
-            {
+            if let Err(err) = ScreencastSession::closed(&signal_emitter).await {
                 warn!(?err, "Failed to send closed signal to screencast session");
             };
         });
@@ -2328,3 +2320,4 @@ fn rule_matches(
         false
     }
 }
+

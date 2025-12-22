@@ -12,12 +12,14 @@ use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, ObjectServer};
 
+use crate::portals::shared::Session;
 use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
 
-pub type ScreencastSession = super::shared::Session<SessionData>;
-use super::shared::{PortalResponse, Request as ScreencastRequest};
+use super::shared::{PortalRequest, PortalResponse, PortalSession};
+/// The screencast session type, used to emit associated signals.
+pub type ScreencastSession = PortalSession<SessionData>;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, PartialEq)]
@@ -86,11 +88,10 @@ impl Portal {
         let span = make_screencast_span("create_session", &session_handle, &request_handle);
         let _span_guard = span.enter();
 
-        let request = ScreencastRequest::new(request_handle.clone());
-        if let Err(err) = object_server.at(&request_handle, request).await {
-            warn!(?err, "Failed to create screencast request object");
+        if let Err(err) = PortalRequest::init(request_handle.clone(), object_server).await {
+            warn!(?err, "Failed to create portal request");
             return (PortalResponse::Error, HashMap::new());
-        };
+        }
 
         let session_data = SessionData {
             id: next_session_id(),
@@ -101,29 +102,13 @@ impl Portal {
         };
         let session_id = format!("fht-compositor-screencast-{}", session_data.id);
 
-        let session = ScreencastSession::new(
-            session_handle.clone(),
-            session_data,
-            Some(|data: &SessionData| {
-                if let Some(cast_id) = data.cast_id {
-                    if let Err(err) = data.to_compositor.send(Request::StopCast { cast_id }) {
-                        error!(
-                            ?err,
-                            ?cast_id,
-                            "Failed to send StopCast request to compositor"
-                        );
-                    };
-                }
-            }),
-        );
-
-        if let Err(err) = object_server.at(&session_handle, session).await {
-            let _ = object_server
-                .remove::<ScreencastRequest, _>(&request_handle)
-                .await; // even we dont remove this its not really important
+        if let Err(err) =
+            PortalSession::init(session_handle.clone(), session_data, object_server).await
+        {
+            _ = PortalRequest::stop(&request_handle, object_server);
             warn!(?err, "Failed to create screencast session object");
             return (PortalResponse::Error, HashMap::new());
-        };
+        }
 
         let results = HashMap::from_iter([("session_id", session_id.into())]);
         (PortalResponse::Success, results)
@@ -173,12 +158,12 @@ impl Portal {
             Ok(output) => {
                 let code = output.status.code();
                 warn!(?code, "fht-share-picker exited unsuccessfully");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
                 warn!(?err, "Failed to spawn fht-share-picker");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         };
@@ -233,7 +218,7 @@ impl Portal {
             cursor_mode,
         }) {
             warn!(?err, "Failed to send StartCast request to compositor");
-            let _ = session.closed(&signal_emitter, HashMap::new()).await;
+            _ = ScreencastSession::closed(&signal_emitter).await;
             return (PortalResponse::Error, HashMap::new());
         }
 
@@ -244,7 +229,7 @@ impl Portal {
         } = match metadata_receiver.recv().await {
             Ok(Some(metadata)) => metadata,
             Ok(None) => {
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
@@ -252,7 +237,7 @@ impl Portal {
                     ?err,
                     "Metadata receiver channel closed when it should not, weird..."
                 );
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         };
@@ -300,6 +285,15 @@ pub struct SessionData {
     source: Option<ScreencastSource>,
     /// The cursor mode used for this session.
     cursor_mode: Option<CursorMode>,
+}
+impl Session for SessionData {
+    fn on_destroy(&mut self) {
+        if let Some(cast_id) = self.cast_id.take() {
+            if let Err(err) = self.to_compositor.send(Request::StopCast { cast_id }) {
+                error!(?err, "Failed to send StopCast request to compositor");
+            };
+        }
+    }
 }
 
 /// The metadata associated with a pipewire stream, received from the compositor.

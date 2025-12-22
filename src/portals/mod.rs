@@ -35,5 +35,26 @@ pub fn start(
             .context("Failed to insert XDG screencast portal in dbus!")?);
     }
 
+    #[cfg(feature = "xdg-global-shortcuts-portal")]
+    {
+        info!("Starting global-shortcuts portal");
+        let (to_compositor, from_screencast) = calloop::channel::channel();
+        let portal = global_shortcuts::Portal::new(to_compositor);
+        loop_handle
+            .insert_source(from_screencast, move |event, _, state| {
+                let calloop::channel::Event::Msg(req) = event else {
+                    return;
+                };
+                _ = (req, state);
+            })
+            .map_err(|err| {
+                anyhow::anyhow!("Failed to insert XDG screencast portal source! {err}")
+            })?;
+        assert!(dbus_connection
+            .object_server()
+            .at("/org/freedesktop/portal/desktop", portal)
+            .context("Failed to insert XDG screencast portal in dbus!")?);
+    }
+
     Ok(())
 }
