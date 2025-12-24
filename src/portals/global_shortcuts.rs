@@ -8,6 +8,7 @@ use zbus::{interface, ObjectServer};
 use zvariant::Str;
 
 use super::shared::{PortalRequest, PortalResponse, PortalSession, Session};
+use crate::portals::shared::record_span;
 type GsSession = PortalSession<SessionData>;
 
 pub const PORTAL_VERSION: u32 = 2;
@@ -26,7 +27,11 @@ impl Portal {
     pub fn new(to_compositor: calloop::channel::Sender<Request>) -> Self {
         Self {
             to_compositor,
-            span: debug_span!("global-shortcuts"),
+            span: debug_span!(
+                "global-shortcuts",
+                session_handle = tracing::field::Empty,
+                request_handle = tracing::field::Empty
+            ),
         }
     }
 }
@@ -41,6 +46,7 @@ impl Portal {
         PORTAL_VERSION
     }
 
+    #[tracing::instrument(name = "create-session", parent = &self.span, skip(self))]
     async fn create_session(
         &self,
         request_handle: zvariant::ObjectPath<'_>,
@@ -49,7 +55,7 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let _span = self.span.enter();
+        record_span(&self.span, &session_handle, &request_handle);
 
         if let Err(err) = PortalRequest::init(request_handle.clone(), object_server).await {
             error!(?err, "Failed to create portal request object");
@@ -70,6 +76,7 @@ impl Portal {
         (PortalResponse::Success, HashMap::new())
     }
 
+    #[tracing::instrument(name = "bind-shortcuts", parent = &self.span, skip(self))]
     async fn bind_shortcuts(
         &self,
         _request_handle: zvariant::ObjectPath<'_>,
@@ -79,8 +86,6 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &zbus::ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let _span = self.span.enter();
-
         let session_ref = object_server
             .interface::<_, GsSession>(&session_handle)
             .await
@@ -105,9 +110,10 @@ impl Portal {
             }
         });
 
-        todo!()
+        (PortalResponse::Success, HashMap::new())
     }
 
+    #[tracing::instrument(name = "list-shortcuts", parent = &self.span, skip(self))]
     async fn list_shortcuts(
         &self,
         _request_handle: zvariant::ObjectPath<'_>,
@@ -145,12 +151,12 @@ impl Portal {
         (PortalResponse::Success, HashMap::new())
     }
 
+    #[tracing::instrument(name = "configure-shortcuts", parent = &self.span, skip(self))]
     async fn configure_shortcuts(
         &self,
         session_handle: zvariant::ObjectPath<'_>,
         _options: HashMap<&str, zvariant::Value<'_>>,
     ) {
-        let _span = self.span.enter();
         debug!(?session_handle, "ConfigureShortcuts")
     }
 

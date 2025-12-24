@@ -99,3 +99,21 @@ pub enum PortalResponse {
     Cancelled,
     Error,
 }
+
+/// Record session and request handles into the given span for logging.
+pub fn record_span<'a>(
+    span: &tracing::Span,
+    session_handle: &zvariant::ObjectPath<'a>,
+    request_handle: &zvariant::ObjectPath<'a>,
+) {
+    let session_handle = session_handle
+        .as_str()
+        .strip_prefix("/org/freedesktop/portal/desktop/session/")
+        .expect("session handle should always contain prefix");
+    span.record("session_handle", session_handle);
+    let request_handle = request_handle
+        .as_str()
+        .strip_prefix("/org/freedesktop/portal/desktop/request/")
+        .expect("request handle should always contain prefix");
+    span.record("request_handle", request_handle);
+}

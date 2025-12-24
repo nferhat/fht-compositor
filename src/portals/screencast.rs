@@ -12,7 +12,7 @@ use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, ObjectServer};
 
-use crate::portals::shared::Session;
+use crate::portals::shared::{record_span, Session};
 use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
@@ -44,7 +44,21 @@ bitflags::bitflags! {
 /// This structure can be added inside a zbus [`Connection`] to register the
 /// `org.freedesktop.impl.portal.ScreenCast` interface
 pub struct Portal {
-    pub(super) to_compositor: calloop::channel::Sender<Request>,
+    to_compositor: calloop::channel::Sender<Request>,
+    span: tracing::Span,
+}
+
+impl Portal {
+    pub fn new(to_compositor: calloop::channel::Sender<Request>) -> Self {
+        Self {
+            to_compositor,
+            span: debug_span!(
+                "screencast",
+                session_handle = tracing::field::Empty,
+                request_handle = tracing::field::Empty
+            ),
+        }
+    }
 }
 
 /// A [`Request`] that the [`Portal`] or a [`Session`] can send to the compositor.
@@ -77,6 +91,7 @@ impl Portal {
         PORTAL_VERSION
     }
 
+    #[tracing::instrument(name = "create-session", parent = &self.span, skip(self))]
     async fn create_session(
         &self,
         request_handle: zvariant::ObjectPath<'_>,
@@ -85,8 +100,7 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("create_session", &session_handle, &request_handle);
-        let _span_guard = span.enter();
+        record_span(&self.span, &session_handle, &request_handle);
 
         if let Err(err) = PortalRequest::init(request_handle.clone(), object_server).await {
             warn!(?err, "Failed to create portal request");
@@ -114,6 +128,7 @@ impl Portal {
         (PortalResponse::Success, results)
     }
 
+    #[tracing::instrument(name = "select-sources", parent = &self.span, skip(self))]
     async fn select_sources(
         &self,
         request_handle: zvariant::ObjectPath<'_>,
@@ -123,9 +138,6 @@ impl Portal {
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("select_sources", &session_handle, &request_handle);
-        let _span_guard = span.enter();
-
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await
@@ -176,6 +188,7 @@ impl Portal {
         (PortalResponse::Success, HashMap::new())
     }
 
+    #[tracing::instrument(name = "start", parent = &self.span, skip(self))]
     #[allow(clippy::too_many_arguments)]
     async fn start(
         &self,
@@ -187,9 +200,6 @@ impl Portal {
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("start", &session_handle, &request_handle);
-        let _span_guard = span.enter();
-
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await
@@ -318,23 +328,4 @@ fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
 ) -> anyhow::Result<T> {
     T::try_from(options.get(name).context("Failed to get value!")?)
         .map_err(|_| anyhow::anyhow!("Failed to convert value!"))
-}
-
-// A simpler way to record spans.
-fn make_screencast_span<'a>(
-    event: &'static str,
-    session_handle: &zvariant::ObjectPath<'a>,
-    request_handle: &zvariant::ObjectPath<'a>,
-) -> tracing::Span {
-    let session_handle = session_handle
-        .as_str()
-        .strip_prefix("/org/freedesktop/portal/desktop/session/")
-        .expect("session handle should always contain prefix");
-    let request_handle = request_handle
-        .as_str()
-        .strip_prefix("/org/freedesktop/portal/desktop/request/")
-        .expect("request handle should always contain prefix");
-    let span = debug_span!("screencast", ?event, ?session_handle, ?request_handle);
-
-    span
 }
