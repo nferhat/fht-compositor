@@ -20,3 +20,6 @@ thiserror = "2.0.12"
 toml = { version = "0.9.4", default-features = false, features = ["parse", "serde"] }
 tracing.workspace = true
 xdg = "3.0.0"
+
+[features]
+xdg-global-shortcuts = []
