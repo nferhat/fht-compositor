@@ -66,6 +66,10 @@ pub struct Space {
 struct InteractiveSwap {
     /// The tile currently being swapped around.
     tile: tile::Tile,
+    /// The initial tile location.
+    initial_loc: Point<i32, Logical>,
+    /// Whether the window should be centered around the cursor.
+    center_window: bool,
     /// We need to track on which outputs the tile is visible on, to render it accordingly.
     overlap_outputs: Vec<Output>,
     /// The last output we rendered on.
@@ -878,6 +882,7 @@ impl Space {
                         tile.location() + workspace.output().current_location(),
                         false,
                     );
+                    let mut initial_location = tile.location();
 
                     if center_window {
                         // Make the tile slightly smaller, just for aesthetic urposes and give a
@@ -893,13 +898,17 @@ impl Space {
                         } else {
                             tile.set_location(pointer_loc - tile.size().downscale(2), true);
                         }
+
+                        initial_location = tile.location();
                     }
 
                     let output = workspace.output().clone();
                     self.interactive_swap = Some(InteractiveSwap {
                         tile,
+                        initial_loc: initial_location,
                         overlap_outputs: vec![output.clone()],
                         last_output: Some(output),
+                        center_window,
                     });
                     return true;
                 }
@@ -915,6 +924,7 @@ impl Space {
     pub fn handle_interactive_swap_motion(
         &mut self,
         window: &Window,
+        initial_pointer_loc: Point<i32, Logical>,
         pointer_loc: Point<i32, Logical>,
     ) -> bool {
         let Some(interactive_swap) = &mut self.interactive_swap else {
@@ -925,7 +935,13 @@ impl Space {
             return false;
         }
 
-        let new_location = pointer_loc - interactive_swap.tile.visual_size().downscale(2);
+        let new_location = if interactive_swap.center_window {
+            pointer_loc - interactive_swap.tile.visual_size().downscale(2)
+        } else {
+            let delta = pointer_loc - initial_pointer_loc;
+            interactive_swap.initial_loc + delta
+        };
+
         interactive_swap.tile.set_location(new_location, false);
 
         // Now, update the outputs the tile is overlapping with.
@@ -1154,4 +1170,3 @@ impl AnimationConfig {
         enable.then_some(Self { duration, curve })
     }
 }
-

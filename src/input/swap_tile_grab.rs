@@ -30,11 +30,11 @@ impl PointerGrab<State> for SwapTileGrab {
         // No focus while motion is active
         handle.motion(data, None, event);
 
-        if data
-            .fht
-            .space
-            .handle_interactive_swap_motion(&self.window, event.location.to_i32_round())
-        {
+        if data.fht.space.handle_interactive_swap_motion(
+            &self.window,
+            self.start_data.location.to_i32_round(),
+            event.location.to_i32_round(),
+        ) {
             return;
         }
 
