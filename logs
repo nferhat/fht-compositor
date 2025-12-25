@@ -1,0 +1,10 @@
+[2m2025-11-14T22:25:50.156068Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Starting fht-compositor. [3mversion[0m[2m=[0m"25.10.1" [3mgit_hash[0m[2m=[0m"c9d721f1"
+[2m2025-11-14T22:25:50.156262Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Listening on socket [3msocket_name[0m[2m=[0m"wayland-2"
+[2m2025-11-14T22:25:50.156338Z[0m [32m INFO[0m [2mfht_compositor::ipc[0m[2m:[0m Started IPC [3msocket_path[0m[2m=[0m"/run/user/1000/fhtc-11236-wayland-2.socket"
+[2m2025-11-14T22:25:50.165154Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Running from TTY, initializing Udev backend
+[2m2025-11-14T22:25:50.257389Z[0m [32m INFO[0m [2mfht_compositor::backend::udev[0m[2m:[0m Found primary GPU for rendering! [3mprimary_gpu[0m[2m=[0mDrmNode { dev: 57984, ty: Render } [3mprimary_node[0m[2m=[0mDrmNode { dev: 57857, ty: Primary }
+[2m2025-11-14T22:25:50.435941Z[0m [33m WARN[0m [2mfht_compositor::backend::udev[0m[2m:[0m Failed to initialize EGL hardware-acceleration [3merr[0m[2m=[0mEglExtensionNotSupported(["EGL_WL_bind_wayland_display"])
+[2m2025-11-14T22:25:50.616839Z[0m [32m INFO[0m [2mfht_compositor::state[0m[2m:[0m Adding new output [3mname[0m[2m=[0m"DP-3"
+[2m2025-11-14T22:25:59.791934Z[0m [32m INFO[0m [2mfht_compositor[0m[2m:[0m Shutting down! Goodbye~
+[2m2025-11-14T22:26:00.210937Z[0m [31mERROR[0m [2msmithay::backend::drm::device::atomic[0m[2m:[0m Failed to restore previous state. Error: Permission denied (os error 13)
+[2m2025-11-14T22:26:00.211214Z[0m [31mERROR[0m [2msmithay::backend::drm::device::atomic[0m[2m:[0m Failed to restore previous state. Error: Permission denied (os error 13)

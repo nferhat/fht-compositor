@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
 
 use anyhow::Context;
 use smithay::reexports::calloop;
@@ -12,6 +13,7 @@ use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, ObjectServer};
 
+use crate::utils::get_monotonic_time;
 use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
@@ -47,6 +49,11 @@ pub struct Portal {
 
 /// A [`Request`] that the [`Portal`] or a [`Session`] can send to the compositor.
 pub enum Request {
+    /// Check/make sure that a [`ScreencastSource`] is valid.
+    CheckSource {
+        source: ScreencastSource,
+        results_render: async_channel::Sender<bool>,
+    },
     /// The [`Portal`] has requested to start a cast.
     StartCast {
         session_handle: zvariant::OwnedObjectPath,
@@ -98,6 +105,7 @@ impl Portal {
             cast_id: None,
             source: None,      // lazily created when receiving metadata
             cursor_mode: None, // ^^^^
+            persist: 0,
         };
         let session_id = format!("fht-compositor-screencast-{}", session_data.id);
 
@@ -154,38 +162,131 @@ impl Portal {
                 warn!("Failed to get 'cursor_mode' from options, using HIDDEN");
                 CursorMode::HIDDEN
             });
+        let persist = get_option_value::<u32>(&options, "persist_mode").unwrap_or(0);
 
-        let exit_status = std::process::Command::new("fht-share-picker")
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|child| child.wait_with_output());
-        let source = match exit_status {
-            Ok(output) if output.status.success() => {
-                if output.stdout.is_empty() {
-                    // The user clicked exit, and thus doesn't want to screencast anymore.
-                    // No need to log anything.
-                    return (PortalResponse::Cancelled, HashMap::new());
+        #[allow(unused_assignments)]
+        let mut source = None;
+
+        // Before running fht-share-picker, we try to restore the previously selected source. When
+        // encoding it the restore_data, we make sure that its
+        // 1. Not too old
+        // 2. Still valid (requires checking with the compositor), since for example, the client
+        //    might be asking to restore a source of a dead window ID.
+        if let Some(restore_data) =
+            get_option_value::<zvariant::Structure>(&options, "restore_data").ok()
+        {
+            trace!(?restore_data, "Got screencast session restore data");
+            // The restore data takes the form of (VENDOR_ID, FORMAT_VERSION, DATA)
+            // - VENDOR_ID is always harcoded to the string "fht-compositor"
+            // - FORMAT_VERSION is used for backwards compatibility if we make changes to DATA.
+            // - DATA is whatever's needed to restore the session.
+            let fields = restore_data.into_fields();
+
+            if fields.len() == 3
+                && fields[0].to_string() == "fht-compositor"
+                && fields[1].downcast_ref::<u32>().unwrap() == 1
+            {
+                // SAFETY: We are assured the RestoreData passed in from the client is the same as
+                // the restore data we are expecting
+                let dict = fields[2].try_to_owned().unwrap();
+                let RestoreData {
+                    window_id,
+                    output_name,
+                    workspace_idx,
+                    created_at,
+                } = RestoreData::try_from(dict).unwrap();
+
+                // Thank you zbus for now being able to store time
+                let created_at = Duration::from_secs(created_at);
+                let now = get_monotonic_time();
+
+                if now.saturating_sub(created_at) < RESTORE_DATA_LIFETIME {
+                    if let Some(window_id) = window_id {
+                        source = Some(ScreencastSource::Window {
+                            id: window_id as usize,
+                        });
+                    } else if let Some(output_name) = output_name {
+                        source = Some(match workspace_idx {
+                            Some(idx) => ScreencastSource::Workspace {
+                                output: output_name,
+                                idx: idx as _,
+                            },
+                            None => ScreencastSource::Output { name: output_name },
+                        });
+                    }
+
+                    trace!(?source, "Screencast source from restore_data");
+                } else {
+                    trace!(?source, "Ignoring restore_data since its too old");
                 }
+            }
+        }
 
-                // Read the standard output, decode the JSON out of it
-                serde_json::from_slice::<ScreencastSource>(&output.stdout).unwrap()
+        // Now make sure the screencast source is actually valid.
+        source.take_if(|source| {
+            let (tx, rx) = async_channel::bounded(1);
+            if let Err(err) = self.to_compositor.send(Request::CheckSource {
+                source: source.clone(),
+                results_render: tx,
+            }) {
+                warn!(?err, "Failed to send CheckSource request to compositor");
+                return true; // can't check the source, just pick a new one
             }
-            Ok(output) => {
-                let code = output.status.code();
-                warn!(?code, "fht-share-picker exited unsuccessfully");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return (PortalResponse::Error, HashMap::new());
+
+            match rx.recv_blocking() {
+                Ok(res) => !res,
+                Err(err) => {
+                    warn!(?err, "CheckSource channel closed, weird...");
+                    true // can't check the source, just pick a new one
+                }
             }
-            Err(err) => {
-                warn!(?err, "Failed to spawn fht-share-picker");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return (PortalResponse::Error, HashMap::new());
-            }
+        });
+
+        // If we didn't get a source yet (IE no restore_data, or invalid/old one), proceed to open
+        // fht-share-picker to prompt the user for a screencast source
+        if source.is_none() {
+            let exit_status = std::process::Command::new("fht-share-picker")
+                .stdout(Stdio::piped())
+                .spawn()
+                .and_then(|child| child.wait_with_output());
+            source = Some(match exit_status {
+                Ok(output) if output.status.success() => {
+                    if output.stdout.is_empty() {
+                        // The user clicked exit, and thus doesn't want to screencast anymore.
+                        // No need to log anything.
+                        return (PortalResponse::Cancelled, HashMap::new());
+                    }
+
+                    // Read the standard output, decode the JSON out of it
+                    serde_json::from_slice::<ScreencastSource>(&output.stdout).unwrap()
+                }
+                Ok(output) => {
+                    let code = output.status.code();
+                    warn!(?code, "fht-share-picker exited unsuccessfully");
+                    let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                    return (PortalResponse::Error, HashMap::new());
+                }
+                Err(err) => {
+                    warn!(?err, "Failed to spawn fht-share-picker");
+                    let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                    return (PortalResponse::Error, HashMap::new());
+                }
+            });
+
+            trace!(?source, "Got source from fht-share-picker");
+        }
+
+        let Some(source) = source else {
+            warn!("Failed to get screencast source");
+            let _ = session.closed(&signal_emitter, HashMap::new()).await;
+            return (PortalResponse::Error, HashMap::new());
         };
 
         session.with_data(|data| {
             data.source = Some(source);
-            data.cursor_mode = Some(cursor_mode)
+            data.cursor_mode = Some(cursor_mode);
+            data.persist = persist; // 1 = until app closes, 2 = until we revoke it.
+                                    // FIXME: Handle until app closes better?
         });
 
         (PortalResponse::Success, HashMap::new())
@@ -271,11 +372,26 @@ impl Portal {
             HashMap::from_iter([("size", size), ("source_type", source_type)]);
         let stream = (node_id, stream_info);
 
-        // TODO: Support persist mode
-        let results = HashMap::from_iter([
-            ("streams", zvariant::Value::new(vec![stream])),
-            ("persist_mode", zvariant::Value::new("")),
-        ]);
+        let mut results = HashMap::from_iter([("streams", zvariant::Value::new(vec![stream]))]);
+        let persist_mode = session.with_data(|data| data.persist);
+        if persist_mode > 0 {
+            // Create persistence data.
+            let restore_data = match source.clone() {
+                ScreencastSource::Window { id } => RestoreData::window(id),
+                ScreencastSource::Workspace { output, idx } => RestoreData::workspace(output, idx),
+                ScreencastSource::Output { name } => RestoreData::output(name),
+            };
+            let restore_data = zvariant::StructureBuilder::new()
+                .add_field("fht-compositor")
+                .add_field(1u32)
+                // This weird conversion transform restore_data from a{sv} -> v
+                // IE turn it into a plain variant instead of a dict
+                .append_field(zvariant::Value::Value(Box::new(restore_data.into())))
+                .build()
+                .unwrap();
+            results.insert("persist_mode", zvariant::Value::U32(persist_mode));
+            results.insert("restore_data", zvariant::Value::from(restore_data));
+        }
 
         // as per the portal API documentation,
         // return 0 as the status code, and results contain our node metadata
@@ -300,6 +416,8 @@ pub struct SessionData {
     source: Option<ScreencastSource>,
     /// The cursor mode used for this session.
     cursor_mode: Option<CursorMode>,
+    /// Whether we should persist this session.
+    persist: u32,
 }
 
 /// The metadata associated with a pipewire stream, received from the compositor.
@@ -316,6 +434,56 @@ pub enum ScreencastSource {
     Window { id: usize },
     Workspace { output: String, idx: usize },
     Output { name: String },
+}
+
+// Give restore data tokens a quite generous 5 minute timeout.
+// FIXME: Maybe add an option in debug config?
+const RESTORE_DATA_LIFETIME: Duration = Duration::from_secs(5 * 60);
+
+/// Restore data send/received by clients to keep sessions similar.
+#[derive(Debug, Clone, zvariant::Value, zvariant::OwnedValue, zvariant::Type)]
+#[zvariant(signature = "dict", rename_all = "snake-case")]
+struct RestoreData {
+    // Since we can't just put a [`ScreencastSource`], we do the following
+    // 1. If window_id exists, assume it was a window source
+    // 2. If output_name exists AND workspace_idx exists, assume it was a workspace source
+    // 3. If only output_name exists, assume it was a output source.
+    window_id: Option<u32>,
+    output_name: Option<String>,
+    workspace_idx: Option<u32>,
+    /// Give a timeout for restore data. Anything that's lived for longer than
+    /// [`RESTORE_DATA_LIFETIME`] gets invalidated. And since zbus can't serialize instants, we
+    /// store the UNIX_EPOCH time.
+    created_at: u64,
+}
+
+impl RestoreData {
+    fn window(id: usize) -> Self {
+        Self {
+            window_id: Some(id as u32),
+            output_name: None,
+            workspace_idx: None,
+            created_at: get_monotonic_time().as_secs(),
+        }
+    }
+
+    fn workspace(output: String, idx: usize) -> Self {
+        Self {
+            window_id: None,
+            output_name: Some(output),
+            workspace_idx: Some(idx as u32),
+            created_at: get_monotonic_time().as_secs(),
+        }
+    }
+
+    fn output(output: String) -> Self {
+        Self {
+            window_id: None,
+            output_name: Some(output),
+            workspace_idx: None,
+            created_at: get_monotonic_time().as_secs(),
+        }
+    }
 }
 
 fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
