@@ -13,6 +13,8 @@ mod drm_lease;
 mod drm_syncobj;
 mod foreign_toplevel_list;
 mod fractional_scale;
+#[cfg(feature = "udev-backend")]
+pub mod gamma_control;
 mod idle_inhibit;
 mod input_method;
 mod keyboard_shortcuts_inhibit;
@@ -38,4 +40,4 @@ mod xdg_decoration;
 mod xdg_dialog;
 mod xdg_foreign;
 mod xdg_shell;
-pub mod gamma_control;
+
