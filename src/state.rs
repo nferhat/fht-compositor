@@ -119,13 +119,22 @@ impl State {
         dh: &DisplayHandle,
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
-        config_path: Option<std::path::PathBuf>,
+        config: fht_compositor_config::Config,
+        config_paths: Vec<std::path::PathBuf>,
         ipc_server: Option<ipc::Server>,
         backend: Option<crate::cli::BackendType>,
         _socket_name: String,
     ) -> Self {
         #[allow(unused)]
-        let mut fht = Fht::new(dh, loop_handle, loop_signal, ipc_server, config_path);
+        let mut fht = Fht::new(
+            dh,
+            loop_handle,
+            loop_signal,
+            ipc_server,
+            config,
+            config_paths,
+        );
+
         #[allow(unused)]
         let backend: crate::backend::Backend = if let Some(backend_type) = backend {
             match backend_type {
@@ -322,7 +331,7 @@ impl State {
         crate::profile_function!();
 
         let (new_config, paths) =
-            match fht_compositor_config::load(self.fht.cli_config_path.clone()) {
+            match fht_compositor_config::load(self.fht.root_config_path.clone()) {
                 Ok((config, paths)) => {
                     self.fht.config_ui.show(
                         config_ui::Content::Reloaded {
@@ -648,10 +657,10 @@ pub struct Fht {
     pub has_transient_output_changes: bool,
 
     pub config: Arc<fht_compositor_config::Config>,
+    pub root_config_path: Option<std::path::PathBuf>,
     // Sometimes we might have to change the output config at runtime, so we use this value
     // when updating stuff instead of one guarded by an Arc.
     pub output_config: HashMap<String, fht_compositor_config::Output>,
-    pub cli_config_path: Option<std::path::PathBuf>,
     // The config_ui also tracks the last configuration error, if any.
     pub config_ui: config_ui::ConfigUi,
     // Keep track of whether we already opened/drawed a config_ui on one output.
@@ -708,7 +717,8 @@ impl Fht {
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
         ipc_server: Option<ipc::Server>,
-        config_path: Option<std::path::PathBuf>,
+        config: fht_compositor_config::Config,
+        paths: Vec<std::path::PathBuf>,
     ) -> Self {
         let (executor, scheduler) =
             calloop::futures::executor().expect("Failed to create scheduler");
@@ -718,27 +728,9 @@ impl Fht {
             })
             .unwrap();
 
-        let mut config_ui = config_ui::ConfigUi::new();
-        let (config, paths) = match fht_compositor_config::load(config_path.clone()) {
-            Ok((config, paths)) => (config, paths),
-            Err(err) => {
-                error!(?err, "Failed to load configuration, using default");
-                // NOTE: By default we enable animationns, justifying animate = true
-                config_ui.show(config_ui::Content::ReloadError { error: err }, true);
-                (
-                    Default::default(),
-                    vec![
-                        // We still track the user-provided config path (or the default one)
-                        // so that if the user changed and reloaded the config path, we can pick it
-                        // up.
-                        config_path
-                            .clone()
-                            .unwrap_or_else(fht_compositor_config::config_path),
-                    ],
-                )
-            }
-        };
+        let config_ui = config_ui::ConfigUi::new();
         let output_config = config.outputs.clone();
+        let root_config_path = paths.get(0).cloned();
 
         let config_watcher = crate::config::init_watcher(paths, &loop_handle)
             .inspect_err(|err| warn!(?err, "Failed to start config file watcher"))
@@ -849,7 +841,6 @@ impl Fht {
         };
 
         let space = Space::new(&config);
-        
 
         Self {
             display_handle: dh.clone(),
@@ -884,8 +875,8 @@ impl Fht {
             has_transient_output_changes: false,
 
             config: Arc::new(config),
+            root_config_path,
             output_config,
-            cli_config_path: config_path,
             config_ui,
             config_ui_output: None,
             config_watcher,
@@ -2329,3 +2320,4 @@ fn rule_matches(
         false
     }
 }
+

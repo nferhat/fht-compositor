@@ -108,6 +108,14 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         "Starting fht-compositor."
     );
 
+    let (config, loaded_config_paths) = match fht_compositor_config::load(cli.config_path) {
+        Ok(ret) => ret,
+        Err(err) => {
+            error!(?err, "Failed to load compositor configuration");
+            std::process::exit(1);
+        }
+    };
+
     // If we are starting in a session, this means we are starting as a systemd unit
     // These variables should not be present, but you don't know how people mess with their system
     // soo...
@@ -181,7 +189,8 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
         &dh,
         event_loop.handle(),
         event_loop.get_signal(),
-        cli.config_path,
+        config,
+        loaded_config_paths,
         ipc_server,
         cli.backend,
         socket_name.clone(),
