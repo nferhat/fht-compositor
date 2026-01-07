@@ -499,7 +499,7 @@ impl State {
             .fht
             .space
             .outputs()
-            .all(|o| o.geometry().to_f64().contains(pointer_location));
+            .all(|o| o.geometry().to_f64().contains(new_pos));
 
         // Here, we must properly clamp the new pointer location into the nearest output after
         // it has moved, in case for example, the user didn't configure proper gaps in their
