@@ -199,8 +199,10 @@ impl Fht {
                             window
                         });
 
-                    if Some(idx) == active_tile_idx {
-                        focused_window_id = Some(window.id);
+                    if workspace_active {
+                        if Some(idx) == active_tile_idx {
+                            focused_window_id = Some(window.id);
+                        }
                     }
                 }
             }
