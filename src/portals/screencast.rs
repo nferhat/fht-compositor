@@ -177,7 +177,7 @@ impl Portal {
         &self,
         request_handle: ObjectPath<'_>,
         session_handle: ObjectPath<'_>,
-        _app_id: String,
+        app_id: String,
         options: SelectSourcesOptions,
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
@@ -187,10 +187,19 @@ impl Portal {
             .await?;
         let session = session_ref.get_mut().await;
 
+        if options.multiple == Some(true) {
+            warn!("Application {app_id} requested multi-source support, ignoring...")
+        }
         let cursor_mode = options
             .cursor_mode
             .and_then(CursorMode::from_bits)
             .unwrap_or(CursorMode::EMBEDDED);
+        // FIXME: Properly restrict types with fht-share-picker, right now we just "upgrade" the
+        // type to whatever the user picks.
+        // let types = options
+        //     .types
+        //     .and_then(SourceType::from_bits)
+        //     .unwrap_or(SourceType::MONITOR);
 
         let exit_status = std::process::Command::new("fht-share-picker")
             .stdout(Stdio::piped())
