@@ -1,6 +1,9 @@
 //! XDG screencast implementation.
 //!
 //! This file only handles D-Bus communication. For pipewire logic, see `src/pipewire/mod.rs`
+//!
+//! A lot of architectural design from <https://github.com/waycrate/xdg-desktop-portal-luminous/>,
+//! really good portal!
 
 use std::collections::HashMap;
 use std::process::Stdio;
