@@ -75,11 +75,11 @@ impl<T: Send + 'static> Session<T> {
 }
 
 /// A single portal request.
-pub struct Request {
+pub struct PortalRequest {
     handle: zvariant::OwnedObjectPath,
 }
 
-impl Request {
+impl PortalRequest {
     /// Create a new XDG desktop portal request.
     pub fn new<P>(handle: P) -> Self
     where
@@ -92,7 +92,7 @@ impl Request {
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Request")]
-impl Request {
+impl PortalRequest {
     /// Closes the portal request to which this object refers and ends all related user interaction
     /// (dialogs, etc).
     pub async fn close(&mut self, #[zbus(object_server)] object_server: &zbus::ObjectServer) {
@@ -105,19 +105,20 @@ impl Request {
 }
 
 /// A result from a portal request.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde_repr::Deserialize_repr,
-    serde_repr::Serialize_repr,
-    zvariant::Type,
-)]
-#[repr(u32)]
-pub enum PortalResponse {
-    Success,
+#[derive(zvariant::Type)]
+#[zvariant(signature = "(ua{sv})")]
+pub enum PortalResponse<T: serde::Serialize + zvariant::Type> {
+    Success(T),
     Cancelled,
     Error,
+}
+
+impl<T: zvariant::Type + serde::Serialize> serde::Serialize for PortalResponse<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Success(res) => (0, res).serialize(serializer),
+            Self::Cancelled => (1, HashMap::<String, zvariant::Value>::new()).serialize(serializer),
+            Self::Error => (2, HashMap::<String, zvariant::Value>::new()).serialize(serializer),
+        }
+    }
 }
