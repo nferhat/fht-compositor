@@ -154,17 +154,7 @@ impl Portal {
         let session = ScreencastSession::new(
             session_handle.clone(),
             session_data,
-            Some(|data: &SessionData| {
-                if let Some(cast_id) = data.cast_id {
-                    if let Err(err) = data.to_compositor.send(Request::StopCast { cast_id }) {
-                        error!(
-                            ?err,
-                            ?cast_id,
-                            "Failed to send StopCast request to compositor"
-                        );
-                    };
-                }
-            }),
+            Some(SessionData::on_close),
         );
 
         object_server.at(&session_handle, session).await?;
@@ -330,6 +320,20 @@ pub struct SessionData {
     source: Option<ScreencastSource>,
     /// The cursor mode used for this session.
     cursor_mode: Option<CursorMode>,
+}
+
+impl SessionData {
+    fn on_close(&self) {
+        if let Some(cast_id) = self.cast_id {
+            if let Err(err) = self.to_compositor.send(Request::StopCast { cast_id }) {
+                error!(
+                    ?err,
+                    ?cast_id,
+                    "Failed to send StopCast request to compositor"
+                );
+            };
+        }
+    }
 }
 
 /// The metadata associated with a pipewire stream, received from the compositor.
