@@ -80,6 +80,7 @@ use crate::output::{self, OutputExt, RedrawState};
 use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
+use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -218,6 +219,7 @@ impl State {
             }
         }
 
+        ext_workspace::refresh(self);
         // Update keyboard and pointer focus **after** making sure there are no lock
         // surfaces in fht.refresh() (or ensuring the pending one gets confirmed)
         self.update_keyboard_focus();
@@ -628,6 +630,8 @@ pub struct Fht {
     pub pointer: PointerHandle<State>,
     pub clock: Clock<Monotonic>,
     pub suppressed_keys: HashSet<Keysym>,
+    pub current_swipe_fingers: Option<u32>,
+    pub gesture_action_executed: bool,
     // We store both the timer and the keysym used to trigger the key action.
     // When we remove the keysym from suppressed keys we stop it.
     pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
@@ -706,9 +710,7 @@ pub struct Fht {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
-
-    pub current_swipe_fingers: Option<u32>,
-    pub gesture_action_executed: bool,
+    pub ext_workspace_manager_state: ExtWorkspaceManagerState,
 }
 
 impl Fht {
@@ -766,6 +768,12 @@ impl Fht {
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_shell_state = XdgShellState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
+        let ext_workspace_manager_state = ExtWorkspaceManagerState::new::<State, _>(dh, |client| {
+            // Only allow clients that aren't running inside a SC
+            client
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
+        });
         ContentTypeState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(dh);
         TextInputManagerState::new::<State>(dh);
@@ -853,6 +861,8 @@ impl Fht {
             clock,
             suppressed_keys: HashSet::new(),
             repeated_keyaction_timer: None,
+            current_swipe_fingers: None,
+            gesture_action_executed: false,
             seat,
             devices: vec![],
             seat_state,
@@ -906,9 +916,7 @@ impl Fht {
             xdg_activation_state,
             xdg_shell_state,
             xdg_foreign_state,
-
-            current_swipe_fingers: None,
-            gesture_action_executed: false,
+            ext_workspace_manager_state,
         }
     }
 
