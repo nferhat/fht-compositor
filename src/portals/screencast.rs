@@ -38,17 +38,17 @@ pub struct SelectSourcesOptions {
     /// A string that will be used as the last element of the handle.
     /// What types of content to record.
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub types: Option<u32>,
+    types: Option<u32>,
     /// Whether to allow selecting multiple sources.
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub multiple: Option<bool>,
+    multiple: Option<bool>,
     /// Determines how the cursor will be drawn in the screen cast stream.
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub cursor_mode: Option<u32>,
+    cursor_mode: Option<u32>,
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub restore_data: Option<RestoreData>,
+    restore_data: Option<RestoreData>,
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub persist_mode: Option<PersistMode>,
+    persist_mode: Option<PersistMode>,
 }
 
 #[derive(zvariant::Type, Debug, Serialize, Deserialize)]
@@ -131,6 +131,17 @@ impl Portal {
 
 /// A [`Request`] that the [`Portal`] or a [`Session`] can send to the compositor.
 pub enum Request {
+    /// Verify that a screencast source is still valid.
+    ///
+    /// This is used in the context of properly restoring the screencast session, and prompting the
+    /// user to select a new source if the source is not valid.
+    ///
+    /// The compositor will then send back a new screencast source, `None` if it can't find an
+    /// equivalent (for example a close-enough matching window)
+    CheckSource {
+        source: ScreencastSource,
+        sender: async_channel::Sender<Option<ScreencastSource>>,
+    },
     /// The [`Portal`] has requested to start a cast.
     StartCast {
         session_handle: zvariant::OwnedObjectPath,
@@ -235,8 +246,18 @@ impl Portal {
                     })
                 {
                     debug!(?previous_source, "Received restore data from portal");
-                    // FIXME: Validate that the source is still correct with the compositor.
-                    source = Some(previous_source);
+
+                    // We still have to check if the source is valid.
+                    let (tx, rx) = async_channel::bounded(1);
+                    if let Err(err) = self.to_compositor.send(Request::CheckSource {
+                        source: previous_source.clone(),
+                        sender: tx,
+                    }) {
+                        debug!(?err, "Failed to send CheckSource request, prompting user");
+                    } else {
+                        let validated = rx.recv().await.unwrap_or_default();
+                        source = validated;
+                    }
                 }
             }
         }
@@ -440,7 +461,16 @@ pub struct StreamMetadata {
 // it's a limitation of dbus' enums.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScreencastSource {
-    Window { id: usize },
-    Workspace { output: String, idx: usize },
-    Output { name: String },
+    Window {
+        id: usize,
+        title: Option<String>,
+        app_id: Option<String>,
+    },
+    Workspace {
+        output: String,
+        idx: usize,
+    },
+    Output {
+        name: String,
+    },
 }

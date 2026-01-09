@@ -410,7 +410,127 @@ impl State {
 
     #[cfg(feature = "xdg-screencast-portal")]
     pub fn handle_screencast_request(&mut self, req: screencast::Request) {
+        fn lev_distance(a: &str, b: &str) -> usize {
+            if a == b {
+                return 0;
+            }
+
+            let mut v0 = vec![0usize; b.len() + 1];
+            let mut v1 = vec![0usize; b.len() + 1];
+
+            for i in 0..a.len() {
+                v1[0] = i + 1;
+                for j in 0..b.len() {
+                    let deletion_cost = v0[j + 1] + 1;
+                    let insert_cost = v1[j] + 1;
+                    let substituion_cost = v0[j] + (a.chars().nth(i) == b.chars().nth(j)) as usize;
+                    v1[j + 1] = deletion_cost.min(insert_cost).min(substituion_cost);
+                }
+                std::mem::swap(&mut v0, &mut v1);
+            }
+
+            v0[b.len()]
+        }
+
         match req {
+            screencast::Request::CheckSource { source, sender } => {
+                match source {
+                    ScreencastSource::Window {
+                        id,
+                        title: previous_title,
+                        app_id: previous_app_id,
+                    } => {
+                        // First try exact match by ID.
+
+                        if let Some(window) = self.fht.space.windows().find(|w| w.id() == id) {
+                            _ = sender.send_blocking(Some(ScreencastSource::Window {
+                                id,
+                                title: window.title(),
+                                app_id: window.app_id(),
+                            }));
+                            return;
+                        }
+
+                        // If we can't get a exact match from the window ID, try to find a close
+                        // matching window. This is to ensure that if the window gets
+                        // closed/reopened, or the session restarts, there would still be a decent
+                        // chance at finding the same window.
+                        let (Some(previous_title), Some(previous_app_id)) =
+                            (previous_title, previous_app_id)
+                        else {
+                            _ = sender.send_blocking(None);
+                            return;
+                        };
+
+                        // The actual matching logic is from KDE, seems like everyone respects their
+                        // portal implementation.
+
+                        let best_match = self
+                            .fht
+                            .space
+                            .windows()
+                            // We need a title to proceed with the levenstein distance check
+                            .filter(|w| w.title().is_some())
+                            // First filter by app-id since otherwise we might be streaming a
+                            // completely different window that could be trying to force itself
+                            // being restored.
+                            .filter(|w| w.app_id().as_ref() == Some(&previous_app_id))
+                            // After, for each window, calculate its leveinstein distance.
+                            .map(|w| {
+                                let title = w.title().unwrap();
+                                (w, lev_distance(&title, &previous_title))
+                            })
+                            // And find the closest one.
+                            .min_by_key(|(_, d)| *d);
+
+                        if let Some((window, distance)) = best_match {
+                            // If it's an exact match, we can proceed.
+                            if distance == 0 {
+                                _ = sender.send_blocking(Some(ScreencastSource::Window {
+                                    id,
+                                    title: window.title(),
+                                    app_id: window.app_id(),
+                                }));
+                                return;
+                            }
+
+                            // Heuristic to make sure that the best match is somewhat similar to the
+                            // previous window, in case for example where it was the only match
+                            if distance < previous_title.len() / 2 {
+                                _ = sender.send_blocking(Some(ScreencastSource::Window {
+                                    id,
+                                    title: window.title(),
+                                    app_id: window.app_id(),
+                                }));
+                                return;
+                            }
+
+                            // Otherwise fall through and prompt the user again
+                        }
+                    }
+                    ScreencastSource::Workspace { output, idx } => {
+                        // Since we have a static number of workspaces, checking for output
+                        // existence is enough.
+                        if self.fht.space.outputs().any(|o| o.name() == output) {
+                            _ = sender
+                                .send_blocking(Some(ScreencastSource::Workspace { output, idx }));
+                            return;
+                        }
+                    }
+                    ScreencastSource::Output { name } => {
+                        // Since we have a static number of workspaces, checking for output
+                        // existence is enough.
+                        if self.fht.space.outputs().any(|o| o.name() == name) {
+                            _ = sender.send_blocking(Some(ScreencastSource::Output { name }));
+                            return;
+                        }
+                    }
+                }
+
+                // Not handled, assume source is invalid.
+                _ = sender.send_blocking(None);
+            }
+
             screencast::Request::StartCast {
                 session_handle,
                 metadata_sender,
@@ -506,7 +626,7 @@ impl State {
                         false,
                     )
                 }
-                ScreencastSource::Window { id } => {
+                ScreencastSource::Window { id, .. } => {
                     let mut cast_window = None;
                     for window in self.fht.space.windows() {
                         if window.id() == *id {
@@ -2320,4 +2440,3 @@ fn rule_matches(
         false
     }
 }
-
