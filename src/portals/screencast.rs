@@ -46,11 +46,20 @@ pub struct SelectSourcesOptions {
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
     pub cursor_mode: Option<u32>,
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub restore_token: Option<String>,
+    pub restore_data: Option<RestoreData>,
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    pub persist_mode: Option<u32>,
+    pub persist_mode: Option<PersistMode>,
 }
 
+#[derive(zvariant::Type, Debug, Serialize, Deserialize)]
+#[zvariant(signature = "suv")]
+struct RestoreData {
+    vendor_name: String,
+    vendor_version: u32,
+    data: zvariant::OwnedValue,
+}
+
+/// Options dict specified in a [`Screencast::select_sources`] request.
 #[derive(zvariant::Type, Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Stream(u32, StreamProperties);
 
@@ -70,9 +79,9 @@ struct StartResult {
     #[serde(with = "as_value")]
     streams: Vec<Stream>,
     #[serde(with = "as_value")]
-    persist_mode: u32,
+    persist_mode: PersistMode,
     #[serde(with = "optional", skip_serializing_if = "Option::is_none", default)]
-    restore_token: Option<String>,
+    restore_data: Option<RestoreData>,
 }
 
 bitflags::bitflags! {
@@ -91,6 +100,15 @@ bitflags::bitflags! {
         const EMBEDDED = 2;
         const METADATA = 4;
     }
+}
+
+#[derive(zvariant::Type, Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[repr(u32)]
+enum PersistMode {
+    #[default]
+    NoPersist = 0,
+    PersistWhileRunning = 1,
+    PersistUntilRevoked = 2,
 }
 
 /// A [XDG ScreenCast desktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html) instance
@@ -146,10 +164,12 @@ impl Portal {
         &self,
         request_handle: ObjectPath<'_>,
         session_handle: ObjectPath<'_>,
-        _app_id: String,
+        app_id: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> fdo::Result<PortalResponse<CreateSessionResult>> {
+        debug!(?app_id, "Received CreateSession call");
+
         // First insert the request interface
         object_server
             .at(&request_handle, PortalRequest::new(request_handle.clone()))
@@ -162,6 +182,7 @@ impl Portal {
                 cast_id: None,
                 source: None,      // lazily created when receiving metadata
                 cursor_mode: None, // ^^^^
+                persist_mode: PersistMode::default(),
             },
             Some(SessionData::on_close),
         );
@@ -182,6 +203,8 @@ impl Portal {
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> fdo::Result<PortalResponse<HashMap<String, OwnedValue>>> {
+        debug!(?app_id, ?options, "Received SelectSources call");
+
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await?;
@@ -201,37 +224,62 @@ impl Portal {
         //     .and_then(SourceType::from_bits)
         //     .unwrap_or(SourceType::MONITOR);
 
-        let exit_status = std::process::Command::new("fht-share-picker")
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|child| child.wait_with_output());
-        let source = match exit_status {
-            Ok(output) if output.status.success() => {
-                if output.stdout.is_empty() {
-                    // The user clicked exit, and thus doesn't want to screencast anymore.
-                    // No need to log anything.
-                    return Ok(PortalResponse::Cancelled);
-                }
+        let mut source = None;
 
-                // Read the standard output, decode the JSON out of it
-                serde_json::from_slice::<ScreencastSource>(&output.stdout).unwrap()
+        // First try to restore the previous source from screencast data.
+        if let Some(restore_data) = options.restore_data {
+            if restore_data.vendor_name == "fhtc" && restore_data.vendor_version == 1 {
+                if let Some(previous_source) =
+                    restore_data.data.try_into().ok().and_then(|data: String| {
+                        serde_json::from_str::<ScreencastSource>(&data).ok()
+                    })
+                {
+                    debug!(?previous_source, "Received restore data from portal");
+                    // FIXME: Validate that the source is still correct with the compositor.
+                    source = Some(previous_source);
+                }
             }
-            Ok(output) => {
-                let code = output.status.code();
-                warn!(?code, "fht-share-picker exited unsuccessfully");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return Ok(PortalResponse::Error);
-            }
-            Err(err) => {
-                warn!(?err, "Failed to spawn fht-share-picker");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
-                return Ok(PortalResponse::Error);
+        }
+
+        // If we couldn't restore the source from a previous session, prompt the user again.
+        let source = match source {
+            Some(source) => source,
+            None => {
+                // We couldn't restore the source from a previous session, prompt the user again
+                let exit_status = std::process::Command::new("fht-share-picker")
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .and_then(|child| child.wait_with_output());
+                match exit_status {
+                    Ok(output) if output.status.success() => {
+                        if output.stdout.is_empty() {
+                            // The user clicked exit, and thus doesn't want to screencast anymore.
+                            // No need to log anything.
+                            return Ok(PortalResponse::Cancelled);
+                        }
+
+                        // Read the standard output, decode the JSON out of it
+                        serde_json::from_slice::<ScreencastSource>(&output.stdout).unwrap()
+                    }
+                    Ok(output) => {
+                        let code = output.status.code();
+                        warn!(?code, "fht-share-picker exited unsuccessfully");
+                        let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                        return Ok(PortalResponse::Error);
+                    }
+                    Err(err) => {
+                        warn!(?err, "Failed to spawn fht-share-picker");
+                        let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                        return Ok(PortalResponse::Error);
+                    }
+                }
             }
         };
 
         session.with_data(|data| {
             data.source = Some(source);
-            data.cursor_mode = Some(cursor_mode)
+            data.cursor_mode = Some(cursor_mode);
+            data.persist_mode = options.persist_mode.unwrap_or_default();
         });
 
         Ok(PortalResponse::Success(Default::default()))
@@ -243,12 +291,14 @@ impl Portal {
         &self,
         request_handle: ObjectPath<'_>,
         session_handle: ObjectPath<'_>,
-        _app_id: String,
+        app_id: String,
         _parent_window: String,
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> fdo::Result<PortalResponse<StartResult>> {
+        debug!(?app_id, "Received Start call");
+
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await?;
@@ -302,7 +352,15 @@ impl Portal {
 
         // A client should only be able to call start once per session.
         // We assert this here.
-        session.with_data(|data| assert!(data.cast_id.replace(cast_id).is_none()));
+        let (persist_mode, source) = session.with_data(|data| {
+            assert!(data.cast_id.replace(cast_id).is_none());
+            let source = data
+                .source
+                .as_ref()
+                .cloned()
+                .expect("source should be set when Start is called!");
+            (data.persist_mode, source)
+        });
 
         let stream_properties = StreamProperties {
             size: (size.w as i32, size.h as i32),
@@ -314,12 +372,29 @@ impl Portal {
             .bits(),
         };
 
+        let restore_data = if persist_mode != PersistMode::NoPersist {
+            // Send restore data to the portal for it to store. At a later moment, it will send us
+            // this same restore data for the same application, and we are supposed to restore the
+            // stream from that, if the source still exists.
+            let serialized = serde_json::to_string(&source).unwrap();
+            // SAFETY: try_to_owned never fails with a Value::Str
+            let data = zvariant::Value::from(&serialized).try_to_owned().unwrap();
+            Some(RestoreData {
+                vendor_name: String::from("fhtc"),
+                vendor_version: 1,
+                data,
+            })
+        } else {
+            None
+        };
+
         // TODO: Support persist mode
         Ok(PortalResponse::Success(StartResult {
             streams: vec![Stream(node_id, stream_properties)],
-            // FIXME: persistence support.
-            persist_mode: 0,
-            restore_token: None,
+            // NOTE: For now we don't reduce the persist mode given by the requesting application,
+            // however it would be nice if for example through a debug option for example.
+            persist_mode,
+            restore_data,
         }))
     }
 }
@@ -333,6 +408,8 @@ pub struct SessionData {
     source: Option<ScreencastSource>,
     /// The cursor mode used for this session.
     cursor_mode: Option<CursorMode>,
+    /// The persist mode selected by the application.
+    persist_mode: PersistMode,
 }
 
 impl SessionData {
@@ -358,6 +435,9 @@ pub struct StreamMetadata {
 
 // This enum is taken straight from fht-share-picker
 // SEE: https://github.com/nferhat/fht-share-picker
+//
+// HACK: We use this, stored as a raw json string, as vendor restore data. Yes this is hacky, but
+// it's a limitation of dbus' enums.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScreencastSource {
     Window { id: usize },
