@@ -7,39 +7,46 @@
 //! object path to a [`Request`] object, and when the portal backend is done, it sends out a
 //! `Request::response` signal containing the data.
 
-use std::collections::HashMap;
+mod request;
 use std::sync::{Arc, Mutex};
 
+pub use request::Request as PortalRequest;
 use zbus::object_server::SignalEmitter;
+use zbus::ObjectServer;
 
 /// A long-lived XDG portal session.
 ///
 /// You can optionally associate some portal-specific data with this session. Useful to keep for
 /// example communication channels to the compositor or portal state.
-pub struct Session<T: 'static> {
-    data: Arc<Mutex<T>>,
-    #[allow(clippy::type_complexity)]
-    on_destroy: Option<Box<dyn FnOnce(&T) + Send + Sync>>,
+pub struct PortalSession<D: Session> {
+    data: Arc<Mutex<D>>,
     handle: zvariant::OwnedObjectPath,
 }
 
-impl<T: 'static> Session<T> {
+impl<D: Session + Send + 'static> PortalSession<D> {
     /// Create a new XDG desktop portal session.
-    pub fn new<P, F>(handle: P, data: T, on_destroy: Option<F>) -> Self
+    pub async fn init<P>(handle: P, data: D, object_server: &ObjectServer) -> zbus::Result<()>
     where
         P: Into<zvariant::OwnedObjectPath>,
-        F: FnOnce(&T) + Send + Sync + 'static,
     {
-        Self {
+        let handle = handle.into();
+        let iface = Self {
             data: Arc::new(Mutex::new(data)),
-            handle: handle.into(),
-            on_destroy: on_destroy.map(|cb| Box::new(cb) as Box<_>),
+            handle: handle.clone(),
+        };
+        let new = object_server.at(handle, iface).await?;
+        if !new {
+            // The sessions should be unique, IE the client implementation should always generate
+            // a new random handle each time it starts a new session.
+            warn!("Duplicate portal session");
         }
+
+        Ok(())
     }
 
     pub fn with_data<F, R>(&self, cb: F) -> R
     where
-        F: FnOnce(&mut T) -> R,
+        F: FnOnce(&mut D) -> R,
     {
         let mut data = self.data.lock().unwrap();
         cb(&mut *data)
@@ -47,7 +54,7 @@ impl<T: 'static> Session<T> {
 }
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Session")]
-impl<T: Send + 'static> Session<T> {
+impl<T: Session + Send + 'static> PortalSession<T> {
     /// Closes the portal session to which this object refers and ends all related user interaction
     /// (dialogs, etc).
     pub async fn close(&mut self, #[zbus(object_server)] object_server: &zbus::ObjectServer) {
@@ -57,50 +64,21 @@ impl<T: Send + 'static> Session<T> {
             Err(err) => error!(?err, "Failed to destroy portal session"),
         }
 
-        if let Some(on_destroy) = self.on_destroy.take() {
-            let data = self.data.lock().unwrap();
-            on_destroy(&*data);
-        }
+        let mut data = self.data.lock().unwrap();
+        data.on_destroy();
     }
 
     /// Emitted when a session is closed.
     ///
     /// The content of details is specified by the interface creating the session.
     #[zbus(signal)]
-    pub async fn closed(
-        &self,
-        _emitter: &SignalEmitter<'_>,
-        details: HashMap<&str, zvariant::Value<'_>>,
-    ) -> zbus::Result<()>;
+    pub async fn closed(_emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }
 
-/// A single portal request.
-pub struct Request {
-    handle: zvariant::OwnedObjectPath,
-}
-
-impl Request {
-    /// Create a new XDG desktop portal request.
-    pub fn new<P>(handle: P) -> Self
-    where
-        P: Into<zvariant::OwnedObjectPath>,
-    {
-        Self {
-            handle: handle.into(),
-        }
-    }
-}
-
-#[zbus::interface(name = "org.freedesktop.impl.portal.Request")]
-impl Request {
-    /// Closes the portal request to which this object refers and ends all related user interaction
-    /// (dialogs, etc).
-    pub async fn close(&mut self, #[zbus(object_server)] object_server: &zbus::ObjectServer) {
-        match object_server.remove::<Self, _>(&self.handle).await {
-            Ok(true) => (),
-            Ok(false) => warn!(handle = ?self.handle, "Could not destroy portal request"),
-            Err(err) => error!(?err, "Failed to destroy portal request"),
-        }
+/// Trait for session data to implement.
+pub trait Session {
+    fn on_destroy(&mut self) {
+        // No-op.
     }
 }
 
@@ -120,4 +98,22 @@ pub enum PortalResponse {
     Success,
     Cancelled,
     Error,
+}
+
+/// Record session and request handles into the given span for logging.
+pub fn record_span<'a>(
+    span: &tracing::Span,
+    session_handle: &zvariant::ObjectPath<'a>,
+    request_handle: &zvariant::ObjectPath<'a>,
+) {
+    let session_handle = session_handle
+        .as_str()
+        .strip_prefix("/org/freedesktop/portal/desktop/session/")
+        .expect("session handle should always contain prefix");
+    span.record("session_handle", session_handle);
+    let request_handle = request_handle
+        .as_str()
+        .strip_prefix("/org/freedesktop/portal/desktop/request/")
+        .expect("request handle should always contain prefix");
+    span.record("request_handle", request_handle);
 }

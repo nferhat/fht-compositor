@@ -1,4 +1,4 @@
 [portal]
 DBusName=fht.desktop.Compositor
-Interfaces=org.freedesktop.impl.portal.ScreenCast;
+Interfaces=org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.GlobalShortcuts
 UseIn=fht-compositor

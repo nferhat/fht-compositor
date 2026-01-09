@@ -159,10 +159,12 @@ profile-with-tracy = ["tracy-client/default"]
 profile-with-tracy-allocations = ["profile-with-tracy"]
 
 # Marker feature to enable all supported portals.
-all-portals = ["xdg-screencast-portal"]
+all-portals = ["xdg-global-shortcuts-portal", "xdg-screencast-portal"]
 
 # Enable xdg-screencast portal support
 xdg-screencast-portal = ["pipewire", "dbus", "smithay/backend_gbm"]
+# Enable xdg-global shortcuts portal support
+xdg-global-shortcuts-portal = ["dbus", "fht-compositor-config/xdg-global-shortcuts"]
 
 # Enable integration with systemd.
 systemd = ["dep:sd-notify", "dbus"]

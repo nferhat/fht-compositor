@@ -12,12 +12,14 @@ use smithay::utils::{Physical, Size};
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, ObjectServer};
 
+use crate::portals::shared::{record_span, Session};
 use crate::utils::pipewire::CastId;
 
 pub const PORTAL_VERSION: u32 = 5;
 
-pub type ScreencastSession = super::shared::Session<SessionData>;
-use super::shared::{PortalResponse, Request as ScreencastRequest};
+use super::shared::{PortalRequest, PortalResponse, PortalSession};
+/// The screencast session type, used to emit associated signals.
+pub type ScreencastSession = PortalSession<SessionData>;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, PartialEq)]
@@ -42,7 +44,21 @@ bitflags::bitflags! {
 /// This structure can be added inside a zbus [`Connection`] to register the
 /// `org.freedesktop.impl.portal.ScreenCast` interface
 pub struct Portal {
-    pub(super) to_compositor: calloop::channel::Sender<Request>,
+    to_compositor: calloop::channel::Sender<Request>,
+    span: tracing::Span,
+}
+
+impl Portal {
+    pub fn new(to_compositor: calloop::channel::Sender<Request>) -> Self {
+        Self {
+            to_compositor,
+            span: debug_span!(
+                "screencast",
+                session_handle = tracing::field::Empty,
+                request_handle = tracing::field::Empty
+            ),
+        }
+    }
 }
 
 /// A [`Request`] that the [`Portal`] or a [`Session`] can send to the compositor.
@@ -75,6 +91,7 @@ impl Portal {
         PORTAL_VERSION
     }
 
+    #[tracing::instrument(name = "create-session", parent = &self.span, skip(self))]
     async fn create_session(
         &self,
         request_handle: zvariant::ObjectPath<'_>,
@@ -83,14 +100,12 @@ impl Portal {
         _options: HashMap<&str, zvariant::Value<'_>>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("create_session", &session_handle, &request_handle);
-        let _span_guard = span.enter();
+        record_span(&self.span, &session_handle, &request_handle);
 
-        let request = ScreencastRequest::new(request_handle.clone());
-        if let Err(err) = object_server.at(&request_handle, request).await {
-            warn!(?err, "Failed to create screencast request object");
+        if let Err(err) = PortalRequest::init(request_handle.clone(), object_server).await {
+            warn!(?err, "Failed to create portal request");
             return (PortalResponse::Error, HashMap::new());
-        };
+        }
 
         let session_data = SessionData {
             id: next_session_id(),
@@ -101,34 +116,19 @@ impl Portal {
         };
         let session_id = format!("fht-compositor-screencast-{}", session_data.id);
 
-        let session = ScreencastSession::new(
-            session_handle.clone(),
-            session_data,
-            Some(|data: &SessionData| {
-                if let Some(cast_id) = data.cast_id {
-                    if let Err(err) = data.to_compositor.send(Request::StopCast { cast_id }) {
-                        error!(
-                            ?err,
-                            ?cast_id,
-                            "Failed to send StopCast request to compositor"
-                        );
-                    };
-                }
-            }),
-        );
-
-        if let Err(err) = object_server.at(&session_handle, session).await {
-            let _ = object_server
-                .remove::<ScreencastRequest, _>(&request_handle)
-                .await; // even we dont remove this its not really important
+        if let Err(err) =
+            PortalSession::init(session_handle.clone(), session_data, object_server).await
+        {
+            _ = PortalRequest::stop(&request_handle, object_server);
             warn!(?err, "Failed to create screencast session object");
             return (PortalResponse::Error, HashMap::new());
-        };
+        }
 
         let results = HashMap::from_iter([("session_id", session_id.into())]);
         (PortalResponse::Success, results)
     }
 
+    #[tracing::instrument(name = "select-sources", parent = &self.span, skip(self))]
     async fn select_sources(
         &self,
         request_handle: zvariant::ObjectPath<'_>,
@@ -138,9 +138,6 @@ impl Portal {
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("select_sources", &session_handle, &request_handle);
-        let _span_guard = span.enter();
-
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await
@@ -173,12 +170,12 @@ impl Portal {
             Ok(output) => {
                 let code = output.status.code();
                 warn!(?code, "fht-share-picker exited unsuccessfully");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
                 warn!(?err, "Failed to spawn fht-share-picker");
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         };
@@ -191,6 +188,7 @@ impl Portal {
         (PortalResponse::Success, HashMap::new())
     }
 
+    #[tracing::instrument(name = "start", parent = &self.span, skip(self))]
     #[allow(clippy::too_many_arguments)]
     async fn start(
         &self,
@@ -202,9 +200,6 @@ impl Portal {
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
         #[zbus(object_server)] object_server: &ObjectServer,
     ) -> (PortalResponse, HashMap<&str, zvariant::Value<'_>>) {
-        let span = make_screencast_span("start", &session_handle, &request_handle);
-        let _span_guard = span.enter();
-
         let session_ref = object_server
             .interface::<_, ScreencastSession>(&session_handle)
             .await
@@ -233,7 +228,7 @@ impl Portal {
             cursor_mode,
         }) {
             warn!(?err, "Failed to send StartCast request to compositor");
-            let _ = session.closed(&signal_emitter, HashMap::new()).await;
+            _ = ScreencastSession::closed(&signal_emitter).await;
             return (PortalResponse::Error, HashMap::new());
         }
 
@@ -244,7 +239,7 @@ impl Portal {
         } = match metadata_receiver.recv().await {
             Ok(Some(metadata)) => metadata,
             Ok(None) => {
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
             Err(err) => {
@@ -252,7 +247,7 @@ impl Portal {
                     ?err,
                     "Metadata receiver channel closed when it should not, weird..."
                 );
-                let _ = session.closed(&signal_emitter, HashMap::new()).await;
+                _ = ScreencastSession::closed(&signal_emitter).await;
                 return (PortalResponse::Error, HashMap::new());
             }
         };
@@ -301,6 +296,15 @@ pub struct SessionData {
     /// The cursor mode used for this session.
     cursor_mode: Option<CursorMode>,
 }
+impl Session for SessionData {
+    fn on_destroy(&mut self) {
+        if let Some(cast_id) = self.cast_id.take() {
+            if let Err(err) = self.to_compositor.send(Request::StopCast { cast_id }) {
+                error!(?err, "Failed to send StopCast request to compositor");
+            };
+        }
+    }
+}
 
 /// The metadata associated with a pipewire stream, received from the compositor.
 pub struct StreamMetadata {
@@ -324,23 +328,4 @@ fn get_option_value<'value, T: TryFrom<&'value zvariant::Value<'value>>>(
 ) -> anyhow::Result<T> {
     T::try_from(options.get(name).context("Failed to get value!")?)
         .map_err(|_| anyhow::anyhow!("Failed to convert value!"))
-}
-
-// A simpler way to record spans.
-fn make_screencast_span<'a>(
-    event: &'static str,
-    session_handle: &zvariant::ObjectPath<'a>,
-    request_handle: &zvariant::ObjectPath<'a>,
-) -> tracing::Span {
-    let session_handle = session_handle
-        .as_str()
-        .strip_prefix("/org/freedesktop/portal/desktop/session/")
-        .expect("session handle should always contain prefix");
-    let request_handle = request_handle
-        .as_str()
-        .strip_prefix("/org/freedesktop/portal/desktop/request/")
-        .expect("request handle should always contain prefix");
-    let span = debug_span!("screencast", ?event, ?session_handle, ?request_handle);
-
-    span
 }

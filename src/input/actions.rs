@@ -48,6 +48,8 @@ pub enum KeyActionType {
     SendFocusedWindowToWorkspace(usize),
     FocusNextWorkspace,
     FocusPreviousWorkspace,
+    #[cfg(feature = "xdg-global-shortcuts-portal")]
+    GlobalShortcut(String),
     #[default]
     None,
 }
@@ -165,6 +167,8 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     ComplexKeyAction::SendToWorkspace(idx) => {
                         KeyActionType::SendFocusedWindowToWorkspace(idx)
                     }
+                    #[cfg(feature = "xdg-global-shortcuts-portal")]
+                    ComplexKeyAction::GlobalShortcut(name) => KeyActionType::GlobalShortcut(name),
                 };
             }
         }
@@ -422,6 +426,10 @@ impl State {
                     mon.workspace_mut_by_index(idx)
                         .insert_window(window, location, true);
                 }
+            }
+            #[cfg(feature = "xdg-global-shortcuts-portal")]
+            KeyActionType::GlobalShortcut(name) => {
+                todo!("Handle global shortcut: {name}");
             }
             KeyActionType::None => (), // disabled the key combo
         }
@@ -758,4 +766,3 @@ impl State {
         }
     }
 }
-
