@@ -1,7 +1,7 @@
 # {{{ Workspace
 
 [workspace]
-members = ["fht-compositor-config", "fht-compositor-ipc"]
+members = ["fht-compositor-config", "fht-compositor-ipc", "fht-share-picker"]
 resolver = "2"
 
 [workspace.package]
