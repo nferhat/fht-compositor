@@ -1,3 +1,4 @@
+use adw::prelude::{ActionRowExt, PreferencesRowExt};
 use glib::object::{Cast, ObjectExt};
 use glib::types::StaticType;
 use gtk::prelude::{ButtonExt, EditableExt, ListBoxRowExt, ToggleButtonExt, WidgetExt};
@@ -154,7 +155,9 @@ impl SelectionWidget {
                 let selection = row.map(|row| {
                     let row = row.downcast_ref::<WindowRow>().unwrap();
                     let id = row.identifier() as usize;
-                    ScreencastSource::Window { id }
+                    let title = Some(row.title().to_string());
+                    let app_id = row.subtitle().map(|s| s.to_string());
+                    ScreencastSource::Window { id, title, app_id }
                 });
 
                 imp.set_selection(selection);

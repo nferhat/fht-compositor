@@ -162,7 +162,7 @@ profile-with-tracy-allocations = ["profile-with-tracy"]
 all-portals = ["xdg-screencast-portal"]
 
 # Enable xdg-screencast portal support
-xdg-screencast-portal = ["pipewire", "dbus", "smithay/backend_gbm"]
+xdg-screencast-portal = ["pipewire", "dbus", "smithay/backend_gbm", "fht-compositor-ipc/screencast-source"]
 
 # Enable integration with systemd.
 systemd = ["dep:sd-notify", "dbus"]

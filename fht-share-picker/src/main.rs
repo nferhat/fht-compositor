@@ -20,22 +20,12 @@ mod utils;
 use std::io::{BufRead as _, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
+pub use fht_compositor_ipc::ScreencastSource;
 use fht_compositor_ipc::{Request, Response};
 use gtk::prelude::ApplicationExtManual;
 use gtk::{gio, glib};
 use output_object::OutputObject;
 use window_object::WindowObject;
-
-/// The selected screencast source
-///
-/// This exact same struct gets deserialized by the compositor when we are done with selecting,
-/// from the [Standard Output](std::io::Stdout).
-#[derive(serde::Serialize, serde::Deserialize)]
-pub enum ScreencastSource {
-    Window { id: usize },
-    Workspace { output: String, idx: usize },
-    Output { name: String },
-}
 
 fn main() -> glib::ExitCode {
     let only_message = tracing_subscriber::fmt::format::debug_fn(|writer, field, value| {

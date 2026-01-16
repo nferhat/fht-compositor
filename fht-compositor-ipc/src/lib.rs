@@ -739,3 +739,24 @@ pub enum PickLayerShellResult {
     /// The pick request was cancelled.
     Cancelled,
 }
+
+/// The selected screencast source
+///
+/// This exact same struct gets deserialized by the compositor when we are done with selecting,
+/// from the [Standard Output](std::io::Stdout).
+#[cfg(feature = "screencast-source")]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ScreencastSource {
+    Window {
+        id: usize,
+        title: Option<String>,
+        app_id: Option<String>,
+    },
+    Workspace {
+        output: String,
+        idx: usize,
+    },
+    Output {
+        name: String,
+    },
+}

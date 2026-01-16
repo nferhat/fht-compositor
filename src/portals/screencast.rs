@@ -454,23 +454,6 @@ pub struct StreamMetadata {
     pub size: Size<u32, Physical>,
 }
 
-// This enum is taken straight from fht-share-picker
-// SEE: https://github.com/nferhat/fht-share-picker
-//
 // HACK: We use this, stored as a raw json string, as vendor restore data. Yes this is hacky, but
 // it's a limitation of dbus' enums.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum ScreencastSource {
-    Window {
-        id: usize,
-        title: Option<String>,
-        app_id: Option<String>,
-    },
-    Workspace {
-        output: String,
-        idx: usize,
-    },
-    Output {
-        name: String,
-    },
-}
+pub use fht_compositor_ipc::ScreencastSource;

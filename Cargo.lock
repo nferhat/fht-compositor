@@ -1011,7 +1011,7 @@ dependencies = [
  "egui_glow",
  "fht-animation",
  "fht-compositor-config",
- "fht-compositor-ipc 25.10.1",
+ "fht-compositor-ipc",
  "futures-util",
  "glam",
  "libc",
@@ -1063,23 +1063,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "fht-compositor-ipc"
-version = "25.10.1"
-source = "git+https://github.com/nferhat/fht-compositor#f9dd0778d4ea892f7b7e2579010730734479a77e"
-dependencies = [
- "anyhow",
- "clap",
- "schemars",
- "serde",
- "serde_json",
- "smithay",
-]
-
-[[package]]
 name = "fht-share-picker"
 version = "25.10.0"
 dependencies = [
- "fht-compositor-ipc 25.10.1 (git+https://github.com/nferhat/fht-compositor)",
+ "fht-compositor-ipc",
  "glib 0.21.5",
  "glib-build-tools",
  "gtk4",

@@ -11,7 +11,7 @@ lto = true
 
 [dependencies]
 adw = { version = "0.8", package = "libadwaita", features = ["v1_6"] }
-fht-compositor-ipc = { git = "https://github.com/nferhat/fht-compositor", version = "25.10.0" }
+fht-compositor-ipc = { path = "../fht-compositor-ipc/", features = ["screencast-source"] }
 glib = { version = "0.21", features = ["log"] }
 gtk = { version = "0.10", package = "gtk4", features = ["v4_16"] }
 serde = { version = "1.0.217", features = ["derive"] }
