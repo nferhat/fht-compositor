@@ -11,13 +11,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    fht-share-picker = {
-      url = "github:nferhat/fht-share-picker/gtk-rewrite";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-parts.follows = "flake-parts";
-      inputs.rust-overlay.follows = "";
-    };
   };
 
   outputs = inputs:

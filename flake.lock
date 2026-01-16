@@ -1,30 +1,5 @@
 {
   "nodes": {
-    "fht-share-picker": {
-      "inputs": {
-        "flake-parts": [
-          "flake-parts"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "rust-overlay": []
-      },
-      "locked": {
-        "lastModified": 1760900224,
-        "narHash": "sha256-YEGJe7yBNT20MSJn79s9WAjugRjv254PLVrph/Ja0dg=",
-        "owner": "nferhat",
-        "repo": "fht-share-picker",
-        "rev": "a6ed304a9f40f9a088cec5479765616dd68dca73",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nferhat",
-        "ref": "gtk-rewrite",
-        "repo": "fht-share-picker",
-        "type": "github"
-      }
-    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -63,7 +38,6 @@
     },
     "root": {
       "inputs": {
-        "fht-share-picker": "fht-share-picker",
         "flake-parts": "flake-parts",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
