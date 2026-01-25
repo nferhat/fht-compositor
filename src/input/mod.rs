@@ -9,11 +9,11 @@ use std::time::Duration;
 pub use actions::*;
 use fht_compositor_config::{GestureAction, GestureDirection, KeyPattern};
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, Event, GestureBeginEvent,
-    GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent,
-    KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
-    ProximityState, TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent,
-    TabletToolTipEvent, TabletToolTipState,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, DeviceCapability, Event,
+    GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent,
+    InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    PointerMotionEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+    TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
@@ -289,6 +289,34 @@ impl State {
         // The spec doesn't specify which events should give activity, so just notify whenever
         // there's something that happened from the user.
         self.fht.idle_notify_activity();
+
+        let should_enable_outputs = match &event {
+            // Don't turn outputs on key releases, in case the user uses a keybind to disable
+            // outputs, this would lead to us handling the key release that follow it, hence
+            // re-enabling them.
+            InputEvent::Keyboard { event } => event.state() == KeyState::Pressed,
+            InputEvent::PointerButton { event } => event.state() == ButtonState::Pressed,
+            // In the same logic, only device added events should be handled.
+            InputEvent::DeviceAdded { .. } => true,
+            // General motion events should always enable outputs.
+            InputEvent::PointerMotion { .. }
+            | InputEvent::PointerMotionAbsolute { .. }
+            | InputEvent::PointerAxis { .. }
+            | InputEvent::GestureSwipeBegin { .. }
+            | InputEvent::GesturePinchBegin { .. }
+            | InputEvent::GestureHoldBegin { .. }
+            | InputEvent::TouchDown { .. }
+            | InputEvent::TouchMotion { .. }
+            | InputEvent::TabletToolAxis { .. }
+            | InputEvent::TabletToolProximity { .. }
+            | InputEvent::TabletToolTip { .. }
+            | InputEvent::TabletToolButton { .. } => true,
+            // Device removed/motion/gesture end events should not trigger.
+            _ => false
+        };
+        if should_enable_outputs {
+            self.fht.enable_outputs();
+        }
 
         match event {
             InputEvent::DeviceAdded { device }          => self.on_device_added::<B>(device),

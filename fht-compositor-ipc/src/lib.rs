@@ -412,6 +412,8 @@ pub enum Layer {
 pub enum Action {
     /// Exit the compositor.
     Quit,
+    /// Disable all outputs.
+    DisableOutputs,
     /// Run a command inside the compositor.
     #[serde(alias = "run-command")]
     RunCommandLine {

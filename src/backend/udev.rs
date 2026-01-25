@@ -39,11 +39,14 @@ use smithay::input::keyboard::XkbConfig;
 use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{Dispatcher, RegistrationToken};
+use smithay::reexports::drm::control::atomic::AtomicModeReq;
 use smithay::reexports::drm::control::connector::{
     self, Handle as ConnectorHandle, Info as ConnectorInfo,
 };
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
-use smithay::reexports::drm::control::{ModeFlags, ModeTypeFlags, ResourceHandle, property};
+use smithay::reexports::drm::control::{
+    property, AtomicCommitFlags, Device as ControlDevice, ModeFlags, ModeTypeFlags, ResourceHandle,
+};
 use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
@@ -62,11 +65,6 @@ use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-
-use std::any::Any;
-use smithay::reexports::drm::control::{
-    atomic::AtomicModeReq, AtomicCommitFlags, Device as ControlDevice,
-};
 
 use crate::frame_clock::FrameClock;
 use crate::handlers::gamma_control::GammaControlState;
@@ -144,7 +142,7 @@ pub struct UdevData {
     pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
     #[allow(dead_code)]
-    pub gamma_control_manager_state: GammaControlState
+    pub gamma_control_manager_state: GammaControlState,
 }
 
 impl UdevData {
@@ -310,9 +308,7 @@ impl UdevData {
             "Found primary GPU for rendering!"
         );
 
-        let gamma_control_manager_state = GammaControlState::new::<State>(
-            &state.display_handle,
-        );
+        let gamma_control_manager_state = GammaControlState::new::<State>(&state.display_handle);
 
         let mut data = UdevData {
             primary_gpu,
@@ -1681,6 +1677,21 @@ impl UdevData {
         anyhow::bail!("No matching output found")
     }
 
+    pub fn enable_outputs(&mut self) {
+        // Here we actually do nothing, since a next queued draw will trigger the surface/CRTC
+        // to re-enable again.
+    }
+
+    pub fn disable_outputs(&mut self) {
+        for device in self.devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
+                    warn!("error clearing drm surface: {err:?}");
+                }
+            }
+        }
+    }
+
     pub fn gamma_size(&self, output: &Output) -> anyhow::Result<usize> {
         let UdevOutputData { device, crtc } = output
             .user_data()
@@ -1690,13 +1701,16 @@ impl UdevData {
         let device = self.devices.get(device).context("Device not found")?;
         let surface = device.surfaces.get(crtc).context("Surface not found")?;
 
-        let gamma_size = surface.drm_output.with_compositor(|compositor| -> anyhow::Result<usize> {
-            let drm_surface = compositor.surface();
-            let drm = drm_surface.device_fd();
-            
-            let crtc_info = drm.get_crtc(*crtc).context("Failed to get CRTC info")?;
-            Ok(crtc_info.gamma_length() as usize)
-        })?;
+        let gamma_size =
+            surface
+                .drm_output
+                .with_compositor(|compositor| -> anyhow::Result<usize> {
+                    let drm_surface = compositor.surface();
+                    let drm = drm_surface.device_fd();
+
+                    let crtc_info = drm.get_crtc(*crtc).context("Failed to get CRTC info")?;
+                    Ok(crtc_info.gamma_length() as usize)
+                })?;
 
         Ok(gamma_size)
     }
@@ -1745,14 +1759,14 @@ impl UdevData {
 
             let blob_id = {
                 use std::os::fd::AsRawFd;
-                
+
                 // Def of the IOCTL numbers (Linux standard)
                 const DRM_IOCTL_BASE: u64 = 0x64; // 'd'
                 const DRM_IOCTL_MODE_CREATE_BLOB_NR: u64 = 0xBD;
 
                 let data = lut.as_slice();
                 let length = (data.len() * std::mem::size_of::<DrmColorLut>()) as u32;
-                
+
                 let mut create_blob = drm_ffi::drm_mode_create_blob {
                     data: data.as_ptr() as usize as u64,
                     length,
@@ -1880,7 +1894,6 @@ impl UdevData {
             }
         }
     }
-
 }
 
 struct UdevOutputData {
@@ -2274,7 +2287,6 @@ fn generate_output_render_elements<'a>(
 
     render_elements
 }
-
 
 #[repr(C)]
 #[derive(Copy, Clone)]

@@ -519,6 +519,7 @@ impl State {
     fn handle_ipc_action(&mut self, action: fht_compositor_ipc::Action) -> anyhow::Result<()> {
         match action {
             fht_compositor_ipc::Action::Quit => self.fht.stop = true,
+            fht_compositor_ipc::Action::DisableOutputs => self.fht.disable_outputs(),
             fht_compositor_ipc::Action::RunCommandLine { command_line } => {
                 let (token, _token_data) =
                     self.fht.xdg_activation_state.create_external_token(None);

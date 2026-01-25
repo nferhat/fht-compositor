@@ -230,6 +230,7 @@ pub enum SimpleKeyAction {
     FocusNextWorkspace,
     FocusPreviousWorkspace,
     CloseFocusedWindow,
+    DisableOutputs,
     None,
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -258,6 +259,7 @@ pub enum ComplexKeyAction {
     FocusNextWorkspace,
     FocusPreviousWorkspace,
     CloseFocusedWindow,
+    DisableOutputs,
     None,
     #[serde(alias = "run-command")]
     RunCommandLine(String),
@@ -1733,3 +1735,4 @@ pub enum Error {
     #[error("An error occured while parsing the configuration file: {0}")]
     Parse(#[from] toml::de::Error),
 }
+

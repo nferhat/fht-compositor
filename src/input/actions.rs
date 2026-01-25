@@ -48,6 +48,7 @@ pub enum KeyActionType {
     SendFocusedWindowToWorkspace(usize),
     FocusNextWorkspace,
     FocusPreviousWorkspace,
+    DisableOuptuts,
     #[default]
     None,
 }
@@ -111,6 +112,7 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     SimpleKeyAction::FocusPreviousWorkspace => {
                         KeyActionType::FocusPreviousWorkspace
                     }
+                    SimpleKeyAction::DisableOutputs => KeyActionType::DisableOuptuts,
                     SimpleKeyAction::None => KeyActionType::None,
                 };
             }
@@ -151,6 +153,7 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                         KeyActionType::FocusPreviousWorkspace
                     }
                     ComplexKeyAction::CloseFocusedWindow => KeyActionType::CloseFocusedWindow,
+                    ComplexKeyAction::DisableOutputs => KeyActionType::DisableOuptuts,
                     ComplexKeyAction::None => KeyActionType::None,
                     ComplexKeyAction::RunCommandLine(cmdline) => {
                         KeyActionType::RunCommandLine(cmdline)
@@ -190,6 +193,7 @@ impl State {
 
         match &action.r#type {
             KeyActionType::Quit => self.fht.stop = true,
+            KeyActionType::DisableOuptuts => self.fht.disable_outputs(),
             KeyActionType::ReloadConfig => self.reload_config(),
             KeyActionType::RunCommandLine(cmdline) => {
                 let (token, _token_data) =
@@ -758,4 +762,3 @@ impl State {
         }
     }
 }
-

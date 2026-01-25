@@ -205,4 +205,36 @@ impl Backend {
             _ => unreachable!(),
         }
     }
+
+    pub fn enable_outputs(&mut self) {
+        match self {
+            #[cfg(feature = "winit-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Winit(_) => (),
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.enable_outputs(),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => (),
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn disable_outputs(&mut self) {
+        match self {
+            #[cfg(feature = "winit-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Winit(_) => (),
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(data) => data.disable_outputs(),
+            #[cfg(feature = "headless-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Headless(_) => (),
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
+        }
+    }
 }

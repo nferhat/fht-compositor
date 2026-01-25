@@ -267,40 +267,57 @@ impl State {
         let output_state = self.fht.output_state.get_mut(&output).unwrap();
         assert!(output_state.redraw_state.is_queued());
 
-        // Advance animations.
-        let target_presentation_time = output_state.frame_clock.next_presentation_time();
-        let animations_running = {
-            crate::profile_scope!("advance_animations");
-            let mut ongoing = self.fht.config_ui.advance_animations(
-                target_presentation_time,
-                !self.fht.config.animations.disable,
-            );
-            // If we finished animating the config_ui this means its hidden.
-            // Clear the output its opened on
-            let _ = self.fht.config_ui_output.take_if(|_| !ongoing);
-
-            ongoing |= self
-                .fht
-                .space
-                .advance_animations(target_presentation_time, &output);
-
-            ongoing
-        };
-
-        let output_state = self.fht.output_state.get_mut(&output).unwrap();
-        output_state.animations_running = animations_running;
-
-        // Then ask the backend to render.
         // if res.is_err() == something wrong happened and we didnt render anything.
         // if res == Ok(true) we rendered and submitted a new buffer
         // if res == Ok(false) we rendered but had no damage to submit
-        let res = self
-            .backend
-            .render(&mut self.fht, &output, target_presentation_time);
+        let mut render_result = Ok(false);
+        if !self.fht.outputs_disabled {
+            // Advance animations.
+            let target_presentation_time = output_state.frame_clock.next_presentation_time();
+            let animations_running = {
+                crate::profile_scope!("advance_animations");
+                let mut ongoing = self.fht.config_ui.advance_animations(
+                    target_presentation_time,
+                    !self.fht.config.animations.disable,
+                );
+                // If we finished animating the config_ui this means its hidden.
+                // Clear the output its opened on
+                let _ = self.fht.config_ui_output.take_if(|_| !ongoing);
+
+                ongoing |= self
+                    .fht
+                    .space
+                    .advance_animations(target_presentation_time, &output);
+
+                ongoing
+            };
+            output_state.animations_running = animations_running;
+
+            // Then ask the backend to render.
+            render_result = self
+                .backend
+                .render(&mut self.fht, &output, target_presentation_time);
+        }
+
+        let output_state = self.fht.output_state.get_mut(&output).unwrap();
+        if render_result.as_ref().map_or(true, |&draw| draw == false) {
+            // Update the redraw state on failed render.
+            output_state.redraw_state =
+                if let RedrawState::WaitingForEstimatedVblankTimer { token, .. } =
+                    std::mem::take(&mut output_state.redraw_state)
+                {
+                    RedrawState::WaitingForEstimatedVblankTimer {
+                        token,
+                        queued: false,
+                    }
+                } else {
+                    RedrawState::Idle
+                };
+        }
 
         {
             let output_state = self.fht.output_state.get_mut(&output).unwrap();
-            if res.is_err() {
+            if render_result.is_err() {
                 // Update the redraw state on failed render.
                 output_state.redraw_state =
                     if let RedrawState::WaitingForEstimatedVblankTimer { token, .. } =
@@ -655,12 +672,15 @@ pub struct Fht {
     // This can happen when you use a tool that interacts with the wlr-output-management protocol.
     // When reloading the config, we want to undo those changes.
     pub has_transient_output_changes: bool,
-
-    pub config: Arc<fht_compositor_config::Config>,
-    pub root_config_path: Option<std::path::PathBuf>,
     // Sometimes we might have to change the output config at runtime, so we use this value
     // when updating stuff instead of one guarded by an Arc.
     pub output_config: HashMap<String, fht_compositor_config::Output>,
+    /// Whether all the outputs are disabled. This field should only be set by the backend, and be
+    /// referenced by the compositor state.
+    pub outputs_disabled: bool,
+
+    pub config: Arc<fht_compositor_config::Config>,
+    pub root_config_path: Option<std::path::PathBuf>,
     // The config_ui also tracks the last configuration error, if any.
     pub config_ui: config_ui::ConfigUi,
     // Keep track of whether we already opened/drawed a config_ui on one output.
@@ -873,10 +893,11 @@ impl Fht {
 
             output_state: HashMap::new(),
             has_transient_output_changes: false,
+            output_config,
+            outputs_disabled: false,
 
             config: Arc::new(config),
             root_config_path,
-            output_config,
             config_ui,
             config_ui_output: None,
             config_watcher,
@@ -1233,6 +1254,27 @@ impl Fht {
                 .backend
                 .update_output_vrr(&mut state.fht, &output, new_state);
         });
+    }
+
+    pub fn disable_outputs(&mut self) {
+        if !self.outputs_disabled {
+            _ = self.loop_handle.insert_idle(|state| {
+                state.backend.disable_outputs();
+                state.fht.outputs_disabled = true;
+            })
+        }
+    }
+
+    pub fn enable_outputs(&mut self) {
+        if self.outputs_disabled {
+            _ = self.loop_handle.insert_idle(|state| {
+                _ = state.backend.enable_outputs();
+                // Even if there are errors, still try to draw to the outputs, otherwise we will
+                // render the session unusable.
+                state.fht.outputs_disabled = false;
+                state.fht.queue_redraw_all();
+            });
+        }
     }
 
     pub fn output_named(&self, name: &str) -> Option<Output> {
@@ -2320,4 +2362,3 @@ fn rule_matches(
         false
     }
 }
-
