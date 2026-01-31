@@ -16,7 +16,7 @@ pub fn start(
     {
         info!("Starting XDG screencast portal");
         let (to_compositor, from_screencast) = calloop::channel::channel::<screencast::Request>();
-        let portal = screencast::Portal { to_compositor };
+        let portal = screencast::Portal::new(to_compositor);
         loop_handle
             .insert_source(from_screencast, move |event, _, state| {
                 let calloop::channel::Event::Msg(req) = event else {

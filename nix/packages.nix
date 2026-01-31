@@ -21,6 +21,11 @@
         cargoCheckType = next.cargoBuildType;
         dontStrip = true;
       });
+
+      # Tool used with fht-compositor's screencast portal.
+      fht-share-picker = pkgs.callPackage ../fht-share-picker/default.nix {
+        rev = self.shortRev or self.dirtyShortRev or "unknown";
+      };
     };
   };
 }

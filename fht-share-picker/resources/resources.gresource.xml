@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/fht/desktop/SharePicker/">
+    <file compressed="true" preprocess="xml-stripblanks">ui/window.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/selection-widget.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/workspace-row.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">ui/output-button.ui</file>
+    <file compressed="true">output-grid.css</file>
+  </gresource>
+</gresources>

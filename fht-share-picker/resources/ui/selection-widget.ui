@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="SelectionWidget" parent="GtkBox">
+    <property name="orientation">1</property>
+    <property name="spacing">17</property>
+    <child>
+      <object class="AdwViewSwitcher" id="source-type-switcher">
+        <property name="policy">1</property>
+        <property name="halign">3</property>
+        <property name="valign">1</property>
+        <property name="height-request">34</property>
+        <property name="stack">source_type</property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwViewStack" id="source_type">
+        <property name="vhomogeneous">false</property>
+        <property name="vexpand">true</property>
+        <child>
+          <object class="AdwViewStackPage" id="output-selection-page">
+            <property name="name">outputs-page</property>
+            <property name="title">Output</property>
+            <property name="child">
+              <object class="OutputGrid" id="output_grid">
+                <property name="hexpand">true</property>
+                <property name="vexpand">true</property>
+                <property name="valign">1</property>
+                <style>
+                  <class name="output-grid"/>
+                </style>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStackPage" id="workspace-selection-page">
+            <property name="name">workspaces-page</property>
+            <property name="title">Workspace</property>
+            <property name="child">
+              <object class="GtkListBox" id="workspace_list">
+                <property name="hexpand">true</property>
+                <property name="vexpand">true</property>
+                <property name="valign">1</property>
+                <property name="selection-mode">single</property>
+                <style>
+                  <class name="content"/>
+                </style>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStackPage" id="window-selection-page">
+            <property name="title">Window</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">1</property>
+                <property name="vexpand">1</property>
+                <property name="hexpand">1</property>
+
+                <child>
+                  <object class="GtkSearchBar" id="window_search_bar">
+                    <property name="halign">3</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkListBox" id="window_list">
+                    <property name="hexpand">true</property>
+                    <property name="vexpand">true</property>
+                    <property name="valign">1</property>
+                    <property name="selection-mode">single</property>
+                    <style>
+                      <class name="content"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

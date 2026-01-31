@@ -11,13 +11,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    fht-share-picker = {
-      url = "github:nferhat/fht-share-picker/gtk-rewrite";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-parts.follows = "flake-parts";
-      inputs.rust-overlay.follows = "";
-    };
   };
 
   outputs = inputs:
@@ -34,7 +27,7 @@
 
         devShells.default = let
           rust-bin = inputs.rust-overlay.lib.mkRustBin {} pkgs;
-          inherit (self'.packages) fht-compositor;
+          inherit (self'.packages) fht-compositor fht-share-picker;
         in
           pkgs.mkShell.override {
             stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
@@ -53,7 +46,9 @@
               pkgs.nodejs # vitepress for docs
             ];
 
-            inherit (fht-compositor) buildInputs nativeBuildInputs;
+            buildInputs = fht-compositor.buildInputs ++ fht-share-picker.buildInputs;
+            nativeBuildInputs = fht-compositor.nativeBuildInputs ++ fht-share-picker.nativeBuildInputs;
+
             env = {
               # WARN: Do not overwrite this variable in your shell!
               # It is required for `dlopen()` to work on some libraries; see the comment

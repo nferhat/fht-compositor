@@ -17,6 +17,7 @@ smithay.workspace = true
 
 [features]
 clap = []
+screencast-source = []
 
 [[bin]]
 name = "test_client"
