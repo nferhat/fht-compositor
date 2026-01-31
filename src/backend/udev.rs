@@ -1787,7 +1787,7 @@ impl UdevData {
                     const _IOC_READ: u64 = 2;
                     const _IOC_WRITE: u64 = 1;
                     const _IOC_INOUT: u64 = _IOC_READ | _IOC_WRITE;
-                    
+
                     let size = std::mem::size_of::<drm_ffi::drm_mode_create_blob>() as u64;
 
                     (_IOC_INOUT << _IOC_DIRSHIFT) |
@@ -1805,7 +1805,7 @@ impl UdevData {
             };
 
             let blob = property::Value::Blob(blob_id.into());
-            
+
             tracing::debug!("Gamma blob = {}", blob_id);
 
             let props = drm.get_properties(*crtc)?;
@@ -1931,7 +1931,7 @@ pub struct Surface {
         DrmDeviceFd,
     >,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
-    pub gamma_blob: Option<Box<dyn Any>>,
+    pub gamma_blob: Option<Box<dyn std::any::Any>>,
 }
 
 fn get_surface_dmabuf_feedback(
