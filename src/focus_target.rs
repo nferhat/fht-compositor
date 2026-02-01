@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 pub use smithay::backend::input::KeyState;
 pub use smithay::desktop::{LayerSurface, PopupKind};
+use smithay::input::dnd::DndFocus;
 pub use smithay::input::keyboard::{KeyboardTarget, KeysymHandle, ModifiersState};
 pub use smithay::input::pointer::{
     AxisFrame, ButtonEvent, MotionEvent, PointerTarget, RelativeMotionEvent,
@@ -16,6 +17,7 @@ use smithay::reexports::wayland_server::backend::ObjectId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Serial};
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::selection::data_device::WlOfferData;
 use smithay::wayland::session_lock::LockSurface;
 
 use crate::state::State;
@@ -524,6 +526,62 @@ impl TouchTarget<State> for PointerFocusTarget {
             Self::LayerSurface(l) => {
                 TouchTarget::orientation(l.wl_surface(), seat, data, event, seq)
             }
+        }
+    }
+}
+
+impl DndFocus<State> for PointerFocusTarget {
+    type OfferData<S>
+        = WlOfferData<S>
+    where
+        S: smithay::input::dnd::Source;
+
+    fn enter<S: smithay::input::dnd::Source>(
+        &self,
+        data: &mut State,
+        dh: &smithay::reexports::wayland_server::DisplayHandle,
+        source: std::sync::Arc<S>,
+        seat: &Seat<State>,
+        location: smithay::utils::Point<f64, smithay::utils::Logical>,
+        serial: &Serial,
+    ) -> Option<Self::OfferData<S>> {
+        self.wl_surface().as_ref().and_then(|wl_surface| {
+            DndFocus::<State>::enter(&**wl_surface, data, dh, source, seat, location, serial)
+        })
+    }
+
+    fn leave<S: smithay::input::dnd::Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut Self::OfferData<S>>,
+        seat: &Seat<State>,
+    ) {
+        if let Some(wl_surface) = self.wl_surface().as_ref() {
+            DndFocus::<State>::leave(&**wl_surface, data, offer, seat);
+        }
+    }
+
+    fn motion<S: smithay::input::dnd::Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut Self::OfferData<S>>,
+        seat: &Seat<State>,
+        location: smithay::utils::Point<f64, smithay::utils::Logical>,
+        time: u32,
+    ) {
+        if let Some(wl_surface) = self.wl_surface().as_ref() {
+            DndFocus::<State>::motion(&**wl_surface, data, offer, seat, location, time);
+        }
+    }
+
+    fn drop<S: smithay::input::dnd::Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut Self::OfferData<S>>,
+        seat: &Seat<State>,
+    ) {
+        if let Some(wl_surface) = self.wl_surface().as_ref() {
+            DndFocus::<State>::drop(&**wl_surface, data, offer, seat);
         }
     }
 }

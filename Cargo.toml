@@ -22,12 +22,12 @@ serde = { version = "1.0.217", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-rev = "d40ada55eceac04fb1c752f0f17b0c32cf24fbb1"
+branch = "feat/fb-effects"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "d40ada55eceac04fb1c752f0f17b0c32cf24fbb1"
+branch = "feat/fb-effects"
 
 [profile.opt]
 inherits = "release"

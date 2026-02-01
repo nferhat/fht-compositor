@@ -48,7 +48,7 @@ impl Border {
         let Parameters {
             color,
             corner_radius: radius,
-            thickness,
+            ..
         } = parameters;
 
         Self {
