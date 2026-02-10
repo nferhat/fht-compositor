@@ -48,34 +48,28 @@ impl Server {
         _ = unlink(self.socket_path);
     }
 
-    pub fn push_events(
-        &mut self,
-        events: impl IntoIterator<Item = fht_compositor_ipc::Event> + 'static,
-    ) {
+    pub fn push_event(&mut self, event: fht_compositor_ipc::Event) {
         let mut to_disconnect = vec![];
-        for event in events {
-            for (idx, sender) in self.subscribed_clients.iter().enumerate() {
-                match sender.try_send(event.clone()) {
-                    Ok(()) => (),
-                    Err(TrySendError::Full(_)) => {
-                        // In this case for some reason the I/O on the client side is not reading
-                        // events fast enough, so events are getting stuck in the (quite generous)
-                        // event queue.
-                        //
-                        // I've noticed that this happens quite a lot with quickshell.
-                        warn!("IPC client event channel is full, closing...");
-                        to_disconnect.push(idx);
-                    }
-                    Err(TrySendError::Closed(_)) => {
-                        // The channel is closed, disconnect basically. Nothing else todo.
-                        error!("Failed to send event to subscribed client");
-                        to_disconnect.push(idx);
-                    }
+        for (idx, sender) in self.subscribed_clients.iter().enumerate() {
+            match sender.try_send(event.clone()) {
+                Ok(()) => (),
+                Err(TrySendError::Full(_)) => {
+                    // In this case for some reason the I/O on the client side is not reading
+                    // events fast enough, so events are getting stuck in the (quite generous)
+                    // event queue.
+                    //
+                    // I've noticed that this happens quite a lot with quickshell.
+                    warn!("IPC client event channel is full, closing...");
+                    to_disconnect.push(idx);
+                }
+                Err(TrySendError::Closed(_)) => {
+                    // The channel is closed, disconnect basically. Nothing else todo.
+                    error!("Failed to send event to subscribed client");
+                    to_disconnect.push(idx);
                 }
             }
         }
 
-        to_disconnect.dedup();
         for idx in to_disconnect.into_iter().rev() {
             self.subscribed_clients.swap_remove(idx);
             // The client will automatically stop since it will exit out of the recv().await loop

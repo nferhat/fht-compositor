@@ -138,7 +138,9 @@ impl Fht {
         }
 
         drop(compositor_state); // rust argh
-        server.push_events(events);
+        for event in events {
+            server.push_event(event);
+        }
     }
 
     /// Refresh the IPC window state. Note that this operation is quite expensive as it will
@@ -227,7 +229,9 @@ impl Fht {
         }
 
         drop(compositor_state); // rust argh!
-        server.push_events(events);
+        for event in events {
+            server.push_event(event);
+        }
     }
 
     pub fn refresh_ipc_workspaces(&mut self) {
@@ -292,7 +296,9 @@ impl Fht {
         }
 
         drop(compositor_state); // rust argh!
-        server.push_events(events);
+        for event in events {
+            server.push_event(event);
+        }
     }
 }
 
