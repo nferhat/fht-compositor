@@ -33,8 +33,7 @@ The configuration is live-reloaded. You can edit and save the file and `fht-comp
 apply changes.
 
 If you made a mistake when writing your configuration (let that be syntax, invalid values, unknown enum variant, etc.), the
-compositor will warn you with a popup window slidi
-ng from the top of your screen. You can run `fht-comopsitor check-configuration`
+compositor will warn you with a popup window sliding from the top of your screen. You can run `fht-comopsitor check-configuration`
 to get that error in your terminal.
 
 
@@ -63,7 +62,7 @@ The merging logic does as so: For each file (starting from the main `compositor.
 ##### `autostart`
 
 Command lines to run whenever the compositor starts up. Each line is evaluated using `/bin/sh -c "<command line>"`, meaning you have
-access to shell-expansions like using variables, or exapding of `~` to `$HOME`
+access to shell-expansions like using variables, or expanding of `~` to `$HOME`
 
 > [!TIP] Autostart with systemd units
 > While using this approach for autostart can work, using systemd user services are a much better! You benefit from having
@@ -83,7 +82,7 @@ access to shell-expansions like using variables, or exapding of `~` to `$HOME`
 
 ##### `env`
 
-Environment variables to set. They are set before anything else starts up in the compositor, and before `autostart` is exxecuted
+Environment variables to set. They are set before anything else starts up in the compositor, and before `autostart` is executed
 
 ```toml
 [env]

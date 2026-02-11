@@ -50,7 +50,7 @@ Dynamic layouts are extremely flexible and can be molded to adapt for any situat
 fuss creating a specialized layout for your current job in other window management models like Sway's or River's, instead, you
 pick a layout that suits your need, resize and move some window around, and start working.
 
-You can create workflows and make them work with what you have to do quickly, and adapt for some unforseen cases or patterns
+You can create workflows and make them work with what you have to do quickly, and adapt for some unforeseen cases or patterns
 the main task has. You can build from the provided layouts and get started working.
 
 Overall, the experience is very natural and you'll get the hang of it really fast.

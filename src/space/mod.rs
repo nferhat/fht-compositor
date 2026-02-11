@@ -32,6 +32,7 @@ use crate::utils::RectCenterExt;
 use crate::window::Window;
 
 mod border;
+mod tree;
 mod closing_tile;
 mod monitor;
 pub mod shadow;
