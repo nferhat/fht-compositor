@@ -1008,7 +1008,12 @@ impl UdevData {
             anyhow::bail!("Device DRM is not active")
         }
 
-        let surface = device.surfaces.get_mut(crtc).unwrap();
+        let Some(surface) = device.surfaces.get_mut(crtc) else {
+            // This can happen if the output got disconnected, but connector_disconneted didn't
+            // fire yet, hence Fht::remove_output not triggered.
+            error!("Missing surface for output");
+            return Ok(false);
+        };
 
         let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
             self.gpu_manager.single_renderer(&surface.render_node)
@@ -1774,7 +1779,8 @@ impl UdevData {
                 };
 
                 // Calculation of the IOCTL number (_IOWR)
-                // This is the Rust translation of the C macro _IOWR('d', 0xBD, struct drm_mode_create_blob)
+                // This is the Rust translation of the C macro _IOWR('d', 0xBD, struct
+                // drm_mode_create_blob)
                 let ioctl_num = {
                     const _IOC_NRBITS: u64 = 8;
                     const _IOC_TYPEBITS: u64 = 8;
@@ -1790,10 +1796,10 @@ impl UdevData {
 
                     let size = std::mem::size_of::<drm_ffi::drm_mode_create_blob>() as u64;
 
-                    (_IOC_INOUT << _IOC_DIRSHIFT) |
-                    ((size & ((1 << _IOC_SIZEBITS) - 1)) << _IOC_SIZESHIFT) |
-                    (DRM_IOCTL_BASE << _IOC_TYPESHIFT) |
-                    (DRM_IOCTL_MODE_CREATE_BLOB_NR << _IOC_NRSHIFT)
+                    (_IOC_INOUT << _IOC_DIRSHIFT)
+                        | ((size & ((1 << _IOC_SIZEBITS) - 1)) << _IOC_SIZESHIFT)
+                        | (DRM_IOCTL_BASE << _IOC_TYPESHIFT)
+                        | (DRM_IOCTL_MODE_CREATE_BLOB_NR << _IOC_NRSHIFT)
                 };
 
                 unsafe {
@@ -1879,7 +1885,9 @@ impl UdevData {
                 }
             }
 
-            Ok(drm.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req).map(|_| blob))
+            Ok(drm
+                .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)
+                .map(|_| blob))
         });
 
         match result {
