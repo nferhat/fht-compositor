@@ -1,4 +1,5 @@
 # Default configuration for fht-compositor.
+#
 # This is a good starter configuration in case you have never used the compositor
 # before. You should build yours on top of this one.
 # ---
@@ -6,7 +7,7 @@
 # https://nferhat.github.io/fht-compositor
 
 # Autostart
-# Command lines that are executed with `/bin/sh -c "<autostart string>"`
+# SEE: https://nferhat.github.io/fht-compositor/configuration/introduction.html#autostart
 # ---
 # NOTE: If you are on systemd you should not use this and instead bind
 # whatever you need to service files instead! This will provide many niceties like
@@ -16,16 +17,13 @@ autostart = []
 # ---------------------------------------------------------
 
 # Environment variables
-#
-# Example:
-#
-# env = { DISPLAY = ":0" }
+# SEE: https://nferhat.github.io/fht-compositor/configuration/introduction.html#env
 env = {}
 
 # ---------------------------------------------------------
 
 # Input configuration.
-# Config section: 2.5
+# SEE: https://nferhat.github.io/fht-compositor/configuration/input.html
 [input]
 # -%- Keyboard configuration
 # You can configure the keyboard layout, rules, etc.
@@ -60,13 +58,14 @@ repeat-delay = 250
 # ---------------------------------------------------------
 
 # General compositor behaviour
-# Config section: 2.1
+# SEE: https://nferhat.github.io/fht-compositor/configuration/general.html
 [general]
 cursor-warps = true         # Move the cursor to newly opened windows
 focus-new-windows = true    # Give newly inserted windows keyboard focus
 focus-follows-mouse = false # When true, hovering over a window will focus it without clicking
 
 # The dynamic layouts, the core feature of fht-compositor.
+# SEE: https://nferhat.github.io/fht-compositor/usage/layouts.html
 # ---
 # You can build up a list of layouts and configure them on-the-fly. The values here
 # for nmaster and mwfact are only the defaults! See the keybinds sections for more
@@ -82,7 +81,7 @@ outer-gaps = 30 # gaps around the screen
 # ---------------------------------------------------------
 
 # Decorations: I.E the pretty
-# See section 2.4: decorations
+# SEE: https://nferhat.github.io/fht-compositor/configuration/decorations.html
 # ---
 # All the decorations can be overriden on a per-window basis using window rules.
 # See window-rules below for examples!
@@ -94,12 +93,15 @@ outer-gaps = 30 # gaps around the screen
 # Just ask GNOME devs to implement xdg_decoration for this to actually work.
 decoration-mode = "force-server-side"
 
+# Colors in the configuration are parsed using a CSS-style parser, so you can use either of
+# - CSS named colors like "red", "blue", ...
+# - Colors in hex notation (supports 3-character): #rrggbb(aa)
+# - Color notation using functions like rgba(), hsl(), rgb()...
+
 # Border around windows! (You'd probably want to leave this on)
 [decorations.border]
 thickness = 2
 radius = 15
-# You can either use a gradient color or a solid color.
-# Refer to the docs for more details on how to use them.
 focused-color = "#6791c9"
 normal-color = "#222230"
 
@@ -108,10 +110,14 @@ normal-color = "#222230"
 color = "black" # by default its rgba(black, 0.5)
 floating-only = false # Up to you, I don't judge!
 
-# Blur, because yes!
-# NOTE: Blur can be expensive, and disabling blur on lower-end devices or when
-# performance is needed (for example video games) is HIGHLY recommended.
-# Disable it with window rules if that's the case, or entierly.
+# Blur behind transparent windows.
+#
+# WARN: While good-looking, blur is an expensive operation that can heavily tax your GPU,
+# especially on lower-end systems. If you are suffering from poor performance or low battery life on
+# laptops, consider disabling blur as your first measure.
+#
+# Even if on a high-end system, you might want to disable the blur on your games using a window rule,
+# see below for examples.
 [decorations.blur]
 disable = false
 # About performance. More passes == more upscaling/downscaling == more GPU time wasted/used
@@ -126,23 +132,29 @@ noise = 0.05
 # ---------------------------------------------------------
 
 # Animations. Makes everything smooooooooooooooth!
-# See section 2.6: animations
+#
+# While not as taxing as blur, animations can be quite expensive since they force continous redraw
+# of the screen for the duration of the animation.
+#
+# Generally, animations are short-lived (<1s) so you should not generally feel their impact, but they
+# can potentially eat at battery life, especially for badly-configured spring animations (with a very
+# low epsilon value, for example)
+#
+# SEE: https://nferhat.github.io/fht-compositor/configuration/animations.html
 [animations]
 # In case you don't need them, here's a global switch
 # Each animation kind have a disable section, for more fine-grained control.
-# Again refer to the documention for more details!
 disable = false
 
 # ---------------------------------------------------------
 
-# Key bindings.
-# See section 5.4: keybinds for a list!
-# ---
-# WARN: You should AT ALL times keep a bind to quit the compositor and reload the config.
-# Why? Since key bindings is the only section that the compositor does not fill by
-# default for you!
-# ---
-# Default keybinds are heavily influenced by DWM, and XMonad.
+# Key bindings, the core of your workflow.
+# SEE: https://nferhat.github.io/fht-compositor/configuration/keybindings.html
+#
+# WARN: You should AT ALL times keep a bind to quit the compositor and reload the config, since
+# this section does not have any defaults set, and doing so will leave you with a "broken" session
+#
+# Default keybinds are heavily influenced by DWM and XMonad.
 [keybinds]
 # Most keybinds will not need an argument passed to them, so you can just use the following
 # syntax to bind those "simple" actions
@@ -217,15 +229,22 @@ Super-Shift-9 = { action = "send-to-workspace", arg = 8 }
 # ---------------------------------------------------------
 
 # Mouse bindings
-# Refer to section 2.4: mousebinds
+# SEE: https://nferhat.github.io/fht-compositor/configuration/mousebindings.html
 [mousebinds]
 Super-Left = "swap-tile"
 Super-Right = "resize-tile"
 
 # ---------------------------------------------------------
 
+# Gesture bindings, for laptop users.
+# SEE: https://nferhat.github.io/fht-compositor/configuration/gesturebindings.html
+[gesturebinds]
+
+
+# ---------------------------------------------------------
+
 # Window rules
-# Refer to section 2.6: window rules
+# SEE: https://nferhat.github.io/fht-compositor/configuration/window-rules.html
 # ---
 # Window rules are dynamic and always refresh and keep themselves up to date
 # Properties like on-workspace, is-focused, etc.
@@ -261,16 +280,3 @@ Super-Right = "resize-tile"
 # on-output = "HDMI-A-1"
 # on-workspace = 4
 # fullscreen = true
-
-# ---------------------------------------------------------
-
-# Layer-shell rules
-# Refer to section 2.7: layer rules
-# ---
-# These are mostly used to enable effects on layer shells
-# Example here to enable blur for wofi
-# [[layer-rules]]
-# corner-radius = 25
-# match-namespace = ["wofi"]
-# blur = { disable = false, noise = 0, passes = 4, radius = 1 }
-# shadow = {  color = "black", disable = false }

@@ -108,11 +108,23 @@ epsilon = 0.0001
 Animations settings for switching workspaces. The animation slides workspaces in/out the output's edges depending
 on the workspace index relative to the one you're switching to.
 
+In addition, this animation controls the parameters of the workspace switch [gesturebind](/configuration/gesturebindings)
+
 `workspace-switch.direction`: Can either be `horizontal` or `vertical`
 
-Default curve:
+Defaults:
 
 ```toml
+[animations.workspace-switch]
+# Gesturebind configuration.
+#
+# These defaults are pretty sensible, giving you quite a lot of preview room before the switch actually
+# happens.
+swipe-distance = 200.0
+swipe-cancel-ratio = 0.3
+swipe-min-speed-to-force = 500.0
+direction-detection-threshold = 5.0
+
 [animations.workspace-switch.curve]
 initial-velocity = 1.0
 clamp = false

@@ -1,5 +1,23 @@
 # General behaviour configuration
 
+This section tweaks general behaviour of the compositor, like the layouts would want to enable, how windows should be
+inserted in your workspaces, gaps and such. Here's a quick overview of the section.
+
+```toml
+[general]
+cursor-warps = true
+focus-new-windows = true
+focus-follows-mouse = false
+insert-window-strategy = "end-of-slave-stack"
+layouts = ["tile"]
+nmaster = 1
+mwfact = 0.5
+outer-gaps = 8
+inner-gaps = 8
+```
+
+---
+
 #### `cursor-warps`
 
 Whether to warp the pointer cursor whenever based on select events/actions. This currently includes

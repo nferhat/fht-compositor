@@ -8,12 +8,20 @@ in a straight horizontal line, like the following:
 You refer by outputs using their connector names, for example `eDP-1` is your laptop builtin display,
 `DP-{number}` are display port connectors, `HDMI-A-{number}` are builtin HDMI ports, etc.
 
-You configure outputs by using the `outputs.{connector-name}` table.
+You configure outputs by using the `outputs.{connector-name}` table, for example:
+
+```toml
+[outputs.eDP-1]
+mode = "1920x1080@120"
+transform = "normal" # or 90/180/270, and their -flipped variants
+vrr = "off"
+```
 
 > [!NOTE] Output management tools
 > The compositor supports the `wlr-output-management-v1` protool, allowing you to use tools like [wlr-randr](https://sr.ht/~emersion/wlr-randr/)
 > or any GUI equivalent to manage the outputs at runtime. Be aware that the output configuration will be *reset* if you change the
 > output configuration!
+
 
 ---
 
