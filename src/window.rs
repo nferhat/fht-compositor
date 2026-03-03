@@ -56,8 +56,11 @@ impl IsAlive for Window {
 
 static WINDOW_IDS: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct WindowId(pub usize);
+pub struct WindowId(usize);
 impl WindowId {
+    /// Create a unique [`WindowId`].
+    ///
+    /// Panics when you create [`usize::MAX - 1`] items.
     pub fn unique() -> Self {
         Self(WINDOW_IDS.fetch_add(1, Ordering::SeqCst))
     }

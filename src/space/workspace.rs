@@ -27,13 +27,26 @@ static WORKSPACE_IDS: AtomicUsize = AtomicUsize::new(0);
 
 /// Identifier of a [`Workspace`].
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct WorkspaceId(pub usize);
+pub struct WorkspaceId(usize);
 impl WorkspaceId {
     /// Create a unique [`WorkspaceId`].
     ///
     /// Panics when you create [`usize::MAX - 1`] items.
     fn unique() -> Self {
         Self(WORKSPACE_IDS.fetch_add(1, Ordering::SeqCst))
+    }
+
+    pub fn from_raw(id: usize) -> Option<Self> {
+        // FIXME: This is **REALLY** Bad since we don't really keep a cache of existing IDs. Meaning
+        // we can end up with a `WindowId` that holds a completely bogus value. Not optimal
+        // at all but gating it behind a function is better than leaving the field public
+        if id < WORKSPACE_IDS.load(Ordering::SeqCst) {
+            // However, we can still do a sanity check, so that we don't give a WindowId for a
+            // non-generated ID (since they are sequential)
+            None
+        } else {
+            Some(Self(id))
+        }
     }
 }
 impl std::fmt::Debug for WorkspaceId {
@@ -45,6 +58,11 @@ impl std::ops::Deref for WorkspaceId {
     type Target = usize;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+impl PartialEq<usize> for WorkspaceId {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 == *other
     }
 }
 
@@ -1840,7 +1858,7 @@ impl Workspace {
                 [end.x, end.y],
                 animation_config.duration,
             )
-            .with_curve(animation_config.curve)
+            .with_curve(animation_config.curve),
         ));
     }
 

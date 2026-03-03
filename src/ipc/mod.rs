@@ -23,10 +23,8 @@ use smithay::wayland::seat::WaylandFocus;
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
 use crate::output::OutputExt;
-use crate::space::WorkspaceId;
 use crate::state::State;
 use crate::utils::get_credentials_for_surface;
-use crate::window::WindowId;
 
 pub mod client;
 mod subscribe;
@@ -530,7 +528,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -542,7 +540,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -555,7 +553,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
@@ -580,7 +578,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
@@ -609,7 +607,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
@@ -635,7 +633,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     None => {
@@ -660,7 +658,7 @@ impl State {
                         .fht
                         .space
                         .tiles_mut()
-                        .find(|tile| tile.window().id() == WindowId(id))
+                        .find(|tile| tile.window().id() == id)
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
                     None => {
@@ -694,7 +692,7 @@ impl State {
                         .fht
                         .space
                         .tiles_mut()
-                        .find(|tile| tile.window().id() == WindowId(id))
+                        .find(|tile| tile.window().id() == id)
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
                     None => {
@@ -730,7 +728,6 @@ impl State {
                 tile.set_size(new_size, true);
             }
             fht_compositor_ipc::Action::FocusWindow { window_id } => {
-                let window_id = WindowId(window_id);
                 let mut window = None;
 
                 for monitor in self.fht.space.monitors_mut() {
@@ -772,7 +769,10 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(
+                            crate::space::WorkspaceId::from_raw(id)
+                                .context("Invalid workspace ID")?,
+                        )
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -785,7 +785,10 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(
+                            crate::space::WorkspaceId::from_raw(id)
+                                .context("Invalid workspace ID")?,
+                        )
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -801,7 +804,10 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(
+                            crate::space::WorkspaceId::from_raw(id)
+                                .context("Invalid workspace ID")?,
+                        )
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -817,7 +823,10 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(
+                            crate::space::WorkspaceId::from_raw(id)
+                                .context("Invalid workspace ID")?,
+                        )
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -864,7 +873,7 @@ impl State {
                 for monitor in self.fht.space.monitors_mut() {
                     let mut idx = None;
                     for (ws_idx, workspace) in monitor.workspaces().enumerate() {
-                        if workspace.id() == WorkspaceId(workspace_id) {
+                        if workspace.id() == workspace_id {
                             idx = Some(ws_idx);
                             break;
                         }
@@ -935,7 +944,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     None => {
@@ -971,7 +980,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -993,7 +1002,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(crate::space::WorkspaceId(id))
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -1013,7 +1022,7 @@ impl State {
                         .fht
                         .space
                         .tiles_mut()
-                        .find(|tile| tile.window().id() == WindowId(id))
+                        .find(|tile| tile.window().id() == id)
                         .context("No window with matching ID")?,
                     // If there's no active window, we just silently return
                     None => {
@@ -1044,7 +1053,7 @@ impl State {
                         .fht
                         .space
                         .windows()
-                        .find(|window| window.id() == WindowId(id))
+                        .find(|window| window.id() == id)
                         .cloned()
                         .context("No window with matching ID")?,
                     None => {
@@ -1059,7 +1068,7 @@ impl State {
 
                 self.fht
                     .space
-                    .move_window_to_workspace(&window, WorkspaceId(workspace_id), true);
+                    .move_window_to_workspace(&window, workspace_id, true);
             }
         }
 

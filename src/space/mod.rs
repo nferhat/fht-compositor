@@ -359,7 +359,10 @@ impl Space {
     }
 
     /// Get the [`Workspace`] associated with this [`WorkspaceId`].
-    pub fn workspace_mut_for_id(&mut self, workspace_id: WorkspaceId) -> Option<&mut Workspace> {
+    pub fn workspace_mut_for_id<WsId>(&mut self, workspace_id: WsId) -> Option<&mut Workspace>
+    where
+        WorkspaceId: PartialEq<WsId>,
+    {
         self.monitors
             .iter_mut()
             .find_map(|mon| mon.workspaces_mut().find(|ws| ws.id() == workspace_id))
@@ -728,12 +731,14 @@ impl Space {
     }
 
     /// Move this [`Window`] to a given [`Workspace`].
-    pub fn move_window_to_workspace(
+    pub fn move_window_to_workspace<WsId>(
         &mut self,
         window: &Window,
-        workspace_id: WorkspaceId,
+        workspace_id: WsId,
         animate: bool,
-    ) {
+    ) where
+        WorkspaceId: PartialEq<WsId>,
+    {
         // If we try to add the window back into its original workspace.
         let mut original_workspace_id = None;
         let mut insert_location = None;
@@ -768,7 +773,7 @@ impl Space {
         else {
             // No matching monitor, insert back
             let original_workspace = self
-                .workspace_mut_for_id(original_workspace_id)
+                .workspace_mut_for_id::<WorkspaceId>(original_workspace_id)
                 .expect("original_workspace_id should always be valid");
             original_workspace.insert_window(window.clone(), insert_location, animate);
             return;
