@@ -387,7 +387,7 @@ impl Fht {
         workspace: &Workspace,
     ) {
         // we constrain the popup inside the output the window is, to avoid overflows
-        let mut target = workspace.output().geometry();
+        let mut target = Rectangle::from_size(workspace.output().geometry().size);
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
         target.loc -= workspace.window_location(&window).unwrap();
 
