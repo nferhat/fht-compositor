@@ -594,9 +594,8 @@ impl Device {
             )
         });
 
-        fht.queue_redraw(&output);
         let surface = Surface::new(
-            output,
+            output.clone(),
             output_global,
             self.render_node,
             conn.handle(),
@@ -605,6 +604,12 @@ impl Device {
             dmabuf_feedback,
         );
         self.surfaces.insert(crtc, surface);
+
+        fht.loop_handle.insert_idle(move |state| {
+            if state.fht.output_state.contains_key(&output) {
+                state.fht.queue_redraw(&output);
+            }
+        });
 
         Ok(())
     }
