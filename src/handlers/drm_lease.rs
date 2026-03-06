@@ -13,8 +13,7 @@ impl DrmLeaseHandler for State {
             .devices
             .get_mut(&node)
             .unwrap()
-            .lease_state
-            .as_mut()
+            .lease_state()
             .unwrap()
     }
 
@@ -29,56 +28,17 @@ impl DrmLeaseHandler for State {
             .devices
             .get(&node)
             .ok_or(LeaseRejected::default())?;
-
-        let drm_device = device.drm_output_manager.device();
-        let mut builder = DrmLeaseBuilder::new(drm_device);
-        for conn in request.connectors {
-            if let Some((_, crtc)) = device
-                .non_desktop_connectors
-                .iter()
-                .find(|(handle, _)| *handle == conn)
-            {
-                builder.add_connector(conn);
-                builder.add_crtc(*crtc);
-                let planes = drm_device.planes(crtc).map_err(LeaseRejected::with_cause)?;
-
-                let (primary_plane, primary_plane_claim) = planes
-                    .primary
-                    .iter()
-                    .find_map(|plane| {
-                        drm_device
-                            .claim_plane(plane.handle, *crtc)
-                            .map(|claim| (plane, claim))
-                    })
-                    .ok_or_else(LeaseRejected::default)?;
-                builder.add_plane(primary_plane.handle, primary_plane_claim);
-                if let Some((cursor, claim)) = planes.cursor.iter().find_map(|plane| {
-                    drm_device
-                        .claim_plane(plane.handle, *crtc)
-                        .map(|claim| (plane, claim))
-                }) {
-                    builder.add_plane(cursor.handle, claim);
-                }
-            } else {
-                warn!(
-                    ?conn,
-                    "Lease requested for desktop connector, denying request"
-                );
-                return Err(LeaseRejected::default());
-            }
-        }
-
-        Ok(builder)
+        device.lease_request(request)
     }
 
     fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
         let backend = self.backend.udev().devices.get_mut(&node).unwrap();
-        backend.active_leases.push(lease);
+        backend.add_active_lease(lease);
     }
 
     fn lease_destroyed(&mut self, node: DrmNode, lease_id: u32) {
-        let backend = self.backend.udev().devices.get_mut(&node).unwrap();
-        backend.active_leases.retain(|l| l.id() != lease_id);
+        let device = self.backend.udev().devices.get_mut(&node).unwrap();
+        device.remove_lease(lease_id);
     }
 }
 

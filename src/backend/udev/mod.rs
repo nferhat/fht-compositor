@@ -3,6 +3,9 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
+mod device;
+mod mode;
+
 use anyhow::Context as _;
 use fht_compositor_config::VrrMode;
 use libc::dev_t;
@@ -15,7 +18,7 @@ use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
-    DrmNode, DrmSurface, NodeType, VrrSupport,
+    DrmNode, DrmSurface, NodeType,
 };
 use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
@@ -36,41 +39,35 @@ use smithay::backend::udev::{self, UdevBackend, UdevEvent};
 use smithay::backend::SwapBuffersError;
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::input::keyboard::XkbConfig;
-use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Subpixel};
+use smithay::output::{Mode as OutputMode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{Dispatcher, RegistrationToken};
+use smithay::reexports::drm;
 use smithay::reexports::drm::control::atomic::AtomicModeReq;
-use smithay::reexports::drm::control::connector::{
-    self, Handle as ConnectorHandle, Info as ConnectorInfo,
-};
+use smithay::reexports::drm::control::connector::{self, Handle as ConnectorHandle};
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
 use smithay::reexports::drm::control::{
-    property, AtomicCommitFlags, Device as ControlDevice, ModeFlags, ModeTypeFlags, ResourceHandle,
+    property, AtomicCommitFlags, Device as ControlDevice, ResourceHandle,
 };
-use smithay::reexports::drm::{self, Device as _};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
-use smithay::reexports::rustix::path::Arg;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{DeviceFd, Monotonic, Scale};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
-use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState};
+use smithay::wayland::drm_lease::DrmLeaseState;
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
-use smithay_drm_extras::display_info;
-use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use crate::frame_clock::FrameClock;
 use crate::handlers::gamma_control::GammaControlState;
 use crate::output::RedrawState;
 use crate::protocols::output_management;
-use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::{
     AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
 };
@@ -132,13 +129,30 @@ impl AsGlowRenderer for UdevRenderer<'_> {
     }
 }
 
+/// The udev session data.
 pub struct UdevData {
+    // The [`LibSeatSession`] holding the seat data. This is fetched from the `seatd` daemon (or
+    // whatever the equivalent is for system.)
     pub session: LibSeatSession,
     dmabuf_global: Option<DmabufGlobal>,
+    // The primary GPU (or render node) used todo all drawing operations.
+    //
+    // The rendering architecture in `fht-compositor` is rather simplistic, with the primary node
+    // doing all/most of the work (fetching surfaces from windows, loading them up, and compositing
+    // them into a buffer if needed).
+    //
+    // What happens from here depends on the surface:
+    // 1. If the surface render node is the primary_gpu, the content gets sent to the connector and
+    //    displayed to the final user, nothing special here.
+    // 2. If the surface render node is not the primary_gpu, the content gets copied and composited
+    //    back in a buffer owned by that render node, and then displayed to the final user.
+    //
+    // FIXME: Perhaps a multi-gpu architecture would be nice, where users can pick&choose what
+    //        render node suit them best, for example through a window rule.
     pub primary_gpu: DrmNode,
     pub primary_node: DrmNode,
     pub gpu_manager: GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
-    pub devices: HashMap<DrmNode, Device>,
+    pub devices: HashMap<DrmNode, device::Device>,
     pub syncobj_state: Option<DrmSyncobjState>,
     _registration_tokens: Vec<RegistrationToken>,
     #[allow(dead_code)]
@@ -223,11 +237,7 @@ impl UdevData {
                     libinput_context.suspend();
 
                     for device in state.backend.udev().devices.values_mut() {
-                        device.drm_output_manager.pause();
-                        device.active_leases.clear();
-                        if let Some(leasing_state) = device.lease_state.as_mut() {
-                            leasing_state.suspend();
-                        }
+                        device.pause();
                     }
                 }
                 SessionEvent::ActivateSession => {
@@ -238,23 +248,7 @@ impl UdevData {
                     }
 
                     for device in &mut state.backend.udev().devices.values_mut() {
-                        // if we do not care about flicking (caused by modesetting) we could just
-                        // pass true for disable connectors here. this would make sure our drm
-                        // device is in a known state (all connectors and planes disabled).
-                        // but for demonstration we choose a more optimistic path by leaving the
-                        // state as is and assume it will just work. If this assumption fails
-                        // we will try to reset the state when trying to queue a frame.
-                        device
-                            .drm_output_manager
-                            .lock()
-                            .activate(false)
-                            .expect("Failed to activate DRM!");
-                        if let Some(leasing_state) = device.lease_state.as_mut() {
-                            leasing_state.resume::<State>();
-                        }
-                        if let Err(err) = device.drm_output_manager.device_mut().reset_state() {
-                            warn!(?err, "Failed to reset drm surface state");
-                        }
+                        device.activate();
                     }
 
                     state.fht.idle_notify_activity();
@@ -264,7 +258,6 @@ impl UdevData {
             .map_err(|_| anyhow::anyhow!("Failed to insert libseat event source!"))?;
 
         let gpu_manager = GbmGlesBackend::default();
-
         let gpu_manager = GpuManager::new(gpu_manager).expect("Failed to initialize GPU manager!");
 
         let (primary_gpu, primary_node) = if let Some(user_path) = &state.config.debug.render_node {
@@ -407,8 +400,8 @@ impl UdevData {
 
         // Open the device path with seatd
         let oflags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK;
-        let fd = self.session.open(path, oflags)?;
-        let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+        let device_fd = self.session.open(path, oflags)?;
+        let fd = DrmDeviceFd::new(DeviceFd::from(device_fd));
 
         // Create DRM notifier to listen for vblanks.
         let (drm, drm_notifier) = DrmDevice::new(fd.clone(), true)?;
@@ -528,25 +521,20 @@ impl UdevData {
             }
         }
 
-        self.devices.insert(
-            device_node,
-            Device {
-                surfaces: HashMap::new(),
-                non_desktop_connectors: Vec::new(),
-                lease_state: DrmLeaseState::new::<State>(&fht.display_handle, &device_node)
-                    .map_err(|err| {
-                        warn!(?err, ?device_node, "Failed to initialize DRM lease state")
-                    })
-                    .ok(),
-                active_leases: Vec::new(),
-                drm_output_manager,
-                gbm,
-                drm_scanner: DrmScanner::new(),
-                render_node,
-                drm_registration_token,
-            },
+        let lease_state = DrmLeaseState::new::<State>(&fht.display_handle, &device_node)
+            .map_err(|err| warn!(?err, ?device_node, "Failed to initialize DRM lease state"))
+            .ok();
+
+        let device = device::Device::new(
+            device_node.clone(),
+            lease_state,
+            drm_output_manager,
+            gbm,
+            render_node,
+            drm_registration_token,
         );
 
+        self.devices.insert(device_node, device);
         self.device_changed(device_id, fht)
             .context("Failed to update device!")?;
 
@@ -567,39 +555,7 @@ impl UdevData {
             return Ok(());
         };
 
-        let Ok(result) = device
-            .drm_scanner
-            .scan_connectors(device.drm_output_manager.device())
-            .inspect_err(|err| warn!(?err, ?device_node, "Failed to scan connectors for device"))
-        else {
-            return Ok(());
-        };
-        for event in result {
-            match event {
-                DrmScanEvent::Connected { connector, crtc } => {
-                    if let Some(crtc) = crtc {
-                        if let Err(err) =
-                            self.connector_connected(device_node, connector, crtc, fht)
-                        {
-                            error!(?crtc, ?err, "Failed to add connector to device")
-                        };
-                    }
-                    // No crtc, can't do much for you since I dont even know WHAT you connected.
-                }
-                DrmScanEvent::Disconnected { connector, crtc } => {
-                    if let Some(crtc) = crtc {
-                        if let Err(err) =
-                            self.connector_disconnected(device_node, connector, crtc, fht)
-                        {
-                            error!(?crtc, ?err, "Failed to remove connector from device")
-                        }
-                    }
-                    // No crtc, can't do much for you since I dont even know WHAT you disconnected.
-                }
-            }
-        }
-
-        Ok(())
+        device.update(fht, self.primary_gpu, &mut self.gpu_manager)
     }
 
     fn device_removed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
@@ -608,7 +564,7 @@ impl UdevData {
         }
 
         let device_node = DrmNode::from_dev_id(device_id)?;
-        let Some(mut device) = self.devices.remove(&device_node) else {
+        let Some(device) = self.devices.remove(&device_node) else {
             warn!(
                 ?device_node,
                 "Attempted to call device_removed on a non-existent device!"
@@ -616,381 +572,7 @@ impl UdevData {
             return Ok(());
         };
 
-        // Disable every surface.
-        let crtcs: Vec<_> = device
-            .drm_scanner
-            .crtcs()
-            .map(|(info, crtc)| (info.clone(), crtc))
-            .collect();
-        for (connector, crtc) in crtcs {
-            let _ = self.connector_disconnected(device_node, connector, crtc, fht);
-        }
-
-        // Disable globals
-        if let Some(mut leasing_state) = device.lease_state.take() {
-            leasing_state.disable_global::<State>();
-        }
-
-        self.gpu_manager.as_mut().remove_node(&device.render_node);
-        fht.loop_handle.remove(device.drm_registration_token);
-
-        Ok(())
-    }
-
-    fn connector_connected(
-        &mut self,
-        device_node: DrmNode,
-        connector: ConnectorInfo,
-        crtc: CrtcHandle,
-        fht: &mut Fht,
-    ) -> anyhow::Result<()> {
-        debug!(?device_node, ?crtc, "Connector connected");
-        let Some(device) = self.devices.get_mut(&device_node) else {
-            warn!(
-                ?device_node,
-                "Trying to call connector_connected on a non-existent device!"
-            );
-            return Ok(());
-        };
-
-        let mut renderer = self
-            .gpu_manager
-            .single_renderer(&device.render_node)
-            .unwrap();
-
-        let output_name = format!(
-            "{}-{}",
-            connector.interface().as_str(),
-            connector.interface_id()
-        );
-        debug!(?crtc, ?output_name, "Trying to setup connector");
-        let drm_device = device.drm_output_manager.device();
-
-        let non_desktop = match get_property_val(drm_device, connector.handle(), "non-desktop") {
-            Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
-            Err(err) => {
-                warn!(
-                    ?crtc,
-                    ?err,
-                    "Failed to get non-desktop property for connector, defaulting to false."
-                );
-                false
-            }
-        };
-
-        let info = display_info::for_connector(drm_device, connector.handle());
-        let make = info
-            .as_ref()
-            .and_then(|info| info.make())
-            .unwrap_or_else(|| "Unknown".into());
-        let model = info
-            .as_ref()
-            .and_then(|info| info.model())
-            .unwrap_or_else(|| "Unknown".into());
-        let serial_number = info
-            .as_ref()
-            .and_then(|info| info.serial())
-            .unwrap_or_else(|| "Unknown".into());
-
-        if non_desktop {
-            debug!(
-                connector_name = output_name,
-                "Setting up connector for leasing!"
-            );
-
-            device
-                .non_desktop_connectors
-                .push((connector.handle(), crtc));
-
-            if let Some(leasing_state) = device.lease_state.as_mut() {
-                leasing_state.add_connector::<State>(
-                    connector.handle(),
-                    output_name,
-                    format!("{make}-{model}"),
-                );
-            }
-
-            return Ok(());
-        }
-
-        let mut new_scale = None;
-        let mut new_transform = None;
-
-        // Sometimes DRM connectors can have custom modes.
-        // ---
-        // The user specifies one, for example 1920x1080@165 and we build a new DrmMode out
-        // of this and the connector info. We test it, it works, nice, otherwise, use
-        // closest requested, or fallback.
-        let modes = connector.modes();
-        let default_mode = get_default_mode(modes);
-        let mut requested_mode = None;
-        let output_config = fht
-            .config
-            .outputs
-            .get(&output_name)
-            .cloned()
-            .unwrap_or_default();
-
-        if let Some((width, height, refresh)) = output_config.mode {
-            // If we can find a pre-defined mode from the output with the given parameters,
-            // everything is fine!
-            requested_mode = get_matching_mode(modes, width, height, refresh)
-                // Otherwise try to generate a mode with CVT calculations,
-                // though this doesn't always work.
-                .or_else(|| get_custom_mode(width, height, refresh));
-        }
-
-        if let Some(transform) = output_config.transform {
-            new_transform = Some(transform.into());
-        }
-
-        if let Some(scale) = output_config.scale {
-            new_scale = Some(smithay::output::Scale::Integer(scale));
-        }
-
-        // Create the output object and expose it's wl_output global to clients
-        let physical_size = connector
-            .size()
-            .map(|(w, h)| (w as i32, h as i32))
-            .unwrap_or((0, 0))
-            .into();
-        let physical_properties = PhysicalProperties {
-            size: physical_size,
-            subpixel: match connector.subpixel() {
-                connector::SubPixel::HorizontalRgb => Subpixel::HorizontalRgb,
-                connector::SubPixel::HorizontalBgr => Subpixel::HorizontalBgr,
-                connector::SubPixel::VerticalRgb => Subpixel::VerticalRgb,
-                connector::SubPixel::VerticalBgr => Subpixel::VerticalBgr,
-                connector::SubPixel::None => Subpixel::None,
-                _ => Subpixel::Unknown,
-            },
-            make,
-            model,
-            serial_number,
-        };
-
-        // Now create the wl_output object to expose it to clients.
-        // The global will be created with Fht::add_output
-        let output = Output::new(output_name.clone(), physical_properties);
-        for mode in modes {
-            let wl_mode = OutputMode::from(*mode);
-            output.add_mode(wl_mode);
-        }
-
-        let mut refresh_interval =
-            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&default_mode));
-        let new_mode = requested_mode
-            .map(|mode| {
-                refresh_interval =
-                    Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&mode));
-                OutputMode::from(mode)
-            })
-            .unwrap_or_else(|| OutputMode::from(default_mode));
-        output.set_preferred(new_mode); // adds the mode if its a custom CVT one
-        output.change_current_state(Some(new_mode), new_transform, new_scale, None);
-        output
-            .user_data()
-            // This ID is used to match and output and a udev surface
-            .insert_if_missing(|| UdevOutputData {
-                device: device_node,
-                crtc,
-            });
-
-        let output_global = output.create_global::<State>(&fht.display_handle);
-
-        let driver = drm_device
-            .get_driver()
-            .context("failed to query drm driver")?;
-        let mut planes = drm_device
-            .planes(&crtc)
-            .context("failed to query crtc planes")?;
-
-        // Using an overlay plane on a nvidia card breaks
-        if driver
-            .name()
-            .to_string_lossy()
-            .to_lowercase()
-            .contains("nvidia")
-            || driver
-                .description()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains("nvidia")
-        {
-            planes.overlay = vec![];
-        }
-
-        // When initializing the DRM output, we use the default mode to initialize, since sometimes
-        // using a custom mode right now might cause the DrmOutput to fail initializing.
-        //
-        // DrmCompositor will automatically try to switch to the active output mode after being
-        // initialized.
-        //
-        // SEE: nferhat/fht-compositor#75
-        let render_elements = generate_output_render_elements(fht, &mut renderer);
-        let mut drm_output = match device
-            .drm_output_manager
-            .lock()
-            .initialize_output::<_, FhtRenderElement<UdevRenderer<'_>>>(
-                crtc,
-                default_mode,
-                &[connector.handle()],
-                &output,
-                Some(planes.clone()),
-                &mut renderer,
-                &render_elements,
-            ) {
-            Ok(output) => output,
-            Err(err) => {
-                anyhow::bail!("Failed to create DRM output: {err:?}");
-            }
-        };
-
-        // Since we only use 8-bit formats, we fix the "max bpc" property
-        if let Err(err) = set_max_bpc(device.drm_output_manager.device(), connector.handle(), 8) {
-            warn!(?err, "Failed to set max bpc for output {output_name}");
-        }
-
-        // We check for vrr now, since we need a DrmOutput to access the compositor.
-        let vrr_enabled = drm_output.with_compositor(|compositor| {
-            match compositor.vrr_supported(connector.handle()) {
-                Ok(VrrSupport::NotSupported) => {
-                    if matches!(output_config.vrr, VrrMode::On | VrrMode::OnDemand) {
-                        warn!("Cannot enable VRR on output since its not supported!");
-                    }
-                    let _ = compositor.use_vrr(false);
-                    None
-                }
-                Ok(VrrSupport::Supported | VrrSupport::RequiresModeset) => {
-                    // If on demand we only enable when we have a window exported to primary
-                    // plane, otherwise keep don't enable it now.
-                    let enable = output_config.vrr == VrrMode::On;
-                    if let Err(err) = compositor.use_vrr(enable) {
-                        warn!(
-                            ?err,
-                            vrr = enable,
-                            "Couldn't update VRR property on new output"
-                        );
-                    }
-
-                    Some(match compositor.vrr_enabled() {
-                        true => VrrMode::On,
-                        false => VrrMode::Off,
-                    })
-                }
-
-                Err(err) => {
-                    warn!(?err, "Failed to query VRR support for output");
-                    None
-                }
-            }
-        });
-
-        // Apply the custom mode if any
-        if let Some(mode) = requested_mode {
-            if let Err(err) = drm_output.use_mode(mode, &mut renderer, &render_elements) {
-                error!(?err, "Failed to apply custom mode for {output_name}");
-            }
-        }
-
-        fht.add_output(output.clone(), Some(refresh_interval), vrr_enabled);
-
-        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
-        // to avoid noise and pollution from other outputs leaking into eachother
-        EffectsFramebuffers::init_for_output(&output, &mut renderer);
-
-        let dmabuf_feedback = drm_output.with_compositor(|compositor| {
-            // We only render on one primary gpu, so we don't have to manage different feedbacks
-            // based on render nodes.
-            get_surface_dmabuf_feedback(
-                self.primary_gpu,
-                device.render_node,
-                &mut self.gpu_manager,
-                compositor.surface(),
-            )
-        });
-
-        let surface = Surface {
-            render_node: device.render_node,
-            connector: connector.handle(),
-            output: output.clone(),
-            output_global,
-            drm_output,
-            dmabuf_feedback,
-            gamma_blob: None,
-        };
-
-        fht.queue_redraw(&surface.output);
-        device.surfaces.insert(crtc, surface);
-
-        Ok(())
-    }
-
-    fn connector_disconnected(
-        &mut self,
-        device_node: DrmNode,
-        connector: ConnectorInfo,
-        crtc: CrtcHandle,
-        fht: &mut Fht,
-    ) -> anyhow::Result<()> {
-        debug!(?device_node, ?crtc, "Connector disconnected");
-        let Some(device) = self.devices.get_mut(&device_node) else {
-            warn!(
-                ?device_node,
-                "Trying to call connector_disconnected on a non-existent device!"
-            );
-            return Ok(());
-        };
-
-        if let Some(pos) = device
-            .non_desktop_connectors
-            .iter()
-            .position(|(handle, _)| *handle == connector.handle())
-        {
-            // Connector is non-desktop, just disable leasing and unregister it.
-            let _ = device.non_desktop_connectors.remove(pos);
-            if let Some(leasing_state) = device.lease_state.as_mut() {
-                leasing_state.withdraw_connector(connector.handle());
-            }
-            return Ok(());
-        }
-
-        let Some(surface) = device.surfaces.remove(&crtc) else {
-            panic!("Tried to remove a non-existant surface!")
-        };
-
-        // Remove and disable output.
-        let global = surface.output_global;
-        fht.display_handle.disable_global::<State>(global.clone());
-        let output_clone = surface.output.clone();
-        fht.loop_handle
-            .insert_source(
-                Timer::from_duration(Duration::from_secs(10)),
-                move |_time, _, state| {
-                    state
-                        .fht
-                        .display_handle
-                        .remove_global::<State>(global.clone());
-                    state.fht.remove_output(&output_clone);
-                    TimeoutAction::Drop
-                },
-            )
-            .expect("Failed to insert output global removal timer!");
-
-        let mut renderer = self
-            .gpu_manager
-            .single_renderer(&device.render_node)
-            .unwrap();
-        let render_elements = generate_output_render_elements(fht, &mut renderer);
-        let _ = device
-            .drm_output_manager
-            .lock()
-            .try_to_restore_modifiers::<_, FhtRenderElement<UdevRenderer<'_>>>(
-                &mut renderer,
-                &render_elements,
-            );
-
-        Ok(())
+        device.remove(fht, &mut self.gpu_manager)
     }
 
     pub fn render(
@@ -1004,7 +586,7 @@ impl UdevData {
         let UdevOutputData { device, crtc } = output.user_data().get().unwrap();
 
         let device = self.devices.get_mut(device).unwrap();
-        if !device.drm_output_manager.device().is_active() {
+        if !device.is_active() {
             anyhow::bail!("Device DRM is not active")
         }
 
@@ -1076,15 +658,10 @@ impl UdevData {
                     SwapBuffersError::ContextLost(err) => match err.downcast_ref::<DrmError>() {
                         Some(DrmError::TestFailed(_)) => {
                             // reset the complete state, disabling all connectors and planes in case
-                            // we hit a test failed most likely we hit
-                            // this after a tty switch when a foreign master changed CRTC <->
-                            // connector bindings and we run in a
+                            // we hit a test failed most likely we hit this after a tty switch when
+                            // a foreign master changed CRTC <-> connector bindings and we run in a
                             // mismatch
-                            device
-                                .drm_output_manager
-                                .device_mut()
-                                .reset_state()
-                                .expect("failed to reset drm device");
+                            device.reset();
                         }
                         _ => panic!("Rendering loop lost: {}", err),
                     },
@@ -1211,6 +788,7 @@ impl UdevData {
         }
         trace!(?duration, "starting estimated vblank timer");
 
+        let surface = device.surfaces.get_mut(crtc).unwrap();
         let timer = Timer::from_duration(duration);
         let output = surface.output.clone();
         let token = fht
@@ -1341,7 +919,7 @@ impl UdevData {
         self.devices.values_mut().for_each(|device| {
             // FIX: Reset overlay planes when changing VTs since some compositors
             // don't use then and as a result don't clean them.
-            let _ = device.drm_output_manager.device_mut().reset_state();
+            let _ = device.reset();
             for surface in device.surfaces.values_mut() {
                 let _ = surface
                     .drm_output
@@ -1357,7 +935,9 @@ impl UdevData {
     /// Get the GBM device associated with the primary node.
     #[cfg(feature = "xdg-screencast-portal")]
     pub fn primary_gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
-        self.devices.get(&self.primary_node).map(|d| d.gbm.clone())
+        self.devices
+            .get(&self.primary_node)
+            .map(device::Device::gbm_device)
     }
 
     /// Reload output configuration and apply new surface modes.
@@ -1408,13 +988,13 @@ impl UdevData {
                 // of this and the connector info. We test it, it works, nice, otherwise, use
                 // fallback
                 let modes = connector.modes();
-                let mut requested_mode = get_default_mode(modes);
+                let mut requested_mode = mode::get_default_mode(modes);
                 let mut custom_mode = None;
 
                 if let Some((width, height, refresh)) = output_config.mode {
-                    requested_mode =
-                        get_matching_mode(modes, width, height, refresh).unwrap_or(requested_mode);
-                    custom_mode = get_custom_mode(width, height, refresh);
+                    requested_mode = mode::get_matching_mode(modes, width, height, refresh)
+                        .unwrap_or(requested_mode);
+                    custom_mode = mode::get_custom_mode(width, height, refresh);
                 }
 
                 let render_elements = generate_output_render_elements(fht, &mut renderer);
@@ -1478,7 +1058,7 @@ impl UdevData {
                     .change_current_state(Some(wl_mode), None, None, None);
                 let output_state = fht.output_state.get_mut(&surface.output).unwrap();
                 let refresh_interval =
-                    Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
+                    Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&new_mode));
                 let vrr_enabled = surface
                     .drm_output
                     .with_compositor(|compositor| compositor.vrr_enabled());
@@ -1518,13 +1098,23 @@ impl UdevData {
         }
 
         for (node, connector, crtc) in to_disable {
-            if let Err(err) = self.connector_disconnected(node, connector, crtc, fht) {
+            let device = self.devices.get_mut(&node).unwrap();
+            if let Err(err) =
+                device.remove_connector(crtc, connector.handle(), &mut self.gpu_manager, fht)
+            {
                 warn!(?node, ?crtc, ?err, "Failed to disable connector");
             }
         }
 
         for (node, connector, crtc) in to_enable {
-            if let Err(err) = self.connector_connected(node, connector, crtc, fht) {
+            let device = self.devices.get_mut(&node).unwrap();
+            if let Err(err) = device.add_connector(
+                crtc,
+                connector,
+                self.primary_gpu,
+                &mut self.gpu_manager,
+                fht,
+            ) {
                 warn!(?node, ?crtc, ?err, "Failed to enable connector");
             }
         }
@@ -1570,9 +1160,9 @@ impl UdevData {
             .map(|(info, _)| info)
             .unwrap();
         let modes = connector.modes();
-        let requested_mode = get_matching_mode(modes, width, height, Some(refresh))
-            .unwrap_or_else(|| get_default_mode(modes));
-        let custom_mode = get_custom_mode(width, height, Some(refresh));
+        let requested_mode = mode::get_matching_mode(modes, width, height, Some(refresh))
+            .unwrap_or_else(|| mode::get_default_mode(modes));
+        let custom_mode = mode::get_custom_mode(width, height, Some(refresh));
         let new_mode = custom_mode.unwrap_or(requested_mode);
 
         if surface
@@ -1621,7 +1211,7 @@ impl UdevData {
             .change_current_state(Some(wl_mode), None, None, None);
         let output_state = fht.output_state.get_mut(&surface.output).unwrap();
         let refresh_interval =
-            Duration::from_secs_f64(1_000f64 / calculate_refresh_rate(&new_mode));
+            Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&new_mode));
         let vrr_enabled = surface
             .drm_output
             .with_compositor(|compositor| compositor.vrr_enabled());
@@ -1909,24 +1499,6 @@ struct UdevOutputData {
     crtc: CrtcHandle,
 }
 
-pub struct Device {
-    surfaces: HashMap<CrtcHandle, Surface>,
-    pub non_desktop_connectors: Vec<(ConnectorHandle, CrtcHandle)>,
-    pub lease_state: Option<DrmLeaseState>,
-    pub active_leases: Vec<DrmLease>,
-    pub drm_output_manager: DrmOutputManager<
-        GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
-        OutputPresentationFeedback,
-        DrmDeviceFd,
-    >,
-    #[allow(unused)] // only read when using xdg-screencast-portal
-    gbm: GbmDevice<DrmDeviceFd>,
-    drm_scanner: DrmScanner,
-    render_node: DrmNode,
-    drm_registration_token: RegistrationToken,
-}
-
 pub struct Surface {
     render_node: DrmNode,
     output: Output,
@@ -2098,186 +1670,6 @@ fn get_property_val(
         }
     }
     anyhow::bail!("No prop found for {}", name)
-}
-
-/// Calculate the refresh rate, in seconds of this [`Mode`](drm::control::Mode).
-///
-/// Code copied from mutter.
-fn calculate_refresh_rate(mode: &drm::control::Mode) -> f64 {
-    let htotal = mode.hsync().2 as u64;
-    let vtotal = mode.vsync().2 as u64;
-    let vscan = mode.vscan() as u64;
-
-    let numerator = mode.clock() as u64 * 1_000_000;
-    let denominator = vtotal * htotal * (if vscan > 1 { vscan } else { 1 });
-    (numerator / denominator) as f64
-}
-
-/// Gets the mode that matches the given description the closest.
-fn get_matching_mode(
-    modes: &[drm::control::Mode],
-    width: u16,
-    height: u16,
-    refresh: Option<f64>,
-) -> Option<drm::control::Mode> {
-    if modes.is_empty() {
-        return None;
-    }
-
-    if let Some(refresh) = refresh {
-        let refresh_milli_hz = (refresh * 1000.).round() as i32;
-        if let Some(mode) = modes
-            .iter()
-            .filter(|mode| mode.size() == (width, height))
-            // Get the mode with the closest refresh.
-            // Since generally you will type `@180` not `@179.998`
-            .min_by_key(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs())
-            .copied()
-        {
-            return Some(mode);
-        }
-    } else {
-        // User just wants highest refresh rate
-        let mut matching_modes = modes
-            .iter()
-            .filter(|mode| mode.size() == (width, height))
-            .copied()
-            .collect::<Vec<_>>();
-        matching_modes.sort_by_key(|mode| mode.vrefresh());
-
-        if let Some(mode) = matching_modes.first() {
-            return Some(*mode);
-        }
-    }
-
-    None
-}
-
-/// Get the default mode from a mode list.
-/// It first tries to find the preferred mode, if not found, uses the first one available
-fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
-    modes
-        .iter()
-        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-        .copied()
-        .unwrap_or_else(|| *modes.first().unwrap())
-}
-
-/// Get a [`Mode`](drm::control::Mode)'s refresh rate in millihertz
-fn get_refresh_milli_hz(mode: &drm::control::Mode) -> i32 {
-    let clock = mode.clock() as u64;
-    let htotal = mode.hsync().2 as u64;
-    let vtotal = mode.vsync().2 as u64;
-
-    let mut refresh = (clock * 1_000_000 / htotal + vtotal / 2) / vtotal;
-
-    if mode.flags().contains(ModeFlags::INTERLACE) {
-        refresh *= 2;
-    }
-
-    if mode.flags().contains(ModeFlags::DBLSCAN) {
-        refresh /= 2;
-    }
-
-    if mode.vscan() > 1 {
-        refresh /= mode.vscan() as u64;
-    }
-
-    refresh as i32
-}
-
-/// Create a new DRM mode info struct from a width, height and refresh rate.
-/// Implementation copied from Hyprland's backend, Aquamarine
-fn get_custom_mode(width: u16, height: u16, refresh: Option<f64>) -> Option<drm::control::Mode> {
-    use libdisplay_info::cvt;
-
-    let cvt_options = cvt::Options {
-        red_blank_ver: cvt::ReducedBlankingVersion::None,
-        h_pixels: width as _,
-        v_lines: height as _,
-        ip_freq_rqd: refresh.unwrap_or(60.0),
-        video_opt: false,
-        vblank: 0.0,
-        additional_hblank: 0,
-        early_vsync_rqd: false,
-        int_rqd: false,
-        margins_rqd: false,
-    };
-    let timing = cvt::Timing::compute(cvt_options);
-    let hsync_start = width as f64 + timing.h_front_porch;
-    let vsync_start = timing.v_lines_rnd + timing.v_front_porch;
-    let hsync_end = hsync_start + timing.h_sync;
-    let vsync_end = vsync_start + timing.v_sync;
-
-    let name = unsafe {
-        let mut name = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
-        name.resize(32, b' ');
-        let name = &*(name.as_slice() as *const [u8] as *const [i8]);
-        name.try_into().ok()?
-    };
-    let mode_info = drm_ffi::drm_mode_modeinfo {
-        clock: (timing.act_pixel_freq * 1000.).round() as u32,
-        hdisplay: width,
-        hsync_start: hsync_start as u16,
-        hsync_end: hsync_end as u16,
-        htotal: (hsync_end + timing.h_back_porch) as u16,
-        hskew: 0,
-        vdisplay: timing.v_lines_rnd as u16,
-        vsync_start: vsync_start as u16,
-        vsync_end: vsync_end as u16,
-        vtotal: (vsync_end + timing.v_back_porch) as u16,
-        vscan: 0,
-        vrefresh: timing.act_frame_rate.round() as u32,
-        flags: drm_ffi::DRM_MODE_FLAG_NHSYNC | drm_ffi::DRM_MODE_FLAG_PVSYNC,
-        type_: drm_ffi::DRM_MODE_TYPE_USERDEF,
-        name,
-    };
-
-    Some(mode_info.into())
-}
-
-// https://lists.freedesktop.org/archives/dri-devel/2018-September/190283.html
-fn set_max_bpc(
-    device: &impl drm::control::Device,
-    connector: ConnectorHandle,
-    max_bpc: u64,
-) -> anyhow::Result<()> {
-    let props = device
-        .get_properties(connector)
-        .context("failed to get connector props")?;
-    for (prop, value) in props {
-        let info = device
-            .get_property(prop)
-            .context("failed to get property")?;
-        if info.name().as_str() != Ok("max bpc") {
-            continue; // no what we are searching for
-        }
-
-        let drm::control::property::ValueType::UnsignedRange(min, max) = info.value_type() else {
-            anyhow::bail!("wrong value type")
-        };
-
-        let bpc = max_bpc.clamp(min, max);
-
-        let drm::control::property::Value::UnsignedRange(value) =
-            info.value_type().convert_value(value)
-        else {
-            anyhow::bail!("wrong property type")
-        };
-        if value == bpc {
-            return Ok(()); // no changes
-        }
-
-        device
-            .set_property(
-                connector,
-                prop,
-                drm::control::property::Value::UnsignedRange(bpc).into(),
-            )
-            .context("error setting property")?;
-    }
-
-    Ok(())
 }
 
 fn generate_output_render_elements<'a>(
