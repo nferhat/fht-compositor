@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -16,6 +17,9 @@ use smithay::backend::renderer::multigpu::GpuManager;
 use smithay::backend::renderer::ImportDma as _;
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::output::{Output, PhysicalProperties, Subpixel};
+use smithay::reexports::drm::control::atomic::AtomicModeReq;
+use smithay::reexports::drm::control::dumbbuffer::DumbBuffer;
+use smithay::reexports::drm::control::{property, AtomicCommitFlags, Device as _, PlaneType, ResourceHandle};
 use smithay::reexports::drm::control::{connector, crtc};
 use smithay::reexports::drm::Device as _;
 use smithay::reexports::rustix::path::Arg as _;
@@ -65,6 +69,9 @@ pub struct Device {
     pub(super) drm_scanner: DrmScanner,
     render_node: DrmNode,
     drm_registration_token: RegistrationToken,
+    // A cache of CRTC the device already encountered.
+    // This is used to avoid uselessly resetting devices over and over.
+    known_crtcs: HashSet<(connector::Info, crtc::Handle)>,
 }
 
 impl Device {
@@ -92,6 +99,7 @@ impl Device {
             drm_scanner: DrmScanner::new(),
             render_node,
             drm_registration_token,
+            known_crtcs: HashSet::new(),
         }
     }
 
@@ -144,13 +152,17 @@ impl Device {
 
     /// Try to update this device.
     ///
-    /// This essentially scans for new connectors and adds them to [`Device::surfaces`] or
-    /// [`Device::non_desktop_connectors`].
-    pub fn update(
+    /// This essentially scans for new connectors and adds them to [`Device::known_crtcs`] or
+    /// [`Device::non_desktop_connectors`]. If any connectors need to be disconnected, they will be
+    /// handled by this function.
+    ///
+    /// You should handle new surfaces with [`Device::add_connector`] yourself after calling this
+    /// funtion
+    pub fn scan_connectors(
         &mut self,
         fht: &mut Fht,
-        primary_render_node: DrmNode,
         gpu_manager: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
+        cleanup: bool,
     ) -> anyhow::Result<()> {
         let Ok(result) = self
             .drm_scanner
@@ -160,34 +172,204 @@ impl Device {
             return Ok(());
         };
 
+        let (mut added, mut removed) = (Vec::new(), Vec::new());
+
         for event in result {
             match event {
-                DrmScanEvent::Connected { connector, crtc } => {
+                DrmScanEvent::Connected { crtc, connector } => {
                     if let Some(crtc) = crtc {
-                        if let Err(err) = self.add_connector(
-                            crtc,
-                            connector,
-                            primary_render_node,
-                            gpu_manager,
-                            fht,
-                        ) {
-                            error!(?crtc, ?err, "Failed to add connector to device")
-                        };
+                        added.push((connector, crtc));
                     }
                     // No crtc, can't do much for you since I dont even know WHAT you connected.
                 }
-                DrmScanEvent::Disconnected { connector, crtc } => {
+                DrmScanEvent::Disconnected { crtc, connector } => {
                     if let Some(crtc) = crtc {
-                        if let Err(err) =
-                            self.remove_connector(crtc, connector.handle(), gpu_manager, fht)
-                        {
-                            error!(?crtc, ?err, "Failed to remove connector from device")
-                        }
+                        removed.push((connector, crtc));
                     }
                     // No crtc, can't do much for you since I dont even know WHAT you disconnected.
                 }
             }
         }
+
+        for (conn, crtc) in removed {
+            _ = self.remove_connector(crtc, conn.handle(), gpu_manager, fht);
+            if !self.known_crtcs.remove(&(conn, crtc)) {
+                error!(?crtc, "Missing output ID for disconnected CRTC");
+            }
+        }
+
+        for new in added {
+            // NOTE: Connector+Crtc pairs should always be unique
+            _ = self.known_crtcs.insert(new);
+        }
+
+        if cleanup {
+            let config = Arc::clone(&fht.config);
+            let should_be_off = |_, conn: &connector::Info| -> bool {
+                let output_name = format!("{}-{}", conn.interface().as_str(), conn.interface_id());
+                let config = config
+                    .outputs
+                    .get(&output_name)
+                    .cloned()
+                    .unwrap_or_default();
+                config.disable
+            };
+
+            if let Err(err) = self.cleanup_mismatching_resources(&should_be_off) {
+                warn!(?err, "Failed to cleanup device connectors");
+                for surface in self.surfaces.values_mut() {
+                    // We aren't force-clearing the CRTCs, so we need to make the surfaces read the
+                    // updated state after a session resume. This also causes a full damage for the
+                    // next redraw.
+                    surface.drm_output.with_compositor(|compositor| {
+                        if let Err(err) = compositor.reset_state() {
+                            warn!(?err, "Failed to reset surface output");
+                        }
+
+                        compositor.reset_buffers();
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // Credit to niri-wm/niri for this function.
+    fn cleanup_mismatching_resources(
+        &self,
+        should_be_off: &dyn Fn(crtc::Handle, &connector::Info) -> bool,
+    ) -> anyhow::Result<()> {
+        let drm_device = self.drm_output_manager.device();
+        let res_handles = drm_device
+            .resource_handles()
+            .context("error getting plane handles")?;
+        let plane_handles = drm_device
+            .plane_handles()
+            .context("error getting plane handles")?;
+
+        let mut req = AtomicModeReq::new();
+
+        // We want to disable all CRTCs that do not correspond to a connector we're using.
+        let mut cleanup = HashSet::<crtc::Handle>::new();
+        cleanup.extend(res_handles.crtcs());
+
+        for (conn, info) in self.drm_scanner.connectors() {
+            // We only keep the connector if it has a CRTC and the output isn't off in niri.
+            if let Some(crtc) = self.drm_scanner.crtc_for_connector(conn) {
+                // Verify that the connector's current CRTC matches the CRTC we expect. If not,
+                // clear the CRTC and the connector so that all connectors can get the expected
+                // CRTCs afterwards. (We do this because we do not handle CRTC rotations across TTY
+                // switches.)
+                let mut has_different_crtc = false;
+                if let Some(enc) = info.current_encoder() {
+                    match drm_device.get_encoder(enc) {
+                        Ok(enc) => {
+                            if let Some(current_crtc) = enc.crtc() {
+                                if current_crtc != crtc {
+                                    has_different_crtc = true;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            debug!(?err, "Failed to get device encoder");
+                            // Err on the safe side.
+                            has_different_crtc = true;
+                        }
+                    }
+                }
+
+                if !has_different_crtc && !should_be_off(crtc, info) {
+                    // Keep the corresponding CRTC.
+                    cleanup.remove(&crtc);
+                    continue;
+                }
+            }
+
+            // Clear the connector.
+            let Some((crtc_id, _, _)) = find_drm_property(&drm_device, *conn, "CRTC_ID") else {
+                debug!("couldn't find connector CRTC_ID property");
+                continue;
+            };
+
+            req.add_property(*conn, crtc_id, property::Value::CRTC(None));
+        }
+
+        // Legacy fallback.
+        if !drm_device.is_atomic() {
+            for crtc in res_handles.crtcs() {
+                #[allow(deprecated)]
+                let _ = drm_device.set_cursor(*crtc, Option::<&DumbBuffer>::None);
+            }
+            for crtc in cleanup {
+                let _ = drm_device.set_crtc(crtc, None, (0, 0), &[], None);
+            }
+            return Ok(());
+        }
+
+        // Disable non-primary planes, and planes belonging to disabled CRTCs.
+        let is_primary = |plane: drm::control::plane::Handle| {
+            if let Some((_, info, value)) = find_drm_property(&drm_device, plane, "type") {
+                match info.value_type().convert_value(value) {
+                    property::Value::Enum(Some(val)) => val.value() == PlaneType::Primary as u64,
+                    _ => false,
+                }
+            } else {
+                debug!("couldn't find plane type property");
+                false
+            }
+        };
+
+        for plane in plane_handles {
+            let info = match drm_device.get_plane(plane) {
+                Ok(x) => x,
+                Err(err) => {
+                    debug!("error getting plane: {err:?}");
+                    continue;
+                }
+            };
+
+            let Some(crtc) = info.crtc() else {
+                continue;
+            };
+
+            if !cleanup.contains(&crtc) && is_primary(plane) {
+                continue;
+            }
+
+            let Some((crtc_id, _, _)) = find_drm_property(&drm_device, plane, "CRTC_ID") else {
+                debug!("couldn't find plane CRTC_ID property");
+                continue;
+            };
+
+            let Some((fb_id, _, _)) = find_drm_property(&drm_device, plane, "FB_ID") else {
+                debug!("couldn't find plane FB_ID property");
+                continue;
+            };
+
+            req.add_property(plane, crtc_id, property::Value::CRTC(None));
+            req.add_property(plane, fb_id, property::Value::Framebuffer(None));
+        }
+
+        // Disable the CRTCs.
+        for crtc in cleanup {
+            let Some((mode_id, _, _)) = find_drm_property(&drm_device, crtc, "MODE_ID") else {
+                debug!("couldn't find CRTC MODE_ID property");
+                continue;
+            };
+
+            let Some((active, _, _)) = find_drm_property(&drm_device, crtc, "ACTIVE") else {
+                debug!("couldn't find CRTC ACTIVE property");
+                continue;
+            };
+
+            req.add_property(crtc, mode_id, property::Value::Unknown(0));
+            req.add_property(crtc, active, property::Value::Boolean(false));
+        }
+
+        drm_device
+            .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)
+            .context("error doing atomic commit")?;
 
         Ok(())
     }
@@ -719,5 +901,25 @@ fn get_surface_dmabuf_feedback(
     Some(SurfaceDmabufFeedback {
         render_feedback,
         scanout_feedback,
+    })
+}
+
+fn find_drm_property(
+    drm: &DrmDevice,
+    resource: impl ResourceHandle,
+    name: &str,
+) -> Option<(property::Handle, property::Info, property::RawValue)> {
+    let props = match drm.get_properties(resource) {
+        Ok(props) => props,
+        Err(err) => {
+            warn!("error getting properties: {err:?}");
+            return None;
+        }
+    };
+
+    props.into_iter().find_map(|(handle, value)| {
+        let info = drm.get_property(handle).ok()?;
+        let n = info.name().to_str().ok()?;
+        (n == name).then_some((handle, info, value))
     })
 }

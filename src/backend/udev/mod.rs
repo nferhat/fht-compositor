@@ -180,10 +180,11 @@ impl UdevData {
                     }
                 }
                 UdevEvent::Changed { device_id } => {
-                    if let Err(err) = state
-                        .backend
-                        .udev()
-                        .device_changed(device_id, &mut state.fht)
+                    if let Err(err) =
+                        state
+                            .backend
+                            .udev()
+                            .device_changed(device_id, &mut state.fht, false)
                     {
                         error!(?err, "Failed to update device")
                     }
@@ -404,7 +405,7 @@ impl UdevData {
         let fd = DrmDeviceFd::new(DeviceFd::from(device_fd));
 
         // Create DRM notifier to listen for vblanks.
-        let (drm, drm_notifier) = DrmDevice::new(fd.clone(), true)?;
+        let (drm_device, drm_notifier) = DrmDevice::new(fd.clone(), false)?;
 
         // Create the GBM device to communicate with the GPU.
         let gbm = GbmDevice::new(fd)?;
@@ -460,7 +461,7 @@ impl UdevData {
             .clone();
 
         let drm_output_manager = DrmOutputManager::new(
-            drm,
+            drm_device,
             allocator,
             exporter,
             Some(gbm.clone()),
@@ -535,13 +536,18 @@ impl UdevData {
         );
 
         self.devices.insert(device_node, device);
-        self.device_changed(device_id, fht)
+        self.device_changed(device_id, fht, true)
             .context("Failed to update device!")?;
 
         Ok(())
     }
 
-    fn device_changed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
+    fn device_changed(
+        &mut self,
+        device_id: dev_t,
+        fht: &mut Fht,
+        cleanup: bool,
+    ) -> anyhow::Result<()> {
         if !self.session.is_active() {
             return Ok(());
         }
@@ -555,7 +561,14 @@ impl UdevData {
             return Ok(());
         };
 
-        device.update(fht, self.primary_gpu, &mut self.gpu_manager)
+        device.scan_connectors(fht, &mut self.gpu_manager, cleanup)?;
+        // Calling this function will connect any new connectors detected by the device.
+        //
+        // Disconnected ones should have been handled by scan_connectors, but this still they will
+        // also be handled here.
+        self.reload_output_configuration(fht, false);
+
+        Ok(())
     }
 
     fn device_removed(&mut self, device_id: dev_t, fht: &mut Fht) -> anyhow::Result<()> {
