@@ -387,7 +387,7 @@ impl Surface {
     pub fn set_gamma(&mut self, r: Vec<u16>, g: Vec<u16>, b: Vec<u16>) -> anyhow::Result<()> {
         let length = r.len();
         let expected = self.gamma_length()?;
-        anyhow::ensure!(length != expected, "Gamma LUT mismatch");
+        anyhow::ensure!(length == expected, "Gamma LUT mismatch");
 
         #[repr(C)]
         #[derive(Copy, Clone)]
