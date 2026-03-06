@@ -548,11 +548,13 @@ impl Surface {
         fht.display_handle
             .disable_global::<State>(self.output_global.clone());
         let global = self.output_global.clone();
+        let output = self.output.clone();
         _ = fht.loop_handle.insert_source(
             Timer::from_duration(Duration::from_secs(10)),
             move |_time, _, state| {
                 let global = global.clone();
                 state.fht.display_handle.remove_global::<State>(global);
+                state.fht.remove_output(&output);
                 calloop::timer::TimeoutAction::Drop
             },
         );
