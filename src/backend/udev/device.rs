@@ -18,7 +18,7 @@ use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::output::{Output, PhysicalProperties, Subpixel};
 use smithay::reexports::drm::control::atomic::AtomicModeReq;
 use smithay::reexports::drm::control::dumbbuffer::DumbBuffer;
-use smithay::reexports::drm::control::{property, AtomicCommitFlags, Device as _, PlaneType, ResourceHandle};
+use smithay::reexports::drm::control::{property, AtomicCommitFlags, Device as _, PlaneType};
 use smithay::reexports::drm::control::{connector, crtc};
 use smithay::reexports::drm::Device as _;
 use smithay::reexports::rustix::path::Arg as _;
@@ -282,7 +282,7 @@ impl Device {
             }
 
             // Clear the connector.
-            let Some((crtc_id, _, _)) = find_drm_property(&drm_device, *conn, "CRTC_ID") else {
+            let Ok((crtc_id, _, _)) = get_property_val(drm_device, *conn, "CRTC_ID") else {
                 debug!("couldn't find connector CRTC_ID property");
                 continue;
             };
@@ -304,8 +304,8 @@ impl Device {
 
         // Disable non-primary planes, and planes belonging to disabled CRTCs.
         let is_primary = |plane: drm::control::plane::Handle| {
-            if let Some((_, info, value)) = find_drm_property(&drm_device, plane, "type") {
-                match info.value_type().convert_value(value) {
+            if let Ok((_, val_type, value)) = get_property_val(drm_device, plane, "type") {
+                match val_type.convert_value(value) {
                     property::Value::Enum(Some(val)) => val.value() == PlaneType::Primary as u64,
                     _ => false,
                 }
@@ -332,12 +332,12 @@ impl Device {
                 continue;
             }
 
-            let Some((crtc_id, _, _)) = find_drm_property(&drm_device, plane, "CRTC_ID") else {
+            let Ok((crtc_id, _, _)) = get_property_val(drm_device, plane, "CRTC_ID") else {
                 debug!("couldn't find plane CRTC_ID property");
                 continue;
             };
 
-            let Some((fb_id, _, _)) = find_drm_property(&drm_device, plane, "FB_ID") else {
+            let Ok((fb_id, _, _)) = get_property_val(drm_device, plane, "FB_ID") else {
                 debug!("couldn't find plane FB_ID property");
                 continue;
             };
@@ -348,12 +348,12 @@ impl Device {
 
         // Disable the CRTCs.
         for crtc in cleanup {
-            let Some((mode_id, _, _)) = find_drm_property(&drm_device, crtc, "MODE_ID") else {
+            let Ok((mode_id, _, _)) = get_property_val(drm_device, crtc, "MODE_ID") else {
                 debug!("couldn't find CRTC MODE_ID property");
                 continue;
             };
 
-            let Some((active, _, _)) = find_drm_property(&drm_device, crtc, "ACTIVE") else {
+            let Ok((active, _, _)) = get_property_val(drm_device, crtc, "ACTIVE") else {
                 debug!("couldn't find CRTC ACTIVE property");
                 continue;
             };
@@ -748,7 +748,7 @@ impl Device {
 
 fn is_desktop_connector(device: &DrmDevice, handle: connector::Handle) -> bool {
     match get_property_val(device, handle, "non-desktop") {
-        Ok((ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
+        Ok((_, ty, val)) => ty.convert_value(val).as_boolean().unwrap_or(false),
         Err(_) => {
             warn!(?handle, "Failed to determine if connector is non-desktop");
             false
@@ -884,25 +884,5 @@ fn get_surface_dmabuf_feedback(
     Some(SurfaceDmabufFeedback {
         render_feedback,
         scanout_feedback,
-    })
-}
-
-fn find_drm_property(
-    drm: &DrmDevice,
-    resource: impl ResourceHandle,
-    name: &str,
-) -> Option<(property::Handle, property::Info, property::RawValue)> {
-    let props = match drm.get_properties(resource) {
-        Ok(props) => props,
-        Err(err) => {
-            warn!("error getting properties: {err:?}");
-            return None;
-        }
-    };
-
-    props.into_iter().find_map(|(handle, value)| {
-        let info = drm.get_property(handle).ok()?;
-        let n = info.name().to_str().ok()?;
-        (n == name).then_some((handle, info, value))
     })
 }

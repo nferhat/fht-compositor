@@ -1296,6 +1296,7 @@ fn get_property_val(
     handle: impl ResourceHandle,
     name: &str,
 ) -> anyhow::Result<(
+    drm::control::property::Handle,
     drm::control::property::ValueType,
     drm::control::property::RawValue,
 )> {
@@ -1305,7 +1306,7 @@ fn get_property_val(
         let info = device.get_property(prop)?;
         if Some(name) == info.name().to_str().ok() {
             let val_type = info.value_type();
-            return Ok((val_type, val));
+            return Ok((prop, val_type, val));
         }
     }
     anyhow::bail!("No prop found for {}", name)
