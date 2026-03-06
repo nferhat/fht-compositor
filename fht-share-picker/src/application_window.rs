@@ -4,15 +4,17 @@ use gtk::{gio, glib};
 use crate::application::Application;
 
 mod imp {
-    use std::{cell::RefCell, sync::OnceLock};
+    use std::cell::RefCell;
+    use std::sync::OnceLock;
 
     use adw::subclass::prelude::AdwApplicationWindowImpl;
-    use glib::{object::ObjectExt, subclass::Signal, types::StaticType};
+    use glib::object::ObjectExt;
+    use glib::subclass::Signal;
+    use glib::types::StaticType;
     use gtk::prelude::{ButtonExt, WidgetExt};
 
-    use crate::selection_widget::SelectionWidget;
-
     use super::*;
+    use crate::selection_widget::SelectionWidget;
 
     #[derive(Default, Debug, gtk::CompositeTemplate)]
     #[template(resource = "/fht/desktop/SharePicker/ui/window.ui")]
@@ -71,7 +73,8 @@ mod imp {
                 #[weak(rename_to = imp)]
                 self,
                 move |_| {
-                    // SAFETY: We know that the select button is only sensitive if there's something selected.
+                    // SAFETY: We know that the select button is only sensitive if there's something
+                    // selected.
                     let selection = imp.current_selection.borrow().clone().unwrap();
                     imp.obj()
                         .emit_by_name::<()>("source-selected", &[&selection]);

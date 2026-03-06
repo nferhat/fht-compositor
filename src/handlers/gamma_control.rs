@@ -1,16 +1,18 @@
-use std::os::fd::{FromRawFd, IntoRawFd};
 use std::io::Read;
+use std::os::fd::{FromRawFd, IntoRawFd};
 
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols_wlr;
+use smithay::reexports::wayland_server::backend::GlobalId;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::{
-    protocol::wl_output::WlOutput,
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
-    backend::GlobalId,
 };
-use wayland_protocols_wlr::gamma_control::v1::server::{
-    zwlr_gamma_control_manager_v1::{self, ZwlrGammaControlManagerV1},
-    zwlr_gamma_control_v1::{self, ZwlrGammaControlV1},
+use wayland_protocols_wlr::gamma_control::v1::server::zwlr_gamma_control_manager_v1::{
+    self, ZwlrGammaControlManagerV1,
+};
+use wayland_protocols_wlr::gamma_control::v1::server::zwlr_gamma_control_v1::{
+    self, ZwlrGammaControlV1,
 };
 
 use crate::state::State;
@@ -66,7 +68,7 @@ impl Dispatch<ZwlrGammaControlManagerV1, ()> for State {
                     gamma_control.gamma_size(size);
                 } else {
                     if let Some(out) = state.fht.space.outputs().next() {
-                         data_init.init(id, out.clone());
+                        data_init.init(id, out.clone());
                     }
                 }
             }
@@ -95,10 +97,10 @@ impl Dispatch<ZwlrGammaControlV1, Output> for State {
                 }
 
                 let expected_bytes = size * 3 * std::mem::size_of::<u16>();
-                
+
                 let mut file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) };
                 let mut buffer = vec![0u8; expected_bytes];
-                
+
                 if file.read_exact(&mut buffer).is_err() {
                     gamma_control.failed();
                     return;
@@ -108,7 +110,8 @@ impl Dispatch<ZwlrGammaControlV1, Output> for State {
                 let (g_bytes, b_bytes) = rest.split_at(size * 2);
 
                 fn to_u16_vec(bytes: &[u8]) -> Vec<u16> {
-                    bytes.chunks_exact(2)
+                    bytes
+                        .chunks_exact(2)
                         .map(|c| u16::from_ne_bytes([c[0], c[1]]))
                         .collect()
                 }

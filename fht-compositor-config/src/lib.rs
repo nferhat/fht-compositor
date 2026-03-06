@@ -1735,4 +1735,3 @@ pub enum Error {
     #[error("An error occured while parsing the configuration file: {0}")]
     Parse(#[from] toml::de::Error),
 }
-
