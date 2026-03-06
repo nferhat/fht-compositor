@@ -5,25 +5,25 @@ use std::time::Duration;
 
 mod device;
 mod mode;
+mod surface;
 
 use anyhow::Context as _;
 use fht_compositor_config::VrrMode;
 use libc::dev_t;
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::drm::compositor::{FrameFlags, PrimaryPlaneElement, RenderFrameError};
+use smithay::backend::drm::compositor::FrameFlags;
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
+use smithay::backend::drm::output::{DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
-    DrmNode, DrmSurface, NodeType,
+    DrmNode, NodeType,
 };
 use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
-use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, OutputDamageTracker};
+use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::glow::GlowRenderer;
@@ -37,31 +37,22 @@ use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
 use smithay::backend::SwapBuffersError;
-use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::input::keyboard::XkbConfig;
 use smithay::output::{Mode as OutputMode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{Dispatcher, RegistrationToken};
 use smithay::reexports::drm;
-use smithay::reexports::drm::control::atomic::AtomicModeReq;
-use smithay::reexports::drm::control::connector::{self, Handle as ConnectorHandle};
 use smithay::reexports::drm::control::crtc::Handle as CrtcHandle;
-use smithay::reexports::drm::control::{
-    property, AtomicCommitFlags, Device as ControlDevice, ResourceHandle,
-};
+use smithay::reexports::drm::control::{connector, ResourceHandle};
 use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
-use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
-use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
-use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Monotonic, Scale};
+use smithay::utils::{DeviceFd, Scale};
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::DrmLeaseState;
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::pointer_gestures::PointerGesturesState;
-use smithay::wayland::presentation::Refresh;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 
 use crate::frame_clock::FrameClock;
@@ -71,7 +62,7 @@ use crate::protocols::output_management;
 use crate::renderer::{
     AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
 };
-use crate::state::{Fht, State, SurfaceDmabufFeedback};
+use crate::state::{Fht, State};
 use crate::utils::get_monotonic_time;
 
 // The compositor can't just pick the first format available since some formats even if supported
@@ -501,16 +492,11 @@ impl UdevData {
             self.devices.values_mut().for_each(|device| {
                 // Update the per drm surface dmabuf feedback
                 device.surfaces.values_mut().for_each(|surface| {
-                    surface.dmabuf_feedback = surface.dmabuf_feedback.take().or_else(|| {
-                        surface.drm_output.with_compositor(|compositor| {
-                            get_surface_dmabuf_feedback(
-                                self.primary_gpu,
-                                surface.render_node,
-                                &mut self.gpu_manager,
-                                compositor.surface(),
-                            )
-                        })
-                    });
+                    if let Err(err) =
+                        surface.init_dmabuf_feedback(self.primary_gpu, &mut self.gpu_manager)
+                    {
+                        warn!(?err, "Failed to initialize surface dmabuf feedback");
+                    }
                 });
             });
 
@@ -610,16 +596,17 @@ impl UdevData {
             return Ok(false);
         };
 
-        let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
-            self.gpu_manager.single_renderer(&surface.render_node)
+        let render_node = surface.render_node();
+
+        let renderer = if render_node == self.primary_gpu {
+            self.gpu_manager.single_renderer(&render_node)
         } else {
-            let format = surface.drm_output.format();
+            let copy_format = surface.copy_format();
             self.gpu_manager
-                .renderer(&self.primary_gpu, &surface.render_node, format)
-        }) else {
-            anyhow::bail!("Failed to get renderer")
+                .renderer(&self.primary_gpu, &render_node, copy_format)
         };
 
+        let mut renderer = renderer.context("Failed to get surface renderer")?;
         let mut output_elements_result = fht.output_elements(&mut renderer, output);
 
         // To render damage we just use solid color elements,
@@ -638,22 +625,13 @@ impl UdevData {
         }
 
         // Renderand check for damage.
-        let res = surface
-            .drm_output
-            .render_frame(
-                &mut renderer,
-                &output_elements_result.elements,
-                [0.1, 0.1, 0.1, 1.0],
-                // TODO: Add debug options to allow to change this?
-                FrameFlags::DEFAULT,
-            )
-            .map_err(|err| match err {
-                RenderFrameError::PrepareFrame(err) => SwapBuffersError::from(err),
-                RenderFrameError::RenderFrame(OutputDamageTrackerError::Rendering(err)) => {
-                    SwapBuffersError::from(err)
-                }
-                _ => unreachable!(),
-            });
+        let res = surface.render(
+            &mut renderer,
+            &output_elements_result,
+            target_presentation_time,
+            FrameFlags::DEFAULT,
+            fht,
+        );
 
         match res {
             Err(err) => {
@@ -671,109 +649,26 @@ impl UdevData {
                     SwapBuffersError::ContextLost(err) => match err.downcast_ref::<DrmError>() {
                         Some(DrmError::TestFailed(_)) => {
                             // reset the complete state, disabling all connectors and planes in case
-                            // we hit a test failed most likely we hit this after a tty switch when
-                            // a foreign master changed CRTC <-> connector bindings and we run in a
+                            // we hit a test failed most likely we hit
+                            // this after a tty switch when a foreign master changed CRTC <->
+                            // connector bindings and we run in a
                             // mismatch
-                            device.reset();
+                            device
+                                .drm_output_manager
+                                .device_mut()
+                                .reset_state()
+                                .expect("failed to reset drm device");
                         }
                         _ => panic!("Rendering loop lost: {}", err),
                     },
                 };
             }
-            Ok(res) => {
-                if res.needs_sync() {
-                    if let PrimaryPlaneElement::Swapchain(element) = &res.primary_element {
-                        crate::profile_scope!("SyncPoint::wait");
-                        if let Err(err) = element.sync.wait() {
-                            error!(?err, "Failed to wait for SyncPoint")
-                        };
-                    }
-                }
-
-                fht.update_primary_scanout_output(output, &res.states);
-                if let Some(dmabuf_feedback) = surface.dmabuf_feedback.as_ref() {
-                    fht.send_dmabuf_feedbacks(output, dmabuf_feedback, &res.states);
-                }
-
-                // Without damage = we just care that rendering happened.
-                //
-                // How we proceed with wlr-screencopy is when a client requests a without damage
-                // frame, we queue rendering of the output to satisfy the request on
-                // the next dispatch cycle
-                fht.render_screencopy_without_damage(
-                    output,
-                    &mut renderer,
-                    &output_elements_result,
-                );
-
-                if !res.is_empty {
-                    // We have damage to submit, take presentation feedback try to queue the next
-                    // frame, this is the only code path where we should send frames to clients that
-                    // are displayed on the Surface's output.
-                    let presentation_feedback = fht.take_presentation_feedback(output, &res.states);
-
-                    match surface.drm_output.queue_frame(presentation_feedback) {
-                        Ok(()) => {
-                            let output_state = fht.output_state.get_mut(output).unwrap();
-                            let new_state = RedrawState::WaitingForVblank { queued: false };
-                            match std::mem::replace(&mut output_state.redraw_state, new_state) {
-                                RedrawState::Queued => (),
-                                RedrawState::WaitingForEstimatedVblankTimer {
-                                    token,
-                                    queued: true,
-                                } => {
-                                    fht.loop_handle.remove(token);
-                                }
-                                _ => unreachable!(),
-                            };
-
-                            // We queued and client buffers are now displayed, we can now send
-                            // frame events to them so they start building the next buffer
-                            output_state.current_frame_sequence =
-                                output_state.current_frame_sequence.wrapping_add(1);
-                            // Also notify tracy of a new frame.
-                            tracy_client::Client::running().unwrap().frame_mark();
-
-                            // Damage also means screencast.
-                            #[cfg(feature = "xdg-screencast-portal")]
-                            {
-                                fht.render_screencast(
-                                    output,
-                                    &mut renderer,
-                                    &output_elements_result,
-                                );
-
-                                fht.render_screencast_windows(
-                                    output,
-                                    &mut renderer,
-                                    target_presentation_time,
-                                );
-
-                                fht.render_screencast_workspaces(
-                                    output,
-                                    &mut renderer,
-                                    target_presentation_time,
-                                );
-                            }
-                            // And also screencopy.
-                            fht.render_screencopy_with_damage(
-                                output,
-                                &mut renderer,
-                                &output_elements_result,
-                            );
-
-                            return Ok(true);
-                        }
-                        Err(err) => {
-                            warn!("error queueing frame: {err}");
-                        }
-                    }
-                }
-            }
+            Ok(true) => return Ok(true), // we renderered, handle back the wayland side.
+            Ok(false) => (),             // see below
         }
 
         // Submitted buffers but there was no damage.
-        // Send frame callbacks after approx
+        // Send frame callbacks after approximated time
         let output_state = fht.output_state.get_mut(output).unwrap();
         match std::mem::take(&mut output_state.redraw_state) {
             RedrawState::Idle => unreachable!(),
@@ -803,7 +698,7 @@ impl UdevData {
 
         let surface = device.surfaces.get_mut(crtc).unwrap();
         let timer = Timer::from_duration(duration);
-        let output = surface.output.clone();
+        let output = surface.output().clone();
         let token = fht
             .loop_handle
             .insert_source(timer, move |_, _, state| {
@@ -867,7 +762,7 @@ impl UdevData {
             return;
         };
 
-        let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+        let output_state = fht.output_state.get_mut(surface.output()).unwrap();
         let redraw_queued =
             match std::mem::replace(&mut output_state.redraw_state, RedrawState::Idle) {
                 RedrawState::WaitingForVblank { queued } => queued,
@@ -880,51 +775,25 @@ impl UdevData {
             DrmEventTime::Realtime(_) => now,
         };
 
-        match surface
-            .drm_output
-            .frame_submitted()
-            .map_err(Into::<SwapBuffersError>::into)
-        {
-            Ok(Some(mut presentation_feedback)) => {
-                let refresh = output_state
-                    .frame_clock
-                    .refresh_interval()
-                    .unwrap_or(Duration::ZERO);
-                // FIXME: ideally should be monotonically increasing for a surface.
-                let seq = metadata.sequence as u64;
-                let mut flags = wp_presentation_feedback::Kind::Vsync
-                    | wp_presentation_feedback::Kind::HwCompletion;
-
-                let time = if presentation_time.is_zero() {
-                    now
-                } else {
-                    flags.insert(wp_presentation_feedback::Kind::HwClock);
-                    presentation_time
-                };
-
-                presentation_feedback.presented::<_, Monotonic>(
-                    time,
-                    Refresh::fixed(refresh),
-                    seq,
-                    flags,
-                );
-            }
-            Ok(None) => (),
-            Err(err) => {
-                warn!("Error during rendering: {:?}", err);
-                if let SwapBuffersError::ContextLost(err) = err {
-                    panic!("Rendering loop lost: {}", err)
-                }
-            }
-        };
+        if let Err(err) = surface.submit(
+            output_state
+                .frame_clock
+                .refresh_interval()
+                .unwrap_or(Duration::ZERO),
+            now,
+            presentation_time,
+            metadata.sequence as u64,
+        ) {
+            warn!(?err, "Failed to submit frame");
+        }
 
         // Now update the frameclock
         output_state.frame_clock.present(presentation_time);
 
         if redraw_queued || output_state.animations_running {
-            fht.queue_redraw(&surface.output);
+            fht.queue_redraw(&surface.output());
         } else {
-            fht.send_frames(&surface.output);
+            fht.send_frames(&surface.output());
         }
     }
 
@@ -934,9 +803,7 @@ impl UdevData {
             // don't use then and as a result don't clean them.
             let _ = device.reset();
             for surface in device.surfaces.values_mut() {
-                let _ = surface
-                    .drm_output
-                    .with_compositor(|compositor| compositor.reset_state());
+                let _ = surface.reset(false);
             }
         });
 
@@ -962,38 +829,41 @@ impl UdevData {
 
         for (&node, device) in &mut self.devices {
             for (&crtc, surface) in &mut device.surfaces {
-                let output_name = surface.output.name();
+                let output_name = surface.output().name();
                 let output_config = fht
                     .config
                     .outputs
                     .get(&output_name)
                     .cloned()
                     .unwrap_or_default();
-                let Some(connector) = device.drm_scanner.connectors().get(&surface.connector)
+                let Some(connector) = device.drm_scanner.connectors().get(surface.connector())
                 else {
                     error!("Missing connector in DRM scanner");
                     continue;
                 };
 
-                let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
-                    self.gpu_manager.single_renderer(&surface.render_node)
+                let render_node = surface.render_node();
+                let renderer = if render_node == self.primary_gpu {
+                    self.gpu_manager.single_renderer(&render_node)
                 } else {
-                    let format = surface.drm_output.format();
+                    let copy_format = surface.copy_format();
                     self.gpu_manager
-                        .renderer(&self.primary_gpu, &surface.render_node, format)
-                }) else {
-                    error!("Failed to get renderer");
+                        .renderer(&self.primary_gpu, &render_node, copy_format)
+                };
+
+                let Ok(mut renderer) = renderer else {
+                    error!("Failed to get surface renderer");
                     continue;
                 };
 
                 if output_config.disable {
                     fht.output_management_manager_state
-                        .set_head_enabled::<State>(&surface.output, false);
+                        .set_head_enabled::<State>(surface.output(), false);
                     to_disable.push((node, connector.clone(), crtc));
                     continue;
                 }
                 fht.output_management_manager_state
-                    .set_head_enabled::<State>(&surface.output, true);
+                    .set_head_enabled::<State>(surface.output(), true);
 
                 // Sometimes DRM connectors can have custom modes.
                 // ---
@@ -1013,19 +883,14 @@ impl UdevData {
                 let render_elements = generate_output_render_elements(fht, &mut renderer);
                 let new_mode = custom_mode.unwrap_or(requested_mode);
 
-                if surface.drm_output.with_compositor(|compositor| {
-                    let mode_changed = compositor.pending_mode() == new_mode;
+                let mode_changed = surface.pending_mode() == new_mode;
+                let vrr_enabled = surface.vrr_enabled();
+                let mut vrr_changed = false;
+                // if we are OnDemand we wait for redraw to update.
+                vrr_changed |= output_config.vrr == VrrMode::On && !vrr_enabled;
+                vrr_changed |= output_config.vrr == VrrMode::Off && vrr_enabled;
 
-                    let vrr_enabled = compositor.vrr_enabled();
-                    let mut vrr_changed = false;
-                    // if we are OnDemand we wait for redraw to update.
-                    vrr_changed |= output_config.vrr == VrrMode::On && !vrr_enabled;
-                    vrr_changed |= output_config.vrr == VrrMode::Off && vrr_enabled;
-
-                    mode_changed || vrr_changed
-                }) && !force
-                {
-                    // Mode didn't change, there's nothing else to change.
+                if !mode_changed && !vrr_changed && !force {
                     continue;
                 }
 
@@ -1033,10 +898,7 @@ impl UdevData {
                 let mut new_mode = None;
                 let mut used_custom = false;
                 if let Some(custom_mode) = custom_mode {
-                    if let Err(err) =
-                        surface
-                            .drm_output
-                            .use_mode(custom_mode, &mut renderer, &render_elements)
+                    if let Err(err) = surface.use_mode(custom_mode, &mut renderer, &render_elements)
                     {
                         error!(?err, "Failed to apply custom mode for {output_name}");
                     } else {
@@ -1047,9 +909,7 @@ impl UdevData {
 
                 if !used_custom {
                     if let Err(err) =
-                        surface
-                            .drm_output
-                            .use_mode(requested_mode, &mut renderer, &render_elements)
+                        surface.use_mode(requested_mode, &mut renderer, &render_elements)
                     {
                         error!(
                             ?err,
@@ -1067,16 +927,14 @@ impl UdevData {
 
                 let wl_mode = OutputMode::from(new_mode);
                 surface
-                    .output
+                    .output()
                     .change_current_state(Some(wl_mode), None, None, None);
-                let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+                let output_state = fht.output_state.get_mut(surface.output()).unwrap();
                 let refresh_interval =
                     Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&new_mode));
-                let vrr_enabled = surface
-                    .drm_output
-                    .with_compositor(|compositor| compositor.vrr_enabled());
+                let vrr_enabled = surface.vrr_enabled();
                 output_state.frame_clock = FrameClock::new(Some(refresh_interval), vrr_enabled);
-                fht.output_resized(&surface.output);
+                fht.output_resized(surface.output());
             }
 
             for (connector, crtc) in device.drm_scanner.crtcs() {
@@ -1154,16 +1012,17 @@ impl UdevData {
         let refresh = (refresh as f64) / 1000.;
 
         let output_name = output.name();
+        let render_node = surface.render_node();
 
-        let Ok(mut renderer) = (if surface.render_node == self.primary_gpu {
-            self.gpu_manager.single_renderer(&surface.render_node)
+        let renderer = if render_node == self.primary_gpu {
+            self.gpu_manager.single_renderer(&render_node)
         } else {
-            let format = surface.drm_output.format();
+            let copy_format = surface.copy_format();
             self.gpu_manager
-                .renderer(&self.primary_gpu, &surface.render_node, format)
-        }) else {
-            anyhow::bail!("Failed to get renderer");
+                .renderer(&self.primary_gpu, &render_node, copy_format)
         };
+
+        let mut renderer = renderer.context("Failed to get surface renderer")?;
         let render_elements = generate_output_render_elements(fht, &mut renderer);
 
         let connector = device
@@ -1178,10 +1037,7 @@ impl UdevData {
         let custom_mode = mode::get_custom_mode(width, height, Some(refresh));
         let new_mode = custom_mode.unwrap_or(requested_mode);
 
-        if surface
-            .drm_output
-            .with_compositor(|compositor| compositor.pending_mode() == new_mode)
-        {
+        if surface.pending_mode() == new_mode {
             // Mode didn't change, there's nothing else to change.
             return Ok(());
         }
@@ -1190,11 +1046,7 @@ impl UdevData {
         let mut new_mode = None;
         let mut used_custom = false;
         if let Some(custom_mode) = custom_mode {
-            if let Err(err) =
-                surface
-                    .drm_output
-                    .use_mode(custom_mode, &mut renderer, &render_elements)
-            {
+            if let Err(err) = surface.use_mode(custom_mode, &mut renderer, &render_elements) {
                 error!(?err, "Failed to apply custom mode for {output_name}");
             } else {
                 new_mode = Some(custom_mode);
@@ -1203,11 +1055,7 @@ impl UdevData {
         }
 
         if !used_custom {
-            if let Err(err) =
-                surface
-                    .drm_output
-                    .use_mode(requested_mode, &mut renderer, &render_elements)
-            {
+            if let Err(err) = surface.use_mode(requested_mode, &mut renderer, &render_elements) {
                 anyhow::bail!("Failed to apply requested/fallback mode for {output_name}: {err:?}");
             } else {
                 new_mode = Some(requested_mode);
@@ -1220,14 +1068,12 @@ impl UdevData {
 
         let wl_mode = OutputMode::from(new_mode);
         surface
-            .output
+            .output()
             .change_current_state(Some(wl_mode), None, None, None);
-        let output_state = fht.output_state.get_mut(&surface.output).unwrap();
+        let output_state = fht.output_state.get_mut(surface.output()).unwrap();
         let refresh_interval =
             Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&new_mode));
-        let vrr_enabled = surface
-            .drm_output
-            .with_compositor(|compositor| compositor.vrr_enabled());
+        let vrr_enabled = surface.vrr_enabled();
         output_state.frame_clock = FrameClock::new(Some(refresh_interval), vrr_enabled);
 
         Ok(())
@@ -1244,14 +1090,11 @@ impl UdevData {
 
         for device in self.devices.values_mut() {
             for surface in device.surfaces.values_mut() {
-                if surface.output != *output {
+                if *surface.output() != *output {
                     continue;
                 }
 
-                if let Err(err) = surface
-                    .drm_output
-                    .with_compositor(|compositor| compositor.use_vrr(vrr))
-                {
+                if let Err(err) = surface.set_vrr_enabled(vrr) {
                     warn!(
                         ?err,
                         ?vrr,
@@ -1261,7 +1104,7 @@ impl UdevData {
                 }
 
                 let data = fht.output_state.get_mut(output).unwrap();
-                let vrr_enabled = surface.drm_output.with_compositor(|c| c.vrr_enabled());
+                let vrr_enabled = surface.vrr_enabled();
                 data.frame_clock.set_vrr(vrr_enabled);
                 return Ok(());
             }
@@ -1273,12 +1116,11 @@ impl UdevData {
     pub fn vrr_enabled(&self, output: &Output) -> anyhow::Result<bool> {
         for device in self.devices.values() {
             for surface in device.surfaces.values() {
-                if surface.output != *output {
+                if *surface.output() != *output {
                     continue;
                 }
 
-                let vrr_enabled = surface.drm_output.with_compositor(|c| c.vrr_enabled());
-                return Ok(vrr_enabled);
+                return Ok(surface.vrr_enabled());
             }
         }
 
@@ -1293,8 +1135,8 @@ impl UdevData {
     pub fn disable_outputs(&mut self) {
         for device in self.devices.values_mut() {
             for surface in device.surfaces.values_mut() {
-                if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
-                    warn!("error clearing drm surface: {err:?}");
+                if let Err(err) = surface.clear() {
+                    warn!(?err, "Error clearing drm surface");
                 }
             }
         }
@@ -1305,22 +1147,9 @@ impl UdevData {
             .user_data()
             .get::<UdevOutputData>()
             .context("Invalid udev output")?;
-
         let device = self.devices.get(device).context("Device not found")?;
         let surface = device.surfaces.get(crtc).context("Surface not found")?;
-
-        let gamma_size =
-            surface
-                .drm_output
-                .with_compositor(|compositor| -> anyhow::Result<usize> {
-                    let drm_surface = compositor.surface();
-                    let drm = drm_surface.device_fd();
-
-                    let crtc_info = drm.get_crtc(*crtc).context("Failed to get CRTC info")?;
-                    Ok(crtc_info.gamma_length() as usize)
-                })?;
-
-        Ok(gamma_size)
+        surface.gamma_length()
     }
 
     pub fn set_gamma(
@@ -1357,145 +1186,11 @@ impl UdevData {
             .user_data()
             .get::<UdevOutputData>()
             .context("Invalid output")?;
-
         let device = self.devices.get_mut(device).context("Device not found")?;
         let surface = device.surfaces.get_mut(crtc).context("Surface not found")?;
 
-        let result = surface.drm_output.with_compositor(|comp| {
-            let drm_surface = comp.surface();
-            let drm = drm_surface.device_fd();
-
-            let blob_id = {
-                use std::os::fd::AsRawFd;
-
-                // Def of the IOCTL numbers (Linux standard)
-                const DRM_IOCTL_BASE: u64 = 0x64; // 'd'
-                const DRM_IOCTL_MODE_CREATE_BLOB_NR: u64 = 0xBD;
-
-                let data = lut.as_slice();
-                let length = (data.len() * std::mem::size_of::<DrmColorLut>()) as u32;
-
-                let mut create_blob = drm_ffi::drm_mode_create_blob {
-                    data: data.as_ptr() as usize as u64,
-                    length,
-                    blob_id: 0,
-                };
-
-                // Calculation of the IOCTL number (_IOWR)
-                // This is the Rust translation of the C macro _IOWR('d', 0xBD, struct
-                // drm_mode_create_blob)
-                let ioctl_num = {
-                    const _IOC_NRBITS: u64 = 8;
-                    const _IOC_TYPEBITS: u64 = 8;
-                    const _IOC_SIZEBITS: u64 = 14;
-                    const _IOC_DIRBITS: u64 = 2;
-                    const _IOC_NRSHIFT: u64 = 0;
-                    const _IOC_TYPESHIFT: u64 = _IOC_NRSHIFT + _IOC_NRBITS;
-                    const _IOC_SIZESHIFT: u64 = _IOC_TYPESHIFT + _IOC_TYPEBITS;
-                    const _IOC_DIRSHIFT: u64 = _IOC_SIZESHIFT + _IOC_SIZEBITS;
-                    const _IOC_READ: u64 = 2;
-                    const _IOC_WRITE: u64 = 1;
-                    const _IOC_INOUT: u64 = _IOC_READ | _IOC_WRITE;
-
-                    let size = std::mem::size_of::<drm_ffi::drm_mode_create_blob>() as u64;
-
-                    (_IOC_INOUT << _IOC_DIRSHIFT)
-                        | ((size & ((1 << _IOC_SIZEBITS) - 1)) << _IOC_SIZESHIFT)
-                        | (DRM_IOCTL_BASE << _IOC_TYPESHIFT)
-                        | (DRM_IOCTL_MODE_CREATE_BLOB_NR << _IOC_NRSHIFT)
-                };
-
-                unsafe {
-                    if libc::ioctl(drm.as_raw_fd(), ioctl_num, &mut create_blob) != 0 {
-                        return Err(std::io::Error::last_os_error().into());
-                    }
-                }
-                create_blob.blob_id
-            };
-
-            let blob = property::Value::Blob(blob_id.into());
-
-            tracing::debug!("Gamma blob = {}", blob_id);
-
-            let props = drm.get_properties(*crtc)?;
-            let (ids, vals) = props.as_props_and_values();
-
-            let mut gamma_lut_id = None;
-            let mut active_id = None;
-            let mut mode_id = None;
-            let mut degamma_id = None;
-            let mut ctm_id = None;
-
-            for (&id, &val) in ids.iter().zip(vals.iter()) {
-                if let Ok(info) = drm.get_property(id) {
-                    match info.name().to_str().unwrap_or("") {
-                        "GAMMA_LUT" => gamma_lut_id = Some(id),
-                        "ACTIVE" => active_id = Some((id, val)),
-                        "MODE_ID" => mode_id = Some((id, val)),
-                        "DEGAMMA_LUT" => degamma_id = Some((id, val)),
-                        "CTM" => ctm_id = Some((id, val)),
-                        _ => {}
-                    }
-                }
-            }
-
-            let gamma_lut_id = gamma_lut_id.context("This CRTC does not support gamma")?;
-
-            let mut req = AtomicModeReq::new();
-
-            req.add_property(*crtc, gamma_lut_id, property::Value::Blob(blob_id.into()));
-
-            if let Some((id, v)) = degamma_id {
-                if v != 0 {
-                    req.add_property(*crtc, id, property::Value::Blob(0u64));
-                }
-            }
-            if let Some((id, v)) = ctm_id {
-                if v != 0 {
-                    req.add_property(*crtc, id, property::Value::Blob(0u64));
-                }
-            }
-
-            let first = drm.atomic_commit(AtomicCommitFlags::empty(), req.clone());
-
-            if first.is_ok() {
-                tracing::debug!("Gamma applied without modeset");
-                return Ok(first.map(|_| blob));
-            }
-
-            tracing::debug!("Retrying with ALLOW_MODESET…");
-
-            if let Some((id, _)) = active_id {
-                req.add_property(*crtc, id, property::Value::Boolean(true));
-            }
-
-            if let Some((id, v)) = mode_id {
-                if v != 0 {
-                    req.add_property(*crtc, id, property::Value::Blob((v as u32).into()));
-                }
-            }
-
-            for conn in drm_surface.current_connectors() {
-                if let Ok(props) = drm.get_properties(conn) {
-                    let (cids, cvals) = props.as_props_and_values();
-                    for (&id, _) in cids.iter().zip(cvals.iter()) {
-                        if let Ok(info) = drm.get_property(id) {
-                            if info.name().to_str().unwrap_or("") == "CRTC_ID" {
-                                req.add_property(conn, id, property::Value::CRTC(Some(*crtc)));
-                            }
-                        }
-                    }
-                }
-            }
-
-            Ok(drm
-                .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)
-                .map(|_| blob))
-        });
-
-        match result {
-            Ok(blob) => {
-                surface.gamma_blob = Some(Box::new(blob));
+        match surface.set_gamma(r, g, b) {
+            Ok(_) => {
                 tracing::info!("Gamma applied successfully to {}", name);
                 Ok(())
             }
@@ -1510,75 +1205,6 @@ impl UdevData {
 struct UdevOutputData {
     device: DrmNode,
     crtc: CrtcHandle,
-}
-
-pub struct Surface {
-    render_node: DrmNode,
-    output: Output,
-    output_global: GlobalId,
-    connector: ConnectorHandle,
-    drm_output: DrmOutput<
-        GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
-        OutputPresentationFeedback,
-        DrmDeviceFd,
-    >,
-    dmabuf_feedback: Option<SurfaceDmabufFeedback>,
-    pub gamma_blob: Option<Box<dyn std::any::Any>>,
-}
-
-fn get_surface_dmabuf_feedback(
-    primary_gpu: DrmNode,
-    render_node: DrmNode,
-    gpus: &mut GpuManager<GbmGlesBackend<GlowRenderer, DrmDeviceFd>>,
-    surface: &DrmSurface,
-) -> Option<SurfaceDmabufFeedback> {
-    let primary_formats = gpus.single_renderer(&primary_gpu).ok()?.dmabuf_formats();
-    let render_formats = gpus.single_renderer(&render_node).ok()?.dmabuf_formats();
-
-    let all_render_formats = primary_formats
-        .iter()
-        .chain(render_formats.iter())
-        .copied()
-        .collect::<FormatSet>();
-
-    let planes = surface.planes().clone();
-
-    // We limit the scan-out tranche to formats we can also render from
-    // so that there is always a fallback render path available in case
-    // the supplied buffer can not be scanned out directly
-    let planes_formats = surface
-        .plane_info()
-        .formats
-        .iter()
-        .copied()
-        .chain(planes.overlay.into_iter().flat_map(|p| p.formats))
-        .collect::<FormatSet>()
-        .intersection(&all_render_formats)
-        .copied()
-        .collect::<FormatSet>();
-
-    let builder = DmabufFeedbackBuilder::new(primary_gpu.dev_id(), primary_formats);
-    let render_feedback = builder
-        .clone()
-        .add_preference_tranche(render_node.dev_id(), None, render_formats.clone())
-        .build()
-        .unwrap();
-
-    let scanout_feedback = builder
-        .add_preference_tranche(
-            surface.device_fd().dev_id().unwrap(),
-            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-            planes_formats,
-        )
-        .add_preference_tranche(render_node.dev_id(), None, render_formats)
-        .build()
-        .unwrap();
-
-    Some(SurfaceDmabufFeedback {
-        render_feedback,
-        scanout_feedback,
-    })
 }
 
 const DAMAGE_COLOR: Color32F = Color32F::new(0.3, 0.0, 0.0, 0.3);

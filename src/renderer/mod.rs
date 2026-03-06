@@ -269,7 +269,7 @@ impl Fht {
     }
 
     #[cfg(feature = "xdg-screencast-portal")]
-    pub fn render_screencast<R: FhtRenderer>(
+    pub fn render_screencast_outputs<R: FhtRenderer>(
         &mut self,
         output: &Output,
         renderer: &mut R,

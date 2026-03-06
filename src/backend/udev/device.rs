@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use calloop::timer::{TimeoutAction, Timer};
 use calloop::RegistrationToken;
 use fht_compositor_config::VrrMode;
 use smithay::backend::allocator::format::FormatSet;
@@ -30,7 +29,7 @@ use smithay::wayland::drm_lease::{DrmLease, DrmLeaseBuilder, DrmLeaseRequest, Dr
 use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
-use super::Surface;
+use super::surface::Surface;
 use super::{
     generate_output_render_elements, get_property_val, UdevOutputData, UdevRenderer,
     mode::*,
@@ -221,13 +220,9 @@ impl Device {
                     // We aren't force-clearing the CRTCs, so we need to make the surfaces read the
                     // updated state after a session resume. This also causes a full damage for the
                     // next redraw.
-                    surface.drm_output.with_compositor(|compositor| {
-                        if let Err(err) = compositor.reset_state() {
-                            warn!(?err, "Failed to reset surface output");
-                        }
-
-                        compositor.reset_buffers();
-                    });
+                    if let Err(err) = surface.reset(true) {
+                        warn!(?err, "Failed to reset surface");
+                    }
                 }
             }
         }
@@ -599,15 +594,15 @@ impl Device {
         });
 
         fht.queue_redraw(&output);
-        let surface = Surface {
-            render_node: self.render_node.clone(),
-            connector: conn.handle(),
+        let surface = Surface::new(
             output,
             output_global,
+            self.render_node,
+            conn.handle(),
+            crtc,
             drm_output,
             dmabuf_feedback,
-            gamma_blob: None,
-        };
+        );
         self.surfaces.insert(crtc, surface);
 
         Ok(())
@@ -635,27 +630,15 @@ impl Device {
             return Ok(());
         }
 
-        let Some(surface) = self.surfaces.remove(&crtc) else {
-            panic!("Tried to remove a non-existant surface!")
-        };
-
-        // Remove and disable output.
-        let global = surface.output_global;
-        fht.display_handle.disable_global::<State>(global.clone());
-        let output_clone = surface.output.clone();
-        fht.loop_handle
-            .insert_source(
-                Timer::from_duration(Duration::from_secs(10)),
-                move |_time, _, state| {
-                    state
-                        .fht
-                        .display_handle
-                        .remove_global::<State>(global.clone());
-                    state.fht.remove_output(&output_clone);
-                    TimeoutAction::Drop
-                },
-            )
-            .expect("Failed to insert output global removal timer!");
+        if let Some(surface) = self.surfaces.remove(&crtc) {
+            // Handles disabling the surface and wayland side of things (removing the global)
+            surface.remove(fht);
+        } else {
+            // This should never happen. In practice, a connector might connect for a split second
+            // before its surface gets registered (since we don't immediatly add the connector when
+            // scanning them)
+            error!("Tried removing a non-existent surface?");
+        }
 
         let mut renderer = gpu_manager.single_renderer(&self.render_node).unwrap();
         let render_elements = generate_output_render_elements(fht, &mut renderer);
