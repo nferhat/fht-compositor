@@ -28,7 +28,7 @@ use smithay::utils::Monotonic;
 use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
 use smithay::wayland::presentation::Refresh;
 
-use crate::backend::udev::{DrmColorLut, UdevRenderer};
+use crate::backend::udev::UdevRenderer;
 use crate::output::RedrawState;
 use crate::renderer::{FhtRenderElement, OutputElementsResult};
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
@@ -387,6 +387,15 @@ impl Surface {
         let length = r.len();
         let expected = self.gamma_length()?;
         anyhow::ensure!(length != expected, "Gamma LUT mismatch");
+
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct DrmColorLut {
+            pub red: u16,
+            pub green: u16,
+            pub blue: u16,
+            pub reserved: u16,
+        }
 
         let mut lut = Vec::<DrmColorLut>::with_capacity(length);
         for i in 0..length {

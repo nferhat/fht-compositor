@@ -1172,16 +1172,6 @@ impl UdevData {
             );
         }
 
-        let mut lut: Vec<DrmColorLut> = Vec::with_capacity(len);
-        for i in 0..len {
-            lut.push(DrmColorLut {
-                red: r[i],
-                green: g[i],
-                blue: b[i],
-                reserved: 0,
-            });
-        }
-
         let UdevOutputData { device, crtc } = output
             .user_data()
             .get::<UdevOutputData>()
@@ -1326,13 +1316,4 @@ fn generate_output_render_elements<'a>(
     }
 
     render_elements
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct DrmColorLut {
-    pub red: u16,
-    pub green: u16,
-    pub blue: u16,
-    pub reserved: u16,
 }
