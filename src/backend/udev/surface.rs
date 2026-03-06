@@ -197,7 +197,8 @@ impl Surface {
         &'slf mut self,
         renderer: &mut super::UdevRenderer<'render>,
         output_elements: &OutputElementsResult<super::UdevRenderer<'render>>,
-        target_presentation_time: Duration,
+        // NOTE: This is only used when handling screencasting
+        #[allow(unused)] target_presentation_time: Duration,
         frame_mode: FrameFlags,
         fht: &mut Fht,
     ) -> Result<bool, SwapBuffersError> {

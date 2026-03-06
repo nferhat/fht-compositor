@@ -102,6 +102,7 @@ impl Device {
         }
     }
 
+    #[cfg(feature = "xdg-screencast-portal")]
     pub fn gbm_device(&self) -> gbm::Device<DrmDeviceFd> {
         self.gbm.clone()
     }
