@@ -74,7 +74,7 @@ impl Backend {
             Self::Winit(data) => {
                 _ = output;
                 _ = target_presentation_time;
-                data.render(fht)
+                data.render(fht, target_presentation_time)
             }
             #[cfg(feature = "udev-backend")]
             #[allow(irrefutable_let_patterns)]

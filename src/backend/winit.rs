@@ -7,9 +7,11 @@ use smithay::backend::renderer::damage::{Error as OutputDamageTrackerError, Outp
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
 use smithay::backend::winit::{self, WinitGraphicsBackend};
+use smithay::backend::SwapBuffersError;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::reexports::winit::dpi::LogicalSize;
 use smithay::reexports::winit::window::WindowAttributes;
 use smithay::utils::{Size, Transform};
 use smithay::wayland::dmabuf::{
@@ -17,7 +19,6 @@ use smithay::wayland::dmabuf::{
 };
 
 use crate::output::RedrawState;
-use crate::renderer::OutputElementsResult;
 use crate::state::{Fht, State};
 
 pub struct WinitData {
@@ -31,8 +32,8 @@ pub struct WinitData {
 impl WinitData {
     pub fn new(fht: &mut Fht) -> anyhow::Result<Self> {
         let window_attrs = WindowAttributes::default()
-            .with_min_inner_size(smithay::reexports::winit::dpi::LogicalSize::new(800, 640))
-            .with_max_inner_size(smithay::reexports::winit::dpi::LogicalSize::new(800, 640))
+            .with_min_inner_size(LogicalSize::new(800, 640))
+            .with_max_inner_size(LogicalSize::new(800, 640))
             .with_title("fht-compositor");
         let (mut backend, winit) = winit::init_from_attributes::<GlowRenderer>(window_attrs)
             .map_err(|err| anyhow::anyhow!("Failed to initialize winit backend: {err}"))?;
@@ -66,7 +67,9 @@ impl WinitData {
                     state.fht.output_resized(&backend.output);
                 }
                 winit::WinitEvent::Input(event) => state.process_input_event(event),
-                winit::WinitEvent::CloseRequested => state.fht.stop = true,
+                winit::WinitEvent::CloseRequested => {
+                    state.fht.remove_output(&state.backend.winit().output);
+                }
                 winit::WinitEvent::Redraw => state.fht.queue_redraw(&state.backend.winit().output),
                 winit::WinitEvent::Focus(_) => (), // we dont really care about focusing...
             })
@@ -173,24 +176,37 @@ impl WinitData {
         })
     }
 
-    pub fn render(&mut self, fht: &mut Fht) -> anyhow::Result<bool> {
+    pub fn render(
+        &mut self,
+        fht: &mut Fht,
+        target_presentation_time: Duration,
+    ) -> anyhow::Result<bool> {
         crate::profile_function!();
 
         let age = self.backend.buffer_age().unwrap_or(1);
-        let res = self.backend.bind().and_then(|(renderer, mut fb)| {
-            let OutputElementsResult { ref elements, .. } =
-                fht.output_elements(renderer, &self.output);
-            self.damage_tracker
-                .render_output(renderer, &mut fb, age, elements, [0.1, 0.1, 0.1, 1.0])
+        let (res, output_elements) = self.backend.bind().and_then(|(renderer, mut fb)| {
+            let output_elements_result = fht.output_elements(renderer, &self.output);
+            fht.render_screencopy_without_damage(&self.output, renderer, &output_elements_result);
+
+            let dt_res = self
+                .damage_tracker
+                .render_output(
+                    renderer,
+                    &mut fb,
+                    age,
+                    &output_elements_result.elements,
+                    [0.1, 0.1, 0.1, 1.0],
+                )
                 .map_err(|err| match err {
-                    OutputDamageTrackerError::Rendering(err) => err.into(),
+                    OutputDamageTrackerError::Rendering(err) => err,
                     _ => unreachable!(),
-                })
+                })?;
+
+            Result::<_, SwapBuffersError>::Ok((dt_res, output_elements_result))
         })?;
 
         fht.update_primary_scanout_output(&self.output, &res.states);
         // FIXME: Screencopy rendering
-        // fht.render_screencopy_without_damage(&self.output, renderer, output_elements_result);
 
         let has_damage = res.damage.is_some();
         if let Some(damage) = res.damage {
@@ -213,6 +229,16 @@ impl WinitData {
                 0,
                 wp_presentation_feedback::Kind::empty(),
             );
+
+            let renderer = self.backend.renderer();
+            fht.render_screencopy_with_damage(&self.output, renderer, &output_elements);
+
+            #[cfg(feature = "xdg-screencast-portal")]
+            {
+                fht.render_screencast_outputs(&self.output, renderer, &output_elements);
+                fht.render_screencast_windows(&self.output, renderer, target_presentation_time);
+                fht.render_screencast_workspaces(&self.output, renderer, target_presentation_time);
+            }
         }
 
         let output_state = fht.output_state.get_mut(&self.output).unwrap();
