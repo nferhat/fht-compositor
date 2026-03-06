@@ -112,6 +112,8 @@ impl WinitData {
         output.change_current_state(Some(mode), Some(Transform::Flipped180), new_scale, None);
         output.set_preferred(mode);
         fht.add_output(output.clone(), None, None);
+        fht.output_management_manager_state
+            .set_head_enabled::<State>(&output, true);
 
         crate::renderer::blur::EffectsFramebuffers::init_for_output(&output, backend.renderer());
 
@@ -247,6 +249,9 @@ impl WinitData {
             _ => unreachable!(),
         }
 
+        // It doesn't really matter in winit since the clock is managed by the parent compositor.
+        // Still doing for for two reasons: 1. to make cargo shutup, 2. consistency with udev
+        output_state.frame_clock.present(target_presentation_time);
         output_state.current_frame_sequence = output_state.current_frame_sequence.wrapping_add(1);
 
         // FIXME: this should wait until a frame callback from the host compositor, but it redraws

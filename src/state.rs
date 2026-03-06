@@ -9,15 +9,13 @@ use calloop::timer::Timer;
 use fht_compositor_config::{
     BlurOverrides, BorderOverrides, DecorationMode, ShadowOverrides, VrrMode,
 };
-use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
 };
 use smithay::desktop::utils::{
-    send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
-    surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-    take_presentation_feedback_surface_tree, under_from_surface_tree,
-    update_surface_primary_scanout_output, OutputPresentationFeedback,
+    send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
+    surface_primary_scanout_output, take_presentation_feedback_surface_tree,
+    under_from_surface_tree, update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
@@ -38,7 +36,7 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
-use smithay::wayland::dmabuf::{DmabufFeedback, DmabufState};
+use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
@@ -1250,11 +1248,9 @@ impl Fht {
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
         self.loop_handle.insert_idle(move |state| {
-            #[cfg(feature = "udev-backend")]
-            #[allow(irrefutable_let_patterns)]
-            if let Backend::Udev(udev) = &mut state.backend {
-                udev.reload_output_configuration(&mut state.fht, force);
-            }
+            state
+                .backend
+                .reload_output_configuration(&mut state.fht, force);
             state.fht.arrange_outputs(None);
         });
 
@@ -1718,12 +1714,16 @@ impl Fht {
         }
     }
 
+    #[cfg(feature = "udev-backend")]
     pub fn send_dmabuf_feedbacks(
         &self,
         output: &Output,
         feedback: &SurfaceDmabufFeedback,
         render_element_states: &RenderElementStates,
     ) {
+        use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
+        use smithay::desktop::utils::send_dmabuf_feedback_surface_tree;
+
         crate::profile_function!();
         let output_state = self.output_state.get(output).unwrap();
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
@@ -2208,9 +2208,10 @@ fn should_send_frames(
 }
 
 #[derive(Debug, Clone)]
+#[cfg(feature = "udev-backend")]
 pub struct SurfaceDmabufFeedback {
-    pub render_feedback: DmabufFeedback,
-    pub scanout_feedback: DmabufFeedback,
+    pub render_feedback: smithay::wayland::dmabuf::DmabufFeedback,
+    pub scanout_feedback: smithay::wayland::dmabuf::DmabufFeedback,
 }
 
 #[derive(Default, Debug)]

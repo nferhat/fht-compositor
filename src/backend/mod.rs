@@ -237,4 +237,24 @@ impl Backend {
             _ => unreachable!(),
         }
     }
+
+    pub fn reload_output_configuration(&mut self, fht: &mut Fht, force: bool) {
+        match self {
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(udev) => udev.reload_output_configuration(fht, force),
+            #[allow(unreachable_patterns)]
+            _ => _ = (fht, force),
+        }
+    }
+
+    pub fn switch_vt(&mut self, vt_num: i32) {
+        match self {
+            #[cfg(feature = "udev-backend")]
+            #[allow(irrefutable_let_patterns)]
+            Self::Udev(udev) => udev.switch_vt(vt_num),
+            #[allow(unreachable_patterns)]
+            _ => _ = vt_num,
+        }
+    }
 }

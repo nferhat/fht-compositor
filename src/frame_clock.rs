@@ -28,11 +28,13 @@ impl FrameClock {
         }
     }
 
+    #[allow(unused)] // no used in winit
     pub fn refresh_interval(&self) -> Option<Duration> {
         self.refresh_interval_ns
             .map(|r| Duration::from_nanos(r.get()))
     }
 
+    #[allow(unused)] // no used in udev
     pub fn set_vrr(&mut self, vrr: bool) {
         if self.vrr == vrr {
             return;

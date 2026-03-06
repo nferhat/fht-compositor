@@ -11,9 +11,9 @@ use smithay::backend::renderer::element::surface::{
 };
 // use smithay::desktop::Window;
 use smithay::desktop::utils::{
-    bbox_from_surface_tree, output_update, send_dmabuf_feedback_surface_tree,
-    send_frames_surface_tree, take_presentation_feedback_surface_tree, under_from_surface_tree,
-    with_surfaces_surface_tree, OutputPresentationFeedback,
+    bbox_from_surface_tree, output_update, send_frames_surface_tree,
+    take_presentation_feedback_surface_tree, under_from_surface_tree, with_surfaces_surface_tree,
+    OutputPresentationFeedback,
 };
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::{Output, WeakOutput};
@@ -22,7 +22,6 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::Sta
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size};
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
-use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::seat::WaylandFocus;
@@ -416,6 +415,7 @@ impl Window {
         }
     }
 
+    #[cfg(feature = "udev-backend")]
     pub fn send_dmabuf_feedback<'a, P, F>(
         &self,
         output: &Output,
@@ -423,9 +423,11 @@ impl Window {
         select_dmabuf_feedback: F,
     ) where
         P: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
-        F: Fn(&WlSurface, &SurfaceData) -> &'a DmabufFeedback + Copy,
+        F: Fn(&WlSurface, &SurfaceData) -> &'a smithay::wayland::dmabuf::DmabufFeedback + Copy,
     {
         if let Some(surface) = self.wl_surface() {
+            use smithay::desktop::utils::send_dmabuf_feedback_surface_tree;
+
             send_dmabuf_feedback_surface_tree(
                 &surface,
                 output,

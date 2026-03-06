@@ -1196,26 +1196,19 @@ impl State {
 
 /// Returns `true` if a VT switch key has been handled.
 fn handle_vt_switch(backend: &mut Backend, key_state: KeyState, modified: Keysym) -> bool {
-    use smithay::input::keyboard::keysyms::*;
-
     if key_state == KeyState::Released {
         // We only do VT switch on presses.
         return false;
     }
 
-    #[cfg(feature = "udev-backend")]
-    #[allow(irrefutable_let_patterns)]
-    if let Backend::Udev(udev) = backend {
-        let vt_num = match modified.raw() {
-            modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
-                (modified - KEY_XF86Switch_VT_1 + 1) as i32
-            }
-            _ => return false,
-        };
-
-        udev.switch_vt(vt_num as i32);
-        return true;
-    }
+    use smithay::input::keyboard::keysyms::*;
+    let vt_num = match modified.raw() {
+        modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
+            (modified - KEY_XF86Switch_VT_1 + 1) as i32
+        }
+        _ => return false,
+    };
+    backend.switch_vt(vt_num);
 
     // If we fall here, it's either the udev backend is disabled, or it's enabled and we are not
     // running on it (IE. we are on winit)
