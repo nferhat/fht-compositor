@@ -945,12 +945,10 @@ pub fn has_transparent_region(surface: &WlSurface, surface_size: Size<i32, Logic
     // Opaque regions are described in surface-local coordinates.
     let surface_geo = Rectangle::from_size(surface_size);
     with_states(surface, |data| {
-        let renderer_data = data
-            .data_map
-            .get::<RendererSurfaceStateUserData>()
-            .unwrap()
-            .lock()
-            .unwrap();
+        let Some(renderer_data) = data.data_map.get::<RendererSurfaceStateUserData>() else {
+            return false; // cannot check here yet.
+        };
+        let renderer_data = renderer_data.lock().unwrap();
         if let Some(opaque_regions) = renderer_data.opaque_regions() {
             // If there's some place left after removing opaque regions, these are
             // transparent regions and must be rendered using blur.
