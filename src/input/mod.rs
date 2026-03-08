@@ -948,11 +948,33 @@ impl State {
     }
 
     fn on_gesture_swipe_begin<B: InputBackend>(&mut self, event: B::GestureSwipeBeginEvent) {
-        self.fht.current_swipe_fingers = Some(event.fingers());
-        self.fht.gesture_action_executed = false;
+        let gesturebinds = &self.fht.config.gesturebinds;
+        // Here we
+        let has_gesture = gesturebinds
+            .iter()
+            .any(|(_, pattern)| pattern.fingers == event.fingers());
+        let has_workspace_gesture = gesturebinds.iter().any(|(action, pattern)| {
+            if pattern.fingers != event.fingers() {
+                return false;
+            }
 
-        let active_monitor = self.fht.space.active_monitor_mut();
-        active_monitor.start_swipe_gesture(&self.fht.config.animations.workspace_switch);
+            matches!(
+                action,
+                GestureAction::FocusNextWorkspace | GestureAction::FocusPreviousWorkspace
+            )
+        });
+        if has_gesture {
+            self.fht.current_swipe_fingers = Some(event.fingers());
+            self.fht.gesture_action_executed = false;
+            if has_workspace_gesture {
+                // We do this check to avoid triggering the gesture with no workspace binds here.
+                let active_monitor = self.fht.space.active_monitor_mut();
+                active_monitor.start_swipe_gesture(&self.fht.config.animations.workspace_switch);
+            }
+
+            // This event has been handled.
+            return;
+        }
 
         let serial = SERIAL_COUNTER.next_serial();
         let pointer = self.fht.pointer.clone();
