@@ -6,7 +6,10 @@ key names) are: `left`, `right`, `middle`, `right`, `forward`, `back`, `scrollup
 ## Available mouse actions
 
 - `swap-tile`: Initiates an interactive tile swap. Allows you to grab a window and put it elsewhere in the window stack,
-  move it across outputs or workspaces. For floating windows, it allows you to move them around with the mouse
+  move it across outputs or workspaces. For floating windows, it allows you to move them around with the mouse.
+
+  Additionally, you can scroll the mouse wheel (vertically or horizontally) to change workspaces while grabbing a window.
+
 - `resize-tile`: Initiates an interactive resize. Only affects floating windows so far.
 - `focus-next-window`, `focus-previous-window`: Focused the next/previous window in the workspace. Removes the currently active fullscreen window, if any.
 - `focus-next-workspace`, `focus-previous-workspace`, I think these are clear.

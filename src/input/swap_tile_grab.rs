@@ -72,6 +72,26 @@ impl PointerGrab<State> for SwapTileGrab {
         handle: &mut PointerInnerHandle<'_, State>,
         details: AxisFrame,
     ) {
+        if let Some((horiz, vert)) = details.v120 {
+            // To make workspace switching easier, allow the user to switch workspaces with the
+            // mouse only, using either the scroll wheel or the side scroll.
+            let vert_next = if vert > 0 { true } else { false };
+            let horiz_next = if horiz > 0 { true } else { false };
+
+            // However, to avoid accidental input (you might trigger a vertical scroll while trying
+            // a horizontal one, for example), take the direction of the max.
+            let next = if horiz > vert { horiz_next } else { vert_next };
+
+            let mon = data.fht.space.active_monitor_mut();
+            let idx = if next {
+                (mon.active_workspace_idx() + 1).clamp(0, 8)
+            } else {
+                mon.active_workspace_idx().saturating_sub(1)
+            };
+            // Ignore new focus.
+            _ = mon.set_active_workspace_idx(idx, true);
+        }
+
         handle.axis(data, details)
     }
 
