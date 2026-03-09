@@ -73,6 +73,9 @@ struct InteractiveSwap {
     /// We need to track on which outputs the tile is visible on, to render it accordingly.
     overlap_outputs: Vec<Output>,
     /// The last output we rendered on.
+    // FIXME: There should always be an output here, however due to how the cursor
+    // position is clamped there might be a split frame where the cursor is outside the
+    // "space"
     last_output: Option<Output>,
 }
 
@@ -886,6 +889,15 @@ impl Space {
                 }
             }
         }
+    }
+
+    /// Get a mutable reference to the [`Tile`] being grabbed in the current [`InteractiveSwap`], if
+    /// any.
+    #[allow(clippy::type_complexity)]
+    pub fn interactive_swap_tile_mut(&mut self) -> Option<(&mut Tile, Option<Output>)> {
+        self.interactive_swap
+            .as_mut()
+            .map(|swap| (&mut swap.tile, swap.last_output.clone()))
     }
 
     /// Start an interactive swap in the [`Workspace`] of this [`Window`].

@@ -332,31 +332,47 @@ pub(super) fn add_window_pre_commit_hook(window: &Window) {
     // the ones that should do this.
     let wl_surface = window.wl_surface().unwrap();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
-        let Some((window, workspace)) = state.fht.space.find_window_and_workspace_mut(surface)
-        else {
-            warn!("Window pre-commit hook should be removed when unmapped");
-            return;
+        if let Some((window, workspace)) = state.fht.space.find_window_and_workspace_mut(surface) {
+            // Before commiting, we check if the window's buffers are getting unmapped.
+            // If that's the case, the window is likely closing (or minimizing, if the
+            // compositor supports that)
+            //
+            // Since we are going to close, we take a snapshot of the window's elements,
+            // like we do inside `Tile::render_elements` into a
+            // GlesTexture and store that for future use.
+            let got_unmapped = with_states(surface, |states| {
+                let mut guard = states.cached_state.get::<SurfaceAttributes>();
+                let attrs = guard.pending();
+                matches!(attrs.buffer, Some(BufferAssignment::Removed))
+            });
+
+            if got_unmapped {
+                state.backend.with_renderer(|renderer| {
+                    workspace.prepare_close_animation_for_window(&window, renderer);
+                });
+            } else {
+                workspace.clear_close_animation_for_window(&window);
+            }
         };
 
-        // Before commiting, we check if the window's buffers are getting unmapped.
-        // If that's the case, the window is likely closing (or minimizing, if the
-        // compositor supports that)
-        //
-        // Since we are going to close, we take a snapshot of the window's elements,
-        // like we do inside `Tile::render_elements` into a
-        // GlesTexture and store that for future use.
-        let got_unmapped = with_states(surface, |states| {
-            let mut guard = states.cached_state.get::<SurfaceAttributes>();
-            let attrs = guard.pending();
-            matches!(attrs.buffer, Some(BufferAssignment::Removed))
-        });
-
-        if got_unmapped {
-            state.backend.with_renderer(|renderer| {
-                workspace.prepare_close_animation_for_window(&window, renderer);
+        if let Some((grabbed_tile, output)) = state.fht.space.interactive_swap_tile_mut() {
+            // Same logic but for interactive swap. Nothing special.
+            let got_unmapped = with_states(surface, |states| {
+                let mut guard = states.cached_state.get::<SurfaceAttributes>();
+                let attrs = guard.pending();
+                matches!(attrs.buffer, Some(BufferAssignment::Removed))
             });
-        } else {
-            workspace.clear_close_animation_for_window(&window);
+
+            if got_unmapped {
+                let scale = output
+                    .map(|o| o.current_scale().integer_scale())
+                    .unwrap_or(1);
+                state.backend.with_renderer(|renderer| {
+                    grabbed_tile.prepare_close_animation_if_needed(renderer, scale);
+                });
+            } else {
+                grabbed_tile.clear_close_animation_snapshot();
+            }
         }
     });
 
