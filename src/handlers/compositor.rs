@@ -55,6 +55,8 @@ impl State {
                 else {
                     unreachable!()
                 };
+                let window_id = window.id();
+                trace!(?window_id, "Preparing unconfigured window");
                 window.on_commit();
                 window.refresh();
 
@@ -72,6 +74,7 @@ impl State {
                             .workspace_mut_for_window_surface(&parent_surface)
                     })
                 {
+                    trace!(?workspace_id, "found parent mapped in workspace");
                     workspace_id = parent_workspace.id();
                     workspace_idx = parent_workspace.index();
                     output = parent_workspace.output().clone();
@@ -169,6 +172,9 @@ impl State {
                 let height_fixed =
                     (min_size.h != 0 && max_size.h != 0) && (min_size.h == max_size.h);
                 let has_fixed_size = width_fixed || height_fixed;
+                if has_fixed_size {
+                    trace!("window has fixed size, floating by default");
+                }
 
                 // Games and media players get floating.
                 let has_content_type = with_states(surface, |data| {
@@ -180,6 +186,9 @@ impl State {
                         Type::Photo | Type::Video | Type::Game
                     )
                 });
+                if has_content_type {
+                    trace!("window has content-type, floating by default");
+                }
 
                 // If the parent is floating, the child shall be too.
                 let parent_floating = parent.as_ref().is_some_and(|w| !w.tiled());
@@ -198,6 +207,9 @@ impl State {
                         ToplevelDialogHint::Dialog | ToplevelDialogHint::Modal
                     )
                 });
+                if has_content_type {
+                    trace!("window is modal, floating by default");
+                }
 
                 // We only honor our floating heuristics if we dont have a fullscreen/maximized
                 // state from client/rules, to avoid jankiness
