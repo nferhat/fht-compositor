@@ -88,6 +88,8 @@ pub enum Request {
     PickLayerShell,
     /// Get the cursor position.
     CursorPosition,
+    /// List all registered global shortcuts.
+    GlobalShortcuts,
     /// Request the compositor to execute an action.
     Action {
         #[command(subcommand)]

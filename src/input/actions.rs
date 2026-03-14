@@ -49,6 +49,10 @@ pub enum KeyActionType {
     FocusNextWorkspace,
     FocusPreviousWorkspace,
     DisableOuptuts,
+    GlobalShortcut {
+        app_id: String,
+        shortcut_id: String,
+    },
     #[default]
     None,
 }
@@ -168,6 +172,19 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     ComplexKeyAction::SendToWorkspace(idx) => {
                         KeyActionType::SendFocusedWindowToWorkspace(idx)
                     }
+                    ComplexKeyAction::GlobalShortcut(arg) => match arg.split_once(':') {
+                        Some((app_id, shortcut_id)) => KeyActionType::GlobalShortcut {
+                            app_id: app_id.to_string(),
+                            shortcut_id: shortcut_id.to_string(),
+                        },
+                        None => {
+                            tracing::warn!(
+                                    ?arg,
+                                    "Invalid global-shortcut arg format, expected '<app_id>:<shortcut_id>'"
+                                );
+                            KeyActionType::None
+                        }
+                    },
                 };
             }
         }
@@ -426,6 +443,10 @@ impl State {
                     mon.workspace_mut_by_index(idx)
                         .insert_window(window, location, true);
                 }
+            }
+            KeyActionType::GlobalShortcut { .. } => {
+                // Handled directly in the keyboard input closure, should never reach here.
+                unreachable!("GlobalShortcut actions are handled in the keyboard input filter");
             }
             KeyActionType::None => (), // disabled the key combo
         }

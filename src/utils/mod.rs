@@ -92,6 +92,17 @@ pub fn spawn(cmdline: impl Into<OsString>, xdg_activation_token: Option<XdgActiv
     spawn_args(command, xdg_activation_token);
 }
 
+/// Split a [`Duration`] into the three timestamp fields the protocol uses.
+///
+/// Returns `(tv_sec_hi, tv_sec_lo, tv_nsec)`.
+pub fn split_timestamp(time: Duration) -> (u32, u32, u32) {
+    let secs = time.as_secs();
+    let tv_sec_hi = (secs >> 32) as u32;
+    let tv_sec_lo = (secs & 0xFFFF_FFFF) as u32;
+    let tv_nsec = time.subsec_nanos();
+    (tv_sec_hi, tv_sec_lo, tv_nsec)
+}
+
 pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {
     let handle = surface.handle().upgrade()?;
     let dh = DisplayHandle::from(handle);

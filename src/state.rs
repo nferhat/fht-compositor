@@ -79,6 +79,7 @@ use crate::portals::screencast::{
     self, CursorMode, ScreencastSession, ScreencastSource, StreamMetadata,
 };
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
+use crate::protocols::hyprland_global_shortcuts::HyprlandGlobalShortcutsState;
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
 use crate::renderer::blur::EffectsFramebuffers;
@@ -850,6 +851,7 @@ pub struct Fht {
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
     pub ext_workspace_manager_state: ExtWorkspaceManagerState,
+    pub hyprland_global_shortcuts_state: HyprlandGlobalShortcutsState,
 }
 
 impl Fht {
@@ -913,6 +915,13 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
+        let hyprland_global_shortcuts_state =
+            HyprlandGlobalShortcutsState::new(dh, |client| {
+                // Only allow clients that aren't running inside a SC
+                client
+                    .get_data::<ClientState>()
+                    .is_none_or(|data| data.security_context.is_none())
+            });
         ContentTypeState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(dh);
         TextInputManagerState::new::<State>(dh);
@@ -1057,6 +1066,7 @@ impl Fht {
             xdg_shell_state,
             xdg_foreign_state,
             ext_workspace_manager_state,
+            hyprland_global_shortcuts_state,
         }
     }
 
