@@ -26,6 +26,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         cli::Request::PickWindow => fht_compositor_ipc::Request::PickWindow,
         cli::Request::Action { action } => fht_compositor_ipc::Request::Action(action),
         cli::Request::CursorPosition => fht_compositor_ipc::Request::CursorPosition,
+        cli::Request::GlobalShortcuts => fht_compositor_ipc::Request::GlobalShortcuts,
         cli::Request::PrintSchema => return fht_compositor_ipc::print_schema(),
         cli::Request::Subscribe => {
             subscribe = true;
@@ -115,6 +116,9 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             },
             fht_compositor_ipc::Response::CursorPosition { x, y } => {
                 Ok(serde_json::json!({ "x": x, "y": y }).to_string())
+            }
+            fht_compositor_ipc::Response::GlobalShortcuts(shortcuts) => {
+                serde_json::to_string(&shortcuts)
             }
             fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
@@ -268,6 +272,24 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
         },
         fht_compositor_ipc::Response::CursorPosition { x, y } => {
             writeln!(&mut writer, "Cursor position: {x}, {y}")?;
+        }
+        fht_compositor_ipc::Response::GlobalShortcuts(shortcuts) => {
+            if shortcuts.is_empty() {
+                writeln!(&mut writer, "No global shortcuts registered.")?;
+            } else {
+                for (idx, shortcut) in shortcuts.iter().enumerate() {
+                    writeln!(&mut writer, "Global Shortcut #{idx}:")?;
+                    writeln!(&mut writer, "\tApp ID: {}", shortcut.app_id)?;
+                    writeln!(&mut writer, "\tID: {}", shortcut.id)?;
+                    writeln!(&mut writer, "\tDescription: {}", shortcut.description)?;
+                    writeln!(
+                        &mut writer,
+                        "\tTrigger Description: {}",
+                        shortcut.trigger_description
+                    )?;
+                    writeln!(&mut writer, "---")?;
+                }
+            }
         }
         fht_compositor_ipc::Response::Error(err) => anyhow::bail!(err.clone()),
         fht_compositor_ipc::Response::Noop => (),

@@ -73,6 +73,15 @@ impl HyprlandGlobalShortcutsState {
         self.get(app_id, id).map_or(false, |s| s.is_alive())
     }
 
+    /// Returns the metadata of all currently registered and alive shortcuts.
+    pub fn list_shortcuts(&self) -> Vec<&ShortcutData> {
+        self.shortcuts
+            .values()
+            .filter(|s| s.is_alive())
+            .filter_map(|s| s.data::<ShortcutData>())
+            .collect()
+    }
+
     /// Fire a `pressed` event on the shortcut identified by `(app_id, id)`.
     ///
     /// Returns `true` if the shortcut existed and the event was sent, `false` otherwise.

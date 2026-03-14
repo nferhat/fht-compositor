@@ -88,6 +88,8 @@ pub enum Request {
     PickLayerShell,
     /// Request the cursor position.
     CursorPosition,
+    /// Request information about all registered global shortcuts.
+    GlobalShortcuts,
     /// Request the compositor to execute an action.
     Action(Action),
     /// Subscribe to the IPC, receiving events continuously.
@@ -118,6 +120,8 @@ pub enum Response {
     PickedLayerShell(PickLayerShellResult),
     /// The cursor position.
     CursorPosition { x: f64, y: f64 },
+    /// All registered global shortcuts.
+    GlobalShortcuts(Vec<GlobalShortcut>),
     /// There was an error handling the request.
     Error(String),
     /// Noop, for requests that do not need a result/output.
@@ -400,6 +404,20 @@ pub enum Layer {
     Bottom,
     Top,
     Overlay,
+}
+
+/// A registered global shortcut from the `hyprland-global-shortcuts-v1` protocol.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GlobalShortcut {
+    /// The application ID that registered this shortcut.
+    pub app_id: String,
+    /// The shortcut identifier.
+    pub id: String,
+    /// A human-readable description of the shortcut.
+    pub description: String,
+    /// A human-readable description of how to trigger the shortcut.
+    pub trigger_description: String,
 }
 
 /// An action to execute. This enum includes all possible key actions found in
