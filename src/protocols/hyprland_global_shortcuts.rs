@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource,
 };
@@ -222,6 +223,20 @@ impl Dispatch<HyprlandGlobalShortcutV1, ShortcutData, State> for HyprlandGlobalS
             #[allow(unreachable_patterns)]
             _ => unreachable!(),
         }
+    }
+
+    fn destroyed(
+        state: &mut State,
+        _client: ClientId,
+        _resource: &HyprlandGlobalShortcutV1,
+        data: &ShortcutData,
+    ) {
+        let key = (data.app_id.clone(), data.id.clone());
+        state
+            .hyprland_global_shortcuts_state()
+            .shortcuts
+            .remove(&key);
+        state.shortcut_destroyed(data.app_id.clone(), data.id.clone());
     }
 }
 
