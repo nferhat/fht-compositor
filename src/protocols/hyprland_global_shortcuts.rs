@@ -67,6 +67,12 @@ impl HyprlandGlobalShortcutsState {
         self.shortcuts.get(&(app_id.to_owned(), id.to_owned()))
     }
 
+    /// Returns `true` if a shortcut identified by `(app_id, id)` is currently registered and
+    /// alive.
+    pub fn has_shortcut(&self, app_id: &str, id: &str) -> bool {
+        self.get(app_id, id).map_or(false, |s| s.is_alive())
+    }
+
     /// Fire a `pressed` event on the shortcut identified by `(app_id, id)`.
     ///
     /// Returns `true` if the shortcut existed and the event was sent, `false` otherwise.
