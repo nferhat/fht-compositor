@@ -455,13 +455,55 @@ impl State {
                     }
                 }
 
-                handle_key_action(
+                let result = handle_key_action(
                     &state.fht.config.keybinds,
                     &mut state.fht.suppressed_keys,
                     modifiers,
                     key_state,
                     raw,
-                )
+                );
+
+                // For global shortcuts, we handle press/release directly here instead of
+                // going through process_key_action.
+                match &result {
+                    FilterResult::Intercept((_, action)) => {
+                        if let KeyActionType::GlobalShortcut {
+                            app_id,
+                            shortcut_id,
+                        } = &action.r#type
+                        {
+                            // SAFETY: handle_key_action will never intercept if raw.is_none()
+                            let keysym = raw.unwrap();
+                            let shortcuts = &state.fht.hyprland_global_shortcuts_state;
+                            if !shortcuts.has_shortcut(app_id, shortcut_id) {
+                                // No client registered this shortcut, undo the suppression
+                                // and forward the key to the focused client.
+                                state.fht.suppressed_keys.remove(&keysym);
+                                return FilterResult::Forward;
+                            }
+
+                            let time = crate::utils::get_monotonic_time();
+                            match key_state {
+                                KeyState::Pressed => {
+                                    shortcuts.press_shortcut(app_id, shortcut_id, time);
+                                }
+                                KeyState::Released => {
+                                    shortcuts.release_shortcut(app_id, shortcut_id, time);
+                                }
+                            }
+
+                            // Intercept with a no-op so process_key_action doesn't try to
+                            // handle this again.
+                            return FilterResult::Intercept((
+                                KeyPattern::default(),
+                                KeyAction::none(),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+
+                result
             },
         );
 

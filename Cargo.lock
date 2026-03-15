@@ -1028,6 +1028,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracy-client",
+ "wayland-scanner",
  "xcursor",
  "xdg",
  "zbus",

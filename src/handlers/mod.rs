@@ -16,6 +16,7 @@ mod foreign_toplevel_list;
 mod fractional_scale;
 #[cfg(feature = "udev-backend")]
 pub mod gamma_control;
+mod hyprland_global_shortcuts;
 mod idle_inhibit;
 mod input_method;
 mod keyboard_shortcuts_inhibit;

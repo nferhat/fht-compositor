@@ -246,6 +246,7 @@ enum ClientRequest {
     PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
     PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
     CursorPosition(async_channel::Sender<(f64, f64)>),
+    GlobalShortcuts(async_channel::Sender<Vec<fht_compositor_ipc::GlobalShortcut>>),
     Action(
         fht_compositor_ipc::Action,
         async_channel::Sender<anyhow::Result<()>>,
@@ -359,6 +360,17 @@ async fn handle_request(
             let (x, y) = rx.recv().await.context("Failed to receive action result")?;
             Ok(Response::CursorPosition { x, y })
         }
+        fht_compositor_ipc::Request::GlobalShortcuts => {
+            let (tx, rx) = async_channel::bounded(1);
+            to_compositor
+                .send(ClientRequest::GlobalShortcuts(tx))
+                .context("IPC communication channel closed")?;
+            let shortcuts = rx
+                .recv()
+                .await
+                .context("Failed to receive global shortcuts")?;
+            Ok(Response::GlobalShortcuts(shortcuts))
+        }
         fht_compositor_ipc::Request::Action(action) => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
@@ -465,6 +477,21 @@ impl State {
             }
             ClientRequest::CursorPosition(tx) => {
                 tx.send_blocking(self.fht.pointer.current_location().into())?;
+            }
+            ClientRequest::GlobalShortcuts(tx) => {
+                let shortcuts = self
+                    .fht
+                    .hyprland_global_shortcuts_state
+                    .list_shortcuts()
+                    .into_iter()
+                    .map(|data| fht_compositor_ipc::GlobalShortcut {
+                        app_id: data.app_id.clone(),
+                        id: data.id.clone(),
+                        description: data.description.clone(),
+                        trigger_description: data.trigger_description.clone(),
+                    })
+                    .collect();
+                tx.send_blocking(shortcuts)?;
             }
             ClientRequest::Action(action, tx) => {
                 tx.send_blocking(self.handle_ipc_action(action))?;
