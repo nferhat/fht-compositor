@@ -6,7 +6,6 @@
 //!
 //! This module also has some helpers to create render elements.
 
-mod data;
 pub mod extra_damage;
 pub mod render_elements;
 pub mod rounded_window;
@@ -639,7 +638,6 @@ impl AsGlowRenderer for GlowRenderer {
 /// Inititalize needed structs and shaders for custom rendering.
 pub fn init(renderer: &mut GlowRenderer) {
     shaders::Shaders::init(renderer);
-    data::RendererData::init(renderer.borrow_mut());
 }
 
 /// Render the given `elements` inside a [`GlesTexture`].
