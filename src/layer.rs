@@ -7,10 +7,9 @@ use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
 use smithay::utils::{Logical, Rectangle};
 
-use crate::renderer::blur::element::BlurElement;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
-use crate::renderer::{has_transparent_region, FhtRenderer};
+use crate::renderer::FhtRenderer;
 use crate::space::shadow::{self, Shadow};
 use crate::state::Fht;
 
@@ -70,7 +69,7 @@ impl MappedLayer {
         renderer: &mut R,
         layer_geo: Rectangle<i32, Logical>,
         scale: i32,
-        config: &fht_compositor_config::Config,
+        _config: &fht_compositor_config::Config,
     ) -> impl Iterator<Item = LayerShellRenderElement<R>> {
         let wl_surface = self.layer.wl_surface();
         let render_geo = layer_geo.to_physical(scale);
@@ -135,28 +134,8 @@ impl MappedLayer {
             )
             .into_iter()
             .map(Into::into);
-        let rv = rv.chain(shadow);
 
-        let blur = config.decorations.blur.with_overrides(&self.rules.blur);
-        let is_transparent = alpha < 1.0 || has_transparent_region(wl_surface, layer_geo.size);
-        let blur = (!blur.disabled() && is_transparent)
-            .then(|| {
-                BlurElement::new(
-                    renderer,
-                    &self.output,
-                    layer_geo,
-                    render_geo.loc,
-                    corner_radius,
-                    false, // FIXME: Configurable
-                    scale,
-                    alpha,
-                    blur,
-                )
-            })
-            .into_iter()
-            .map(Into::into);
-
-        rv.chain(blur)
+        rv.chain(shadow)
     }
 }
 
@@ -271,7 +250,6 @@ crate::fht_render_elements! {
     LayerShellRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedWindowElement<R>,
-        Blur = BlurElement,
         Shadow = ShaderElement,
     }
 }

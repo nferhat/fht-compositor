@@ -6,7 +6,6 @@
 //!
 //! This module also has some helpers to create render elements.
 
-pub mod blur;
 mod data;
 pub mod extra_damage;
 pub mod render_elements;
@@ -18,8 +17,7 @@ pub mod texture_shader_element;
 use std::borrow::BorrowMut;
 
 use anyhow::Context;
-use blur::EffectsFramebuffers;
-use glam::{Mat3, Vec2};
+use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -31,7 +29,6 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::{
     Bind, Blit, Color32F, ExportMem, Frame, ImportAll, ImportMem, Offscreen, Renderer,
     RendererSuper, Texture, TextureFilter, TextureMapping,
@@ -43,11 +40,7 @@ use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{
-    Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size, Transform,
-};
-use smithay::wayland::compositor::with_states;
+use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
@@ -187,7 +180,6 @@ impl Fht {
 
         // Collect the render elements for the rendered monitor
         let monitor = self.space.monitor_mut_for_output(output).unwrap();
-        let has_blur = monitor.has_blur();
         let MonitorRenderResult {
             elements: monitor_elements,
             elements_above_top: monitor_elements_above_top,
@@ -241,29 +233,6 @@ impl Fht {
 
         // We don't need it anymore, and avoid deadlock down below.
         drop(layer_map);
-
-        // In case the optimized blur layer is dirty, re-render
-        // It only has the bottom and background layer shells drawn onto with blur applied.
-        //
-        // We must do it now before we actually render the previous render elements into the final
-        // composited blur buffer
-        let mut fx_buffers = EffectsFramebuffers::get(output);
-        if !self.config.decorations.blur.disable
-            && self.config.decorations.blur.passes > 0
-            && fx_buffers.optimized_blur_dirty
-            && has_blur
-        {
-            if let Err(err) = fx_buffers.update_optimized_blur_buffer(
-                renderer.glow_renderer_mut(),
-                output,
-                scale,
-                &self.config.decorations.blur,
-            ) {
-                error!(?err, "Failed to update optimized blur buffer");
-            } else {
-                fx_buffers.optimized_blur_dirty = false;
-            }
-        }
 
         rv
     }
@@ -511,10 +480,7 @@ impl Fht {
             // NOTE: The workspace already renders to the origin (0, 0), so no need to relocate
             // anything.
 
-            let elements =
-                mon.workspace_mut_by_index(index)
-                    .render(renderer, scale, Some(Point::default()));
-
+            let elements = mon.workspace_mut_by_index(index).render(renderer, scale);
             if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
                 error!(id = ?cast.id(), ?err, "Failed to render cast");
             }
@@ -892,71 +858,4 @@ pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform {
             transpose: false,
         },
     )
-}
-
-// Copied from smithay, adapted to use glam structs
-fn build_texture_mat(
-    src: Rectangle<f64, Buffer>,
-    dest: Rectangle<i32, Physical>,
-    texture: Size<i32, Buffer>,
-    transform: Transform,
-) -> Mat3 {
-    let dst_src_size = transform.transform_size(src.size);
-    let scale = dst_src_size.to_f64() / dest.size.to_f64();
-
-    let mut tex_mat = Mat3::IDENTITY;
-    // first bring the damage into src scale
-    tex_mat = Mat3::from_scale(Vec2::new(scale.x as f32, scale.y as f32)) * tex_mat;
-
-    // then compensate for the texture transform
-    let transform_mat = Mat3::from_cols_array(transform.matrix().as_ref());
-    let translation = match transform {
-        Transform::Normal => Mat3::IDENTITY,
-        Transform::_90 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.w as f32)),
-        Transform::_180 => {
-            Mat3::from_translation(Vec2::new(dst_src_size.w as f32, dst_src_size.h as f32))
-        }
-        Transform::_270 => Mat3::from_translation(Vec2::new(dst_src_size.h as f32, 0f32)),
-        Transform::Flipped => Mat3::from_translation(Vec2::new(dst_src_size.w as f32, 0f32)),
-        Transform::Flipped90 => Mat3::IDENTITY,
-        Transform::Flipped180 => Mat3::from_translation(Vec2::new(0f32, dst_src_size.h as f32)),
-        Transform::Flipped270 => {
-            Mat3::from_translation(Vec2::new(dst_src_size.h as f32, dst_src_size.w as f32))
-        }
-    };
-    tex_mat = transform_mat * tex_mat;
-    tex_mat = translation * tex_mat;
-
-    // now we can add the src crop loc, the size already done implicit by the src size
-    tex_mat = Mat3::from_translation(Vec2::new(src.loc.x as f32, src.loc.y as f32)) * tex_mat;
-
-    // at last we have to normalize the values for UV space
-    tex_mat = Mat3::from_scale(Vec2::new(
-        (1.0f64 / texture.w as f64) as f32,
-        (1.0f64 / texture.h as f64) as f32,
-    )) * tex_mat;
-
-    tex_mat
-}
-
-/// Get whether a surface has any transparent region. This is calculated from opaque regions
-/// provided by the surface aswell as the render format.
-pub fn has_transparent_region(surface: &WlSurface, surface_size: Size<i32, Logical>) -> bool {
-    // Opaque regions are described in surface-local coordinates.
-    let surface_geo = Rectangle::from_size(surface_size);
-    with_states(surface, |data| {
-        let Some(renderer_data) = data.data_map.get::<RendererSurfaceStateUserData>() else {
-            return false; // cannot check here yet.
-        };
-        let renderer_data = renderer_data.lock().unwrap();
-        if let Some(opaque_regions) = renderer_data.opaque_regions() {
-            // If there's some place left after removing opaque regions, these are
-            // transparent regions and must be rendered using blur.
-            let remaining = surface_geo.subtract_rects(opaque_regions.iter().copied());
-            !remaining.is_empty()
-        } else {
-            // no opaque regions == fully transparent window surface
-            true
-        }
-    })
 }

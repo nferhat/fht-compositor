@@ -82,7 +82,6 @@ use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::hyprland_global_shortcuts::HyprlandGlobalShortcutsState;
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
-use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
@@ -419,10 +418,6 @@ impl State {
         self.fht.resolve_rules_for_all_layer_shells();
 
         // Queue a redraw to ensure everything is up-to-date visually.
-        self.fht
-            .space
-            .outputs()
-            .for_each(|o| EffectsFramebuffers::get(o).optimized_blur_dirty = true);
         self.fht.queue_redraw_all();
     }
 
@@ -915,13 +910,12 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
-        let hyprland_global_shortcuts_state =
-            HyprlandGlobalShortcutsState::new(dh, |client| {
-                // Only allow clients that aren't running inside a SC
-                client
-                    .get_data::<ClientState>()
-                    .is_none_or(|data| data.security_context.is_none())
-            });
+        let hyprland_global_shortcuts_state = HyprlandGlobalShortcutsState::new(dh, |client| {
+            // Only allow clients that aren't running inside a SC
+            client
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
+        });
         ContentTypeState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(dh);
         TextInputManagerState::new::<State>(dh);
@@ -1225,15 +1219,6 @@ impl Fht {
             // Resize lock backdrop to make sure it always covers up everything
             buffer.resize(output.geometry().size);
         }
-
-        let output2 = output.clone();
-        self.loop_handle.insert_idle(move |state| {
-            state.backend.with_renderer(|renderer| {
-                if let Err(err) = EffectsFramebuffers::update_for_output(&output2, renderer) {
-                    error!(?err, "Failed to update output effects framebuffers")
-                }
-            });
-        });
 
         self.queue_redraw(output);
     }

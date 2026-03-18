@@ -23,13 +23,12 @@ use super::closing_tile::ClosingTile;
 use super::{border, shadow, Config};
 use crate::egui::EguiRenderElement;
 use crate::output::OutputExt;
-use crate::renderer::blur::element::BlurElement;
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::{ShaderElement, Shaders};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
-use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
+use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::Window;
 
@@ -96,7 +95,6 @@ crate::fht_render_elements! {
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
         Decoration = ShaderElement,
-        Blur = BlurElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
     }
@@ -468,18 +466,6 @@ impl Tile {
         }
     }
 
-    /// Return whether this tile has a transparent region.
-    pub fn has_transparent_region(&self) -> bool {
-        let wl_surface = self
-            .window()
-            .wl_surface()
-            .expect("A mapped window should have a WlSurface");
-        // We only care about main window surface blurring, subsurfaces (for example
-        // popups) are not accoutned for and will not be rendered
-        // with blur.
-        has_transparent_region(&wl_surface, self.window.size())
-    }
-
     /// Advance animations for this [`Tile`].
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         crate::profile_function!();
@@ -527,8 +513,6 @@ impl Tile {
             return;
         }
 
-        // FIXME: Blur with closing tiles is kinda wonky, but you shouldn't notice it unless
-        // you have a *very* slow closing animation
         let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0);
         self.close_animation_snapshot = Some(elements);
     }
@@ -725,8 +709,6 @@ impl Tile {
         renderer: &mut R,
         scale: i32,
         mut alpha: f32,
-        output: &Output,
-        render_offset: Point<i32, Logical>,
     ) -> impl Iterator<Item = TileRenderElement<R>> {
         crate::profile_function!();
         let fractional_scale = Scale::from(scale as f64);
@@ -813,18 +795,11 @@ impl Tile {
 
         let is_fullscreen = self.window.fullscreen();
         let rules = self.window.rules();
-        let border::Parameters {
-            thickness: mut border_thickness,
-            corner_radius: border_radius,
-            ..
-        } = self.border.current_parameters();
-        if is_fullscreen {
-            border_thickness = 0
-        }
-        let (blur, optimized_blur) = (
-            self.config.blur.with_overrides(&rules.blur),
-            rules.blur.optimized,
-        );
+        let border_thickness = if is_fullscreen {
+            0
+        } else {
+            self.border.current_parameters().thickness
+        };
 
         drop(rules);
 
@@ -860,48 +835,10 @@ impl Tile {
             .map(Into::into)
             .into_iter();
 
-        let blur_element = (!blur.disabled() && self.has_transparent_region())
-            .then(|| {
-                // Optimized blur uses a pre-blurred texture containing background and bottom
-                // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
-                // window.
-                //
-                // When a window is tiled, it will most likely only display the background, IE there
-                // are no windows behind it, so we win quit a lot of performance when enabling
-                // optimized blur here since tiled windows are *huge*
-                //
-                // Floating windows on the other hand might have other windows below it, so they
-                // don't use optimized. They are also (in comparaison) relatively
-                // small, so its even better
-                //
-                // HACK: Since the true blur implementation is quite expensive as of right now, we
-                // use optimized blur by default. Unless the user asks for it.
-                let optimized = optimized_blur.unwrap_or(true);
-
-                // render_offset is from the workspace, to account for switching animations
-                let sample_area =
-                    Rectangle::new(window_geometry.loc + render_offset, window_geometry.size);
-
-                BlurElement::new(
-                    renderer,
-                    output,
-                    sample_area,
-                    window_geometry.loc.to_physical(scale),
-                    border_radius,
-                    optimized,
-                    scale,
-                    alpha,
-                    blur,
-                )
-                .into()
-            })
-            .into_iter();
-
         opening_element
             .into_iter()
             .chain(normal_elements)
             .chain(border_element)
-            .chain(blur_element)
             .chain(shadow_element)
     }
 }

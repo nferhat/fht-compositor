@@ -34,7 +34,6 @@ use super::{
     generate_output_render_elements, get_property_val, UdevOutputData, UdevRenderer,
     mode::*,
 };
-use crate::renderer::blur::EffectsFramebuffers;
 use crate::renderer::FhtRenderElement;
 use crate::state::{Fht, State, SurfaceDmabufFeedback};
 
@@ -578,10 +577,6 @@ impl Device {
         }
 
         fht.add_output(output.clone(), Some(refresh_interval), vrr_enabled);
-
-        // NOTE: In contrary to Shaders, the effects frame buffers are kept on a per-output basis
-        // to avoid noise and pollution from other outputs leaking into eachother
-        EffectsFramebuffers::init_for_output(&output, &mut renderer);
 
         let dmabuf_feedback = drm_output.with_compositor(|compositor| {
             // We only render on one primary gpu, so we don't have to manage different feedbacks
