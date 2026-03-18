@@ -248,19 +248,6 @@ impl Monitor {
         })
     }
 
-    /// Returns whether this monitor has any blurred regions.
-    pub fn has_blur(&self) -> bool {
-        for workspace in &self.workspaces {
-            if (workspace.index() == self.active_idx || workspace.render_offset().is_some())
-                && workspace.tiles().any(|tile| tile.has_transparent_region())
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
     /// Return whether the monitor contents should be rendered above the top layer shells
     pub fn render_above_top(&self) -> bool {
         let ws = self.active_workspace();
@@ -462,7 +449,7 @@ impl Monitor {
 
                 let render_offset = workspace.render_offset();
                 let ws_elements = workspace
-                    .render(renderer, scale, None)
+                    .render(renderer, scale)
                     .into_iter()
                     .map(Into::into);
 
@@ -515,7 +502,7 @@ impl Monitor {
 
         // Render the current workspace with its offset
         let current_ws_elements = self.workspaces[self.active_idx]
-            .render(renderer, scale, Some(current_offset))
+            .render(renderer, scale)
             .into_iter();
 
         let current_offset_physical = current_offset.to_physical(scale);
@@ -577,9 +564,7 @@ impl Monitor {
         // Render the adjacent workspace if it exists
         if let Some(idx) = adjacent_idx {
             let adjacent_offset = adjacent_base_offset + current_offset;
-            let adjacent_ws_elements = self.workspaces[idx]
-                .render(renderer, scale, Some(adjacent_offset))
-                .into_iter();
+            let adjacent_ws_elements = self.workspaces[idx].render(renderer, scale).into_iter();
 
             let adjacent_offset_physical = adjacent_offset.to_physical(scale);
             let adjacent_ws_elements = adjacent_ws_elements

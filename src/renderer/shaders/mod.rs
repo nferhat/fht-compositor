@@ -7,17 +7,11 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 
-use super::blur::shader::BlurShaders;
-
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
-const BLUR_FINISH_SRC: &str = include_str!("./blur-finish.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
 const ROUNDED_CORNERS_SRC: &str = include_str!("./rounded-corners.glsl");
-pub(super) const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
-pub(super) const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
-pub(super) const VERTEX_SRC: &str = include_str!("./texture.vert");
 
 /// Preprocess shaders to handle includes.
 fn preprocess_shader_source(source: &str) -> String {
@@ -35,10 +29,7 @@ pub struct Shaders {
     // rounded_window => complex shader that takes into account subsurface position through
     // matrices, only used in src/space/tile.rs
     pub rounded_window: GlesTexProgram,
-    // blur_finish => apply rounded corners and additional effects
-    pub blur_finish: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
-    pub blur: BlurShaders,
 }
 
 impl Shaders {
@@ -55,17 +46,6 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let blur_finish = renderer
-            .compile_custom_texture_shader(
-                BLUR_FINISH_SRC,
-                &[
-                    UniformName::new("corner_radius", UniformType::_1f),
-                    UniformName::new("noise", UniformType::_1f),
-                    UniformName::new("geo", UniformType::_4f),
-                ],
-            )
-            .expect("Shader source should always compile!");
-
         let resizing_texture = renderer
             .compile_custom_texture_shader(
                 preprocess_shader_source(RESIZING_TEXTURE_SRC),
@@ -100,15 +80,12 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let blur = BlurShaders::compile(renderer).expect("Shader source should always compile!");
 
         let shaders = Self {
             border,
             box_shadow,
             rounded_window,
-            blur_finish,
             resizing_texture,
-            blur,
         };
 
         renderer

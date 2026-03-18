@@ -1938,7 +1938,6 @@ impl Workspace {
         &self,
         renderer: &mut R,
         scale: i32,
-        render_offset: Option<Point<i32, Logical>>,
     ) -> Vec<WorkspaceRenderElement<R>> {
         crate::profile_function!();
         let mut elements = vec![];
@@ -1950,17 +1949,11 @@ impl Workspace {
             .map(|(idx, anim)| (*idx, *anim.value()))
             .unwrap_or((None, 1.0));
 
-        let render_offset = render_offset
-            .or_else(|| self.render_offset())
-            .unwrap_or_default();
-
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
 
-            let fullscreen_elements = tile
-                .render(renderer, scale, 1.0, &self.output, render_offset)
-                .map(Into::into);
+            let fullscreen_elements = tile.render(renderer, scale, 1.0).map(Into::into);
 
             if skip_alpha_animation_idx.is_none() {
                 return fullscreen_elements.collect();
@@ -1988,10 +1981,7 @@ impl Workspace {
                 alpha
             };
 
-            elements.extend(
-                tile.render(renderer, scale, alpha, &self.output, render_offset)
-                    .map(Into::into),
-            );
+            elements.extend(tile.render(renderer, scale, alpha).map(Into::into));
         };
 
         // First render ontop tiles.

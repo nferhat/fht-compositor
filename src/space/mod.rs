@@ -1051,7 +1051,7 @@ impl Space {
 
         interactive_swap
             .tile
-            .render(renderer, scale, 1.0, output, Point::default())
+            .render(renderer, scale, 1.0)
             .map(|element| {
                 RelocateRenderElement::from_element(
                     element,
@@ -1136,6 +1136,7 @@ pub struct Config {
     pub gaps: (i32, i32),
     pub mwfact: f64,
     pub focus_new_windows: bool,
+    #[allow(unused)]
     pub blur: fht_compositor_config::Blur,
 }
 
