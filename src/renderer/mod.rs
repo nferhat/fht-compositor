@@ -6,6 +6,7 @@
 //!
 //! This module also has some helpers to create render elements.
 
+mod debug;
 pub mod extra_damage;
 pub mod render_elements;
 pub mod rounded_window;
@@ -19,7 +20,6 @@ use glam::Mat3;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::backend::renderer::element::{Kind, RenderElement};
 use smithay::backend::renderer::gles::{
@@ -41,6 +41,7 @@ use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
+pub use self::debug::draw_damage;
 use crate::config::ui::ConfigUiRenderElement;
 use crate::cursor::CursorRenderElement;
 use crate::handlers::session_lock::SessionLockRenderElement;
@@ -59,13 +60,7 @@ crate::fht_render_elements! {
         InteractiveSwapTile = RelocateRenderElement<TileRenderElement<R>>,
         LayerShell = LayerShellRenderElement<R>,
         SessionLock = SessionLockRenderElement<R>,
-        Debug = DebugRenderElement,
-    }
-}
-
-crate::fht_render_elements! {
-    DebugRenderElement => {
-        Solid = SolidColorRenderElement,
+        Debug = debug::DebugRenderElement,
     }
 }
 
@@ -115,6 +110,15 @@ impl Fht {
         // Push-based rendering. Instead of working with iterators, we pass a push function to
         // render functions, which allow them to conditionally push (or skip) different elements.
         let mut push = |elem| rv.elements.push(elem);
+        let draw_opaque_regions = self.config.debug.draw_opaque_regions;
+        let push: &mut dyn FnMut(FhtRenderElement<R>) = if draw_opaque_regions {
+            &mut move |elem| {
+                debug::push_opaque_regions(&elem, scale, &mut push);
+                push(elem);
+            }
+        } else {
+            &mut push
+        };
 
         // Start with the cursor
         //
@@ -163,6 +167,14 @@ impl Fht {
         rv.cursor_elements_len = rv.elements.len();
         // reborrow rv.elements since we modified rv
         let mut push = |elem| rv.elements.push(elem);
+        let push: &mut dyn FnMut(FhtRenderElement<R>) = if draw_opaque_regions {
+            &mut move |elem| {
+                debug::push_opaque_regions(&elem, scale, &mut push);
+                push(elem);
+            }
+        } else {
+            &mut push
+        };
 
         if !self.config_ui.hidden() {
             // Draw config ui below cursor, only if we didnt start drawing it on another output.
