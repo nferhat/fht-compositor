@@ -1952,12 +1952,10 @@ impl Workspace {
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
-
-            // let fullscreen_elements = tile.render(renderer, scale, 1.0).map(Into::into);
+            tile.render(renderer, scale, 1.0, &mut |e| push(e.into()));
 
             if skip_alpha_animation_idx.is_none() {
-                // FIXME: Render this
-                // return fullscreen_elements.collect();
+                return;
             }
         }
 
