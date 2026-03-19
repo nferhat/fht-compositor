@@ -12,9 +12,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
 };
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::utils::{Logical, Physical, Point, Size, Transform};
@@ -22,6 +20,7 @@ use smithay::wayland::compositor::with_states;
 use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;
 
+use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 
 pub struct CursorThemeManager {
@@ -141,13 +140,14 @@ impl CursorThemeManager {
         scale: i32,
         alpha: f32,
         time: Duration,
-    ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError>
+        push: &mut dyn FnMut(CursorRenderElement<R>),
+    ) -> Result<(), R::FhtError>
     where
         R: FhtRenderer,
     {
         crate::profile_function!();
         match self.image_status {
-            CursorImageStatus::Hidden => Ok(vec![]),
+            CursorImageStatus::Hidden => Ok(()),
             CursorImageStatus::Surface(ref wl_surface) => {
                 let hotspot = with_states(wl_surface, |states| {
                     states
@@ -161,24 +161,27 @@ impl CursorThemeManager {
                 .to_physical_precise_round(scale);
                 location -= hotspot;
 
-                Ok(
-                    render_elements_from_surface_tree::<_, CursorRenderElement<R>>(
-                        renderer,
-                        wl_surface,
-                        location,
-                        scale as f64,
-                        alpha,
-                        Kind::Cursor,
-                    ),
-                )
+                push_elements_from_surface_tree::<_>(
+                    renderer,
+                    wl_surface,
+                    location,
+                    scale as f64,
+                    alpha,
+                    Kind::Cursor,
+                    &mut |surface| push(CursorRenderElement::Surface(surface)),
+                );
+
+                Ok(())
             }
             CursorImageStatus::Named(cursor_icon) => {
                 let Ok(cursor_image) = self.load_cursor_image(cursor_icon, scale) else {
-                    return self.render_with_fallback_cursor_data(renderer, location, alpha);
+                    return self.render_with_fallback_cursor_data(renderer, location, alpha, push);
                 };
+
                 let frame = cursor_image.get_frame(time);
                 location -= frame.hotspot.to_physical_precise_round(scale);
-                Ok(vec![CursorRenderElement::Memory(
+
+                push(CursorRenderElement::Memory(
                     MemoryRenderBufferRenderElement::from_buffer(
                         renderer,
                         location.to_f64(),
@@ -188,7 +191,9 @@ impl CursorThemeManager {
                         None,
                         Kind::Cursor,
                     )?,
-                )])
+                ));
+
+                Ok(())
             }
         }
     }
@@ -198,7 +203,8 @@ impl CursorThemeManager {
         renderer: &mut R,
         location: Point<i32, Physical>,
         alpha: f32,
-    ) -> Result<Vec<CursorRenderElement<R>>, R::FhtError> {
+        push: &mut dyn FnMut(CursorRenderElement<R>),
+    ) -> Result<(), R::FhtError> {
         static RENDER_BUFFER: LazyLock<MemoryRenderBuffer> = LazyLock::new(|| {
             MemoryRenderBuffer::from_slice(
                 include_bytes!("../res/cursor.rgba"),
@@ -209,7 +215,8 @@ impl CursorThemeManager {
                 None,
             )
         });
-        Ok(vec![CursorRenderElement::Memory(
+
+        push(CursorRenderElement::Memory(
             MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
@@ -219,7 +226,9 @@ impl CursorThemeManager {
                 None,
                 Kind::Cursor,
             )?,
-        )])
+        ));
+
+        Ok(())
     }
 }
 

@@ -1,7 +1,5 @@
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::Color32F;
 use smithay::delegate_session_lock;
@@ -13,6 +11,7 @@ use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::session_lock::{self, LockSurface, SessionLockHandler};
 
 use crate::output::OutputExt;
+use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::state::{Fht, State};
 
@@ -87,30 +86,29 @@ impl Fht {
         matches!(&self.lock_state, LockState::Locked | LockState::Pending(_))
     }
 
-    pub fn session_lock_elements<R: FhtRenderer>(
+    pub fn render_session_lock<R: FhtRenderer>(
         &mut self,
         renderer: &mut R,
         output: &Output,
-    ) -> Vec<SessionLockRenderElement<R>> {
+        push: &mut dyn FnMut(SessionLockRenderElement<R>),
+    ) {
         let scale = output.current_scale().integer_scale() as f64;
-        let mut elements = vec![];
         if !self.is_locked() {
-            return elements;
+            return;
         }
 
         let output_state = self.output_state.get_mut(output).unwrap();
 
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
-            elements.extend(render_elements_from_surface_tree(
+            push_elements_from_surface_tree(
                 renderer,
                 lock_surface.wl_surface(),
                 Point::default(),
                 scale,
                 1.0,
-                // a lock surface is going to cover the entire screen, might aswell try to scan it
-                // out if its possible, though it might be first placed on the primary plane.
                 Kind::ScanoutCandidate,
-            ));
+                &mut |e| push(e.into()),
+            );
         }
 
         // We still render a black drop to not show desktop content
@@ -118,7 +116,7 @@ impl Fht {
             SolidColorBuffer::new(output.geometry().size, LOCKED_OUTPUT_BACKDROP_COLOR)
         });
 
-        elements.push(
+        push(
             SolidColorRenderElement::from_buffer(
                 &*solid_buffer,
                 Point::default(),
@@ -128,8 +126,6 @@ impl Fht {
             )
             .into(),
         );
-
-        elements
     }
 }
 

@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use fht_animation::AnimationCurve;
-pub use monitor::{Monitor, MonitorRenderElement, MonitorRenderResult};
+pub use monitor::{Monitor, MonitorRenderElement};
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
@@ -1051,13 +1051,14 @@ impl Space {
         renderer: &mut R,
         output: &Output,
         scale: i32,
-    ) -> Vec<RelocateRenderElement<TileRenderElement<R>>> {
+        push: &mut dyn FnMut(RelocateRenderElement<TileRenderElement<R>>),
+    ) {
         let Some(interactive_swap) = self.interactive_swap.as_mut() else {
-            return vec![];
+            return;
         };
 
         if !interactive_swap.overlap_outputs.contains(output) {
-            return vec![];
+            return;
         }
 
         interactive_swap.last_output = Some(output.clone());
@@ -1068,15 +1069,14 @@ impl Space {
 
         interactive_swap
             .tile
-            .render(renderer, scale, 1.0)
-            .map(|element| {
-                RelocateRenderElement::from_element(
-                    element,
+            .render(renderer, scale, 1.0, &mut |e| {
+                let relocate = RelocateRenderElement::from_element(
+                    e,
                     output_loc.upscale(-1),
                     Relocate::Relative,
-                )
-            })
-            .collect()
+                );
+                push(relocate)
+            });
     }
 
     /// Start an interactive resize in the [`Workspace`] of this [`Window`].

@@ -513,7 +513,10 @@ impl Tile {
             return;
         }
 
-        let elements = self.render_inner(renderer, (0, 0).into(), scale, 1.0);
+        let mut elements = vec![];
+        self.render_inner(renderer, (0, 0).into(), scale, 1.0, &mut |e| {
+            elements.push(e)
+        });
         self.close_animation_snapshot = Some(elements);
     }
 
@@ -536,9 +539,9 @@ impl Tile {
         location: Point<i32, Logical>,
         scale: i32,
         alpha: f32,
-    ) -> Vec<TileRenderElement<R>> {
+        push: &mut dyn FnMut(TileRenderElement<R>),
+    ) {
         crate::profile_function!();
-        let mut elements = vec![];
         let is_fullscreen = self.window.fullscreen();
         let rules = self.window.rules();
 
@@ -576,27 +579,29 @@ impl Tile {
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
-            elements.push(TileRenderElement::RoundedSurfaceDamage(damage));
+            push(TileRenderElement::RoundedSurfaceDamage(damage));
         }
 
-        let popup_elements = self
-            .window
-            .render_popup_elements(
-                renderer,
-                window_geometry.loc.to_physical_precise_round(scale),
-                scale as f64,
-                alpha,
-            )
-            .into_iter()
-            .map(TileRenderElement::Surface);
-        elements.extend(popup_elements);
+        self.window.render_popup_elements(
+            renderer,
+            window_geometry.loc.to_physical_precise_round(scale),
+            scale as f64,
+            alpha,
+            &mut |e| push(TileRenderElement::Surface(e)),
+        );
 
         if has_size_animation {
             // Render inside GlesTexture, and render
             let renderer = renderer.glow_renderer_mut();
-            let window_elements =
-                self.window
-                    .render_toplevel_elements(renderer, (0, 0).into(), scale as f64, alpha);
+            let mut window_elements = vec![];
+
+            self.window.render_toplevel_elements(
+                renderer,
+                (0, 0).into(),
+                scale as f64,
+                alpha,
+                &mut |e| window_elements.push(e),
+            );
             let size_animation = self.size_animation.as_ref().unwrap();
 
             // dont forget to subtract 2 * border since its for the window
@@ -652,22 +657,17 @@ impl Tile {
 
                 self.window
                     .set_offscreen_element_id(Some(element.id().clone()));
-
-                elements.push(TileRenderElement::<R>::ResizingSurface(element.into()));
+                push(TileRenderElement::<R>::ResizingSurface(element.into()));
             }
         } else {
             // FIXME: Why divide by scale to get proper rounding?
             let border_radius = border_radius / scale as f32;
-            let window_elements = self
-                .window
-                .render_toplevel_elements(
-                    renderer,
-                    window_geometry.loc.to_physical_precise_round(scale),
-                    scale as f64,
-                    alpha,
-                )
-                .into_iter()
-                .map(move |e| {
+            self.window.render_toplevel_elements(
+                renderer,
+                window_geometry.loc.to_physical_precise_round(scale),
+                scale as f64,
+                alpha,
+                &mut |e| {
                     // Rounding off windows is a little tricky.
                     //
                     // Not every surface of the window means its "the window", not at all.
@@ -688,17 +688,13 @@ impl Tile {
                             window_geometry,
                             scale as f64,
                         );
-                        TileRenderElement::RoundedSurface(rounded)
+                        push(rounded.into())
                     } else {
-                        TileRenderElement::Surface(e)
+                        push(e.into())
                     }
-                });
-            elements.extend(window_elements);
+                },
+            );
         };
-
-        // elements.extend();
-
-        elements
     }
 
     /// Render the elements for this [`Tile`].
@@ -709,11 +705,10 @@ impl Tile {
         renderer: &mut R,
         scale: i32,
         mut alpha: f32,
-    ) -> impl Iterator<Item = TileRenderElement<R>> {
+        push: &mut dyn FnMut(TileRenderElement<R>),
+    ) {
         crate::profile_function!();
         let fractional_scale = Scale::from(scale as f64);
-        let mut opening_element = None;
-        let mut normal_elements = vec![];
 
         // Rendering tile goes through the following phases.
         //
@@ -735,7 +730,10 @@ impl Tile {
             let opening_animation_scale = opening_animation_progress_to_scale(progress);
 
             let glow_renderer = renderer.glow_renderer_mut();
-            let elements = self.render_inner(glow_renderer, Point::default(), scale, alpha);
+            let mut elements = vec![];
+            self.render_inner(glow_renderer, Point::default(), scale, alpha, &mut |e| {
+                elements.push(e)
+            });
             let rec = elements.iter().fold(Rectangle::default(), |acc, e| {
                 acc.merge(e.geometry(fractional_scale))
             });
@@ -743,7 +741,7 @@ impl Tile {
             // The texture will lower the opacity of that, but for the rest we gotta account for it.
             alpha *= (progress as f32).clamp(0., 1.);
 
-            opening_element = render_to_texture(
+            if let Ok((tex, _sync_point)) = render_to_texture(
                 glow_renderer,
                 rec.size,
                 fractional_scale,
@@ -756,17 +754,17 @@ impl Tile {
                     ?err,
                     "Failed to render window elements to texture for open animation!"
                 )
-            })
-            .ok()
-            .map(|(texture, _sync_point)| {
+            }) {
                 let glow_renderer = renderer.glow_renderer_mut();
 
+                // FIXME: We lose damage tracking here since we are creating a new texture element
+                // each time (Id::new -> new ID)
                 let element_id = Id::new();
                 let texture: FhtTextureElement = TextureRenderElement::from_static_texture(
                     element_id.clone(),
                     glow_renderer.context_id(),
                     self.visual_location().to_physical(scale).to_f64(),
-                    texture,
+                    tex,
                     scale,
                     Transform::Normal,
                     Some(alpha),
@@ -786,11 +784,11 @@ impl Tile {
                 let rescale =
                     RescaleRenderElement::from_element(texture, origin, opening_animation_scale);
 
-                TileRenderElement::<R>::Opening(rescale)
-            });
+                push(TileRenderElement::Opening(rescale));
+            }
         } else {
             self.window.set_offscreen_element_id(None);
-            normal_elements = self.render_inner(renderer, self.visual_location(), scale, alpha)
+            self.render_inner(renderer, self.visual_location(), scale, alpha, push);
         }
 
         let is_fullscreen = self.window.fullscreen();
@@ -808,38 +806,22 @@ impl Tile {
             tile_geometry.size - Size::from((border_thickness, border_thickness)).upscale(2),
         );
 
-        let border_element = self
-            .border
-            .render(renderer, alpha)
-            .map(|border| {
-                border
-                    .with_location(tile_geometry.loc)
-                    .with_size(tile_geometry.size)
-            })
-            .map(Into::into)
-            .into_iter();
-
-        let shadow_element = self
-            .shadow
-            .render(renderer, alpha, !self.window.tiled())
-            .map(|shadow| {
-                // If we expand here, we must take into account the fact that the shadow expands
-                // outwards, since it spreads.
-                let mut expanded = window_geometry;
-                let shadow::Parameters { blur_sigma, .. } = *self.shadow.parameters();
-                expanded.loc -= Point::from((blur_sigma as i32, blur_sigma as i32));
-                expanded.size += Size::from((blur_sigma as i32, blur_sigma as i32)).upscale(2);
-
-                shadow.with_location(expanded.loc).with_size(expanded.size)
-            })
-            .map(Into::into)
-            .into_iter();
-
-        opening_element
-            .into_iter()
-            .chain(normal_elements)
-            .chain(border_element)
-            .chain(shadow_element)
+        if let Some(element) = self.border.render(renderer, alpha) {
+            let element = element
+                .with_location(tile_geometry.loc)
+                .with_size(tile_geometry.size);
+            push(TileRenderElement::Decoration(element))
+        }
+        if let Some(shadow) = self.shadow.render(renderer, alpha, !self.window.tiled()) {
+            // If we expand here, we must take into account the fact that the shadow expands
+            // outwards, since it spreads.
+            let mut expanded = window_geometry;
+            let shadow::Parameters { blur_sigma, .. } = *self.shadow.parameters();
+            expanded.loc -= Point::from((blur_sigma as i32, blur_sigma as i32));
+            expanded.size += Size::from((blur_sigma as i32, blur_sigma as i32)).upscale(2);
+            let element = shadow.with_location(expanded.loc).with_size(expanded.size);
+            push(TileRenderElement::Decoration(element))
+        }
     }
 }
 
