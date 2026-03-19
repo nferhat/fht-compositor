@@ -24,15 +24,12 @@ use smithay::backend::egl::{EGLDevice, EGLDisplay};
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::solid::SolidColorRenderElement;
-use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{
     Error as MultiError, GpuManager, MultiFrame, MultiRenderer, MultiTexture, MultiTextureMapping,
 };
-use smithay::backend::renderer::utils::CommitCounter;
-use smithay::backend::renderer::{Color32F, ImportDma, ImportEgl, ImportMemWl};
+use smithay::backend::renderer::{ImportDma, ImportEgl, ImportMemWl};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -48,7 +45,7 @@ use smithay::reexports::gbm::{BufferObjectFlags, Device as GbmDevice};
 use smithay::reexports::input::{DeviceCapability, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{DeviceFd, Scale};
+use smithay::utils::DeviceFd;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, ImportNotifier};
 use smithay::wayland::drm_lease::DrmLeaseState;
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
@@ -60,7 +57,7 @@ use crate::handlers::gamma_control::GammaControlState;
 use crate::output::RedrawState;
 use crate::protocols::output_management;
 use crate::renderer::{
-    AsGlowRenderer, DebugRenderElement, FhtRenderElement, FhtRenderer, OutputElementsResult,
+    draw_damage, AsGlowRenderer, FhtRenderElement, FhtRenderer, OutputElementsResult,
 };
 use crate::state::{Fht, State};
 use crate::utils::get_monotonic_time;
@@ -612,16 +609,10 @@ impl UdevData {
         // To render damage we just use solid color elements,
         if fht.config.debug.draw_damage {
             let state = fht.output_state.get_mut(output).unwrap();
-            draw_damage(
-                output,
-                &mut state.debug_damage_tracker,
-                &mut output_elements_result.elements,
-            );
-        }
-
-        if fht.config.debug.draw_opaque_regions {
-            let scale = output.current_scale().integer_scale() as f64;
-            draw_opaque_regions(&mut output_elements_result.elements, scale.into());
+            let dt = state
+                .debug_damage_tracker
+                .get_or_insert_with(|| OutputDamageTracker::from_output(output));
+            draw_damage(dt, &mut output_elements_result.elements);
         }
 
         // Renderand check for damage.
@@ -1195,90 +1186,6 @@ impl UdevData {
 struct UdevOutputData {
     device: DrmNode,
     crtc: CrtcHandle,
-}
-
-const DAMAGE_COLOR: Color32F = Color32F::new(0.3, 0.0, 0.0, 0.3);
-const OPAQUE_REGION_COLOR: Color32F = Color32F::new(0.0, 0.0, 0.3, 0.3);
-const SEMITRANSPARENT_COLOR: Color32F = Color32F::new(0.0, 0.3, 0.0, 0.3);
-
-fn draw_damage<R: FhtRenderer>(
-    output: &Output,
-    dt: &mut Option<OutputDamageTracker>,
-    elements: &mut Vec<FhtRenderElement<R>>,
-) {
-    let dt = dt.get_or_insert_with(|| OutputDamageTracker::from_output(output));
-    let Ok((Some(damage), _)) = dt.damage_output(1, elements) else {
-        return;
-    };
-
-    for damage_rect in damage {
-        let damage_element: DebugRenderElement = SolidColorRenderElement::new(
-            Id::new(),
-            *damage_rect,
-            CommitCounter::default(),
-            DAMAGE_COLOR,
-            Kind::Unspecified,
-        )
-        .into();
-        elements.insert(0, damage_element.into())
-    }
-}
-
-pub fn draw_opaque_regions<R: FhtRenderer>(
-    elements: &mut Vec<FhtRenderElement<R>>,
-    scale: Scale<f64>,
-) {
-    crate::profile_function!();
-
-    let mut i = 0;
-    while i < elements.len() {
-        let elem = &elements[i];
-        i += 1;
-
-        // HACK
-        if format!("{elem:?}").contains("ExtraDamage") {
-            continue;
-        }
-
-        let geo = elem.geometry(scale);
-        let mut opaque = elem.opaque_regions(scale).to_vec();
-
-        for rect in &mut opaque {
-            rect.loc += geo.loc;
-        }
-
-        let semitransparent = geo.subtract_rects(opaque.iter().copied());
-
-        for rect in opaque {
-            let color = SolidColorRenderElement::new(
-                Id::new(),
-                rect,
-                CommitCounter::default(),
-                OPAQUE_REGION_COLOR,
-                Kind::Unspecified,
-            );
-            elements.insert(
-                i - 1,
-                FhtRenderElement::Debug(DebugRenderElement::Solid(color)),
-            );
-            i += 1;
-        }
-
-        for rect in semitransparent {
-            let color = SolidColorRenderElement::new(
-                Id::new(),
-                rect,
-                CommitCounter::default(),
-                SEMITRANSPARENT_COLOR,
-                Kind::Unspecified,
-            );
-            elements.insert(
-                i - 1,
-                FhtRenderElement::Debug(DebugRenderElement::Solid(color)),
-            );
-            i += 1;
-        }
-    }
 }
 
 fn get_property_val(
