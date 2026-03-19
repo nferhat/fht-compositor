@@ -38,6 +38,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use crate::config::ui::ConfigUiRenderElement;
@@ -180,19 +181,20 @@ impl Fht {
         }
 
         let layer_map = layer_map_for_output(output);
-        let mut push_from_layer = |layer, push: &mut dyn FnMut(LayerShellRenderElement<R>)| {
-            for mapped in layer_map
-                .layers_on(layer)
-                .filter_map(|layer| self.mapped_layer_surfaces.get(layer))
-                .rev()
-            {
-                let layer_geo = layer_map.layer_geometry(&mapped.layer).unwrap();
-                mapped.render(renderer, layer_geo, scale, &self.config, push);
-            }
-        };
+        let push_from_layer =
+            |layer, renderer: &mut R, push: &mut dyn FnMut(LayerShellRenderElement<R>)| {
+                for mapped in layer_map
+                    .layers_on(layer)
+                    .filter_map(|layer| self.mapped_layer_surfaces.get(layer))
+                    .rev()
+                {
+                    let layer_geo = layer_map.layer_geometry(&mapped.layer).unwrap();
+                    mapped.render(renderer, layer_geo, scale, &self.config, push);
+                }
+            };
 
-        // // Overlay layer shells are drawn above everything else, including fullscreen windows
-        // push_from_layer(Layer::Overlay, &mut |e| push(e.into()));
+        // Overlay layer shells are drawn above everything else, including fullscreen windows
+        push_from_layer(Layer::Overlay, renderer, &mut |e| push(e.into()));
 
         // The tile we grab is always rendered above everything else.
         self.space
@@ -208,17 +210,14 @@ impl Fht {
             push(FhtRenderElement::Monitor(e))
         });
         // Then the top layer shells
-        // push_from_layer(Layer::Overlay, &mut |e| push(e.into()));
+        push_from_layer(Layer::Top, renderer, &mut |e| push(e.into()));
         // The content that should be below the top layer shells
         monitor.render(renderer, scale, false, &mut |e| {
             push(FhtRenderElement::Monitor(e))
         });
         // And finally the rest of the layer shells
-        // push_from_layer(Layer::Bottom, &mut |e| push(e.into()));
-        // push_from_layer(Layer::Background, &mut |e| push(e.into()));
-
-        // We don't need it anymore, and avoid deadlock down below.
-        drop(layer_map);
+        push_from_layer(Layer::Bottom, renderer, &mut |e| push(e.into()));
+        push_from_layer(Layer::Background, renderer, &mut |e| push(e.into()));
 
         rv
     }
