@@ -158,6 +158,11 @@ impl Fht {
                 );
             }
         }
+        // NOTE: Even if we didn't render the cursor elements, we will be slicing [0..] which is
+        // equivalent to slicing the whole elements vector.
+        rv.cursor_elements_len = rv.elements.len();
+        // reborrow rv.elements since we modified rv
+        let mut push = |elem| rv.elements.push(elem);
 
         if !self.config_ui.hidden() {
             // Draw config ui below cursor, only if we didnt start drawing it on another output.
@@ -362,13 +367,14 @@ impl Fht {
                 }
             }
 
-            // let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
-            // let mut elements = window.render_toplevel_elements(renderer, loc, scale, 1.);
-            // elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
-            //
-            // if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
-            //     error!(id = ?cast.id(), ?err, "Failed to render cast");
-            // }
+            let mut elements = vec![];
+            let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
+            window.render_popup_elements(renderer, loc, scale, 1.0, &mut |e| elements.push(e));
+            window.render_toplevel_elements(renderer, loc, scale, 1.0, &mut |e| elements.push(e));
+
+            if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
+                error!(id = ?cast.id(), ?err, "Failed to render cast");
+            }
         }
         pipewire.casts = casts;
 
@@ -462,13 +468,12 @@ impl Fht {
                 }
             }
 
-            // NOTE: The workspace already renders to the origin (0, 0), so no need to relocate
-            // anything.
-
-            // let elements = mon.workspace_mut_by_index(index).render(renderer, scale);
-            // if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
-            //     error!(id = ?cast.id(), ?err, "Failed to render cast");
-            // }
+            let mut elements = vec![];
+            let ws = mon.workspace_mut_by_index(index);
+            ws.render(renderer, scale, &mut |e| elements.push(e));
+            if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
+                error!(id = ?cast.id(), ?err, "Failed to render cast");
+            }
         }
         pipewire.casts = casts;
 
