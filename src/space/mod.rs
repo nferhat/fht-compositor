@@ -770,19 +770,15 @@ impl Space {
 
         'monitors: for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if workspace.remove_window(window, true) {
-                    let location = workspace.tile_location(window);
+                let location = workspace.tile_location(window);
 
-                    if workspace.remove_window(window, true) {
-                        // We successfully removed the window,
-                        // Stop checking for other monitors
-                        original_workspace_id = Some(workspace.id());
-                        let is_floating = !window.tiled();
-                        if is_floating {
-                            insert_location = Some(location).flatten();
-                        }
-                        break 'monitors;
+                if workspace.remove_window(window, true) {
+                    original_workspace_id = Some(workspace.id());
+                    let is_floating = !window.tiled();
+                    if is_floating {
+                        insert_location = Some(location).flatten();
                     }
+                    break 'monitors;
                 }
             }
         }
