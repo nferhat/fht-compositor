@@ -8,6 +8,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::time::Duration;
 
 use anyhow::Context;
+use pipewire::properties::PropertiesBox;
 use pipewire::spa::buffer::DataType;
 use pipewire::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use pipewire::spa::param::format_utils::parse_format;
@@ -148,10 +149,10 @@ impl PipeWire {
             state: CastState::ResizePending { pending_size: size },
         }));
 
-        let stream = pipewire::stream::StreamRc::new(
+        let stream = StreamRc::new(
             self.core.clone(),
             &format!("fht-compositor-{cast_id:?}"),
-            pipewire::properties::PropertiesBox::new(),
+            PropertiesBox::new(),
         )
         .context("Error creating new PipeWire Stream!")?;
 
