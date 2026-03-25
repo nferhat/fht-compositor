@@ -106,7 +106,7 @@ futures-util = { version = "0.3.31", features = ["std", "io"] }
 wayland-scanner = "0.31.7"
 [dependencies.pipewire]
 git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git"
-# rev = "8248451f82cb2b886ea9762917ae4baade4e164b"
+rev = "8248451f82cb2b886ea9762917ae4baade4e164b"
 optional = true
 features = ["v0_3_33" ]
 
