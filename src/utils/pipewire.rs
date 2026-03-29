@@ -8,7 +8,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::time::Duration;
 
 use anyhow::Context;
-use pipewire::properties::Properties;
+use pipewire::properties::PropertiesBox;
 use pipewire::spa::buffer::DataType;
 use pipewire::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use pipewire::spa::param::format_utils::parse_format;
@@ -22,7 +22,7 @@ use pipewire::spa::sys::{
     SPA_DATA_FLAG_READWRITE,
 };
 use pipewire::spa::utils::{Choice, ChoiceEnum, ChoiceFlags, Fraction, Rectangle, SpaTypes};
-use pipewire::stream::{Stream, StreamFlags, StreamState};
+use pipewire::stream::{StreamFlags, StreamRc, StreamState};
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::{GbmBuffer, GbmDevice};
@@ -45,8 +45,8 @@ use crate::state::State;
 use crate::window::WeakWindow;
 
 pub struct PipeWire {
-    _context: pipewire::context::Context,
-    core: pipewire::core::Core,
+    _context: pipewire::context::ContextRc,
+    core: pipewire::core::CoreRc,
     pub casts: Vec<Cast>,
 }
 
@@ -83,13 +83,13 @@ impl PipeWire {
         pipewire::init();
 
         // Initial the main loop.
-        let main_loop = pipewire::main_loop::MainLoop::new(None)
+        let main_loop = pipewire::main_loop::MainLoopRc::new(None)
             .context("Failed to initialize pipewire main loop!")?;
-        let context = pipewire::context::Context::new(&main_loop)
+        let context = pipewire::context::ContextRc::new(&main_loop, None)
             .context("Failed to initialize pipewire context")?;
         // Logging
         let core = context
-            .connect(None)
+            .connect_rc(None)
             .context("Failed to connect pipewire context!")?;
         let listener = core
             .add_listener_local()
@@ -97,7 +97,7 @@ impl PipeWire {
             .register();
         std::mem::forget(listener);
 
-        struct MainLoopWrapper(pipewire::main_loop::MainLoop);
+        struct MainLoopWrapper(pipewire::main_loop::MainLoopRc);
         impl AsFd for MainLoopWrapper {
             fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
                 self.0.loop_().fd()
@@ -108,7 +108,7 @@ impl PipeWire {
         loop_handle
             .insert_source(source, |_, main_loop, _| {
                 crate::profile_scope!("pipewire_loop_dispatch");
-                main_loop.0.loop_().iterate(Duration::ZERO);
+                main_loop.0.loop_().iterate(pipewire::loop_::Timeout::Finite(Duration::ZERO));
                 Ok(PostAction::Continue)
             })
             .map_err(|err| anyhow::anyhow!("Failed to insert PipeWire event source! {err}"))?;
@@ -149,10 +149,10 @@ impl PipeWire {
             state: CastState::ResizePending { pending_size: size },
         }));
 
-        let stream = Stream::new(
-            &self.core,
+        let stream = StreamRc::new(
+            self.core.clone(),
             &format!("fht-compositor-{cast_id:?}"),
-            Properties::new(),
+            PropertiesBox::new(),
         )
         .context("Error creating new PipeWire Stream!")?;
 
@@ -660,7 +660,7 @@ pub struct Cast {
     ///
     /// It is our only way to communicate between the compositor and client, in order to inform
     /// it of parameter updates (refresh rate, size, etc...)
-    pub stream: Stream,
+    pub stream: StreamRc,
     /// Listener to the pipewire stream events.
     ///
     /// Dropping this will drop the connection to the [`Stream`].
