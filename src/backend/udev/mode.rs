@@ -115,18 +115,22 @@ pub fn get_custom_mode(
         int_rqd: false,
         margins_rqd: false,
     };
+  
     let timing = cvt::Timing::compute(cvt_options);
     let hsync_start = width as f64 + timing.h_front_porch;
     let vsync_start = timing.v_lines_rnd + timing.v_front_porch;
     let hsync_end = hsync_start + timing.h_sync;
     let vsync_end = vsync_start + timing.v_sync;
 
-    let name = unsafe {
-        let mut name = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
-        name.resize(32, b' ');
-        let name = &*(name.as_slice() as *const [u8] as *const [i8]);
-        name.try_into().ok()?
+    let name = {
+        let bytes = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
+        let mut name = [0u8; 32];
+        for (i, &b) in bytes.iter().take(32).enumerate() {
+            name[i] = b;
+        }
+        name
     };
+  
     let mode_info = drm_ffi::drm_mode_modeinfo {
         clock: (timing.act_pixel_freq * 1000.).round() as u32,
         hdisplay: width,
