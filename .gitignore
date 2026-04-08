@@ -15,3 +15,4 @@ docs/.vitepress/dist
 
 # For local testing
 compositor.toml
+mise.toml
