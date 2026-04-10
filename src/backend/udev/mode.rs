@@ -124,7 +124,7 @@ pub fn get_custom_mode(
 
     let name = {
         let bytes = format!("{width}x{height}@{}", refresh.unwrap_or(60.0)).into_bytes();
-        let mut name = [0u8 as i8; 32];
+        let mut name = [0i8; 32];
         for (i, &b) in bytes.iter().take(32).enumerate() {
             name[i] = b as i8;
         }
