@@ -1991,11 +1991,11 @@ impl Fht {
 
                 let mouse_config = per_device_config.map_or_else(
                     || match (is_touchpad, is_trackpoint) {
-                        // Not a touchpad and not a trackpoint is just a generic mouse.
-                        (false, false) => &input_config.mouse,
                         (true, false) => &input_config.touchpad,
                         (false, true) => &input_config.trackpoint,
-                        _ => unreachable!(),
+                        // HACK: This also includes the case (true, true), which sometimes can happen?
+                        // See #126 where this user hit that case.
+                        _ => &input_config.mouse,
                     },
                     |cfg|
                     // In the case we use the per-device config, the user already knows what device he's modifying,
