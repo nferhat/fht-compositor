@@ -227,21 +227,6 @@ pub enum OutputTransform {
     Flipped270,
 }
 
-impl From<smithay::utils::Transform> for OutputTransform {
-    fn from(value: smithay::utils::Transform) -> Self {
-        match value {
-            smithay::utils::Transform::Normal => OutputTransform::Normal,
-            smithay::utils::Transform::_90 => OutputTransform::_90,
-            smithay::utils::Transform::_180 => OutputTransform::_180,
-            smithay::utils::Transform::_270 => OutputTransform::_270,
-            smithay::utils::Transform::Flipped => OutputTransform::Flipped,
-            smithay::utils::Transform::Flipped90 => OutputTransform::Flipped90,
-            smithay::utils::Transform::Flipped180 => OutputTransform::Flipped180,
-            smithay::utils::Transform::Flipped270 => OutputTransform::Flipped270,
-        }
-    }
-}
-
 /// A single window.
 ///
 /// A window is a mapped onto the screen inside a [`Workspace`]. A [`Workspace`] is managed inside a

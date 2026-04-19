@@ -13,7 +13,6 @@ clap.workspace = true
 schemars = "1.0.4"
 serde.workspace = true
 serde_json.workspace = true
-smithay.workspace = true
 
 [features]
 clap = []

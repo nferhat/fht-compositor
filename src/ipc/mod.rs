@@ -8,7 +8,7 @@ use std::rc::Rc;
 use anyhow::Context;
 use async_channel::{Sender, TrySendError};
 use calloop::io::Async;
-use fht_compositor_ipc::Response;
+use fht_compositor_ipc as types;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use smithay::input::pointer::{Focus, GrabStartData};
 use smithay::reexports::calloop::generic::Generic;
@@ -19,6 +19,7 @@ use smithay::reexports::rustix;
 use smithay::reexports::rustix::fs::unlink;
 use smithay::utils::{Point, Size, SERIAL_COUNTER};
 use smithay::wayland::seat::WaylandFocus;
+use types::Response;
 
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
 use crate::input::KeyAction;
@@ -35,7 +36,7 @@ pub struct Server {
     listener_token: RegistrationToken,
     socket_path: PathBuf,
     compositor_state: Rc<RefCell<subscribe::CompositorState>>,
-    subscribed_clients: Vec<Sender<fht_compositor_ipc::Event>>,
+    subscribed_clients: Vec<Sender<types::Event>>,
     dispatcher: Dispatcher<'static, Generic<UnixListener>, State>,
 }
 
@@ -46,7 +47,7 @@ impl Server {
         _ = unlink(self.socket_path);
     }
 
-    pub fn push_event(&mut self, event: fht_compositor_ipc::Event) {
+    pub fn push_event(&mut self, event: types::Event) {
         let mut to_disconnect = vec![];
         for (idx, sender) in self.subscribed_clients.iter().enumerate() {
             match sender.try_send(event.clone()) {
@@ -191,8 +192,8 @@ async fn handle_new_client(
             Err(err) => anyhow::bail!("error reading request: {err:?}"),
         }
 
-        let request = serde_json::from_str::<fht_compositor_ipc::Request>(&req_buf);
-        is_subscribe = matches!(request, Ok(fht_compositor_ipc::Request::Subscribe));
+        let request = serde_json::from_str::<types::Request>(&req_buf);
+        is_subscribe = matches!(request, Ok(types::Request::Subscribe));
 
         // When you send a subscribe request to the socket, it can't be used anymore for regular
         // requests. This is a limitation of the current system, to avoid confusion
@@ -242,30 +243,25 @@ async fn handle_new_client(
 }
 
 enum ClientRequest {
-    Outputs(async_channel::Sender<HashMap<String, fht_compositor_ipc::Output>>),
-    PickWindow(async_channel::Sender<fht_compositor_ipc::PickWindowResult>),
-    PickLayerShell(async_channel::Sender<fht_compositor_ipc::PickLayerShellResult>),
+    Outputs(async_channel::Sender<HashMap<String, types::Output>>),
+    PickWindow(async_channel::Sender<types::PickWindowResult>),
+    PickLayerShell(async_channel::Sender<types::PickLayerShellResult>),
     CursorPosition(async_channel::Sender<(f64, f64)>),
-    GlobalShortcuts(async_channel::Sender<Vec<fht_compositor_ipc::GlobalShortcut>>),
-    Action(
-        fht_compositor_ipc::Action,
-        async_channel::Sender<anyhow::Result<()>>,
-    ),
-    NewSubscriber(async_channel::Sender<fht_compositor_ipc::Event>),
+    GlobalShortcuts(async_channel::Sender<Vec<types::GlobalShortcut>>),
+    Action(types::Action, async_channel::Sender<anyhow::Result<()>>),
+    NewSubscriber(async_channel::Sender<types::Event>),
 }
 
 async fn handle_request(
-    req: fht_compositor_ipc::Request,
+    req: types::Request,
     to_compositor: calloop::channel::Sender<ClientRequest>,
     compositor_state: Rc<RefCell<subscribe::CompositorState>>,
-) -> anyhow::Result<fht_compositor_ipc::Response> {
+) -> anyhow::Result<types::Response> {
     match req {
         // The parent handle_client will do this for us
-        fht_compositor_ipc::Request::Subscribe => Ok(Response::Noop),
-        fht_compositor_ipc::Request::Version => {
-            Ok(Response::Version(crate::cli::get_version_string()))
-        }
-        fht_compositor_ipc::Request::Outputs => {
+        types::Request::Subscribe => Ok(Response::Noop),
+        types::Request::Version => Ok(Response::Version(crate::cli::get_version_string())),
+        types::Request::Outputs => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
                 .send(ClientRequest::Outputs(tx))
@@ -276,29 +272,29 @@ async fn handle_request(
                 .context("Failed to retreive output information")?;
             Ok(Response::Outputs(outputs))
         }
-        fht_compositor_ipc::Request::Windows => {
+        types::Request::Windows => {
             let windows = compositor_state.borrow().windows.clone();
             Ok(Response::Windows(windows))
         }
-        fht_compositor_ipc::Request::LayerShells => {
+        types::Request::LayerShells => {
             let layer_shells = compositor_state.borrow().layer_shells.clone();
             Ok(Response::LayerShells(layer_shells))
         }
-        fht_compositor_ipc::Request::Space => {
+        types::Request::Space => {
             let space = compositor_state.borrow().space.clone();
             Ok(Response::Space(space))
         }
-        fht_compositor_ipc::Request::Window(id) => {
+        types::Request::Window(id) => {
             let windows = Ref::map(compositor_state.borrow(), |s| &s.windows);
             let window = windows.get(&id).cloned();
             Ok(Response::Window(window))
         }
-        fht_compositor_ipc::Request::Workspace(id) => {
+        types::Request::Workspace(id) => {
             let workspaces = Ref::map(compositor_state.borrow(), |s| &s.workspaces);
             let workspace = workspaces.get(&id).cloned();
             Ok(Response::Workspace(workspace))
         }
-        fht_compositor_ipc::Request::GetWorkspace { output, index } => {
+        types::Request::GetWorkspace { output, index } => {
             let state = compositor_state.borrow();
             let id = match output {
                 Some(name) => state
@@ -320,7 +316,7 @@ async fn handle_request(
 
             Ok(Response::Workspace(workspace))
         }
-        fht_compositor_ipc::Request::FocusedWindow => {
+        types::Request::FocusedWindow => {
             let state = compositor_state.borrow();
             let window = state
                 .focused_window_id
@@ -328,12 +324,12 @@ async fn handle_request(
                 .cloned();
             Ok(Response::Window(window))
         }
-        fht_compositor_ipc::Request::FocusedWorkspace => {
+        types::Request::FocusedWorkspace => {
             let state = compositor_state.borrow();
             let workspace = state.workspaces.get(&state.active_workspace_id).cloned();
             Ok(Response::Workspace(workspace))
         }
-        fht_compositor_ipc::Request::PickWindow => {
+        types::Request::PickWindow => {
             let (tx, rx) = async_channel::bounded(1024);
             to_compositor
                 .send(ClientRequest::PickWindow(tx))
@@ -341,7 +337,7 @@ async fn handle_request(
             let result = rx.recv().await.context("Failed to receive picked window")?;
             Ok(Response::PickedWindow(result))
         }
-        fht_compositor_ipc::Request::PickLayerShell => {
+        types::Request::PickLayerShell => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
                 .send(ClientRequest::PickLayerShell(tx))
@@ -352,7 +348,7 @@ async fn handle_request(
                 .context("Failed to receive picked layer-shell")?;
             Ok(Response::PickedLayerShell(result))
         }
-        fht_compositor_ipc::Request::CursorPosition => {
+        types::Request::CursorPosition => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
                 .send(ClientRequest::CursorPosition(tx))
@@ -360,7 +356,7 @@ async fn handle_request(
             let (x, y) = rx.recv().await.context("Failed to receive action result")?;
             Ok(Response::CursorPosition { x, y })
         }
-        fht_compositor_ipc::Request::GlobalShortcuts => {
+        types::Request::GlobalShortcuts => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
                 .send(ClientRequest::GlobalShortcuts(tx))
@@ -371,7 +367,7 @@ async fn handle_request(
                 .context("Failed to receive global shortcuts")?;
             Ok(Response::GlobalShortcuts(shortcuts))
         }
-        fht_compositor_ipc::Request::Action(action) => {
+        types::Request::Action(action) => {
             let (tx, rx) = async_channel::bounded(1);
             to_compositor
                 .send(ClientRequest::Action(action, tx))
@@ -413,7 +409,7 @@ impl State {
                                     );
                                 }
 
-                                fht_compositor_ipc::OutputMode {
+                                types::OutputMode {
                                     dimensions: (mode.size.w as u32, mode.size.h as u32),
                                     preferred: Some(mode) == preferred_mode,
                                     refresh: mode.refresh as f64 / 1000.,
@@ -424,9 +420,19 @@ impl State {
                         let position = output.current_location().into();
                         let logical_size = output.geometry().size;
                         let scale = output.current_scale().integer_scale();
-                        let transform = output.current_transform().into();
+                        use types::OutputTransform;
+                        let transform = match output.current_transform() {
+                            smithay::utils::Transform::Normal => OutputTransform::Normal,
+                            smithay::utils::Transform::_90 => OutputTransform::_90,
+                            smithay::utils::Transform::_180 => OutputTransform::_180,
+                            smithay::utils::Transform::_270 => OutputTransform::_270,
+                            smithay::utils::Transform::Flipped => OutputTransform::Flipped,
+                            smithay::utils::Transform::Flipped90 => OutputTransform::Flipped90,
+                            smithay::utils::Transform::Flipped180 => OutputTransform::Flipped180,
+                            smithay::utils::Transform::Flipped270 => OutputTransform::Flipped270,
+                        };
 
-                        let ipc_output = fht_compositor_ipc::Output {
+                        let ipc_output = types::Output {
                             name: name.clone(),
                             make: props.make,
                             model: props.model,
@@ -484,7 +490,7 @@ impl State {
                     .hyprland_global_shortcuts_state
                     .list_shortcuts()
                     .into_iter()
-                    .map(|data| fht_compositor_ipc::GlobalShortcut {
+                    .map(|data| types::GlobalShortcut {
                         app_id: data.app_id.clone(),
                         id: data.id.clone(),
                         description: data.description.clone(),
@@ -503,16 +509,16 @@ impl State {
 
                 let initial_state = ipc_server.compositor_state.borrow();
                 let initial_events = [
-                    fht_compositor_ipc::Event::Windows(initial_state.windows.clone()),
-                    fht_compositor_ipc::Event::FocusedWindowChanged {
+                    types::Event::Windows(initial_state.windows.clone()),
+                    types::Event::FocusedWindowChanged {
                         id: initial_state.focused_window_id,
                     },
-                    fht_compositor_ipc::Event::Workspaces(initial_state.workspaces.clone()),
-                    fht_compositor_ipc::Event::ActiveWorkspaceChanged {
+                    types::Event::Workspaces(initial_state.workspaces.clone()),
+                    types::Event::ActiveWorkspaceChanged {
                         id: initial_state.active_workspace_id,
                     },
-                    fht_compositor_ipc::Event::Space(initial_state.space.clone()),
-                    fht_compositor_ipc::Event::LayerShells(initial_state.layer_shells.clone()),
+                    types::Event::Space(initial_state.space.clone()),
+                    types::Event::LayerShells(initial_state.layer_shells.clone()),
                 ];
 
                 // First broadcast initial state
@@ -535,22 +541,22 @@ impl State {
         Ok(())
     }
 
-    fn handle_ipc_action(&mut self, action: fht_compositor_ipc::Action) -> anyhow::Result<()> {
+    fn handle_ipc_action(&mut self, action: types::Action) -> anyhow::Result<()> {
         match action {
-            fht_compositor_ipc::Action::Quit => self.fht.stop = true,
-            fht_compositor_ipc::Action::DisableOutputs => self.fht.disable_outputs(),
-            fht_compositor_ipc::Action::RunCommandLine { command_line } => {
+            types::Action::Quit => self.fht.stop = true,
+            types::Action::DisableOutputs => self.fht.disable_outputs(),
+            types::Action::RunCommandLine { command_line } => {
                 let (token, _token_data) =
                     self.fht.xdg_activation_state.create_external_token(None);
                 crate::utils::spawn(command_line, Some(token.clone()));
             }
-            fht_compositor_ipc::Action::Run { command } => {
+            types::Action::Run { command } => {
                 let (token, _token_data) =
                     self.fht.xdg_activation_state.create_external_token(None);
                 crate::utils::spawn_args(command.clone(), Some(token.clone()));
             }
-            fht_compositor_ipc::Action::ReloadConfig => self.reload_config(),
-            fht_compositor_ipc::Action::SelectNextLayout { workspace_id } => {
+            types::Action::ReloadConfig => self.reload_config(),
+            types::Action::SelectNextLayout { workspace_id } => {
                 let workspace = match workspace_id {
                     Some(id) => self
                         .fht
@@ -562,7 +568,7 @@ impl State {
 
                 workspace.select_next_layout(true);
             }
-            fht_compositor_ipc::Action::SelectPreviousLayout { workspace_id } => {
+            types::Action::SelectPreviousLayout { workspace_id } => {
                 let workspace = match workspace_id {
                     Some(id) => self
                         .fht
@@ -574,7 +580,7 @@ impl State {
 
                 workspace.select_previous_layout(true);
             }
-            fht_compositor_ipc::Action::MaximizeWindow { state, window_id } => {
+            types::Action::MaximizeWindow { state, window_id } => {
                 let window = match window_id {
                     Some(id) => self
                         .fht
@@ -599,7 +605,7 @@ impl State {
                 };
                 self.fht.space.maximize_window(&window, new_state, true);
             }
-            fht_compositor_ipc::Action::FullscreenWindow { state, window_id } => {
+            types::Action::FullscreenWindow { state, window_id } => {
                 let window = match window_id {
                     Some(id) => self
                         .fht
@@ -628,7 +634,7 @@ impl State {
                     window.request_fullscreen(false);
                 }
             }
-            fht_compositor_ipc::Action::FloatWindow { state, window_id } => {
+            types::Action::FloatWindow { state, window_id } => {
                 let window = match window_id {
                     Some(id) => self
                         .fht
@@ -654,7 +660,7 @@ impl State {
                 };
                 self.fht.space.float_window(&window, new_state, true);
             }
-            fht_compositor_ipc::Action::CenterFloatingWindow { window_id } => {
+            types::Action::CenterFloatingWindow { window_id } => {
                 let window = match window_id {
                     Some(id) => self
                         .fht
@@ -679,7 +685,7 @@ impl State {
 
                 self.fht.space.center_window(&window, true);
             }
-            fht_compositor_ipc::Action::MoveFloatingWindow { window_id, change } => {
+            types::Action::MoveFloatingWindow { window_id, change } => {
                 let tile = match window_id {
                     Some(id) => self
                         .fht
@@ -702,18 +708,18 @@ impl State {
                 }
 
                 let new_loc = match change {
-                    fht_compositor_ipc::WindowLocationChange::Change { dx, dy } => {
+                    types::WindowLocationChange::Change { dx, dy } => {
                         let change = Point::from((dx.unwrap_or(0), dy.unwrap_or(0)));
                         tile.location() + change
                     }
-                    fht_compositor_ipc::WindowLocationChange::Set { x, y } => {
+                    types::WindowLocationChange::Set { x, y } => {
                         let prev = tile.location();
                         Point::from((x.unwrap_or(prev.x), y.unwrap_or(prev.y)))
                     }
                 };
                 tile.set_location(new_loc, true);
             }
-            fht_compositor_ipc::Action::ResizeFloatingWindow { window_id, change } => {
+            types::Action::ResizeFloatingWindow { window_id, change } => {
                 let tile = match window_id {
                     Some(id) => self
                         .fht
@@ -738,11 +744,11 @@ impl State {
                 }
 
                 let new_size = match change {
-                    fht_compositor_ipc::WindowSizeChange::Change { dx, dy } => {
+                    types::WindowSizeChange::Change { dx, dy } => {
                         let change = Size::from((dx.unwrap_or(0), dy.unwrap_or(0)));
                         tile.size() + change
                     }
-                    fht_compositor_ipc::WindowSizeChange::Set { x, y } => {
+                    types::WindowSizeChange::Set { x, y } => {
                         let prev = tile.size();
                         Size::from((
                             x.unwrap_or(prev.w as u32) as i32,
@@ -754,7 +760,7 @@ impl State {
                 let new_size = Size::from((new_size.w.max(20), new_size.h.max(20)));
                 tile.set_size(new_size, true);
             }
-            fht_compositor_ipc::Action::FocusWindow { window_id } => {
+            types::Action::FocusWindow { window_id } => {
                 let mut window = None;
 
                 for monitor in self.fht.space.monitors_mut() {
@@ -791,7 +797,7 @@ impl State {
 
                 anyhow::bail!("No window with matching ID")
             }
-            fht_compositor_ipc::Action::FocusNextWindow { workspace_id } => {
+            types::Action::FocusNextWindow { workspace_id } => {
                 let workspace = match workspace_id {
                     Some(id) => self
                         .fht
@@ -807,7 +813,7 @@ impl State {
                 workspace.activate_next_tile(true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::FocusPreviousWindow { workspace_id } => {
+            types::Action::FocusPreviousWindow { workspace_id } => {
                 let workspace = match workspace_id {
                     Some(id) => self
                         .fht
@@ -823,7 +829,7 @@ impl State {
                 workspace.activate_previous_tile(true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::SwapWithNextWindow {
+            types::Action::SwapWithNextWindow {
                 keep_focus,
                 workspace_id,
             } => {
@@ -842,7 +848,7 @@ impl State {
                 workspace.swap_active_tile_with_next(keep_focus, true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::SwapWithPreviousWindow {
+            types::Action::SwapWithPreviousWindow {
                 keep_focus,
                 workspace_id,
             } => {
@@ -861,7 +867,7 @@ impl State {
                 workspace.swap_active_tile_with_previous(keep_focus, true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::FocusOutput { output } => {
+            types::Action::FocusOutput { output } => {
                 let output = self
                     .fht
                     .space
@@ -871,7 +877,7 @@ impl State {
                     .context("No output matching name")?;
                 self.fht.focus_output(&output);
             }
-            fht_compositor_ipc::Action::FocusNextOutput => {
+            types::Action::FocusNextOutput => {
                 self.process_key_action(
                     KeyAction {
                         r#type: crate::input::KeyActionType::FocusNextOutput,
@@ -883,7 +889,7 @@ impl State {
                     Default::default(),
                 );
             }
-            fht_compositor_ipc::Action::FocusPreviousOutput => {
+            types::Action::FocusPreviousOutput => {
                 self.process_key_action(
                     KeyAction {
                         r#type: crate::input::KeyActionType::FocusNextOutput,
@@ -895,7 +901,7 @@ impl State {
                     Default::default(),
                 );
             }
-            fht_compositor_ipc::Action::FocusWorkspace { workspace_id } => {
+            types::Action::FocusWorkspace { workspace_id } => {
                 let mut output = None;
                 for monitor in self.fht.space.monitors_mut() {
                     let mut idx = None;
@@ -916,7 +922,7 @@ impl State {
                 let output = output.context("No workspace with matching ID")?;
                 self.fht.focus_output(&output);
             }
-            fht_compositor_ipc::Action::FocusWorkspaceByIndex {
+            types::Action::FocusWorkspaceByIndex {
                 workspace_idx,
                 output,
             } => {
@@ -935,7 +941,7 @@ impl State {
                 monitor.set_active_workspace_idx(workspace_idx, true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::FocusNextWorkspace { output } => {
+            types::Action::FocusNextWorkspace { output } => {
                 let monitor = match output {
                     None => self.fht.space.active_monitor_mut(),
                     Some(name) => self
@@ -950,7 +956,7 @@ impl State {
                 monitor.set_active_workspace_idx(idx, true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::FocusPreviousWorkspace { output } => {
+            types::Action::FocusPreviousWorkspace { output } => {
                 let monitor = match output {
                     None => self.fht.space.active_monitor_mut(),
                     Some(name) => self
@@ -965,7 +971,7 @@ impl State {
                 monitor.set_active_workspace_idx(idx, true);
                 self.update_keyboard_focus();
             }
-            fht_compositor_ipc::Action::CloseWindow { window_id, kill } => {
+            types::Action::CloseWindow { window_id, kill } => {
                 let window = match window_id {
                     Some(id) => self
                         .fht
@@ -999,7 +1005,7 @@ impl State {
                     }
                 }
             }
-            fht_compositor_ipc::Action::ChangeMwfact {
+            types::Action::ChangeMwfact {
                 workspace_id,
                 change,
             } => {
@@ -1013,15 +1019,11 @@ impl State {
                 };
 
                 match change {
-                    fht_compositor_ipc::MwfactChange::Change { delta } => {
-                        workspace.change_mwfact(delta, true)
-                    }
-                    fht_compositor_ipc::MwfactChange::Set { value } => {
-                        workspace.set_mwfact(value, true)
-                    }
+                    types::MwfactChange::Change { delta } => workspace.change_mwfact(delta, true),
+                    types::MwfactChange::Set { value } => workspace.set_mwfact(value, true),
                 }
             }
-            fht_compositor_ipc::Action::ChangeNmaster {
+            types::Action::ChangeNmaster {
                 workspace_id,
                 change,
             } => {
@@ -1035,15 +1037,11 @@ impl State {
                 };
 
                 match change {
-                    fht_compositor_ipc::NmasterChange::Change { delta } => {
-                        workspace.change_nmaster(delta, true)
-                    }
-                    fht_compositor_ipc::NmasterChange::Set { value } => {
-                        workspace.set_nmaster(value, true)
-                    }
+                    types::NmasterChange::Change { delta } => workspace.change_nmaster(delta, true),
+                    types::NmasterChange::Set { value } => workspace.set_nmaster(value, true),
                 }
             }
-            fht_compositor_ipc::Action::ChangeWindowProportion { window_id, change } => {
+            types::Action::ChangeWindowProportion { window_id, change } => {
                 let tile = match window_id {
                     Some(id) => self
                         .fht
@@ -1062,16 +1060,14 @@ impl State {
                 };
 
                 match change {
-                    fht_compositor_ipc::WindowProportionChange::Change { delta } => {
+                    types::WindowProportionChange::Change { delta } => {
                         let new_value = tile.proportion() + delta;
                         tile.set_proportion(new_value);
                     }
-                    fht_compositor_ipc::WindowProportionChange::Set { value } => {
-                        tile.set_proportion(value)
-                    }
+                    types::WindowProportionChange::Set { value } => tile.set_proportion(value),
                 }
             }
-            fht_compositor_ipc::Action::SendWindowToWorkspace {
+            types::Action::SendWindowToWorkspace {
                 window_id,
                 workspace_id,
             } => {
