@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -204,7 +203,7 @@ impl Device {
         }
 
         if cleanup {
-            let config = Arc::clone(&fht.config);
+            let config = &fht.config;
             let should_be_off = |_, conn: &connector::Info| -> bool {
                 let output_name = format!("{}-{}", conn.interface().as_str(), conn.interface_id());
                 let config = config

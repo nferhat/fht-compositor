@@ -122,37 +122,6 @@ impl Backend {
         }
     }
 
-    pub fn set_output_mode(
-        &mut self,
-        fht: &mut Fht,
-        output: &Output,
-        mode: smithay::output::Mode,
-    ) -> anyhow::Result<()> {
-        match self {
-            #[cfg(feature = "winit-backend")]
-            #[allow(irrefutable_let_patterns)]
-            Self::Winit(_) => {
-                _ = fht;
-                _ = output;
-                _ = mode;
-                Ok(())
-            }
-            #[cfg(feature = "udev-backend")]
-            #[allow(irrefutable_let_patterns)]
-            Self::Udev(data) => data.set_output_mode(fht, output, mode),
-            #[cfg(feature = "headless-backend")]
-            #[allow(irrefutable_let_patterns)]
-            Self::Headless(_) => {
-                _ = fht;
-                _ = output;
-                _ = mode;
-                Ok(())
-            }
-            #[allow(unreachable_patterns)]
-            _ => unreachable!(),
-        }
-    }
-
     pub fn update_output_vrr(
         &mut self,
         fht: &mut Fht,

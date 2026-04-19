@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use fht_compositor_config::{
@@ -217,7 +216,7 @@ impl State {
         }
 
         let output = self.fht.space.active_output().clone();
-        let config = Arc::clone(&self.fht.config);
+        let cursor_warps = self.fht.config.general.cursor_warps;
         let active_window = self.fht.space.active_window();
 
         match &action.r#type {
@@ -305,7 +304,7 @@ impl State {
             KeyActionType::FocusNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_next_tile(true) {
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -320,7 +319,7 @@ impl State {
             KeyActionType::FocusPreviousWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_previous_tile(true) {
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -337,7 +336,7 @@ impl State {
                 if active.swap_active_tile_with_next(true, true) {
                     let tile = active.active_tile().unwrap();
                     let window = tile.window().clone();
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
@@ -349,7 +348,7 @@ impl State {
                 if active.swap_active_tile_with_previous(true, true) {
                     let tile = active.active_tile().unwrap();
                     let window = tile.window().clone();
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
@@ -374,7 +373,7 @@ impl State {
                 }
 
                 let output = outputs.into_iter().nth(next_output_idx).unwrap();
-                if config.general.cursor_warps {
+                if cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
@@ -400,7 +399,7 @@ impl State {
                 };
 
                 let output = outputs.into_iter().nth(next_output_idx).unwrap();
-                if config.general.cursor_warps {
+                if cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
@@ -507,8 +506,7 @@ impl State {
 impl State {
     pub fn process_mouse_action(&mut self, button: u32, action: MouseAction, serial: Serial) {
         crate::profile_function!();
-
-        let config = Arc::clone(&self.fht.config);
+        let cursor_warps = self.fht.config.general.cursor_warps;
 
         match action {
             MouseAction::SwapTile => {
@@ -600,7 +598,7 @@ impl State {
             MouseAction::FocusNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_next_tile(true) {
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -615,7 +613,7 @@ impl State {
             MouseAction::FocusPreviousWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_previous_tile(true) {
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -643,7 +641,9 @@ impl State {
             }
         }
     }
+
     pub fn process_gesture_action(&mut self, action: GestureAction) {
+        let cursor_warps = self.fht.config.general.cursor_warps;
         match action {
             GestureAction::FocusNextWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
@@ -691,8 +691,7 @@ impl State {
                 }
 
                 let output = outputs.into_iter().nth(next_output_idx).unwrap();
-                let config = Arc::clone(&self.fht.config);
-                if config.general.cursor_warps {
+                if cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
@@ -703,8 +702,7 @@ impl State {
             GestureAction::FocusNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_next_tile(true) {
-                    let config = Arc::clone(&self.fht.config);
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -735,8 +733,7 @@ impl State {
                 };
 
                 let output = outputs.into_iter().nth(next_output_idx).unwrap();
-                let config = Arc::clone(&self.fht.config);
-                if config.general.cursor_warps {
+                if cursor_warps {
                     let center = output.geometry().center();
                     self.move_pointer(center.to_f64());
                 }
@@ -747,8 +744,7 @@ impl State {
             GestureAction::FocusPreviousWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if let Some(window) = active.activate_previous_tile(true) {
-                    let config = Arc::clone(&self.fht.config);
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
                                 + active.output().current_location(),
@@ -778,8 +774,7 @@ impl State {
                 if active.swap_active_tile_with_next(true, true) {
                     let tile = active.active_tile().unwrap();
                     let window = tile.window().clone();
-                    let config = Arc::clone(&self.fht.config);
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
@@ -791,8 +786,7 @@ impl State {
                 if active.swap_active_tile_with_previous(true, true) {
                     let tile = active.active_tile().unwrap();
                     let window = tile.window().clone();
-                    let config = Arc::clone(&self.fht.config);
-                    if config.general.cursor_warps {
+                    if cursor_warps {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }

@@ -4,7 +4,7 @@
 // Licensed under GPL-3.0
 
 use anyhow::Context;
-use fht_compositor_config::VrrMode;
+use fht_compositor_config::{VrrMode, Output as OutputConfig};
 use smithay::{
     output::{Output, WeakOutput},
     reexports::{
@@ -89,22 +89,13 @@ pub struct PendingOutputHeadConfiguration {
     pub adaptive_sync: Option<fht_compositor_config::VrrMode>,
 }
 
-#[derive(Debug)]
-pub enum OutputConfiguration {
-    Disabled,
-    Enabled {
-        mode: Option<(Size<i32, Physical>, Option<NonZeroU32>)>,
-        position: Option<Point<i32, Logical>>,
-        transform: Option<Transform>,
-        scale: Option<f64>,
-        adaptive_sync: Option<fht_compositor_config::VrrMode>,
-    },
-}
-
 pub trait OutputManagementHandler {
     fn output_management_manager_state(&mut self) -> &mut OutputManagementManagerState;
-    fn apply_configuration(&mut self, config: HashMap<Output, OutputConfiguration>) -> bool;
-    fn test_configuration(&mut self, config: HashMap<Output, OutputConfiguration>) -> bool;
+    fn apply_configuration(&mut self, config: HashMap<String, OutputConfig>) -> bool;
+    fn test_configuration(&mut self, config: HashMap<String, OutputConfig>) -> bool {
+        _ = (self, config);
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -894,8 +885,9 @@ where
                     .iter()
                     .map(|(head, head_cfg)| {
                         let output = head.data::<Output>().unwrap().clone();
+                        let name = output.name();
 
-                        let cfg = match head_cfg {
+                        let config = match head_cfg {
                             PendingHead::NotConfigured => unreachable!(),
                             PendingHead::Enabled(cfg_head) => {
                                 let pending = cfg_head
@@ -903,18 +895,41 @@ where
                                     .unwrap()
                                     .lock()
                                     .unwrap();
-                                OutputConfiguration::Enabled {
-                                    mode: pending.mode,
-                                    position: pending.position,
-                                    transform: pending.transform,
-                                    scale: pending.scale,
-                                    adaptive_sync: pending.adaptive_sync,
+                                use fht_compositor_config::OutputTransform;
+                                use smithay::utils::Transform;
+                                fht_compositor_config::Output {
+                                    disable: false,
+                                    mode: pending.mode.map(|(s, rr)| {
+                                        (s.w as _, s.h as _, rr.map(|v| v.get() as _))
+                                    }),
+                                    position: pending.position.map(|pos| {
+                                        fht_compositor_config::Position { x: pos.x, y: pos.y }
+                                    }),
+                                    // FIXME: Fractional scaling
+                                    scale: pending.scale.map(|s| s.floor() as i32),
+                                    transform: pending.transform.map(|v| match v {
+                                        Transform::Normal => OutputTransform::Normal,
+                                        Transform::_90 => OutputTransform::_90,
+                                        Transform::_180 => OutputTransform::_180,
+                                        Transform::_270 => OutputTransform::_270,
+                                        Transform::Flipped => OutputTransform::Flipped,
+                                        Transform::Flipped90 => OutputTransform::Flipped90,
+                                        Transform::Flipped180 => OutputTransform::Flipped180,
+                                        Transform::Flipped270 => OutputTransform::Flipped270,
+                                    }),
+                                    vrr: pending.adaptive_sync.unwrap_or_default(),
                                 }
                             }
-                            PendingHead::Disabled => OutputConfiguration::Disabled,
+                            // The actual configuration values don't really matter when it's
+                            // disabled. It should get ignored by the arranging code and anything
+                            // else in the compositor.
+                            PendingHead::Disabled => fht_compositor_config::Output {
+                                disable: true,
+                                ..Default::default()
+                            },
                         };
 
-                        (output, cfg)
+                        (name, config)
                     })
                     .collect();
 

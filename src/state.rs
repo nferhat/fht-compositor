@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -380,8 +380,9 @@ impl State {
             // the channel does not exist anymore) So there's nothing todo with the
             // join_handle!
         }
-        let old_config = Arc::clone(&self.fht.config);
-        let config = Arc::new(new_config);
+        // FIXME: This clone could be expensive? I don't know it only happens once so who cares.
+        let old_config = self.fht.config.clone();
+        let config = new_config;
 
         // Some invariants must be upheld when reloading the configuration
         // If any reloading function errors out, the configuration is not valid
@@ -796,14 +797,11 @@ pub struct Fht {
     // This can happen when you use a tool that interacts with the wlr-output-management protocol.
     // When reloading the config, we want to undo those changes.
     pub has_transient_output_changes: bool,
-    // Sometimes we might have to change the output config at runtime, so we use this value
-    // when updating stuff instead of one guarded by an Arc.
-    pub output_config: HashMap<String, fht_compositor_config::Output>,
     /// Whether all the outputs are disabled. This field should only be set by the backend, and be
     /// referenced by the compositor state.
     pub outputs_disabled: bool,
 
-    pub config: Arc<fht_compositor_config::Config>,
+    pub config: fht_compositor_config::Config,
     pub root_config_path: Option<std::path::PathBuf>,
     // The config_ui also tracks the last configuration error, if any.
     pub config_ui: config_ui::ConfigUi,
@@ -872,7 +870,6 @@ impl Fht {
             .unwrap();
 
         let config_ui = config_ui::ConfigUi::new();
-        let output_config = config.outputs.clone();
         let root_config_path = paths.get(0).cloned();
 
         let config_watcher = crate::config::init_watcher(paths, &loop_handle)
@@ -915,13 +912,12 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
-        let hyprland_global_shortcuts_state =
-            HyprlandGlobalShortcutsState::new(dh, |client| {
-                // Only allow clients that aren't running inside a SC
-                client
-                    .get_data::<ClientState>()
-                    .is_none_or(|data| data.security_context.is_none())
-            });
+        let hyprland_global_shortcuts_state = HyprlandGlobalShortcutsState::new(dh, |client| {
+            // Only allow clients that aren't running inside a SC
+            client
+                .get_data::<ClientState>()
+                .is_none_or(|data| data.security_context.is_none())
+        });
         ContentTypeState::new::<State>(dh);
         CursorShapeManagerState::new::<State>(dh);
         TextInputManagerState::new::<State>(dh);
@@ -1031,10 +1027,9 @@ impl Fht {
 
             output_state: HashMap::new(),
             has_transient_output_changes: false,
-            output_config,
             outputs_disabled: false,
 
-            config: Arc::new(config),
+            config: config,
             root_config_path,
             config_ui,
             config_ui_output: None,
@@ -1246,7 +1241,7 @@ impl Fht {
         for (output, config) in self
             .space
             .outputs()
-            .map(|output| (output, self.output_config.get(&output.name())))
+            .map(|output| (output, self.config.outputs.get(&output.name())))
         {
             // NOTE: for winit backend the transform must stay on Flipped180.
             let new_transform = (output.name().as_str() != "winit")
@@ -1267,6 +1262,8 @@ impl Fht {
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
         self.loop_handle.insert_idle(move |state| {
+            // Apply the config then re-arrange, since the outputs' sizes might
+            // have changed, we could have created overlap.
             state
                 .backend
                 .reload_output_configuration(&mut state.fht, force);
@@ -1360,7 +1357,7 @@ impl Fht {
     pub fn output_update_vrr(&mut self, output: &Output) {
         crate::profile_function!();
         let name = output.name();
-        let Some(config) = self.output_config.get(&name) else {
+        let Some(config) = self.config.outputs.get(&name) else {
             return; // no config, VRR disabled by default.
         };
 
@@ -1993,8 +1990,8 @@ impl Fht {
                     || match (is_touchpad, is_trackpoint) {
                         (true, false) => &input_config.touchpad,
                         (false, true) => &input_config.trackpoint,
-                        // HACK: This also includes the case (true, true), which sometimes can happen?
-                        // See #126 where this user hit that case.
+                        // HACK: This also includes the case (true, true), which sometimes can
+                        // happen? See #126 where this user hit that case.
                         _ => &input_config.mouse,
                     },
                     |cfg|

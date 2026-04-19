@@ -358,7 +358,14 @@ impl Surface {
             FhtRenderElement<UdevRenderer<'render>>,
         >,
     ) -> anyhow::Result<()> {
-        self.drm_output.use_mode(mode, renderer, render_elements)?;
+        let res = self
+            .drm_output
+            .use_mode(mode, renderer, render_elements)
+            .context("failed to set mode");
+        if res.is_err() {
+            self.drm_output.reset_buffers();
+        }
+
         Ok(())
     }
 
