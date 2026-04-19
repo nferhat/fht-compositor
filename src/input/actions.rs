@@ -45,7 +45,10 @@ pub enum KeyActionType {
     FocusPreviousOutput,
     CloseFocusedWindow,
     FocusWorkspace(usize),
-    SendFocusedWindowToWorkspace(usize),
+    SendFocusedWindowToWorkspace {
+        workspace_idx: usize,
+        follow: bool,
+    },
     FocusNextWorkspace,
     FocusPreviousWorkspace,
     DisableOuptuts,
@@ -170,7 +173,16 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     }
                     ComplexKeyAction::FocusWorkspace(idx) => KeyActionType::FocusWorkspace(idx),
                     ComplexKeyAction::SendToWorkspace(idx) => {
-                        KeyActionType::SendFocusedWindowToWorkspace(idx)
+                        KeyActionType::SendFocusedWindowToWorkspace {
+                            workspace_idx: idx,
+                            follow: false,
+                        }
+                    }
+                    ComplexKeyAction::SendAndFollowToWorkspace(idx) => {
+                        KeyActionType::SendFocusedWindowToWorkspace {
+                            workspace_idx: idx,
+                            follow: true,
+                        }
                     }
                     ComplexKeyAction::GlobalShortcut(arg) => match arg.split_once(':') {
                         Some((app_id, shortcut_id)) => KeyActionType::GlobalShortcut {
@@ -422,7 +434,10 @@ impl State {
                     self.set_keyboard_focus(Some(window));
                 }
             }
-            KeyActionType::SendFocusedWindowToWorkspace(idx) => {
+            KeyActionType::SendFocusedWindowToWorkspace {
+                workspace_idx: idx,
+                follow,
+            } => {
                 let active = self.fht.space.active_workspace_mut();
                 let Some(window) = active.active_window() else {
                     return;
@@ -442,6 +457,10 @@ impl State {
                     let mon = self.fht.space.active_monitor_mut();
                     mon.workspace_mut_by_index(idx)
                         .insert_window(window, location, true);
+
+                    if *follow {
+                        mon.set_active_workspace_idx(idx, true);
+                    }
                 }
             }
             KeyActionType::GlobalShortcut { .. } => {

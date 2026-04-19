@@ -269,6 +269,7 @@ pub enum ComplexKeyAction {
     ChangeWindowProportion(f64),
     FocusWorkspace(usize),
     SendToWorkspace(usize),
+    SendAndFollowToWorkspace(usize),
     GlobalShortcut(String),
 }
 
