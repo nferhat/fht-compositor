@@ -1,3 +1,4 @@
+use fht_compositor_config::DecorationMode;
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, LayerSurface,
@@ -6,9 +7,11 @@ use smithay::desktop::{
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::ConstraintAdjustment;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
-    self, WmCapabilities,
+    self, State as ToplevelState, WmCapabilities,
 };
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::reexports::wayland_server::Resource;
@@ -16,9 +19,12 @@ use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
 };
+use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+    XdgShellState, XdgToplevelSurfaceData,
 };
 
 use crate::focus_target::KeyboardFocusTarget;
@@ -26,7 +32,7 @@ use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
 use crate::space::Workspace;
-use crate::state::{Fht, State, UnmappedWindow};
+use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -469,6 +475,196 @@ impl Fht {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
     }
+
+    pub fn queue_initial_configure(&self, window: Window) {
+        self.loop_handle.insert_idle(move |state| {
+            state.fht.send_initial_configure(window);
+        });
+    }
+
+    fn send_initial_configure(&mut self, window: Window) {
+        let window_id = window.id();
+        trace!(?window_id, "Preparing unconfigured window");
+        window.on_commit();
+        window.refresh();
+
+        // In order to calculate window rules, we must know the current output/workspace.
+        // We have on-output/workspace matches, so they shall be respected
+        let (has_parent, current_output, current_ws_idx, current_ws_id) =
+            if let Some(parent_workspace) = window
+                .toplevel()
+                .parent()
+                .and_then(|parent| self.space.workspace_mut_for_window_surface(&parent))
+            {
+                trace!(id = ?parent_workspace.id(), "found parent mapped in workspace");
+                (
+                    true,
+                    parent_workspace.output().clone(),
+                    parent_workspace.index(),
+                    parent_workspace.id(),
+                )
+            } else {
+                (
+                    false,
+                    self.space.active_output().clone(),
+                    self.space.active_workspace_mut().index(),
+                    self.space.active_workspace_mut().id(),
+                )
+            };
+
+        let mut rules = ResolvedWindowRules::resolve(
+            &window,
+            &self.config.rules,
+            &current_output.name(),
+            current_ws_idx,
+            false, // we are still unmapped
+        );
+
+        let opening_location = rules.location;
+
+        let open_on_output = if let Some(named_output) = rules
+            .open_on_output
+            .as_ref()
+            .and_then(|name| self.output_named(name))
+        {
+            named_output
+        } else {
+            current_output
+        };
+
+        let open_on_workspace = if let Some(open_on_workspace) = rules.open_on_workspace {
+            let mon = self.space.monitor_mut_for_output(&open_on_output).unwrap();
+            mon.workspace_by_index(open_on_workspace.clamp(0, 8)).id()
+        } else {
+            current_ws_id
+        };
+
+        let decoration_mode = match rules
+            .decoration_mode
+            .unwrap_or(self.config.decorations.decoration_mode)
+        {
+            // The decoration mode to apply.
+            // prefer-* branches will just keep whatever the client has.
+            DecorationMode::ClientPreference
+            | DecorationMode::PreferClientSide
+            | DecorationMode::PreferServerSide => None,
+            DecorationMode::ForceClientSide => Some(zxdg_toplevel_decoration_v1::Mode::ClientSide),
+            DecorationMode::ForceServerSide => Some(zxdg_toplevel_decoration_v1::Mode::ClientSide),
+        };
+
+        let open_floating = if let Some(open_floating) = rules.floating {
+            open_floating
+        } else {
+            should_open_window_floating(&window)
+        };
+
+        window.toplevel().with_pending_state(|pending| {
+            pending.decoration_mode = decoration_mode;
+            if let Some(fullscreen) = rules.fullscreen {
+                if fullscreen {
+                    pending.states.set(ToplevelState::Fullscreen);
+                } else {
+                    pending.states.unset(ToplevelState::Fullscreen);
+                }
+            }
+
+            if let Some(maximized) = rules.maximized {
+                if maximized {
+                    pending.states.set(ToplevelState::Maximized);
+                } else {
+                    pending.states.unset(ToplevelState::Maximized);
+                }
+            }
+
+            if !open_floating {
+                pending.states.set(ToplevelState::TiledBottom);
+                pending.states.set(ToplevelState::TiledLeft);
+                pending.states.set(ToplevelState::TiledRight);
+                pending.states.set(ToplevelState::TiledTop);
+            } else {
+                pending.states.unset(ToplevelState::TiledBottom);
+                pending.states.unset(ToplevelState::TiledLeft);
+                pending.states.unset(ToplevelState::TiledRight);
+                pending.states.unset(ToplevelState::TiledTop);
+            }
+        });
+
+        if open_floating {
+            if has_parent {
+                rules.centered_in_parent = Some(true);
+            } else {
+                // FIXME: Perhaps calculate "the best place to put this floating window" in the
+                // workspace? Because right how you can spam open window and they will all end up
+                // in the same place with this.
+                rules.centered = Some(true);
+            }
+
+            window.set_rules(rules);
+        } else {
+            window.set_rules(rules);
+            self.space
+                .prepare_unconfigured_window(&window, open_on_workspace);
+        }
+
+        window.send_configure();
+        self.unmapped_windows.push(UnmappedWindow::Configured {
+            window,
+            workspace_id: open_on_workspace,
+            opening_location,
+        });
+    }
+}
+
+/// Determine whether a window should be opened floating based on a set of heuristics.
+/// These are from cage, sway, hyprland and niri.
+///
+/// These of course don't cover all the cases, use window rules if they don't cover yours.
+///
+/// The current list of heuristics include
+/// - Window has a parent
+/// - Window requests a size with limits (min/max)
+/// - Window has a content type
+/// - Window is a modal/dialog
+fn should_open_window_floating(window: &Window) -> bool {
+    // Window with parents should always open floating. If you don't like it just use
+    // a window rule, simple
+    if window.toplevel().parent().is_some() {
+        trace!("floating window with parent");
+        return true;
+    }
+
+    // Fixed-size clients should be floating too.
+    let wl_surface = window.wl_surface().unwrap();
+    let (min_size, max_size) = with_states(&wl_surface, |data| {
+        let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
+        let surface_data = cached_state.current();
+        (surface_data.min_size, surface_data.max_size)
+    });
+
+    if min_size.h > 0 && min_size.h == max_size.h {
+        trace!("floating window due to matching fixed-height");
+        // Heuristics from sway.
+        return true;
+    }
+
+    // Games and media players get floating.
+    // FIXME: Make this a window rule
+    let has_content_type = with_states(&*wl_surface, |data| {
+        use wp_content_type_v1::Type;
+        let mut guard = data.cached_state.get::<ContentTypeSurfaceCachedState>();
+        let current = guard.current();
+        matches!(
+            current.content_type(),
+            Type::Photo | Type::Video | Type::Game
+        )
+    });
+
+    if has_content_type {
+        trace!("floating window due to matching content-type");
+        return true;
+    }
+
+    false
 }
 
 delegate_xdg_shell!(State);

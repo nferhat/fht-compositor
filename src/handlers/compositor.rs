@@ -1,11 +1,8 @@
-use fht_compositor_config::DecorationMode;
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
 use smithay::desktop::{find_popup_root_surface, PopupKind};
 use smithay::output::Output;
 use smithay::reexports::calloop::Interest;
-use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1;
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::Rectangle;
@@ -13,15 +10,11 @@ use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
     with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
-use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
-use smithay::wayland::shell::xdg::{
-    SurfaceCachedState, XdgPopupSurfaceData, XdgToplevelSurfaceData,
-};
+use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
-use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
+use crate::state::{Fht, State, UnmappedWindow};
 use crate::utils::RectCenterExt;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
@@ -55,210 +48,9 @@ impl State {
                 else {
                     unreachable!()
                 };
-                let window_id = window.id();
-                trace!(?window_id, "Preparing unconfigured window");
-                window.on_commit();
-                window.refresh();
 
-                let mut output = self.fht.space.active_output().clone();
-                let (mut workspace_id, mut workspace_idx) = {
-                    let workspace = self.fht.space.active_workspace_mut();
-                    (workspace.id(), workspace.index())
-                };
-
-                // Prefer parent workspace and output when matching
-                if let Some(parent_workspace) =
-                    window.toplevel().parent().and_then(|parent_surface| {
-                        self.fht
-                            .space
-                            .workspace_mut_for_window_surface(&parent_surface)
-                    })
-                {
-                    trace!(?workspace_id, "found parent mapped in workspace");
-                    workspace_id = parent_workspace.id();
-                    workspace_idx = parent_workspace.index();
-                    output = parent_workspace.output().clone();
-                }
-
-                let mut rules = ResolvedWindowRules::resolve(
-                    &window,
-                    &self.fht.config.rules,
-                    output.name().as_str(),
-                    workspace_idx,
-                    false, // we are still unmapped
-                );
-                let mut opening_location = rules.location;
-
-                if let Some(named_output) = rules
-                    .open_on_output
-                    .as_ref()
-                    .and_then(|name| self.fht.output_named(name))
-                {
-                    output = named_output;
-                }
-
-                if let Some(open_on_workspace) = rules.open_on_workspace {
-                    let mon = self.fht.space.monitor_mut_for_output(&output).unwrap();
-                    workspace_id = mon.workspace_by_index(open_on_workspace.clamp(0, 8)).id();
-                }
-
-                let decoration_mode = rules
-                    .decoration_mode
-                    .unwrap_or(self.fht.config.decorations.decoration_mode);
-                window.toplevel().with_pending_state(|state| {
-                    // Prefer* == Set server side if client didn't specify anything.
-                    // Force* == set regardless of what the client set.
-                    match decoration_mode {
-                        DecorationMode::ClientPreference => {
-                            // Whatever the client has specified.
-                        }
-                        DecorationMode::PreferServerSide => {
-                            let _ = state
-                                .decoration_mode
-                                .get_or_insert(zxdg_toplevel_decoration_v1::Mode::ServerSide);
-                        }
-                        DecorationMode::PreferClientSide => {
-                            let _ = state
-                                .decoration_mode
-                                .get_or_insert(zxdg_toplevel_decoration_v1::Mode::ClientSide);
-                        }
-                        DecorationMode::ForceServerSide => {
-                            state.decoration_mode =
-                                Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
-                        }
-                        DecorationMode::ForceClientSide => {
-                            state.decoration_mode =
-                                Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
-                        }
-                    }
-                });
-
-                // Check whether the toplevel asked for fullscreen/maximized on creation.
-                // This can override checking for other values
-                let is_fullscreened = if let Some(fullscreen) = rules.fullscreen {
-                    window.request_fullscreen(fullscreen);
-                    fullscreen
-                } else {
-                    window.fullscreen()
-                };
-
-                let is_maximized = if let Some(maximized) = rules.maximized {
-                    window.request_maximized(maximized);
-                    maximized
-                } else {
-                    window.maximized()
-                };
-
-                // We have to set a floating value, no matter what.
-                // - If the user asked for a floating value, use it.
-                // - If the window has a parent
-                // - If the window requests a size with limits (min/max)
-                // - The toplevel has specified a content type
-                // - Default to tiled
-                let parent = window
-                    .toplevel()
-                    .parent()
-                    .and_then(|parent_surface| self.fht.space.find_window(&parent_surface));
-                let has_parent = parent.is_some();
-                let (min_size, max_size) = with_states(surface, |data| {
-                    let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
-                    let surface_data = cached_state.current();
-                    (surface_data.min_size, surface_data.max_size)
-                });
-
-                // If one axis is constrained, the size is constrained.
-                let width_fixed =
-                    (min_size.w != 0 && max_size.w != 0) && (min_size.w == max_size.w);
-                let height_fixed =
-                    (min_size.h != 0 && max_size.h != 0) && (min_size.h == max_size.h);
-                let has_fixed_size = width_fixed || height_fixed;
-                if has_fixed_size {
-                    trace!("window has fixed size, floating by default");
-                }
-
-                // Games and media players get floating.
-                let has_content_type = with_states(surface, |data| {
-                    use wp_content_type_v1::Type;
-                    let mut guard = data.cached_state.get::<ContentTypeSurfaceCachedState>();
-                    let current = guard.current();
-                    matches!(
-                        current.content_type(),
-                        Type::Photo | Type::Video | Type::Game
-                    )
-                });
-                if has_content_type {
-                    trace!("window has content-type, floating by default");
-                }
-
-                // If the parent is floating, the child shall be too.
-                let parent_floating = parent.as_ref().is_some_and(|w| !w.tiled());
-
-                let is_modal = with_states(surface, |data| {
-                    let state = data
-                        .data_map
-                        .get::<XdgToplevelSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    // FIXME: Maybe handle modals better? For example we could put them inside the
-                    // parent tile and not allow focus of the tile until the modal is closed?
-                    matches!(
-                        state.dialog_hint,
-                        ToplevelDialogHint::Dialog | ToplevelDialogHint::Modal
-                    )
-                });
-                if has_content_type {
-                    trace!("window is modal, floating by default");
-                }
-
-                // We only honor our floating heuristics if we dont have a fullscreen/maximized
-                // state from client/rules, to avoid jankiness
-                let default_floating = !(is_maximized || is_fullscreened)
-                    && (is_modal
-                        || has_parent
-                        || has_fixed_size
-                        || has_content_type
-                        || parent_floating);
-
-                if let Some(floating) = rules.floating {
-                    window.request_tiled(!floating);
-                    window.set_rules(rules); // NOTE: apply window rules here since we need them
-                                             // for the right border config to be considered
-                    if !floating {
-                        opening_location = None; // the workspace will place it instead
-                        self.fht
-                            .space
-                            .prepare_unconfigured_window(&window, workspace_id);
-                    }
-                } else if default_floating {
-                    rules.floating = Some(true);
-                    if has_parent {
-                        // We need to center around the parent if it exists.
-                        // For example OBS child window.
-                        rules.centered_in_parent = Some(true);
-                    } else {
-                        // Otherwise center in the workspace.
-                        rules.centered = Some(true);
-                    }
-                    window.set_rules(rules);
-                    window.request_tiled(false);
-                } else {
-                    window.set_rules(rules); // NOTE: apply window rules here since we need them
-                                             // for the right border config to be considered
-                    opening_location = None; // the workspace will place it instead
-                    window.request_tiled(true);
-                    self.fht
-                        .space
-                        .prepare_unconfigured_window(&window, workspace_id);
-                }
-
-                window.send_configure();
-                self.fht.unmapped_windows.push(UnmappedWindow::Configured {
-                    window,
-                    workspace_id,
-                    opening_location,
-                });
-                return Some(output);
+                self.fht.queue_initial_configure(window);
+                return None; // nothing happening yet!
             }
 
             if !has_render_buffer(surface) {
