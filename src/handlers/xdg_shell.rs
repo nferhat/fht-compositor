@@ -549,7 +549,7 @@ impl Fht {
             | DecorationMode::PreferClientSide
             | DecorationMode::PreferServerSide => None,
             DecorationMode::ForceClientSide => Some(zxdg_toplevel_decoration_v1::Mode::ClientSide),
-            DecorationMode::ForceServerSide => Some(zxdg_toplevel_decoration_v1::Mode::ClientSide),
+            DecorationMode::ForceServerSide => Some(zxdg_toplevel_decoration_v1::Mode::ServerSide),
         };
 
         let open_floating = if let Some(open_floating) = rules.floating {
