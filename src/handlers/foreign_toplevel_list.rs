@@ -16,7 +16,7 @@ impl Fht {
     /// Adversite a new [`Window`] with the ext-foreignt-toplevel-v1 protocol.
     ///
     /// This creates the toplevel handle and stores it inside the [`Window`].
-    pub fn adversite_new_foreign_window(&mut self, window: &Window) {
+    pub fn advertise_new_foreign_window(&mut self, window: &Window) {
         if window.foreign_toplevel_handle().is_some() {
             warn!(window = ?window.id(), "Tried to adversite window to ext-foreign-toplevel-v1 twice");
             return;
@@ -64,7 +64,7 @@ impl Fht {
             // it was not adversited before, this should be done on-map
             // this shoud not happen though.
             warn!(window = ?window.id(), "Tried updating foreign toplevel handle details for window without one");
-            self.adversite_new_foreign_window(window);
+            self.advertise_new_foreign_window(window);
         }
     }
 }

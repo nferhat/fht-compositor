@@ -780,7 +780,7 @@ pub struct Fht {
     pub dnd_icon: Option<WlSurface>,
     pub cursor_theme_manager: CursorThemeManager,
     pub space: Space,
-    pub unmapped_windows: Vec<UnmappedWindow>,
+    pub unmapped_windows: HashMap<WlSurface, UnmappedWindow>,
     pub popups: PopupManager,
     pub root_surfaces: HashMap<WlSurface, WlSurface>,
     pub idle_inhibiting_surfaces: Vec<WlSurface>,
@@ -1017,7 +1017,7 @@ impl Fht {
             dnd_icon: None,
             cursor_theme_manager,
             space,
-            unmapped_windows: vec![],
+            unmapped_windows: HashMap::new(),
             popups: PopupManager::default(),
             root_surfaces: HashMap::default(),
             idle_inhibiting_surfaces: Vec::new(),
@@ -2266,10 +2266,6 @@ impl UnmappedWindow {
             Self::Unconfigured(window) => window,
             Self::Configured { window, .. } => window,
         }
-    }
-
-    pub fn configured(&self) -> bool {
-        matches!(self, Self::Configured { .. })
     }
 }
 

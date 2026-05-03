@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
 use smithay::desktop::{find_popup_root_surface, PopupKind};
@@ -5,17 +7,14 @@ use smithay::output::Output;
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::Rectangle;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
     with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
-use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
 use crate::state::{Fht, State, UnmappedWindow};
-use crate::utils::RectCenterExt;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
@@ -30,122 +29,6 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
 }
 
 impl State {
-    fn process_window_commit(&mut self, surface: &WlSurface) -> Option<Output> {
-        if let Some(idx) = self.fht.unmapped_windows.iter().position(|unmapped| {
-            unmapped
-                .window()
-                .wl_surface()
-                .is_some_and(|s| &*s == surface)
-        }) {
-            if !self.fht.unmapped_windows[idx].configured() {
-                // We did not send an initial configure for this window yet.
-                // This is the time when we send an size for the window to configure itself (and)
-                //
-                // This is also a good oppotunity to apply any window rules, if the user specified
-                // one that matches this window. Figuring out the window size is up to the
-                // workspace.
-                let UnmappedWindow::Unconfigured(window) = self.fht.unmapped_windows.remove(idx)
-                else {
-                    unreachable!()
-                };
-
-                self.fht.queue_initial_configure(window);
-                return None; // nothing happening yet!
-            }
-
-            if !has_render_buffer(surface) {
-                let window = self.fht.unmapped_windows[idx].window();
-                window.on_commit();
-                window.refresh();
-                window.send_configure();
-                return None;
-            }
-
-            let UnmappedWindow::Configured {
-                window,
-                workspace_id,
-                opening_location,
-            } = self.fht.unmapped_windows.remove(idx)
-            else {
-                unreachable!("Tried to map an unconfigured window!");
-            };
-
-            // Do another check again just in-case the window decided to change
-            // its mind for absolutely no reason. (which happens)
-            let is_floating = !window.tiled();
-            let opening_location = opening_location.filter(|_| is_floating);
-
-            self.fht.adversite_new_foreign_window(&window);
-            window.on_commit();
-            window.refresh();
-
-            // NOTE: The pre-commit-hook assumes we only add it when we are about to map the window.
-            // we also remove it when unmapping.
-            super::xdg_shell::add_window_pre_commit_hook(&window);
-
-            let workspace = match self.fht.space.workspace_mut_for_id(workspace_id) {
-                Some(ws) => ws,
-                None => {
-                    warn!(?workspace_id, "Unmapped window has an invalid workspace id");
-                    self.fht.space.active_workspace_mut()
-                }
-            };
-
-            let output = workspace.output().clone();
-            workspace.insert_window(window.clone(), opening_location, true);
-            let window_geometry = Rectangle::new(
-                self.fht.space.window_location(&window).unwrap(),
-                window.size(),
-            );
-
-            let is_active = self.fht.space.active_workspace_id() == workspace_id;
-            let should_focus = self.fht.config.general.focus_new_windows && is_active;
-
-            if should_focus {
-                let center = window_geometry.center();
-                self.fht.loop_handle.insert_idle(move |state| {
-                    if state.fht.config.general.cursor_warps {
-                        state.move_pointer(center.to_f64());
-                    }
-                    state.set_keyboard_focus(Some(window));
-                });
-            }
-
-            return Some(output);
-        }
-
-        // Other check: its a mapped window.
-        if let Some((window, workspace)) = self.fht.space.find_window_and_workspace_mut(surface) {
-            window.on_commit();
-            let is_mapped = has_render_buffer(surface);
-            #[allow(unused_assignments)]
-            if !is_mapped {
-                // workspace.close_window will remove the window from the workspace tiles and
-                // create a ClosingTile to represent the last frame of the closing window.
-                self.backend.with_renderer(|renderer| {
-                    if workspace.prepare_close_animation_for_window(&window, renderer) {
-                        workspace.close_window(&window, renderer, true);
-                    }
-                });
-
-                if let Some(pre_commit_hook) = window.take_pre_commit_hook_id() {
-                    remove_pre_commit_hook(surface, pre_commit_hook);
-                }
-
-                // When a window gets unmapped, it needs to go through all the initial configure
-                // sequence again to set its render buffers and toplevel surface again.
-                let output = workspace.output().clone();
-                self.fht
-                    .unmapped_windows
-                    .push(UnmappedWindow::Unconfigured(window));
-                return Some(output);
-            }
-            return Some(workspace.output().clone());
-        }
-
-        None
-    }
-
     fn process_popup_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
         let popup = state.popups.find_popup(surface)?;
 
@@ -254,29 +137,101 @@ impl CompositorHandler for State {
             .insert(surface.clone(), root_surface.clone());
 
         if surface == &root_surface {
-            // Committing a root surface, not a subsurface/popup.
-            // Try to get the output where this surface is being drawn, otherwise quit.
-            if let Some(output) = self
-                .process_window_commit(surface)
-                .or_else(|| State::process_layer_shell_commit(surface, &mut self.fht))
+            // Maybe it's an unmapped window.
+            if let Entry::Occupied(entry) = self.fht.unmapped_windows.entry(surface.clone()) {
+                if matches!(entry.get(), UnmappedWindow::Unconfigured(_)) {
+                    let UnmappedWindow::Unconfigured(window) = entry.remove() else {
+                        unreachable!()
+                    };
+                    self.fht.queue_initial_configure(surface.clone(), window);
+                    return; // nothing happening yet!
+                } else {
+                    if !has_render_buffer(surface) {
+                        let window = entry.get().window();
+                        window.on_commit();
+                        window.refresh();
+                        window.send_configure();
+                        return;
+                    }
+
+                    let UnmappedWindow::Configured {
+                        window,
+                        workspace_id,
+                        opening_location,
+                    } = entry.remove()
+                    else {
+                        unreachable!()
+                    };
+
+                    let output = self.fht.map_window(window, workspace_id, opening_location);
+                    self.fht.queue_redraw(&output);
+                    return;
+                }
+            }
+
+            // Maybe it's a mapped window.
+            if let Some((window, workspace)) = self.fht.space.find_window_and_workspace_mut(surface)
             {
+                let is_mapped = has_render_buffer(surface);
+                let output = workspace.output().clone();
+
+                if !is_mapped {
+                    // workspace.close_window will remove the window from the workspace tiles and
+                    // create a ClosingTile to represent the last frame of the closing window.
+                    self.backend.with_renderer(|renderer| {
+                        if workspace.prepare_close_animation_for_window(&window, renderer) {
+                            workspace.close_window(&window, renderer, true);
+                        }
+                    });
+                }
+
+                window.on_commit();
+
+                if !is_mapped {
+                    if let Some(pre_commit_hook) = window.take_pre_commit_hook_id() {
+                        remove_pre_commit_hook(surface, pre_commit_hook);
+                    }
+
+                    // When a window gets unmapped, it needs to go through all the initial configure
+                    // sequence again to set its render buffers and toplevel surface again.
+                    self.fht
+                        .unmapped_windows
+                        .insert(surface.clone(), UnmappedWindow::Unconfigured(window));
+
+                    self.fht.queue_redraw(&output);
+                    return;
+                }
+
                 self.fht.queue_redraw(&output);
+                return;
             }
         }
 
-        // 1st case if this isnt a root surface; a popup.
-        // Ensure initial configure.
+        // This is the commit of a non-root wl surface.
+        // we still need to update/commit the root surfce
+        if let Some((window, ws)) = self.fht.space.find_window_and_workspace_mut(&root_surface) {
+            let output = ws.output().clone();
+            // FIXME: We should probably tell the workspace about the window update here, but we
+            // instead wait until the next refresh. (IE next State::dispatch)
+            window.on_commit();
+            self.fht.queue_redraw(&output);
+            return;
+        }
+
+        // This could be a popup
         self.fht.popups.commit(surface);
         if let Some(output) = State::process_popup_commit(surface, &mut self.fht) {
             self.fht.queue_redraw(&output);
             return;
         }
 
-        // 2nd case if this isnt a root surface; some kind of subsurface.
-        // For example firefox has its main webcontent as a subsurface.
-        if let Some(output) = self.fht.visible_output_for_surface(surface).cloned() {
+        // This could be a layer-shell.
+        if let Some(output) = State::process_layer_shell_commit(surface, &mut self.fht) {
             self.fht.queue_redraw(&output);
+            return;
         }
+
+        trace!(id = %surface.id(), "unknown surface commit");
     }
 
     fn destroyed(&mut self, surface: &WlSurface) {

@@ -13,26 +13,27 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::C
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
     self, State as ToplevelState, WmCapabilities,
 };
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Rectangle, Serial};
+use smithay::utils::{Logical, Point, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
 };
 use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
-    XdgShellState, XdgToplevelSurfaceData,
+    XdgShellState,
 };
 
 use crate::focus_target::KeyboardFocusTarget;
 use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
-use crate::space::Workspace;
+use crate::space::{Workspace, WorkspaceId};
 use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
+use crate::utils::RectCenterExt as _;
 use crate::window::Window;
 
 impl XdgShellHandler for State {
@@ -41,20 +42,20 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
+        let surface = toplevel.wl_surface().clone();
         let window = Window::new(toplevel);
-        self.fht
+        if let Some(_) = self
+            .fht
             .unmapped_windows
-            .push(UnmappedWindow::Unconfigured(window));
+            .insert(surface.clone(), UnmappedWindow::Unconfigured(window))
+        {
+            warn!(id = %surface.id(), "Surface opened toplevel twice");
+        }
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(idx) = self.fht.unmapped_windows.iter().position(|unmapped| {
-            unmapped
-                .window()
-                .wl_surface()
-                .is_some_and(|s| &*s == surface.wl_surface())
-        }) {
-            let _unmapped_tile = self.fht.unmapped_windows.remove(idx);
+        if let Some(_) = self.fht.unmapped_windows.remove(surface.wl_surface()) {
+            // Well, it was never mapped, so nothing changes I guess.
             return;
         }
 
@@ -476,13 +477,13 @@ impl Fht {
         });
     }
 
-    pub fn queue_initial_configure(&self, window: Window) {
+    pub fn queue_initial_configure(&self, surface: WlSurface, window: Window) {
         self.loop_handle.insert_idle(move |state| {
-            state.fht.send_initial_configure(window);
+            state.fht.send_initial_configure(surface, window);
         });
     }
 
-    fn send_initial_configure(&mut self, window: Window) {
+    fn send_initial_configure(&mut self, surface: WlSurface, window: Window) {
         let window_id = window.id();
         trace!(?window_id, "Preparing unconfigured window");
         window.on_commit();
@@ -606,12 +607,65 @@ impl Fht {
                 .prepare_unconfigured_window(&window, open_on_workspace);
         }
 
+        // Now force-send a configure to send the initial configure message.
         window.send_configure();
-        self.unmapped_windows.push(UnmappedWindow::Configured {
-            window,
-            workspace_id: open_on_workspace,
-            opening_location,
-        });
+        self.unmapped_windows.insert(
+            surface,
+            UnmappedWindow::Configured {
+                window,
+                workspace_id: open_on_workspace,
+                opening_location,
+            },
+        );
+    }
+
+    /// Maps the given [`Window`]. Returns the [`Output`] on which it gets mapped.
+    pub fn map_window(
+        &mut self,
+        window: Window,
+        workspace_id: WorkspaceId,
+        opening_location: Option<Point<i32, Logical>>,
+    ) -> Output {
+        // Do another check again just in-case the window decided to change
+        // its mind for absolutely no reason. (which happens)
+        let is_floating = !window.tiled();
+        let opening_location = opening_location.filter(|_| is_floating);
+
+        self.advertise_new_foreign_window(&window);
+        window.on_commit();
+        window.refresh();
+
+        // NOTE: The pre-commit-hook assumes we only add it when we are about to map the window.
+        // we also remove it when unmapping.
+        super::xdg_shell::add_window_pre_commit_hook(&window);
+
+        let workspace = match self.space.workspace_mut_for_id(workspace_id) {
+            Some(ws) => ws,
+            None => {
+                warn!(?workspace_id, "Unmapped window has an invalid workspace id");
+                self.space.active_workspace_mut()
+            }
+        };
+
+        let output = workspace.output().clone();
+        workspace.insert_window(window.clone(), opening_location, true);
+        let window_geometry =
+            Rectangle::new(self.space.window_location(&window).unwrap(), window.size());
+
+        let is_active = self.space.active_workspace_id() == workspace_id;
+        let should_focus = self.config.general.focus_new_windows && is_active;
+
+        if should_focus {
+            let center = window_geometry.center();
+            self.loop_handle.insert_idle(move |state| {
+                if state.fht.config.general.cursor_warps {
+                    state.move_pointer(center.to_f64());
+                }
+                state.set_keyboard_focus(Some(window));
+            });
+        }
+
+        output
     }
 }
 
