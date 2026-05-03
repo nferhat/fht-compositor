@@ -40,9 +40,9 @@
                 toolchain.default.override {
                   extensions = ["rust-analyzer" "rust-src" "rustc-codegen-cranelift-preview"];
                 }))
-              pkgs.tracy-wayland # profiler
+              pkgs.tracy # profiler
               pkgs.alejandra # for formatting this flake if needed
-              pkgs.nodePackages.prettier # formatting documentation
+              pkgs.prettier # formatting documentation
               pkgs.nodejs # vitepress for docs
             ];
 
