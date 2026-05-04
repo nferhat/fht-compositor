@@ -1528,6 +1528,7 @@ impl Fht {
                         surface,
                         output,
                         states,
+                        None,
                         render_element_states,
                         default_primary_scanout_output_compare,
                     );
@@ -1546,6 +1547,7 @@ impl Fht {
                         surface,
                         output,
                         states,
+                        None,
                         render_element_states,
                         default_primary_scanout_output_compare,
                     );
@@ -1564,6 +1566,7 @@ impl Fht {
                         surface,
                         output,
                         states,
+                        None,
                         render_element_states,
                         default_primary_scanout_output_compare,
                     );
@@ -1594,6 +1597,7 @@ impl Fht {
                     .update_from_render_element_states(
                         id,
                         output,
+                        None,
                         render_element_states,
                         default_primary_scanout_output_compare,
                     );
@@ -1613,6 +1617,7 @@ impl Fht {
                     surface,
                     output,
                     states,
+                    None,
                     render_element_states,
                     // Layer surfaces are shown only on one output at a time.
                     |_, _, output, _| output,
@@ -1734,7 +1739,11 @@ impl Fht {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             );
         }
@@ -1745,7 +1754,11 @@ impl Fht {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             );
         }
@@ -1756,7 +1769,11 @@ impl Fht {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             );
         }
@@ -1766,7 +1783,11 @@ impl Fht {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             )
         }
@@ -1777,7 +1798,11 @@ impl Fht {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             );
         }
@@ -1850,7 +1875,7 @@ impl Fht {
         let input_config = &self.config.input;
         let per_device_config = input_config
             .per_device
-            .get(device.name())
+            .get(&device.name().to_string())
             .or_else(|| input_config.per_device.get(device.sysname()));
 
         self.keyboard.change_repeat_info(
@@ -1927,7 +1952,10 @@ impl Fht {
                 }
 
                 if let Some(drag_lock) = mouse_config.drag_lock {
-                    let _ = device.config_tap_set_drag_lock_enabled(drag_lock);
+                    let _ = device.config_tap_set_drag_lock_enabled(match drag_lock {
+                        true => input::DragLockState::EnabledTimeout,
+                        false => input::DragLockState::Disabled,
+                    });
                 } else {
                     let default = device.config_tap_default_drag_lock_enabled();
                     let _ = device.config_tap_set_drag_lock_enabled(default);

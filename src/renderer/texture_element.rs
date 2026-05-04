@@ -6,6 +6,8 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::Texture;
+#[cfg(feature = "udev-backend")]
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
@@ -72,6 +74,7 @@ impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
             &self.0,
@@ -80,6 +83,7 @@ impl RenderElement<GlowRenderer> for FhtTextureElement<GlesTexture> {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
     }
 
@@ -100,6 +104,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         <TextureRenderElement<MultiTexture> as RenderElement<UdevRenderer<'a>>>::draw(
             &self.0,
@@ -108,6 +113,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<MultiTexture> {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
     }
 
@@ -128,6 +134,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         <TextureRenderElement<GlesTexture> as RenderElement<GlowRenderer>>::draw(
             &self.0,
@@ -136,6 +143,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureElement<GlesTexture> {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
         .map_err(UdevRenderError::Render)
     }

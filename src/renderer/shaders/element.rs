@@ -11,6 +11,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesPixelProgram, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 #[cfg(feature = "udev-backend")]
@@ -162,6 +163,7 @@ impl RenderElement<GlowRenderer> for ShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         crate::profile_function!();
         let gles_frame: &mut GlesFrame = frame.borrow_mut();
@@ -186,6 +188,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for ShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
+        _cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         crate::profile_function!();
         let glow_frame = frame.as_mut();

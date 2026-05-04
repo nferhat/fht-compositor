@@ -3,6 +3,7 @@ use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::GlesError;
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
 #[cfg(feature = "udev-backend")]
@@ -68,6 +69,7 @@ impl RenderElement<GlowRenderer> for FhtTextureShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         <TextureShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,
@@ -76,6 +78,7 @@ impl RenderElement<GlowRenderer> for FhtTextureShaderElement {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
     }
 
@@ -96,6 +99,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureShaderElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         <TextureShaderElement as RenderElement<GlowRenderer>>::draw(
             &self.0,
@@ -104,6 +108,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for FhtTextureShaderElement {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
         .map_err(UdevRenderError::Render)
     }

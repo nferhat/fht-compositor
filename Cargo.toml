@@ -22,12 +22,12 @@ serde = { version = "1.0.217", features = ["derive"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/smithay/Smithay"
-rev = "d40ada55eceac04fb1c752f0f17b0c32cf24fbb1"
+rev = "5de53056b5cafd453371af2d4e955931ce87ef71"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/Smithay"
-rev = "d40ada55eceac04fb1c752f0f17b0c32cf24fbb1"
+rev = "5de53056b5cafd453371af2d4e955931ce87ef71"
 
 [profile.opt]
 inherits = "release"

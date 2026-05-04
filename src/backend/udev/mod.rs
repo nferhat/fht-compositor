@@ -158,8 +158,9 @@ impl UdevData {
         let seat_name = session.seat();
 
         let udev_backend = UdevBackend::new(&seat_name).context("Failed to crate Udev backend!")?;
-        let udev_dispatcher =
-            Dispatcher::new(udev_backend, |event, (), state: &mut State| match event {
+        let udev_dispatcher = Dispatcher::new(
+            udev_backend,
+            |event, _devices, state: &mut State| match event {
                 UdevEvent::Added { device_id, path } => {
                     if let Err(err) =
                         state
@@ -189,7 +190,8 @@ impl UdevData {
                         error!(?err, "Failed to remove device")
                     }
                 }
-            });
+            },
+        );
         let udev_token = state
             .loop_handle
             .register_dispatcher(udev_dispatcher.clone())

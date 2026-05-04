@@ -122,19 +122,19 @@ impl CompositorHandler for State {
             data.early_import(surface);
         }
 
-        // We are already synced, why bother going additional computations
-        if is_sync_subsurface(surface) {
-            return;
-        }
-
+        // cache our root surface, see [`CompositorHandler::destroyed`]
         let mut root_surface = surface.clone();
         while let Some(new_parent) = get_parent(&root_surface) {
             root_surface = new_parent;
         }
-        // cache our root surface, see [`CompositorHandler::destroyed`]
         self.fht
             .root_surfaces
             .insert(surface.clone(), root_surface.clone());
+
+        // We are already synced, why bother going additional computations
+        if is_sync_subsurface(surface) {
+            return;
+        }
 
         if surface == &root_surface {
             // Maybe it's an unmapped window.
@@ -189,7 +189,7 @@ impl CompositorHandler for State {
 
                 if !is_mapped {
                     if let Some(pre_commit_hook) = window.take_pre_commit_hook_id() {
-                        remove_pre_commit_hook(surface, pre_commit_hook);
+                        remove_pre_commit_hook(surface, &pre_commit_hook);
                     }
 
                     // When a window gets unmapped, it needs to go through all the initial configure

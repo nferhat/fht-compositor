@@ -175,18 +175,20 @@ impl Device {
 
         for event in result {
             match event {
-                DrmScanEvent::Connected { crtc, connector } => {
-                    if let Some(crtc) = crtc {
-                        added.push((connector, crtc));
-                    }
-                    // No crtc, can't do much for you since I dont even know WHAT you connected.
+                DrmScanEvent::Connected {
+                    crtc: Some(crtc),
+                    connector,
+                } => {
+                    added.push((connector, crtc));
                 }
-                DrmScanEvent::Disconnected { crtc, connector } => {
-                    if let Some(crtc) = crtc {
-                        removed.push((connector, crtc));
-                    }
-                    // No crtc, can't do much for you since I dont even know WHAT you disconnected.
+                DrmScanEvent::Disconnected {
+                    crtc: Some(crtc),
+                    connector,
+                } => {
+                    removed.push((connector, crtc));
                 }
+                // FIXME: Handle DrmScanEvent::Changed?
+                _ => (),
             }
         }
 

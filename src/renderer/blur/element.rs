@@ -7,6 +7,7 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::backend::renderer::Renderer as _;
 use smithay::output::Output;
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::{CurrentBuffer, EffectsFramebuffers};
@@ -219,6 +220,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         match self {
             Self::Optimized {
@@ -234,6 +236,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                         dst,
                         damage,
                         opaque_regions,
+                        cache,
                     )
                 } else {
                     let program = Shaders::get_from_frame(frame.borrow_mut())
@@ -265,6 +268,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                             dst,
                             damage,
                             opaque_regions,
+                            cache,
                         );
 
                     gles_frame.clear_tex_program_override();
@@ -360,6 +364,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         <Self as RenderElement<GlowRenderer>>::draw(
             self,
@@ -368,6 +373,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for BlurElement {
             dst,
             damage,
             opaque_regions,
+            cache,
         )
         .map_err(UdevRenderError::Render)
     }

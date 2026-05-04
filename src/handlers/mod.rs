@@ -6,7 +6,6 @@ mod cursor_shape;
 mod data_control;
 mod data_device;
 mod dmabuf;
-mod dnd;
 #[cfg(feature = "udev-backend")]
 mod drm_lease;
 #[cfg(feature = "udev-backend")]

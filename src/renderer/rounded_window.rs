@@ -6,6 +6,7 @@ use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, Unde
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, Uniform};
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::shaders::Shaders;
@@ -216,9 +217,11 @@ impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
         if self.corner_radius == 0.0 {
-            self.element.draw(frame, src, dst, damage, opaque_regions)
+            self.element
+                .draw(frame, src, dst, damage, opaque_regions, cache)
         } else {
             // Override texture shader with our uniforms
             let program = Shaders::get_from_frame(frame.borrow_mut())
@@ -235,7 +238,9 @@ impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
                 ],
             );
 
-            let res = self.element.draw(frame, src, dst, damage, opaque_regions);
+            let res = self
+                .element
+                .draw(frame, src, dst, damage, opaque_regions, cache);
 
             // Never forget to reset since its not our responsibility to manage texture shaders.
             BorrowMut::<GlesFrame>::borrow_mut(frame).clear_tex_program_override();
@@ -258,9 +263,11 @@ impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
         if self.corner_radius == 0.0 {
-            self.element.draw(frame, src, dst, damage, opaque_regions)
+            self.element
+                .draw(frame, src, dst, damage, opaque_regions, cache)
         } else {
             let glow_frame = frame.as_mut();
             let program = Shaders::get_from_frame(glow_frame.borrow_mut())
@@ -277,7 +284,9 @@ impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'
                 ],
             );
 
-            let res = self.element.draw(frame, src, dst, damage, opaque_regions);
+            let res = self
+                .element
+                .draw(frame, src, dst, damage, opaque_regions, cache);
             BorrowMut::<GlesFrame>::borrow_mut(frame.as_mut()).clear_tex_program_override();
 
             res
