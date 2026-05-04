@@ -30,6 +30,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -842,6 +843,7 @@ pub struct Fht {
     pub xdg_shell_state: XdgShellState,
     pub xdg_foreign_state: XdgForeignState,
     pub ext_workspace_manager_state: ExtWorkspaceManagerState,
+    pub background_effects_state: BackgroundEffectState,
     pub hyprland_global_shortcuts_state: HyprlandGlobalShortcutsState,
 }
 
@@ -905,6 +907,7 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
+        let background_effect_state = BackgroundEffectState::new::<State>(dh);
         let hyprland_global_shortcuts_state = HyprlandGlobalShortcutsState::new(dh, |client| {
             // Only allow clients that aren't running inside a SC
             client
@@ -1054,6 +1057,7 @@ impl Fht {
             xdg_shell_state,
             xdg_foreign_state,
             ext_workspace_manager_state,
+            background_effects_state,
             hyprland_global_shortcuts_state,
         }
     }
