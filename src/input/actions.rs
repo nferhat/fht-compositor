@@ -9,7 +9,6 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Point, Rectangle, Serial};
 
 use super::swap_tile_grab::SwapTileGrab;
-use crate::focus_target::PointerFocusTarget;
 use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::output::OutputExt;
 use crate::state::State;
@@ -313,7 +312,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::FocusPreviousWindow => {
@@ -328,7 +327,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::SwapWithNextWindow => {
@@ -340,7 +339,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::SwapWithPreviousWindow => {
@@ -352,7 +351,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::FocusNextOutput => {
@@ -378,7 +377,7 @@ impl State {
                     self.move_pointer(center.to_f64());
                 }
                 if let Some(window) = self.fht.space.set_active_output(&output) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::FocusPreviousOutput => {
@@ -404,7 +403,7 @@ impl State {
                     self.move_pointer(center.to_f64());
                 }
                 if let Some(window) = self.fht.space.set_active_output(&output) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::CloseFocusedWindow => {
@@ -416,21 +415,21 @@ impl State {
                 let idx = (*idx).clamp(0, 8);
                 let mon = self.fht.space.active_monitor_mut();
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::FocusNextWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::FocusPreviousWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = mon.active_workspace_idx().saturating_sub(1);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             KeyActionType::SendFocusedWindowToWorkspace {
@@ -449,7 +448,7 @@ impl State {
                 if active.remove_window(&window, true) {
                     if let Some(window) = active.active_window() {
                         // Focus the new one now
-                        self.set_keyboard_focus(Some(window));
+                        self.set_keyboard_focus(Some(window.wl_surface().clone()));
                     }
 
                     let idx = (*idx).clamp(0, 9);
@@ -508,12 +507,12 @@ impl State {
         crate::profile_function!();
         let cursor_warps = self.fht.config.general.cursor_warps;
 
+        let pointer_loc = self.fht.pointer.current_location();
+        let focus = self.fht.get_pointer_focus(pointer_loc);
+
         match action {
             MouseAction::SwapTile => {
-                let pointer_loc = self.fht.pointer.current_location();
-                if let Some((PointerFocusTarget::Window(window), _)) =
-                    self.fht.focus_target_under(pointer_loc)
-                {
+                if let Some(window) = focus.and_then(|focus| focus.window) {
                     let pointer = self.fht.pointer.clone();
                     let start_data = pointer::GrabStartData {
                         focus: None,
@@ -535,10 +534,7 @@ impl State {
                 }
             }
             MouseAction::ResizeTile => {
-                let pointer_loc = self.fht.pointer.current_location();
-                if let Some((PointerFocusTarget::Window(window), _)) =
-                    self.fht.focus_target_under(pointer_loc)
-                {
+                if let Some(window) = focus.and_then(|focus| focus.window) {
                     let workspace = self.fht.space.workspace_for_window(&window).unwrap();
                     match (window.tiled(), workspace.current_layout()) {
                         (_, WorkspaceLayout::Floating) | (false, _) => (),
@@ -607,7 +603,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             MouseAction::FocusPreviousWindow => {
@@ -622,21 +618,21 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             MouseAction::FocusNextWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             MouseAction::FocusPreviousWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = mon.active_workspace_idx().saturating_sub(1);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
         }
@@ -649,14 +645,14 @@ impl State {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = (mon.active_workspace_idx() + 1).clamp(0, 8);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::FocusPreviousWorkspace => {
                 let mon = self.fht.space.active_monitor_mut();
                 let idx = mon.active_workspace_idx().saturating_sub(1);
                 if let Some(window) = mon.set_active_workspace_idx(idx, true) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::CloseFocusedWindow => {
@@ -696,7 +692,7 @@ impl State {
                     self.move_pointer(center.to_f64());
                 }
                 if let Some(window) = self.fht.space.set_active_output(&output) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::FocusNextWindow => {
@@ -711,7 +707,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::FocusPreviousOutput => {
@@ -738,7 +734,7 @@ impl State {
                     self.move_pointer(center.to_f64());
                 }
                 if let Some(window) = self.fht.space.set_active_output(&output) {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::FocusPreviousWindow => {
@@ -753,7 +749,7 @@ impl State {
 
                         self.move_pointer(window_geometry.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::FullscreenFocusedWindow => {
@@ -778,7 +774,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
             GestureAction::SwapWithPreviousWindow => {
@@ -790,7 +786,7 @@ impl State {
                         let tile_geo = tile.geometry();
                         self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
         }

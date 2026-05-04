@@ -75,7 +75,7 @@ impl SessionLockHandler for State {
 
         if output == *self.fht.space.active_output() {
             // Focus the newly placed lock surface.
-            self.set_keyboard_focus(Some(lock_surface));
+            self.set_keyboard_focus(Some(lock_surface.wl_surface().clone()));
         }
     }
 }

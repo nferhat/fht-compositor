@@ -18,7 +18,6 @@ use smithay::reexports::calloop::{
 use smithay::reexports::rustix;
 use smithay::reexports::rustix::fs::unlink;
 use smithay::utils::{Point, Size, SERIAL_COUNTER};
-use smithay::wayland::seat::WaylandFocus;
 use types::Response;
 
 use crate::input::pick_surface_grab::{PickSurfaceGrab, PickSurfaceTarget};
@@ -791,7 +790,7 @@ impl State {
                 }
 
                 if let Some(window) = window {
-                    self.set_keyboard_focus(Some(window));
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
                     return Ok(());
                 }
 
@@ -994,9 +993,8 @@ impl State {
                     false => window.toplevel().send_close(),
                     true => {
                         // Figure out the PID from credentials
-                        let credentials =
-                            get_credentials_for_surface(window.wl_surface().as_deref().unwrap())
-                                .context("Failed to get wl_surface credentials")?;
+                        let credentials = get_credentials_for_surface(window.wl_surface())
+                            .context("Failed to get wl_surface credentials")?;
                         rustix::process::kill_process(
                             rustix::process::Pid::from_raw(credentials.pid).unwrap(),
                             rustix::process::Signal::KILL,

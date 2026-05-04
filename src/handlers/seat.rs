@@ -2,6 +2,7 @@ use smithay::input::keyboard::LedState;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::input::DeviceCapability;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::data_device::set_data_device_focus;
@@ -9,7 +10,6 @@ use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::{delegate_seat, delegate_tablet_manager, delegate_text_input_manager};
 
-use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
 use crate::state::State;
 
 impl TabletSeatHandler for State {
@@ -23,15 +23,15 @@ impl TabletSeatHandler for State {
 }
 
 impl SeatHandler for State {
-    type KeyboardFocus = KeyboardFocusTarget;
-    type PointerFocus = PointerFocusTarget;
-    type TouchFocus = PointerFocusTarget;
+    type KeyboardFocus = WlSurface;
+    type PointerFocus = WlSurface;
+    type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
         &mut self.fht.seat_state
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocusTarget>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let dh = &self.fht.display_handle;
         let wl_surface = focused.and_then(WaylandFocus::wl_surface);
         let client = wl_surface.and_then(|s| dh.get_client(s.id()).ok());

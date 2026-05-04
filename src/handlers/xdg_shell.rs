@@ -27,7 +27,7 @@ use smithay::wayland::shell::xdg::{
     XdgShellState,
 };
 
-use crate::focus_target::KeyboardFocusTarget;
+use crate::focus::KeyboardFocus;
 use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
@@ -188,7 +188,9 @@ impl XdgShellHandler for State {
             self.fht
                 .space
                 .find_window(&root)
-                .map(KeyboardFocusTarget::Window)
+                .map(|win| KeyboardFocus::Space {
+                    surface: Some(win.wl_surface().clone()),
+                })
                 .or_else(|| {
                     self.fht
                         .space
@@ -198,10 +200,14 @@ impl XdgShellHandler for State {
                                 .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
                                 .cloned()
                         })
-                        .map(KeyboardFocusTarget::LayerSurface)
+                        .map(|layer| KeyboardFocus::LayerSurface { layer })
                 })
         }) {
-            let grab = self.fht.popups.grab_popup(root, popup_kind, &seat, serial);
+            let wl_surface = root.wl_surface().unwrap().into_owned();
+            let grab = self
+                .fht
+                .popups
+                .grab_popup(wl_surface.clone(), popup_kind, &seat, serial);
 
             if let Ok(mut grab) = grab {
                 if let Some(keyboard) = seat.get_keyboard() {
@@ -337,7 +343,7 @@ impl XdgShellHandler for State {
 pub(super) fn add_window_pre_commit_hook(window: &Window) {
     // The workspace tile api is not responsible for actually starting the close animations, we are
     // the ones that should do this.
-    let wl_surface = window.wl_surface().unwrap();
+    let wl_surface = window.wl_surface();
     let hook_id = add_pre_commit_hook::<State, _>(&wl_surface, |state, _dh, surface| {
         if let Some((window, workspace)) = state.fht.space.find_window_and_workspace_mut(surface) {
             // Before commiting, we check if the window's buffers are getting unmapped.
@@ -661,7 +667,7 @@ impl Fht {
                 if state.fht.config.general.cursor_warps {
                     state.move_pointer(center.to_f64());
                 }
-                state.set_keyboard_focus(Some(window));
+                state.set_keyboard_focus(Some(window.wl_surface().clone()));
             });
         }
 
@@ -688,7 +694,7 @@ fn should_open_window_floating(window: &Window) -> bool {
     }
 
     // Fixed-size clients should be floating too.
-    let wl_surface = window.wl_surface().unwrap();
+    let wl_surface = window.wl_surface();
     let (min_size, max_size) = with_states(&wl_surface, |data| {
         let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
         let surface_data = cached_state.current();

@@ -10,7 +10,6 @@ use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
@@ -569,40 +568,41 @@ impl Workspace {
                 // We must have a parent since this can only be set inside
                 // src/handlers/compositor.rs
                 let parent_surface = tile.window().toplevel().parent().unwrap();
-                parent_idx =
-                    if let Some(parent_idx) = self.tiles.iter().position(|tile| {
-                        tile.window().wl_surface().as_deref() == Some(&parent_surface)
-                    }) {
-                        let parent_tile = &self.tiles[parent_idx];
-                        let parent_geometry = parent_tile.geometry();
+                parent_idx = if let Some(parent_idx) = self
+                    .tiles
+                    .iter()
+                    .position(|tile| *tile.window().wl_surface() == parent_surface)
+                {
+                    let parent_tile = &self.tiles[parent_idx];
+                    let parent_geometry = parent_tile.geometry();
 
-                        let new_location = parent_geometry.center() - size.downscale(2).to_point();
-                        if output_geometry.contains_rect(Rectangle::new(new_location, size)) {
-                            tile.set_location(new_location, false);
-                        } else {
-                            // Output geometry cannot contain centered in parent geometry.
-                            // Fallback to simple centering
-                            tile.set_location(
-                                output_geometry.center()
-                                    - size.downscale(2).to_point()
-                                    - output_geometry.loc,
-                                false,
-                            );
-                        }
-
-                        Some(parent_idx)
+                    let new_location = parent_geometry.center() - size.downscale(2).to_point();
+                    if output_geometry.contains_rect(Rectangle::new(new_location, size)) {
+                        tile.set_location(new_location, false);
                     } else {
-                        // We did not find the parent in this workspace.
-                        // Fallback to simple centering.
+                        // Output geometry cannot contain centered in parent geometry.
+                        // Fallback to simple centering
                         tile.set_location(
                             output_geometry.center()
                                 - size.downscale(2).to_point()
                                 - output_geometry.loc,
                             false,
                         );
+                    }
 
-                        None
-                    };
+                    Some(parent_idx)
+                } else {
+                    // We did not find the parent in this workspace.
+                    // Fallback to simple centering.
+                    tile.set_location(
+                        output_geometry.center()
+                            - size.downscale(2).to_point()
+                            - output_geometry.loc,
+                        false,
+                    );
+
+                    None
+                };
             }
         }
 
@@ -1791,7 +1791,7 @@ impl Workspace {
         }
 
         // Clamp size to min/max
-        let (min_size, max_size) = with_states(&window.wl_surface().unwrap(), |data| {
+        let (min_size, max_size) = with_states(window.wl_surface(), |data| {
             let mut cached_state = data.cached_state.get::<SurfaceCachedState>();
             let surface_data = cached_state.current();
             (surface_data.min_size, surface_data.max_size)

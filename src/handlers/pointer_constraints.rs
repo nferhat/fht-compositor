@@ -15,12 +15,17 @@ impl Fht {
         let pointer = self.seat.get_pointer().unwrap();
         let pointer_loc = pointer.current_location();
 
-        let Some((under, surface_loc)) = self.focus_target_under(pointer_loc) else {
+        let Some(focus) = self.get_pointer_focus(pointer_loc) else {
             return;
         };
-        let Some(surface) = under.wl_surface() else {
+        let Some((surface, surface_loc)) = focus.surface else {
             return;
         };
+
+        if pointer.current_focus().as_ref() != Some(&surface) {
+            // Only focused surfaces should activate constraints.
+            return;
+        }
 
         with_pointer_constraint(&surface, &pointer, |constraint| {
             let Some(constraint) = constraint else { return };

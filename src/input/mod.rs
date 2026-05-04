@@ -19,7 +19,8 @@ use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
-use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::seat::WaylandFocus;
@@ -27,154 +28,20 @@ use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer};
 use smithay::wayland::tablet_manager::{TabletDescriptor, TabletSeatTrait};
 
 use crate::backend::Backend;
-use crate::focus_target::{KeyboardFocusTarget, PointerFocusTarget};
+use crate::focus::PointerFocus;
 use crate::output::OutputExt;
 use crate::state::State;
-use crate::utils::get_monotonic_time;
 
 impl State {
-    pub fn update_keyboard_focus(&mut self) {
-        crate::profile_function!();
-        let keyboard = self.fht.keyboard.clone();
-        let output = self.fht.space.active_output().clone();
-
-        // Before updating keyboard focus, make sure the layer-shell the user requested to focus
-        // (by clicking) can still accept keyboard focus
-        _ = self
-            .fht
-            .focused_on_demand_layer_shell
-            .take_if(|layer_shell| {
-                if !layer_shell.alive() {
-                    return false; // dead, byebye
-                }
-
-                let keyboard_interactivity = layer_shell.cached_state().keyboard_interactivity;
-                !matches!(
-                    keyboard_interactivity,
-                    KeyboardInteractivity::Exclusive | KeyboardInteractivity::OnDemand
-                )
-            });
-
-        let new_focus = if self.fht.is_locked() {
-            let output_state = self.fht.output_state.get(&output).unwrap();
-            if let Some(lock_surface) = output_state.lock_surface.clone() {
-                Some(KeyboardFocusTarget::LockSurface(lock_surface))
-            } else {
-                // Even if the compositor isn't locked we force remove the focus from everything
-                // else here, since we might in a state when the lock program didn't assign surfaces
-                // yet
-                None
-            }
-        } else {
-            let mon = self.fht.space.monitor_for_output(&output).unwrap();
-
-            // When checking for window focus, the fullscreened window always take precedence,
-            // since its the only one displayed.
-            let focused_window = || {
-                mon.active_workspace()
-                    .active_window()
-                    .map(KeyboardFocusTarget::Window)
-            };
-            let fullscreen_window_on_monitor = || {
-                mon.active_workspace()
-                    .fullscreened_window()
-                    .map(KeyboardFocusTarget::Window)
-            };
-
-            // When checking for layer shell focus, exclusive keyboard focus obviously takes the
-            // precedence, then we check on-demand.
-            //
-            // On-demand layer-shells get keyboard focus only when they get pressed down.
-            let layer_map = layer_map_for_output(&output);
-            let on_demand_layer_shell = |layer| {
-                layer_map
-                    .layers_on(layer)
-                    .find(|&layer| Some(layer) == self.fht.focused_on_demand_layer_shell.as_ref())
-                    .cloned()
-                    .map(KeyboardFocusTarget::LayerSurface)
-            };
-            let exclusive_layer_shell = |layer| {
-                layer_map
-                    .layers_on(layer)
-                    .find(|&layer| {
-                        layer.cached_state().keyboard_interactivity
-                            == KeyboardInteractivity::Exclusive
-                    })
-                    .cloned()
-                    .map(KeyboardFocusTarget::LayerSurface)
-            };
-            let layer_shell_focus =
-                |layer| exclusive_layer_shell(layer).or_else(|| on_demand_layer_shell(layer));
-
-            // Now start checking for focus, from Overlay layer shells
-            //
-            // Make sure that these are ordered the same way in Fht::output_elements to ensure
-            // consistency.
-            let mut ft = layer_shell_focus(Layer::Overlay);
-            if mon.render_above_top() {
-                ft = ft.or_else(|| fullscreen_window_on_monitor());
-                ft = ft.or_else(|| focused_window());
-                ft = ft.or_else(|| layer_shell_focus(Layer::Top));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Bottom));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Background));
-            } else {
-                ft = ft.or_else(|| layer_shell_focus(Layer::Top));
-                ft = ft.or_else(|| fullscreen_window_on_monitor());
-                ft = ft.or_else(|| focused_window());
-                ft = ft.or_else(|| layer_shell_focus(Layer::Bottom));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Background));
-            }
-
-            ft
-        };
-
-        if keyboard.current_focus() != new_focus {
-            // Inform the workspace system about the new focus, this will in turn set the Activated
-            // xdg_toplevel state on the window (after State::dispatch)
-            if let Some(KeyboardFocusTarget::Window(window)) = &new_focus {
-                if !self.fht.space.activate_window(window, true) {
-                    // Don't really know when this can hapen
-                    error!("Window from space disappeared while being focused");
-                    return;
-                }
-            }
-
-            // FIXME: We are not handling popup grabs here, might mess things here.
-            //
-            // By default anvil early returns on this function if the keyboard/pointer are grabbed,
-            // but seems like a hack more like anything else
-            self.set_keyboard_focus(new_focus);
-        }
-    }
-
-    /// Refresh the pointer focus.
-    pub fn update_pointer_focus(&mut self) {
-        crate::profile_scope!("refresh_pointer_focus");
-        // We try to update the pointer focus. If the new one is not the same as the previous one we
-        // encountered, we send a motion and frame event to the new one.
-        let pointer = self.fht.pointer.clone();
-        let pointer_loc = pointer.current_location();
-        let new_focus = self.fht.focus_target_under(pointer_loc);
-        if new_focus.as_ref().map(|(ft, _)| ft) == pointer.current_focus().as_ref() {
-            return; // No updates, keep going
+    fn handle_focus_follows_mouse(&mut self, under: Option<&PointerFocus>) {
+        if !self.fht.config.general.focus_follows_mouse {
+            return;
         }
 
-        pointer.motion(
-            self,
-            new_focus,
-            &MotionEvent {
-                location: pointer_loc,
-                serial: SERIAL_COUNTER.next_serial(),
-                time: get_monotonic_time().as_millis() as u32,
-            },
-        );
-        // After motion, try to activate new pointer constraint under surface
-        self.fht.activate_pointer_constraint();
+        if self.fht.pointer.is_grabbed() {
+            return;
+        }
 
-        pointer.frame(self);
-    }
-
-    fn handle_focus_follows_mouse(&mut self, under: Option<PointerFocusTarget>) {
         // When we are handling focus-follows-mouse, we must do a few things:
         // - If we are about to focus a LayerShell and that layer-shell has OnDemand keyboard
         //   interactivity, we do the same handling as if the user clicked that layer-shell, and
@@ -182,72 +49,31 @@ impl State {
         // - If we are about to focus a Window, we make sure that that window is actually focused in
         //   the Space, by updating Workspace::active_tile_idx for correctness.
         let Some(new_focus) = under else { return };
-        // Space updates should have been done by now.
-        let output = self.fht.space.active_output();
+        trace!(?new_focus, "Handling follows-focus-mouse for");
 
-        match new_focus {
-            PointerFocusTarget::WlSurface(wl_surface) => {
-                // There are two cases for this:
-                // - This could be a LockSurface, which we don't care about since if there's one,
-                //   its always focused by default.
-                // - This can also be a window/layer-shell subsurface/popup. We traserve up the
-                //   surface tree until we find a matching layer-shell/window. Root surfaces are
-                //   cached on each surface commit.
-                let Some(root_surface) = self.fht.root_surfaces.get(&wl_surface).cloned() else {
-                    // Root surfaces are cached on initial commit and after, if we can't get it
-                    // now, wait for the first commit then handle
-                    return;
-                };
+        if self.fht.space.active_output() != &new_focus.output {
+            self.fht.space.set_active_output(&new_focus.output);
+        }
 
-                if let Some(window) = self.fht.space.find_window(&root_surface) {
-                    _ = self.fht.space.activate_window(&window, true);
-                    self.set_keyboard_focus(Some(window));
-                    return;
-                }
+        if let Some(window) = &new_focus.window {
+            // FIXME: Here we should not raise the window but we do. This causes erratic movement
+            // of windows, which is super annoying.
+            //
+            // SEE: nferhat/fht-compositor#130
+            self.fht.space.activate_window(window, true);
+        }
 
-                // Try to handle for layer-shell
-                let mut focus_layer = None;
-                let layer_map = layer_map_for_output(output);
-                if let Some(layer) = layer_map.layers().find(|layer_surface| {
-                    *layer_surface.wl_surface() == root_surface
-                        && matches!(layer_surface.layer(), Layer::Top | Layer::Overlay)
-                }) {
-                    if layer.cached_state().keyboard_interactivity
-                        == KeyboardInteractivity::OnDemand
-                    {
-                        focus_layer = Some(layer.clone());
-                    }
-                };
-                drop(layer_map);
-
-                if let Some(layer) = focus_layer {
-                    self.set_keyboard_focus(Some(layer));
-                }
-
-                // The only remaining case is LockSurface, which is already handled
-            }
-            PointerFocusTarget::Window(window) => {
-                _ = self.fht.space.activate_window(&window, true);
-            }
-            PointerFocusTarget::LayerSurface(layer_surface) => {
-                let mut focus = false;
-                let layer_map = layer_map_for_output(output);
-                if matches!(layer_surface.layer(), Layer::Top | Layer::Overlay)
-                    && layer_surface.cached_state().keyboard_interactivity
-                        == KeyboardInteractivity::OnDemand
-                {
-                    focus = true;
-                }
-                drop(layer_map);
-
-                if focus {
-                    self.set_keyboard_focus(Some(layer_surface));
-                }
+        if let Some(layer_surface) = &new_focus.layer_surface {
+            if matches!(layer_surface.layer(), Layer::Top | Layer::Overlay) {
+                // XXX: Should layer shells be focused only when hovering them?
+                // I feel like clicking on them to make sure would be better, but I am not sure
+                // /shrug
+                self.fht.focused_on_demand_layer_shell = Some(layer_surface.clone());
             }
         }
     }
 
-    pub fn set_keyboard_focus(&mut self, ft: Option<impl Into<KeyboardFocusTarget>>) {
+    pub fn set_keyboard_focus(&mut self, ft: Option<WlSurface>) {
         let ft = ft.map(Into::into);
         self.fht
             .keyboard
@@ -255,18 +81,16 @@ impl State {
             .set_focus(self, ft, SERIAL_COUNTER.next_serial());
     }
 
-    pub fn move_pointer(&mut self, point: Point<f64, Logical>) {
+    pub fn move_pointer(&mut self, location: Point<f64, Logical>) {
         let pointer = self.fht.pointer.clone();
-        let under = self.fht.focus_target_under(point);
-        if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
-            self.handle_focus_follows_mouse(under.as_ref().map(|(p, _)| p).cloned());
-        }
+        let focus = self.fht.get_pointer_focus(location);
+        self.handle_focus_follows_mouse(focus.as_ref());
 
         pointer.motion(
             self,
-            under,
+            focus.and_then(|focus| focus.surface),
             &MotionEvent {
-                location: point,
+                location,
                 serial: SERIAL_COUNTER.next_serial(),
                 time: {
                     let duration: std::time::Duration = self.fht.clock.now().into();
@@ -274,10 +98,9 @@ impl State {
                 },
             },
         );
+
         self.fht.activate_pointer_constraint();
-
         pointer.frame(self);
-
         // FIXME: More granular, maybe check for where the point was and is now
         self.fht.queue_redraw_all();
     }
@@ -393,7 +216,7 @@ impl State {
                     cloned
                 });
                 if let Some(surface) = surface {
-                    self.set_keyboard_focus(Some(surface));
+                    self.set_keyboard_focus(Some(surface.wl_surface().clone()));
                     keyboard.input::<(), _>(self, keycode, key_state, serial, time, |_, _, _| {
                         FilterResult::Forward
                     });
@@ -405,16 +228,19 @@ impl State {
         let pointer_location = self.fht.pointer.current_location();
         let inhibited = self
             .fht
-            .focus_target_under(pointer_location)
-            .and_then(|(ft, _)| {
-                if let PointerFocusTarget::Window(w) = ft {
-                    let wl_surface = w.wl_surface()?;
-                    self.fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| {
+                // Only windows can inhibit keyboard shortcuts
+                // FIXME: Filter?
+                if let Some(window) = focus.window {
+                    let wl_surface = window.wl_surface();
+                    return self
+                        .fht
                         .seat
-                        .keyboard_shortcuts_inhibitor_for_surface(&wl_surface)
-                } else {
-                    None
+                        .keyboard_shortcuts_inhibitor_for_surface(&wl_surface);
                 }
+
+                None
             })
             .map(|inhibitor| inhibitor.is_active())
             .unwrap_or(false);
@@ -515,23 +341,23 @@ impl State {
     fn on_pointer_motion<B: InputBackend>(&mut self, event: B::PointerMotionEvent) {
         let pointer = self.fht.pointer.clone();
         let mut pointer_location = pointer.current_location();
-        let under = self.fht.focus_target_under(pointer_location);
+        let under = self
+            .fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| focus.surface);
         let serial = SERIAL_COUNTER.next_serial();
 
         let mut pointer_locked = false;
         let mut confine_region = None;
 
-        if let Some((wl_surface, &surface_loc)) = under
-            .as_ref()
-            .and_then(|(ft, l)| Some((ft.wl_surface()?, l)))
-        {
+        if let Some((wl_surface, loc)) = under.as_ref() {
             with_pointer_constraint(&wl_surface, &pointer, |constraint| {
                 match constraint {
                     Some(constraint) if constraint.is_active() => {
                         // Constraint basically useless if not within region/doesn't have a
                         // defined region
                         if !constraint.region().is_none_or(|region| {
-                            region.contains((pointer_location - surface_loc).to_i32_round())
+                            region.contains((pointer_location - *loc).to_i32_round())
                         }) {
                             return;
                         }
@@ -606,7 +432,10 @@ impl State {
         }
         pointer_location = new_pos;
 
-        let new_under = self.fht.focus_target_under(pointer_location);
+        let new_under = self
+            .fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| focus.surface);
         let maybe_new_output = self
             .fht
             .space
@@ -637,10 +466,6 @@ impl State {
             }
         }
 
-        if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
-            self.handle_focus_follows_mouse(under.as_ref().map(|(p, _)| p).cloned());
-        }
-
         pointer.motion(
             self,
             under,
@@ -666,10 +491,10 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.fht.pointer.clone();
-        let under = self.fht.focus_target_under(pointer_location);
-        if self.fht.config.general.focus_follows_mouse && !pointer.is_grabbed() {
-            self.handle_focus_follows_mouse(under.as_ref().map(|(p, _)| p).cloned());
-        }
+        let under = self
+            .fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| focus.surface);
 
         pointer.motion(
             self,
@@ -694,24 +519,20 @@ impl State {
 
         if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
             let pointer_loc = pointer.current_location();
+            let focus = self.fht.get_pointer_focus(pointer_loc);
 
-            let mut has_layer_under = false;
-            if let Some((PointerFocusTarget::LayerSurface(layer), _)) =
-                self.fht.focus_target_under(pointer_loc)
+            if let Some(layer) = focus
+                .as_ref()
+                .and_then(|focus| focus.layer_surface.as_ref())
             {
                 if matches!(layer.layer(), Layer::Top | Layer::Overlay) {
-                    has_layer_under = true;
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
                 }
             }
 
-            if !has_layer_under {
-                if let Some((window, _)) = self.fht.space.window_under(pointer_loc) {
-                    // Activate the window so that on the next State::dispatch,
-                    // update_keyboard_focus will focus the correct
-                    // window
-                    self.fht.space.activate_window(&window, true);
-                }
+            if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {
+                // FIXME: Here we should raise the window. See handle_focus_follows_mouse
+                self.fht.space.activate_window(&window, true);
             }
 
             if let Some(button) = event.button() {
@@ -856,7 +677,10 @@ impl State {
             event.position_transformed(output_geometry.size) + output_geometry.loc.to_f64();
 
         let pointer = self.fht.pointer.clone();
-        let under = self.fht.focus_target_under(pointer_location);
+        let under = self
+            .fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| focus.surface);
         let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
         let tool = tablet_seat.get_tool(&event.tool());
 
@@ -929,7 +753,10 @@ impl State {
             event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
 
         let pointer = self.fht.pointer.clone();
-        let under = self.fht.focus_target_under(pointer_location);
+        let under = self
+            .fht
+            .get_pointer_focus(pointer_location)
+            .and_then(|focus| focus.surface);
         let tablet = tablet_seat.get_tablet(&TabletDescriptor::from(&event.device()));
         let tool = tablet_seat.get_tool(&tool);
 
@@ -943,8 +770,6 @@ impl State {
             },
         );
         pointer.frame(self);
-
-        let under = under.and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc)));
 
         if let (Some(under), Some(tablet), Some(tool)) = (under, tablet, tool) {
             match event.state() {

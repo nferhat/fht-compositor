@@ -6,9 +6,9 @@ use smithay::input::pointer::{
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
 
-use crate::focus_target::PointerFocusTarget;
 use crate::output::OutputExt;
 use crate::state::State;
 use crate::window::Window;
@@ -69,7 +69,7 @@ impl PointerGrab<State> for ResizeTileGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        _focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         // Clamp the event's position so that we do not go outside the output.
@@ -102,7 +102,7 @@ impl PointerGrab<State> for ResizeTileGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         handle.relative_motion(data, focus, event)

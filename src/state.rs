@@ -15,7 +15,7 @@ use smithay::backend::renderer::element::{
 use smithay::desktop::utils::{
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, take_presentation_feedback_surface_tree,
-    under_from_surface_tree, update_surface_primary_scanout_output, OutputPresentationFeedback,
+    update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
@@ -47,13 +47,12 @@ use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
-use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::SessionLockManagerState;
-use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer, WlrLayerShellState};
+use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, WlrLayerShellState};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::dialog::XdgDialogState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -69,7 +68,6 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
-use crate::focus_target::PointerFocusTarget;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::layer::MappedLayer;
@@ -663,7 +661,7 @@ impl State {
                     let output = self
                         .fht
                         .space
-                        .output_for_surface(&window.wl_surface().unwrap())
+                        .output_for_surface(window.wl_surface())
                         .unwrap();
                     let mode = output.current_mode().unwrap();
                     let scale = output.current_scale().integer_scale() as f64;
@@ -1166,7 +1164,7 @@ impl Fht {
     pub fn focus_output(&mut self, output: &Output) {
         if let Some(window) = self.space.set_active_output(output) {
             self.loop_handle.insert_idle(move |state| {
-                state.set_keyboard_focus(Some(window));
+                state.set_keyboard_focus(Some(window.wl_surface().clone()));
             });
 
             if self.config.general.cursor_warps {
@@ -1371,7 +1369,7 @@ impl Fht {
                     }
 
                     // FIXME: Should we check for subsurfaces too?
-                    let wl_surface = window.wl_surface().unwrap();
+                    let wl_surface = window.wl_surface();
                     with_states(&wl_surface, |states| {
                         surface_primary_scanout_output(&wl_surface, states).as_ref() == Some(output)
                     })
@@ -1427,106 +1425,6 @@ impl Fht {
             let state = self.output_state.get_mut(output).unwrap();
             state.redraw_state.queue();
         }
-    }
-
-    /// Get the [`PointerFocusTarget`] under a given point and its location in global coordinate
-    /// space. We transform elements location from local to global space based on output
-    /// location and their position inside the output.
-    ///
-    /// A focus target is the surface that should get active pointer focus.
-    pub fn focus_target_under(
-        &self,
-        point: Point<f64, Logical>,
-    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
-        let output = self.space.active_output();
-        let output_loc = output.current_location();
-        let point_in_output = point - output_loc.to_f64();
-        let layer_map = layer_map_for_output(output);
-
-        // If we have a lock surface, return it immediatly
-        {
-            let output_state = self.output_state.get(output).unwrap();
-            if let Some(lock_surface) = &output_state.lock_surface {
-                // NOTE: Lock surface is always position at (0,0)
-                if let Some((surface, surface_loc)) = under_from_surface_tree(
-                    lock_surface.wl_surface(),
-                    point_in_output,
-                    Point::default(),
-                    WindowSurfaceType::ALL,
-                ) {
-                    return Some((
-                        PointerFocusTarget::WlSurface(surface),
-                        (surface_loc + output_loc).to_f64(),
-                    ));
-                }
-            }
-        }
-
-        let layer_under = |layer| {
-            layer_map
-                .layer_under(layer, point_in_output)
-                .and_then(|layer| {
-                    let layer_loc = layer_map.layer_geometry(layer).unwrap().loc;
-                    layer
-                        .surface_under(point_in_output - layer_loc.to_f64(), WindowSurfaceType::ALL)
-                        .map(|(surface, surface_loc)| {
-                            if surface == *layer.wl_surface() {
-                                // Used in handling on-demand layer-shell focus
-                                (
-                                    PointerFocusTarget::LayerSurface(layer.clone()),
-                                    (output_loc + layer_loc).to_f64(),
-                                )
-                            } else {
-                                (
-                                    PointerFocusTarget::WlSurface(surface),
-                                    (surface_loc + output_loc + layer_loc).to_f64(),
-                                )
-                            }
-                        })
-                })
-        };
-
-        let window_under = |fullscreen| {
-            let maybe_window = if fullscreen {
-                self.space.fullscreened_window_under(point)
-            } else {
-                self.space.window_under(point)
-            };
-
-            maybe_window.and_then(|(window, window_loc)| {
-                let window_wl_surface = window.wl_surface().unwrap();
-                window
-                    .surface_under(
-                        point_in_output - window_loc.to_f64(),
-                        WindowSurfaceType::ALL,
-                    )
-                    .map(|(surface, surface_loc)| {
-                        if surface == *window_wl_surface {
-                            // Use the window immediatly when we are the toplevel surface.
-                            // PointerFocusTarget::Window to proceed (namely
-                            // State::process_mouse_action).
-                            (
-                                PointerFocusTarget::Window(window.clone()),
-                                (window_loc + output_loc).to_f64(),
-                            )
-                        } else {
-                            (
-                                PointerFocusTarget::from(surface),
-                                (surface_loc + window_loc + output_loc).to_f64(),
-                            )
-                        }
-                    })
-            })
-        };
-
-        // We must keep these in accordance with rendering order, otherwise there will be
-        // inconsistencies with how rendering is done and how input is handled.
-        layer_under(Layer::Overlay)
-            .or_else(|| window_under(true))
-            .or_else(|| layer_under(Layer::Top))
-            .or_else(|| window_under(false))
-            .or_else(|| layer_under(Layer::Bottom))
-            .or_else(|| layer_under(Layer::Background))
     }
 
     /// Focus the given layer surface if its keyboard interactivity is set to

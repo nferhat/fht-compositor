@@ -26,7 +26,7 @@ mod cli;
 mod config;
 mod cursor;
 mod egui;
-mod focus_target;
+mod focus;
 mod frame_clock;
 mod handlers;
 mod input;

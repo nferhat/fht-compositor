@@ -16,7 +16,6 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
-use smithay::wayland::seat::WaylandFocus;
 
 use super::border::Border;
 use super::closing_tile::ClosingTile;
@@ -269,10 +268,7 @@ impl Tile {
 
     /// Check if this [`Tile`] contains this [`WlSurface`] in its surface tree.
     pub fn has_surface(&self, s: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        let Some(window_surface) = self.window.wl_surface() else {
-            return false;
-        };
-        let window_surface = window_surface.as_ref();
+        let window_surface = self.window.wl_surface();
 
         if surface_type.contains(WindowSurfaceType::TOPLEVEL) && window_surface == s {
             return true;
@@ -470,10 +466,7 @@ impl Tile {
 
     /// Return whether this tile has a transparent region.
     pub fn has_transparent_region(&self) -> bool {
-        let wl_surface = self
-            .window()
-            .wl_surface()
-            .expect("A mapped window should have a WlSurface");
+        let wl_surface = self.window().wl_surface();
         // We only care about main window surface blurring, subsurfaces (for example
         // popups) are not accoutned for and will not be rendered
         // with blur.

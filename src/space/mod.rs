@@ -20,7 +20,6 @@ use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle};
-use smithay::wayland::seat::WaylandFocus;
 pub use tile::{Tile, TileRenderElement};
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
@@ -408,7 +407,7 @@ impl Space {
         if let Some(window) = self
             .interactive_swap
             .as_ref()
-            .filter(|swap| swap.tile.window().wl_surface().as_deref() == Some(surface))
+            .filter(|swap| swap.tile.window().wl_surface() == surface)
             .map(|swap| swap.tile.window().clone())
         {
             return Some(window);
@@ -417,11 +416,7 @@ impl Space {
         for monitor in &self.monitors {
             for workspace in monitor.workspaces() {
                 for tile in workspace.tiles() {
-                    if tile
-                        .window()
-                        .wl_surface()
-                        .is_some_and(|s| s.as_ref() == surface)
-                    {
+                    if tile.window().wl_surface() == surface {
                         return Some(tile.window().clone());
                     }
                 }
@@ -438,11 +433,7 @@ impl Space {
             for workspace in monitor.workspaces() {
                 let mut w = None;
                 for tile in workspace.tiles() {
-                    if tile
-                        .window()
-                        .wl_surface()
-                        .is_some_and(|s| s.as_ref() == surface)
-                    {
+                    if tile.window().wl_surface() == surface {
                         w = Some(tile.window().clone());
                         break;
                     }
@@ -467,11 +458,7 @@ impl Space {
             for workspace in monitor.workspaces_mut() {
                 let mut w = None;
                 for tile in workspace.tiles() {
-                    if tile
-                        .window()
-                        .wl_surface()
-                        .is_some_and(|s| s.as_ref() == surface)
-                    {
+                    if tile.window().wl_surface() == surface {
                         w = Some(tile.window().clone());
                         break;
                     }
@@ -491,7 +478,7 @@ impl Space {
         if let Some(swap) = self
             .interactive_swap
             .as_ref()
-            .filter(|swap| swap.tile.window().wl_surface().as_deref() == Some(surface))
+            .filter(|swap| swap.tile.window().wl_surface() == surface)
         {
             // HACK: I really don't know how to handle this properly
             // For now we just use the output that has the tile center.

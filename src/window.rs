@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,7 +23,6 @@ use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
-use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 
 use crate::renderer::FhtRenderer;
@@ -38,12 +36,6 @@ pub struct Window {
 impl PartialEq for Window {
     fn eq(&self, other: &Self) -> bool {
         self.inner.id == other.inner.id
-    }
-}
-
-impl WaylandFocus for Window {
-    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
-        Some(Cow::Borrowed(self.inner.toplevel.wl_surface()))
     }
 }
 
@@ -126,6 +118,10 @@ impl Window {
         &self.inner.toplevel
     }
 
+    pub fn wl_surface(&self) -> &WlSurface {
+        self.toplevel().wl_surface()
+    }
+
     pub fn send_pending_configure(&self) -> Option<Serial> {
         self.inner.toplevel.send_pending_configure()
     }
@@ -194,44 +190,37 @@ impl Window {
 
     pub fn size(&self) -> Size<i32, Logical> {
         let bbox = self.bbox();
-        if let Some(surface) = self.wl_surface() {
-            // It's the set geometry clamped to the bounding box with the full bounding box as the
-            // fallback.
-            with_states(&surface, |states| {
-                states
-                    .cached_state
-                    .get::<SurfaceCachedState>()
-                    .current()
-                    .geometry
-                    .and_then(|geo| geo.intersection(bbox))
-                    .map(|geo| geo.size)
-            })
-            .unwrap_or(bbox.size)
-        } else {
-            bbox.size
-        }
+        let surface = self.wl_surface();
+        // It's the set geometry clamped to the bounding box with the full bounding box as the
+        // fallback.
+        with_states(&surface, |states| {
+            states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
+                .and_then(|geo| geo.intersection(bbox))
+                .map(|geo| geo.size)
+        })
+        .unwrap_or(bbox.size)
     }
 
     /// Get the window visual's geometry start, relative to its buffer.
     /// This might be used for CSD, for example
     pub fn render_offset(&self) -> Point<i32, Logical> {
         let bbox = self.bbox();
-        if let Some(surface) = self.wl_surface() {
-            // It's the set geometry clamped to the bounding box with the full bounding box as the
-            // fallback.
-            with_states(&surface, |states| {
-                states
-                    .cached_state
-                    .get::<SurfaceCachedState>()
-                    .current()
-                    .geometry
-                    .and_then(|geo| geo.intersection(bbox))
-                    .map(|geo| geo.loc)
-            })
-            .unwrap_or(bbox.loc)
-        } else {
-            bbox.loc
-        }
+        // It's the set geometry clamped to the bounding box with the full bounding box as the
+        // fallback.
+        with_states(&self.wl_surface(), |states| {
+            states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
+                .and_then(|geo| geo.intersection(bbox))
+                .map(|geo| geo.loc)
+        })
+        .unwrap_or(bbox.loc)
     }
 
     pub fn request_fullscreen(&self, fullscreen: bool) {
@@ -326,7 +315,7 @@ impl Window {
     }
 
     pub fn title(&self) -> Option<String> {
-        with_states(self.wl_surface().as_deref()?, |states| {
+        with_states(self.wl_surface(), |states| {
             let data = states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
@@ -338,7 +327,7 @@ impl Window {
     }
 
     pub fn app_id(&self) -> Option<String> {
-        with_states(self.wl_surface().as_deref()?, |states| {
+        with_states(self.wl_surface(), |states| {
             let data = states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
@@ -406,12 +395,11 @@ impl Window {
         F: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
     {
         let time = time.into();
-        if let Some(surface) = self.wl_surface() {
-            send_frames_surface_tree(&surface, output, time, throttle, primary_scan_out_output);
-            for (popup, _) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                send_frames_surface_tree(surface, output, time, throttle, primary_scan_out_output);
-            }
+        let surface = self.wl_surface();
+        send_frames_surface_tree(&surface, output, time, throttle, primary_scan_out_output);
+        for (popup, _) in PopupManager::popups_for_surface(&surface) {
+            let surface = popup.wl_surface();
+            send_frames_surface_tree(surface, output, time, throttle, primary_scan_out_output);
         }
     }
 
@@ -425,24 +413,23 @@ impl Window {
         P: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
         F: Fn(&WlSurface, &SurfaceData) -> &'a smithay::wayland::dmabuf::DmabufFeedback + Copy,
     {
-        if let Some(surface) = self.wl_surface() {
-            use smithay::desktop::utils::send_dmabuf_feedback_surface_tree;
+        use smithay::desktop::utils::send_dmabuf_feedback_surface_tree;
 
+        let surface = self.wl_surface();
+        send_dmabuf_feedback_surface_tree(
+            &surface,
+            output,
+            primary_scan_out_output,
+            select_dmabuf_feedback,
+        );
+        for (popup, _) in PopupManager::popups_for_surface(&surface) {
+            let surface = popup.wl_surface();
             send_dmabuf_feedback_surface_tree(
-                &surface,
+                surface,
                 output,
                 primary_scan_out_output,
                 select_dmabuf_feedback,
             );
-            for (popup, _) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                send_dmabuf_feedback_surface_tree(
-                    surface,
-                    output,
-                    primary_scan_out_output,
-                    select_dmabuf_feedback,
-                );
-            }
         }
     }
 
@@ -455,22 +442,21 @@ impl Window {
         F1: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
         F2: FnMut(&WlSurface, &SurfaceData) -> wp_presentation_feedback::Kind + Copy,
     {
-        if let Some(surface) = self.wl_surface() {
+        let surface = self.wl_surface();
+        take_presentation_feedback_surface_tree(
+            &surface,
+            output_feedback,
+            primary_scan_out_output,
+            presentation_feedback_flags,
+        );
+        for (popup, _) in PopupManager::popups_for_surface(&surface) {
+            let surface = popup.wl_surface();
             take_presentation_feedback_surface_tree(
-                &surface,
+                surface,
                 output_feedback,
                 primary_scan_out_output,
                 presentation_feedback_flags,
             );
-            for (popup, _) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                take_presentation_feedback_surface_tree(
-                    surface,
-                    output_feedback,
-                    primary_scan_out_output,
-                    presentation_feedback_flags,
-                );
-            }
         }
     }
 
@@ -478,32 +464,29 @@ impl Window {
     where
         F: FnMut(&WlSurface, &SurfaceData),
     {
-        if let Some(surface) = self.wl_surface() {
-            with_surfaces_surface_tree(&surface, &mut processor);
-            for (popup, _) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                with_surfaces_surface_tree(surface, &mut processor);
-            }
+        let surface = self.wl_surface();
+        with_surfaces_surface_tree(&surface, &mut processor);
+        for (popup, _) in PopupManager::popups_for_surface(&surface) {
+            let surface = popup.wl_surface();
+            with_surfaces_surface_tree(surface, &mut processor);
         }
     }
 
     pub fn on_commit(&self) {
-        if let Some(surface) = self.wl_surface() {
-            self.inner.data.lock().unwrap().bbox = bbox_from_surface_tree(&surface, (0, 0));
-        }
+        let surface = self.wl_surface();
+        self.inner.data.lock().unwrap().bbox = bbox_from_surface_tree(surface, (0, 0));
     }
 
     pub fn refresh(&self) {
         let guard = self.inner.data.lock().unwrap();
-        if let Some(surface) = self.wl_surface() {
-            for (weak, overlap) in guard.entered_outputs.iter() {
-                if let Some(output) = weak.upgrade() {
-                    output_update(&output, Some(*overlap), &surface);
-                    for (popup, location) in PopupManager::popups_for_surface(&surface) {
-                        let mut overlap = *overlap;
-                        overlap.loc -= location;
-                        output_update(&output, Some(overlap), popup.wl_surface());
-                    }
+        let surface = self.wl_surface();
+        for (weak, overlap) in guard.entered_outputs.iter() {
+            if let Some(output) = weak.upgrade() {
+                output_update(&output, Some(*overlap), &surface);
+                for (popup, location) in PopupManager::popups_for_surface(&surface) {
+                    let mut overlap = *overlap;
+                    overlap.loc -= location;
+                    output_update(&output, Some(overlap), popup.wl_surface());
                 }
             }
         }
@@ -515,21 +498,20 @@ impl Window {
         surface_type: WindowSurfaceType,
     ) -> Option<(WlSurface, Point<i32, Logical>)> {
         let point = point.into();
-        if let Some(surface) = self.wl_surface() {
-            if surface_type.contains(WindowSurfaceType::POPUP) {
-                for (popup, location) in PopupManager::popups_for_surface(&surface) {
-                    let offset = self.render_offset() + location - popup.geometry().loc;
-                    if let Some(result) =
-                        under_from_surface_tree(popup.wl_surface(), point, offset, surface_type)
-                    {
-                        return Some(result);
-                    }
+        let surface = self.wl_surface();
+        if surface_type.contains(WindowSurfaceType::POPUP) {
+            for (popup, location) in PopupManager::popups_for_surface(&surface) {
+                let offset = self.render_offset() + location - popup.geometry().loc;
+                if let Some(result) =
+                    under_from_surface_tree(popup.wl_surface(), point, offset, surface_type)
+                {
+                    return Some(result);
                 }
             }
+        }
 
-            if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                return under_from_surface_tree(&surface, point, (0, 0), surface_type);
-            }
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+            return under_from_surface_tree(&surface, point, (0, 0), surface_type);
         }
 
         None
@@ -543,9 +525,7 @@ impl Window {
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>> {
         let scale = scale.into();
-        let Some(surface) = self.wl_surface() else {
-            return vec![];
-        };
+        let surface = self.wl_surface();
 
         location -= self.render_offset().to_physical_precise_round(scale);
         render_elements_from_surface_tree(
@@ -565,10 +545,9 @@ impl Window {
         scale: impl Into<Scale<f64>>,
         alpha: f32,
     ) -> Vec<WaylandSurfaceRenderElement<R>> {
-        let Some(surface) = self.wl_surface() else {
-            return vec![];
-        };
+        let surface = self.wl_surface();
         let scale = scale.into();
+
         PopupManager::popups_for_surface(&surface)
             .flat_map(|(popup, popup_offset)| {
                 let offset = (popup_offset - popup.geometry().loc).to_physical_precise_round(scale);
@@ -594,7 +573,6 @@ mod weak {
     use smithay::desktop::utils::bbox_from_surface_tree;
     use smithay::desktop::PopupManager;
     use smithay::utils::Rectangle;
-    use smithay::wayland::seat::WaylandFocus as _;
 
     #[derive(Clone, Debug)]
     pub struct WeakWindow {
@@ -625,12 +603,11 @@ mod weak {
 
         pub fn bbox_with_popups(&self) -> Rectangle<i32, smithay::utils::Logical> {
             let mut bounding_box = self.bbox();
-            if let Some(surface) = self.wl_surface() {
-                for (popup, location) in PopupManager::popups_for_surface(&surface) {
-                    let surface = popup.wl_surface();
-                    let offset = self.render_offset() + location - popup.geometry().loc;
-                    bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
-                }
+            let surface = self.wl_surface();
+            for (popup, location) in PopupManager::popups_for_surface(&surface) {
+                let surface = popup.wl_surface();
+                let offset = self.render_offset() + location - popup.geometry().loc;
+                bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
             }
 
             bounding_box
