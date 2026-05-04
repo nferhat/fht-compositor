@@ -1938,9 +1938,9 @@ impl Workspace {
         &self,
         renderer: &mut R,
         scale: i32,
-    ) -> Vec<WorkspaceRenderElement<R>> {
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) {
         crate::profile_function!();
-        let mut elements = vec![];
         // when fullscreening a window, we apply a decreasing alpha to other tiles in order to make
         // the transition seamless when entering/closing fullscreen
         let (skip_alpha_animation_idx, alpha) = self
@@ -1953,17 +1953,18 @@ impl Workspace {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
 
-            let fullscreen_elements = tile.render(renderer, scale, 1.0).map(Into::into);
+            // let fullscreen_elements = tile.render(renderer, scale, 1.0).map(Into::into);
 
             if skip_alpha_animation_idx.is_none() {
-                return fullscreen_elements.collect();
+                // FIXME: Render this
+                // return fullscreen_elements.collect();
             }
         }
 
         // Render closing tiles above the rest
         for closing_tile in self.closing_tiles.iter() {
             let element = closing_tile.render(scale, alpha).into();
-            elements.push(element);
+            push(WorkspaceRenderElement::ClosingTile(element))
         }
 
         let (ontop_tiles, normal_tiles) = self
@@ -1974,32 +1975,31 @@ impl Workspace {
             .filter(|(idx, _)| Some(*idx) != self.active_tile_idx)
             .partition::<Vec<_>, _>(|(_, tile)| tile.window().rules().ontop.unwrap_or(false));
 
-        let mut render_tile = |idx, tile: &Tile| {
+        let mut render_tile = |idx, tile: &Tile, push: &mut dyn FnMut(TileRenderElement<R>)| {
             let alpha = if Some(idx) == skip_alpha_animation_idx {
                 1.0
             } else {
                 alpha
             };
 
-            elements.extend(tile.render(renderer, scale, alpha).map(Into::into));
+            tile.render(renderer, scale, alpha, push);
         };
 
         // First render ontop tiles.
         for (idx, tile) in ontop_tiles.into_iter() {
-            render_tile(idx, tile)
+            render_tile(idx, tile, &mut |e| push(e.into()))
         }
 
         // Then the active one
         if let Some(active_tile) = self.active_tile() {
-            render_tile(self.active_tile_idx.unwrap(), active_tile)
+            let idx = self.active_tile_idx.unwrap();
+            render_tile(idx, active_tile, &mut |e| push(e.into()))
         }
 
         // Now render others, just fine.
         for (idx, tile) in normal_tiles.into_iter() {
-            render_tile(idx, tile)
+            render_tile(idx, tile, &mut |e| push(e.into()))
         }
-
-        elements
     }
 }
 

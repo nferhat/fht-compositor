@@ -1,7 +1,5 @@
 use fht_compositor_config::{BlurOverrides, ShadowOverrides};
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
@@ -9,6 +7,7 @@ use smithay::utils::{Logical, Rectangle};
 
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
+use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::space::shadow::{self, Shadow};
 use crate::state::Fht;
@@ -70,72 +69,70 @@ impl MappedLayer {
         layer_geo: Rectangle<i32, Logical>,
         scale: i32,
         _config: &fht_compositor_config::Config,
-    ) -> impl Iterator<Item = LayerShellRenderElement<R>> {
+        push: &mut dyn FnMut(LayerShellRenderElement<R>),
+    ) {
         let wl_surface = self.layer.wl_surface();
         let render_geo = layer_geo.to_physical(scale);
         let alpha = self.rules.opacity.unwrap_or(1.0);
 
         // First render popups above everything else.
-        let popups: Vec<_> = PopupManager::popups_for_surface(wl_surface)
-            .flat_map(|(popup, popup_offset)| {
-                let offset = (popup_offset - popup.geometry().loc).to_physical(scale);
-                render_elements_from_surface_tree::<_, LayerShellRenderElement<_>>(
-                    renderer,
-                    popup.wl_surface(),
-                    render_geo.loc + offset,
-                    scale as f64,
-                    alpha,
-                    Kind::Unspecified,
-                )
-            })
-            .collect();
+        for (popup, popup_offset) in PopupManager::popups_for_surface(wl_surface) {
+            let offset = (popup_offset - popup.geometry().loc).to_physical(scale);
+            push_elements_from_surface_tree::<_>(
+                renderer,
+                popup.wl_surface(),
+                render_geo.loc + offset,
+                scale as f64,
+                alpha,
+                Kind::Unspecified,
+                &mut |e| push(e.into()),
+            )
+        }
 
         // Then render the actual surfaces
-        let (mut normal, mut rounded) = (vec![], vec![]);
         let corner_radius = self.rules.corner_radius.unwrap_or(0.0);
         if corner_radius > 0.0 {
-            rounded = render_elements_from_surface_tree(
+            push_elements_from_surface_tree(
                 renderer,
                 wl_surface,
                 render_geo.loc,
                 scale as f64,
                 alpha,
                 Kind::Unspecified,
-            )
-            .into_iter()
-            .map(|surface| {
-                if RoundedWindowElement::will_clip(&surface, scale as f64, layer_geo, corner_radius)
-                {
-                    RoundedWindowElement::new(surface, corner_radius, layer_geo, scale as f64)
-                        .into()
-                } else {
-                    LayerShellRenderElement::Surface(surface)
-                }
-            })
-            .collect();
+                &mut |surface| {
+                    if RoundedWindowElement::will_clip(
+                        &surface,
+                        scale as f64,
+                        layer_geo,
+                        corner_radius,
+                    ) {
+                        let rounded = RoundedWindowElement::new(
+                            surface,
+                            corner_radius,
+                            layer_geo,
+                            scale as f64,
+                        );
+                        push(LayerShellRenderElement::RoundedSurface(rounded))
+                    } else {
+                        push(LayerShellRenderElement::Surface(surface))
+                    }
+                },
+            );
         } else {
-            normal = render_elements_from_surface_tree(
+            push_elements_from_surface_tree(
                 renderer,
                 wl_surface,
                 render_geo.loc,
                 scale as f64,
                 alpha,
                 Kind::Unspecified,
+                &mut |e| push(e.into()),
             );
         }
 
-        let rv = None.into_iter().chain(popups).chain(normal).chain(rounded);
-
-        // Now render decorations.
-        let shadow = self
-            .shadow
-            .render(
-                renderer, alpha, true, // doesn't matter with layer-shells?
-            )
-            .into_iter()
-            .map(Into::into);
-
-        rv.chain(shadow)
+        if let Some(shadow) = self.shadow.render(renderer, alpha, true) {
+            push(LayerShellRenderElement::Shadow(shadow))
+        }
     }
 }
 

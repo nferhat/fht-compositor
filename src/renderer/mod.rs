@@ -10,10 +10,9 @@ pub mod extra_damage;
 pub mod render_elements;
 pub mod rounded_window;
 pub mod shaders;
+pub mod surface;
 pub mod texture_element;
 pub mod texture_shader_element;
-
-use std::borrow::BorrowMut;
 
 use anyhow::Context;
 use glam::Mat3;
@@ -22,7 +21,7 @@ use smithay::backend::allocator::{Buffer as _, Fourcc};
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
-use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
+use smithay::backend::renderer::element::{Kind, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesTexture, Uniform, UniformValue,
 };
@@ -33,14 +32,12 @@ use smithay::backend::renderer::{
     RendererSuper, Texture, TextureFilter, TextureMapping,
 };
 use smithay::desktop::layer_map_for_output;
-use smithay::desktop::space::SurfaceTree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::{Output, OutputModeSource};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::{IsAlive, Physical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use crate::config::ui::ConfigUiRenderElement;
@@ -48,7 +45,8 @@ use crate::cursor::CursorRenderElement;
 use crate::handlers::session_lock::SessionLockRenderElement;
 use crate::layer::LayerShellRenderElement;
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
-use crate::space::{MonitorRenderElement, MonitorRenderResult, TileRenderElement};
+use crate::renderer::surface::push_elements_from_surface_tree;
+use crate::space::{MonitorRenderElement, TileRenderElement};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
 
@@ -113,6 +111,9 @@ impl Fht {
         let scale = output.current_scale().integer_scale();
 
         let mut rv = OutputElementsResult::default();
+        // Push-based rendering. Instead of working with iterators, we pass a push function to
+        // render functions, which allow them to conditionally push (or skip) different elements.
+        let mut push = |elem| rv.elements.push(elem);
 
         // Start with the cursor
         //
@@ -132,28 +133,28 @@ impl Fht {
             let cursor_element_pos = (self.pointer.current_location()
                 - output.current_location().to_f64())
             .to_physical_precise_round(scale);
-            if let Ok(elements) = self.cursor_theme_manager.render(
+            if let Err(err) = self.cursor_theme_manager.render(
                 renderer,
                 cursor_element_pos,
                 scale,
                 1.0,
                 self.clock.now().into(),
+                &mut |e| push(FhtRenderElement::Cursor(e)),
             ) {
-                rv.cursor_elements_len += elements.len();
-                rv.elements.extend(elements.into_iter().map(Into::into));
+                warn!(?err, "Failed to render the cursor");
             }
 
             // Draw drag and drop icon.
             if let Some(surface) = self.dnd_icon.as_ref().filter(IsAlive::alive) {
-                let elements = AsRenderElements::<R>::render_elements::<CursorRenderElement<R>>(
-                    &SurfaceTree::from_surface(surface),
+                push_elements_from_surface_tree(
                     renderer,
+                    surface,
                     cursor_element_pos,
-                    Scale::from(scale as f64),
+                    scale as f64,
                     1.0,
+                    Kind::Cursor,
+                    &mut |e| push(FhtRenderElement::Cursor(CursorRenderElement::Surface(e))),
                 );
-                rv.cursor_elements_len += elements.len();
-                rv.elements.extend(elements.into_iter().map(Into::into));
             }
         }
 
@@ -163,9 +164,9 @@ impl Fht {
                 .config_ui_output
                 .get_or_insert_with(|| self.space.active_output().clone());
             if config_ui_output == output {
-                if let Some(element) = self.config_ui.render(renderer, output, scale) {
-                    rv.elements.push(element.into())
-                }
+                self.config_ui.render(renderer, output, scale, &mut |e| {
+                    push(FhtRenderElement::ConfigUi(e))
+                });
             }
         } else {
             let _ = self.config_ui_output.take();
@@ -173,62 +174,48 @@ impl Fht {
 
         // Render session lock surface between output and elements
         if self.is_locked() {
-            let elements = self.session_lock_elements(renderer, output);
-            rv.elements.extend(elements.into_iter().map(Into::into));
+            self.render_session_lock(renderer, output, &mut |e| {
+                push(FhtRenderElement::SessionLock(e))
+            });
         }
 
-        // Collect the render elements for the rendered monitor
-        let monitor = self.space.monitor_mut_for_output(output).unwrap();
-        let MonitorRenderResult {
-            elements: monitor_elements,
-            elements_above_top: monitor_elements_above_top,
-        } = monitor.render(renderer, scale);
-        // And interactive swap elements
-        let interactive_move_elements = self.space.render_interactive_swap(renderer, output, scale);
-
         let layer_map = layer_map_for_output(output);
-        let mut extend_from_layer = |elements: &mut Vec<FhtRenderElement<R>>, layer| {
+        let mut push_from_layer = |layer, push: &mut dyn FnMut(LayerShellRenderElement<R>)| {
             for mapped in layer_map
                 .layers_on(layer)
                 .filter_map(|layer| self.mapped_layer_surfaces.get(layer))
                 .rev()
             {
                 let layer_geo = layer_map.layer_geometry(&mapped.layer).unwrap();
-                elements.extend(
-                    mapped
-                        .render(renderer, layer_geo, scale, &self.config)
-                        .map(Into::into)
-                        .collect::<Vec<_>>(),
-                );
+                mapped.render(renderer, layer_geo, scale, &self.config, push);
             }
         };
 
-        // Overlay layer shells are drawn above everything else, including fullscreen windows
-        extend_from_layer(&mut rv.elements, Layer::Overlay);
-        // Then we collect the top layer shells, which might be rendered above or below the
-        // monitor contents depending on the currently displayed workspace.
-        let mut top = vec![];
-        extend_from_layer(&mut top, Layer::Top);
-        // Then the background layer shells that are always behind
-        let mut background = vec![];
-        extend_from_layer(&mut background, Layer::Bottom);
-        extend_from_layer(&mut background, Layer::Background);
+        // // Overlay layer shells are drawn above everything else, including fullscreen windows
+        // push_from_layer(Layer::Overlay, &mut |e| push(e.into()));
 
         // The tile we grab is always rendered above everything else.
-        rv.elements
-            .extend(interactive_move_elements.into_iter().map(Into::into));
+        self.space
+            .render_interactive_swap(renderer, output, scale, &mut |e| {
+                push(FhtRenderElement::InteractiveSwapTile(e))
+            });
+
+        let monitor = self.space.monitor_mut_for_output(output).unwrap();
         // First elements that should be rendered above the top layer shell. We do this since there
         // is a potential case where we switch between two workspaces where one has fullscreened
         // tile and the other dont.
-        rv.elements
-            .extend(monitor_elements_above_top.into_iter().map(Into::into));
+        monitor.render(renderer, scale, true, &mut |e| {
+            push(FhtRenderElement::Monitor(e))
+        });
         // Then the top layer shells
-        rv.elements.extend(top);
+        // push_from_layer(Layer::Overlay, &mut |e| push(e.into()));
         // The content that should be below the top layer shells
-        rv.elements
-            .extend(monitor_elements.into_iter().map(Into::into));
+        monitor.render(renderer, scale, false, &mut |e| {
+            push(FhtRenderElement::Monitor(e))
+        });
         // And finally the rest of the layer shells
-        rv.elements.extend(background);
+        // push_from_layer(Layer::Bottom, &mut |e| push(e.into()));
+        // push_from_layer(Layer::Background, &mut |e| push(e.into()));
 
         // We don't need it anymore, and avoid deadlock down below.
         drop(layer_map);
@@ -376,13 +363,13 @@ impl Fht {
                 }
             }
 
-            let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
-            let mut elements = window.render_toplevel_elements(renderer, loc, scale, 1.);
-            elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
-
-            if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
-                error!(id = ?cast.id(), ?err, "Failed to render cast");
-            }
+            // let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
+            // let mut elements = window.render_toplevel_elements(renderer, loc, scale, 1.);
+            // elements.extend(window.render_popup_elements(renderer, loc, scale, 1.));
+            //
+            // if let Err(err) = cast.render(renderer, &elements, bbox.size, scale) {
+            //     error!(id = ?cast.id(), ?err, "Failed to render cast");
+            // }
         }
         pipewire.casts = casts;
 
@@ -479,10 +466,10 @@ impl Fht {
             // NOTE: The workspace already renders to the origin (0, 0), so no need to relocate
             // anything.
 
-            let elements = mon.workspace_mut_by_index(index).render(renderer, scale);
-            if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
-                error!(id = ?cast.id(), ?err, "Failed to render cast");
-            }
+            // let elements = mon.workspace_mut_by_index(index).render(renderer, scale);
+            // if let Err(err) = cast.render(renderer, &elements, size, scale as f64) {
+            //     error!(id = ?cast.id(), ?err, "Failed to render cast");
+            // }
         }
         pipewire.casts = casts;
 

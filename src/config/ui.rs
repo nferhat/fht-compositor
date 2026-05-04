@@ -195,15 +195,16 @@ impl ConfigUi {
         renderer: &mut impl FhtRenderer,
         output: &smithay::output::Output,
         scale: i32,
-    ) -> Option<ConfigUiRenderElement> {
+        push: &mut dyn FnMut(ConfigUiRenderElement),
+    ) {
         crate::profile_function!();
         if matches!(self.state, State::Hidden) {
-            return None;
+            return;
         }
 
         // We first render the egui inside the desized texture, then, use the ctx information
         // in order to properly center the egui content on the output.
-        let egui_element = self
+        let Ok(egui_element) = self
             .egui
             .render(
                 renderer.glow_renderer_mut(),
@@ -213,7 +214,9 @@ impl ConfigUi {
                 |ctx| ui(ctx, &self.state),
             )
             .inspect_err(|err| warn!(?err, "Failed to render egui for config ui"))
-            .ok()?;
+        else {
+            return;
+        };
 
         let used_size = self.egui.ctx().used_size();
         let output_size = output.geometry().size;
@@ -235,7 +238,7 @@ impl ConfigUi {
             smithay::backend::renderer::element::utils::Relocate::Absolute,
         );
 
-        Some(element.into())
+        push(ConfigUiRenderElement::Egui(element));
     }
 }
 

@@ -4,10 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use owning_ref::MutexGuardRef;
-use smithay::backend::renderer::element;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::{self, Kind};
 // use smithay::desktop::Window;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_frames_surface_tree,
@@ -25,6 +23,7 @@ use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 
+use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::state::ResolvedWindowRules;
 
@@ -523,19 +522,21 @@ impl Window {
         mut location: Point<i32, Physical>,
         scale: impl Into<Scale<f64>>,
         alpha: f32,
-    ) -> Vec<WaylandSurfaceRenderElement<R>> {
+        push: &mut dyn FnMut(WaylandSurfaceRenderElement<R>),
+    ) {
         let scale = scale.into();
         let surface = self.wl_surface();
 
         location -= self.render_offset().to_physical_precise_round(scale);
-        render_elements_from_surface_tree(
+        push_elements_from_surface_tree(
             renderer,
             &surface,
             location,
             scale,
             alpha,
             element::Kind::ScanoutCandidate,
-        )
+            push,
+        );
     }
 
     pub fn render_popup_elements<R: FhtRenderer>(
@@ -544,24 +545,25 @@ impl Window {
         location: Point<i32, Physical>,
         scale: impl Into<Scale<f64>>,
         alpha: f32,
-    ) -> Vec<WaylandSurfaceRenderElement<R>> {
+        push: &mut dyn FnMut(WaylandSurfaceRenderElement<R>),
+    ) {
         let surface = self.wl_surface();
         let scale = scale.into();
 
-        PopupManager::popups_for_surface(&surface)
-            .flat_map(|(popup, popup_offset)| {
-                let offset = (popup_offset - popup.geometry().loc).to_physical_precise_round(scale);
-
-                render_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    location + offset,
-                    scale,
-                    alpha,
-                    element::Kind::ScanoutCandidate,
-                )
-            })
-            .collect()
+        for (popup, popup_offset) in PopupManager::popups_for_surface(&*surface) {
+            let offset = (popup_offset - popup.geometry().loc)
+                .to_f64()
+                .to_physical_precise_round(scale);
+            push_elements_from_surface_tree::<_>(
+                renderer,
+                popup.wl_surface(),
+                location + offset,
+                scale,
+                alpha,
+                Kind::Unspecified,
+                push,
+            )
+        }
     }
 }
 
