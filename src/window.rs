@@ -89,6 +89,8 @@ pub struct WindowData {
     rules: ResolvedWindowRules,
     need_to_resolve_rules: bool,
     foreign_toplevel_handle: Option<ForeignToplevelHandle>,
+    // Whether this window is being screencasted.
+    screencasted: bool,
 }
 
 impl Window {
@@ -105,6 +107,7 @@ impl Window {
                     rules: ResolvedWindowRules::default(),
                     need_to_resolve_rules: false,
                     foreign_toplevel_handle: None,
+                    screencasted: false,
                 }),
             }),
         }
@@ -382,6 +385,17 @@ impl Window {
         let mut guard = self.inner.data.lock().unwrap();
         let _ = guard.entered_outputs.remove(&output.downgrade());
         guard.entered_outputs.retain(|k, _| k.is_alive());
+    }
+
+    pub fn set_is_screencasted(&self, screencasted: bool) {
+        let mut guard = self.inner.data.lock().unwrap();
+        guard.need_to_resolve_rules = true;
+        guard.screencasted = screencasted;
+    }
+
+    pub fn is_screencasted(&self) -> bool {
+        let guard = self.inner.data.lock().unwrap();
+        guard.screencasted
     }
 
     pub fn send_frame<T, F>(

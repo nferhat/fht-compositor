@@ -2372,6 +2372,12 @@ fn rule_matches(
             }
         }
 
+        if let Some(rule_is_screencasted) = rule.is_screencasted {
+            if rule_is_screencasted != window.is_screencasted() {
+                return false;
+            }
+        }
+
         true
     } else {
         if let Some(window_title) = window.title() {
@@ -2414,6 +2420,12 @@ fn rule_matches(
 
         if let Some(rule_is_floating) = rule.is_floating {
             if rule_is_floating == is_floating {
+                return true;
+            }
+        }
+
+        if let Some(rule_is_screencasted) = rule.is_screencasted {
+            if rule_is_screencasted == window.is_screencasted() {
                 return true;
             }
         }

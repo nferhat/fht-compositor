@@ -383,6 +383,9 @@ impl Fht {
                 continue;
             };
 
+            // Make sure it's marked as being screencasted.
+            window.set_is_screencasted(true);
+
             if !windows.iter().any(|w| **w == window) {
                 continue;
             }

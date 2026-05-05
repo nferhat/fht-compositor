@@ -1184,6 +1184,7 @@ pub struct WindowRule {
     pub on_workspace: Option<usize>,
     pub is_focused: Option<bool>,
     pub is_floating: Option<bool>,
+    pub is_screencasted: Option<bool>,
     // Rules to apply
     pub open_on_output: Option<String>,
     pub open_on_workspace: Option<usize>,
