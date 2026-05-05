@@ -2059,6 +2059,12 @@ impl Fht {
         self.loop_handle.remove(cast.to_compositor_token); // remove calloop stream
         let _ = cast.stream.disconnect(); // even if this fails we dont use the stream anymore
 
+        if let CastSource::Window(weak) = cast.source() {
+            if let Some(window) = weak.upgrade() {
+                window.set_is_screencasted(false);
+            }
+        }
+
         let object_server = dbus_conn.object_server();
         let Ok(interface) = object_server.interface::<_, ScreencastSession>(&cast.session_handle)
         else {
