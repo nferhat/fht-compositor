@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use fht_animation::Animation;
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind};
@@ -29,7 +28,7 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
 use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
-use crate::window::Window;
+use crate::window::{Window, WindowRenderElement};
 
 /// A single workspace tile.
 ///
@@ -89,13 +88,18 @@ pub struct Tile {
 
 crate::fht_render_elements! {
     TileRenderElement<R> => {
-        Surface = WaylandSurfaceRenderElement<R>,
-        RoundedSurface = RoundedWindowElement<R>,
-        RoundedSurfaceDamage = ExtraDamage,
+        Window = WindowRenderElement<R>,
+        RoundedWindow = RoundedWindowElement<R>,
+        ExtraDamage = ExtraDamage,
+        // To render resizing/opening/whatever animations, we first render into an intermediary buffer,
+        // and then stretch/resize/crop this buffer to our liking. This makes it much easier to reason
+        // about window rendering logic.
         ResizingSurface = FhtTextureShaderElement,
-        Decoration = ShaderElement,
-        DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
+        // All decorations are just shaders.
+        Decoration = ShaderElement,
+        // FIXME: Add debug overlay back.
+        DebugOverlay = EguiRenderElement,
     }
 }
 
@@ -575,7 +579,7 @@ impl Tile {
 
         if border_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
-            push(TileRenderElement::RoundedSurfaceDamage(damage));
+            push(TileRenderElement::ExtraDamage(damage));
         }
 
         self.window.render_popup_elements(
@@ -583,7 +587,7 @@ impl Tile {
             window_geometry.loc.to_physical_precise_round(scale),
             scale as f64,
             alpha,
-            &mut |e| push(TileRenderElement::Surface(e)),
+            &mut |e| push(TileRenderElement::Window(e)),
         );
 
         if has_size_animation {
@@ -672,21 +676,28 @@ impl Tile {
                     // this with the preview window)
                     //
                     // To counter this, we check here if the surface is going to clip.
-                    if RoundedWindowElement::will_clip(
-                        &e,
-                        scale as f64,
-                        window_geometry,
-                        border_radius,
-                    ) {
-                        let rounded = RoundedWindowElement::new(
-                            e,
-                            border_radius,
-                            window_geometry,
-                            scale as f64,
-                        );
-                        push(rounded.into())
-                    } else {
-                        push(e.into())
+                    match e {
+                        elem @ WindowRenderElement::Color(_) => {
+                            push(TileRenderElement::Window(elem))
+                        }
+                        WindowRenderElement::Surface(surface) => {
+                            if RoundedWindowElement::will_clip(
+                                &surface,
+                                scale as f64,
+                                window_geometry,
+                                border_radius,
+                            ) {
+                                let rounded = RoundedWindowElement::new(
+                                    surface,
+                                    border_radius,
+                                    window_geometry,
+                                    scale as f64,
+                                );
+                                push(rounded.into())
+                            } else {
+                                push(WindowRenderElement::Surface(surface).into())
+                            }
+                        }
                     }
                 },
             );

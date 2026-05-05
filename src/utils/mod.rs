@@ -2,6 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+pub mod geometry;
 mod spawn;
 
 use smithay::reexports::rustix;

@@ -51,6 +51,8 @@ use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::space::{MonitorRenderElement, TileRenderElement};
 use crate::state::Fht;
 use crate::utils::get_monotonic_time;
+#[cfg(feature = "xdg-screencast-portal")]
+use crate::window::WindowRenderElement;
 
 crate::fht_render_elements! {
     FhtRenderElement<R> => {
@@ -315,6 +317,7 @@ impl Fht {
     ) where
         smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>:
             RenderElement<R>,
+        WindowRenderElement<R>: RenderElement<R>,
     {
         crate::profile_function!();
 

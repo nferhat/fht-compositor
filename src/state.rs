@@ -907,7 +907,7 @@ impl Fht {
                 .get_data::<ClientState>()
                 .is_none_or(|data| data.security_context.is_none())
         });
-        let background_effect_state = BackgroundEffectState::new::<State>(dh);
+        let background_effects_state = BackgroundEffectState::new::<State>(dh);
         let hyprland_global_shortcuts_state = HyprlandGlobalShortcutsState::new(dh, |client| {
             // Only allow clients that aren't running inside a SC
             client

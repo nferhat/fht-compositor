@@ -4,8 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use owning_ref::MutexGuardRef;
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{self, Kind};
+use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::Color32F;
 // use smithay::desktop::Window;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_frames_surface_tree,
@@ -22,7 +25,9 @@ use smithay::wayland::compositor::{send_surface_state, with_states, HookId, Surf
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
+use tracing::span::Id;
 
+use crate::handlers::background_effect::get_cached_blur_region;
 use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::state::ResolvedWindowRules;
@@ -522,7 +527,7 @@ impl Window {
         mut location: Point<i32, Physical>,
         scale: impl Into<Scale<f64>>,
         alpha: f32,
-        push: &mut dyn FnMut(WaylandSurfaceRenderElement<R>),
+        push: &mut dyn FnMut(WindowRenderElement<R>),
     ) {
         let scale = scale.into();
         let surface = self.wl_surface();
@@ -535,8 +540,28 @@ impl Window {
             scale,
             alpha,
             element::Kind::ScanoutCandidate,
-            push,
+            &mut |e| push(WindowRenderElement::Surface(e)),
         );
+        // FIX: Use the setting in debug config. For now it's just to get a visualisation
+        if false {
+            with_states(surface, |states| {
+                let rects = get_cached_blur_region(states);
+                if let Some(rects) = rects {
+                    for rect in rects.iter() {
+                        let mut rect = rect.to_physical_precise_round(scale);
+                        rect.loc += location;
+
+                        push(WindowRenderElement::Color(SolidColorRenderElement::new(
+                            element::Id::new(),
+                            rect,
+                            CommitCounter::default(),
+                            Color32F::new(0.1, 0.1, 0.0, 0.25),
+                            Kind::Unspecified,
+                        )))
+                    }
+                }
+            });
+        }
     }
 
     pub fn render_popup_elements<R: FhtRenderer>(
@@ -545,7 +570,7 @@ impl Window {
         location: Point<i32, Physical>,
         scale: impl Into<Scale<f64>>,
         alpha: f32,
-        push: &mut dyn FnMut(WaylandSurfaceRenderElement<R>),
+        push: &mut dyn FnMut(WindowRenderElement<R>),
     ) {
         let surface = self.wl_surface();
         let scale = scale.into();
@@ -561,9 +586,16 @@ impl Window {
                 scale,
                 alpha,
                 Kind::Unspecified,
-                push,
+                &mut |e| push(WindowRenderElement::Surface(e)),
             )
         }
+    }
+}
+
+crate::fht_render_elements! {
+    WindowRenderElement<R> => {
+        Surface = WaylandSurfaceRenderElement<R>,
+        Color = SolidColorRenderElement,
     }
 }
 
