@@ -2069,8 +2069,8 @@ pub fn clamp_size(
         size.h = size.h.max(min_size.h);
     }
 
-    if min_size.w > 0 {
-        size.w = size.w.min(min_size.w);
+    if max_size.w > 0 {
+        size.w = size.w.min(max_size.w);
     }
     if max_size.h > 0 {
         size.h = size.h.min(max_size.h);
