@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use smithay::output::Output;
 use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::{DataInit, New, Resource};
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1};
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1};
@@ -204,6 +205,39 @@ pub fn refresh(fht: &mut Fht) {
     // At the end notify changes.
     if changed {
         notify_changes(manager_state);
+    }
+}
+
+pub fn workspace_group_enter(
+    manager: &mut ExtWorkspaceManagerState,
+    output: &Output,
+    wl_output: &WlOutput,
+) {
+    let Some(client) = wl_output.client() else {
+        return;
+    };
+
+    let mut sent = false;
+
+    if let Some(data) = manager.workspace_groups.get_mut(output) {
+        for group in &mut data.instances {
+            if group.client().as_ref() != Some(&client) {
+                continue;
+            }
+
+            group.output_enter(wl_output);
+            sent = true;
+        }
+    }
+
+    if !sent {
+        return;
+    }
+
+    for manager in manager.instances.keys() {
+        if manager.client().as_ref() == Some(&client) {
+            manager.done();
+        }
     }
 }
 
