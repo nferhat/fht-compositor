@@ -528,6 +528,8 @@ impl State {
                 if matches!(layer.layer(), Layer::Top | Layer::Overlay) {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
                 }
+            } else {
+                self.fht.set_on_demand_layer_shell_focus(None);
             }
 
             if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {

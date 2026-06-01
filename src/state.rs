@@ -1442,7 +1442,7 @@ impl Fht {
 
         // A layer-shell with keyboard interacitivty set to something else got clicked,
         // remove the select one if any
-        if layer.is_some() {
+        if self.focused_on_demand_layer_shell.is_some() {
             self.focused_on_demand_layer_shell = None;
             self.queue_redraw_all();
         }
