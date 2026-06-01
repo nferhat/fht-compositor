@@ -3,7 +3,7 @@ pub mod pick_surface_grab;
 pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub use actions::*;
@@ -259,7 +259,7 @@ impl State {
 
                 // We handled a virtual terminal switch, no need to handle other keybinds.
                 if handle_vt_switch(&mut state.backend, key_state, modified) {
-                    state.fht.suppressed_keys.insert(modified);
+                    state.fht.suppressed_keys.insert(modified, KeyAction::none());
                     return FilterResult::Intercept((KeyPattern::default(), KeyAction::none()));
                 }
 
@@ -1108,7 +1108,7 @@ fn handle_vt_switch(backend: &mut Backend, key_state: KeyState, modified: Keysym
 
 fn handle_key_action(
     keybinds: &HashMap<KeyPattern, fht_compositor_config::KeyActionDesc>,
-    suppressed: &mut HashSet<Keysym>,
+    suppressed: &mut HashMap<Keysym, KeyAction>,
     modifiers: &ModifiersState,
     key_state: KeyState,
     keysym: Option<Keysym>,
@@ -1121,7 +1121,7 @@ fn handle_key_action(
     let key_action = find_keyaction(keybinds, modifiers, keysym);
     if key_state == KeyState::Pressed {
         if let Some(res) = key_action {
-            suppressed.insert(keysym);
+            suppressed.insert(keysym, res.1.clone());
             return FilterResult::Intercept(res);
         } else {
             // There's nothing matching here, we can forward to the client.
@@ -1134,9 +1134,8 @@ fn handle_key_action(
 
     // In this case, we are releasing the key, check if there wasn't a previous keybind, since we
     // should inhibit both the key down and key up event.
-    if suppressed.remove(&keysym) {
-        let key_pattern = key_action.map_or_else(Default::default, |(kp, _)| kp);
-        return FilterResult::Intercept((key_pattern, KeyAction::none()));
+    if let Some(action) = suppressed.remove(&keysym) {
+        return FilterResult::Intercept((KeyPattern::default(), action));
     }
 
     FilterResult::Forward

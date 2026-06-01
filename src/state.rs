@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -70,6 +70,7 @@ use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
+use crate::input::KeyAction;
 use crate::layer::MappedLayer;
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
@@ -764,7 +765,7 @@ pub struct Fht {
     pub keyboard: KeyboardHandle<State>,
     pub pointer: PointerHandle<State>,
     pub clock: Clock<Monotonic>,
-    pub suppressed_keys: HashSet<Keysym>,
+    pub suppressed_keys: HashMap<Keysym, KeyAction>,
     // We store both the timer and the keysym used to trigger the key action.
     // When we remove the keysym from suppressed keys we stop it.
     pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
@@ -1001,7 +1002,7 @@ impl Fht {
             stop: false,
 
             clock,
-            suppressed_keys: HashSet::new(),
+            suppressed_keys: HashMap::new(),
             repeated_keyaction_timer: None,
             seat,
             devices: vec![],
