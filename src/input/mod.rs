@@ -529,7 +529,12 @@ impl State {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
                 }
             } else {
-                self.fht.set_on_demand_layer_shell_focus(None);
+                if focus.is_none() {
+                    self.fht.set_on_demand_layer_shell_focus(None);
+                    
+                    let keyboard = self.fht.seat.get_keyboard().unwrap();
+                    keyboard.set_focus(self, None, serial); 
+                }
             }
 
             if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {
