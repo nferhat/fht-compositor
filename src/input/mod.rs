@@ -302,8 +302,6 @@ impl State {
                             let keysym = raw.unwrap();
                             let shortcuts = &state.fht.hyprland_global_shortcuts_state;
                             if !shortcuts.has_shortcut(app_id, shortcut_id) {
-                                // No client registered this shortcut, undo the suppression
-                                // and forward the key to the focused client.
                                 state.fht.suppressed_keys.remove(&keysym);
                                 return FilterResult::Forward;
                             }
@@ -318,8 +316,11 @@ impl State {
                                 }
                             }
 
-                            // Intercept with a no-op so process_key_action doesn't try to
-                            // handle this again.
+                            return FilterResult::Intercept((
+                                KeyPattern::default(),
+                                KeyAction::none(),
+                            ));
+                        } else if key_state == KeyState::Released {
                             return FilterResult::Intercept((
                                 KeyPattern::default(),
                                 KeyAction::none(),
