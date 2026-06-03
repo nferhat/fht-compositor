@@ -3,7 +3,7 @@ pub mod pick_surface_grab;
 pub mod resize_tile_grab;
 pub mod swap_tile_grab;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub use actions::*;
@@ -259,7 +259,7 @@ impl State {
 
                 // We handled a virtual terminal switch, no need to handle other keybinds.
                 if handle_vt_switch(&mut state.backend, key_state, modified) {
-                    state.fht.suppressed_keys.insert(modified);
+                    state.fht.suppressed_keys.insert(keycode.into(), (KeyPattern::default(), KeyAction::none()));
                     return FilterResult::Intercept((KeyPattern::default(), KeyAction::none()));
                 }
 
@@ -284,9 +284,11 @@ impl State {
                 let result = handle_key_action(
                     &state.fht.config.keybinds,
                     &mut state.fht.suppressed_keys,
+                    &state.fht.hyprland_global_shortcuts_state, // On passe l'état ici
                     modifiers,
                     key_state,
                     raw,
+                    keycode.into(),
                 );
 
                 // For global shortcuts, we handle press/release directly here instead of
@@ -298,26 +300,16 @@ impl State {
                             shortcut_id,
                         } = &action.r#type
                         {
-                            // SAFETY: handle_key_action will never intercept if raw.is_none()
-                            let keysym = raw.unwrap();
                             let shortcuts = &state.fht.hyprland_global_shortcuts_state;
                             if !shortcuts.has_shortcut(app_id, shortcut_id) {
                                 // No client registered this shortcut, undo the suppression
                                 // and forward the key to the focused client.
-                                state.fht.suppressed_keys.remove(&keysym);
+                                state.fht.suppressed_keys.remove(&keycode.into());
                                 return FilterResult::Forward;
                             }
 
                             let time = crate::utils::get_monotonic_time();
-                            match key_state {
-                                KeyState::Pressed => {
-                                    shortcuts.press_shortcut(app_id, shortcut_id, time);
-                                }
-                                KeyState::Released => {
-                                    shortcuts.release_shortcut(app_id, shortcut_id, time);
-                                }
-                            }
-
+                            shortcuts.press_shortcut(app_id, shortcut_id, time);
                             // Intercept with a no-op so process_key_action doesn't try to
                             // handle this again.
                             return FilterResult::Intercept((
@@ -528,6 +520,9 @@ impl State {
                 if matches!(layer.layer(), Layer::Top | Layer::Overlay) {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
                 }
+            } else {
+                self.fht.set_on_demand_layer_shell_focus(None);
+                self.set_keyboard_focus(None);
             }
 
             if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {
@@ -1106,10 +1101,12 @@ fn handle_vt_switch(backend: &mut Backend, key_state: KeyState, modified: Keysym
 
 fn handle_key_action(
     keybinds: &HashMap<KeyPattern, fht_compositor_config::KeyActionDesc>,
-    suppressed: &mut HashSet<Keysym>,
+    suppressed: &mut HashMap<u32, (KeyPattern, KeyAction)>,
+    shortcuts: &crate::protocols::hyprland_global_shortcuts::HyprlandGlobalShortcutsState,
     modifiers: &ModifiersState,
     key_state: KeyState,
     keysym: Option<Keysym>,
+    keycode: u32,
 ) -> FilterResult<(KeyPattern, KeyAction)> {
     let Some(keysym) = keysym else {
         // I don't know how we can have this case for regular keyboards.
@@ -1119,7 +1116,7 @@ fn handle_key_action(
     let key_action = find_keyaction(keybinds, modifiers, keysym);
     if key_state == KeyState::Pressed {
         if let Some(res) = key_action {
-            suppressed.insert(keysym);
+            suppressed.insert(keycode, res.clone());
             return FilterResult::Intercept(res);
         } else {
             // There's nothing matching here, we can forward to the client.
@@ -1130,11 +1127,13 @@ fn handle_key_action(
         }
     }
 
-    // In this case, we are releasing the key, check if there wasn't a previous keybind, since we
-    // should inhibit both the key down and key up event.
-    if suppressed.remove(&keysym) {
-        let key_pattern = key_action.map_or_else(Default::default, |(kp, _)| kp);
-        return FilterResult::Intercept((key_pattern, KeyAction::none()));
+    if let Some(res) = suppressed.remove(&keycode) {
+        if let KeyActionType::GlobalShortcut { app_id, shortcut_id } = &res.1.r#type {
+            let time = crate::utils::get_monotonic_time();
+            shortcuts.release_shortcut(app_id, shortcut_id, time);
+        }
+        
+        return FilterResult::Forward;
     }
 
     FilterResult::Forward
