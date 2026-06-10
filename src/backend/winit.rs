@@ -208,7 +208,6 @@ impl WinitData {
         })?;
 
         fht.update_primary_scanout_output(&self.output, &res.states);
-        // FIXME: Screencopy rendering
 
         let has_damage = res.damage.is_some();
         if let Some(damage) = res.damage {

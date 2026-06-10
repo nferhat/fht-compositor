@@ -2,8 +2,7 @@ use std::collections::hash_map::Entry;
 
 use smithay::backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state};
 use smithay::delegate_compositor;
-use smithay::desktop::{find_popup_root_surface, PopupKind};
-use smithay::output::Output;
+use smithay::desktop::PopupKind;
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
@@ -12,9 +11,8 @@ use smithay::wayland::compositor::{
     with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
-use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
-use crate::state::{Fht, State, UnmappedWindow};
+use crate::state::{State, UnmappedWindow};
 use crate::utils::send_scale_transform;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {

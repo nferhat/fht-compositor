@@ -34,19 +34,6 @@ impl WorkspaceId {
     fn unique() -> Self {
         Self(WORKSPACE_IDS.fetch_add(1, Ordering::SeqCst))
     }
-
-    pub fn from_raw(id: usize) -> Option<Self> {
-        // FIXME: This is **REALLY** Bad since we don't really keep a cache of existing IDs. Meaning
-        // we can end up with a `WindowId` that holds a completely bogus value. Not optimal
-        // at all but gating it behind a function is better than leaving the field public
-        if id < WORKSPACE_IDS.load(Ordering::SeqCst) {
-            // However, we can still do a sanity check, so that we don't give a WindowId for a
-            // non-generated ID (since they are sequential)
-            None
-        } else {
-            Some(Self(id))
-        }
-    }
 }
 impl std::fmt::Debug for WorkspaceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

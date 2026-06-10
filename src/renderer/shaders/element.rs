@@ -1,7 +1,7 @@
 //! A re-implementation of Smithay's [`PixelShaderElement`] that allows it to change opacity on the
 //! fly, which is required for some animations in the compositor.
 
-// FIXME: In the future, maybe adding the possibility to attach textures to pixel shader elements
+// TODO: In the future, maybe adding the possibility to attach textures to pixel shader elements
 // would be quite an interesting opportunity for effects and transitions, but for now, using custom
 // texture shaders is enough.
 

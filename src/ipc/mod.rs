@@ -197,10 +197,7 @@ async fn handle_new_client(
         // When you send a subscribe request to the socket, it can't be used anymore for regular
         // requests. This is a limitation of the current system, to avoid confusion
         // (how the client should interpret one of our responses?)
-        //
-        // FIXME: Handle other non-subscribe requests before? How should we tell when the client
-        // stops sending other requests? I don't know, this is weird anyway. You should use
-        // a separate socket for subscribing.
+
         if is_subscribe {
             break;
         }
@@ -801,10 +798,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(
-                            crate::space::WorkspaceId::from_raw(id)
-                                .context("Invalid workspace ID")?,
-                        )
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -817,10 +811,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(
-                            crate::space::WorkspaceId::from_raw(id)
-                                .context("Invalid workspace ID")?,
-                        )
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -836,10 +827,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(
-                            crate::space::WorkspaceId::from_raw(id)
-                                .context("Invalid workspace ID")?,
-                        )
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };
@@ -855,10 +843,7 @@ impl State {
                     Some(id) => self
                         .fht
                         .space
-                        .workspace_mut_for_id(
-                            crate::space::WorkspaceId::from_raw(id)
-                                .context("Invalid workspace ID")?,
-                        )
+                        .workspace_mut_for_id(id)
                         .context("No workspace with matching ID")?,
                     None => self.fht.space.active_workspace_mut(),
                 };

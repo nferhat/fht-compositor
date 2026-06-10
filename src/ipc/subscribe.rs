@@ -306,7 +306,6 @@ fn window_changed(window: &fht_compositor_ipc::Window, workspace_id: usize, tile
     let location = tile.location() + tile.window_loc();
     let size = tile.window().size();
 
-    // FIXME: The string comparaisons could be really expensive. Considering using (A)rc<str>
     tile.window().title() != window.title
         || tile.window().app_id() != window.app_id
         || tile.window().maximized() != window.maximized

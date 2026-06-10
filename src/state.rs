@@ -382,7 +382,6 @@ impl State {
             // the channel does not exist anymore) So there's nothing todo with the
             // join_handle!
         }
-        // FIXME: This clone could be expensive? I don't know it only happens once so who cares.
         let old_config = self.fht.config.clone();
         let config = new_config;
 
@@ -1390,7 +1389,6 @@ impl Fht {
                         return false;
                     }
 
-                    // FIXME: Should we check for subsurfaces too?
                     let wl_surface = window.wl_surface();
                     with_states(&wl_surface, |states| {
                         surface_primary_scanout_output(&wl_surface, states).as_ref() == Some(output)

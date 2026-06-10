@@ -179,8 +179,6 @@ impl Tile {
     }
 
     fn update_decorations(&mut self, active: bool) {
-        // FIXME: This might not be always accurate, to be exact, window rules must be
-        // refreshed inside Tile::refresh, but this could be really expensive
         let rules = self.window.rules();
         let mut border = self.config.border.with_overrides(&rules.border);
         let mut shadow = self.config.shadow.with_overrides(&rules.shadow);
