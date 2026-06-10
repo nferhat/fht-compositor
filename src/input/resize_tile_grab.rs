@@ -83,19 +83,22 @@ impl PointerGrab<State> for ResizeTileGrab {
             ..*event
         };
 
-        // No focus while motion is active
-        handle.motion(data, None, &event);
-
         let delta = (event.location - self.start_data.location).to_i32_round();
-        if data
+        let res = data
             .fht
             .space
-            .handle_interactive_resize_motion(&self.window, delta)
-        {
-            return;
-        }
+            .handle_interactive_resize_motion(&self.window, delta);
 
-        handle.unset_grab(self, data, event.serial, event.time, true)
+        match res {
+            Some(true) => {
+                // We successfully resized the window. We can ask the pointer to move.
+                handle.motion(data, None, &event);
+            }
+            Some(false) => {
+                // We didn't resized the window at all. do not move the pointer.
+            }
+            None => handle.unset_grab(self, data, event.serial, event.time, true),
+        }
     }
 
     fn relative_motion(

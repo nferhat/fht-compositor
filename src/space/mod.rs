@@ -1079,21 +1079,25 @@ impl Space {
 
     /// Handle the iteractive resize motion for this window.
     ///
-    /// Returns [`true`] if the grab should continue.
+    /// Returns:
+    /// - Some(true)  => the grab succeeded and the window size changed
+    /// - Some(false) => the grab succeeded but the window size didnt change
+    /// - None        => the grab didn't succeed, stop it.
     pub fn handle_interactive_resize_motion(
         &mut self,
         window: &Window,
         delta: Point<i32, Logical>,
-    ) -> bool {
+    ) -> Option<bool> {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if workspace.handle_interactive_resize_motion(window, delta) {
-                    return true;
+                let res = workspace.handle_interactive_resize_motion(window, delta);
+                if res.is_some() {
+                    return res;
                 }
             }
         }
 
-        false
+        None
     }
 
     /// Handle the iteractive resize motion for this window.

@@ -1728,30 +1728,33 @@ impl Workspace {
     ///
     /// `delta` is how much the cursor moved from its initial window location.
     ///
-    /// Returns [`true`] if the grab was successfully registered.
+    /// Returns:
+    /// - Some(true)  => the grab succeeded and the window size changed
+    /// - Some(false) => the grab succeeded but the window size didnt change
+    /// - None        => the grab didn't succeed, stop it.
     pub fn handle_interactive_resize_motion(
         &mut self,
         window: &Window,
         delta: Point<i32, Logical>,
-    ) -> bool {
+    ) -> Option<bool> {
         let Some(interactive_resize) = &self.interactive_resize else {
-            return false;
+            return None;
         };
 
         if interactive_resize.window != *window {
-            return false;
+            return None;
         }
 
         let active_window = self.active_window();
         if Some(window) != active_window.as_ref() {
-            return false;
+            return None;
         }
 
         match (window.tiled(), self.current_layout()) {
             (_, WorkspaceLayout::Floating) | (false, _) => (),
             // We switched from floating to tiled between the motion events
             // Can happen if the user uses a key action bound to toggle-window-floating
-            (true, _) => return false,
+            (true, _) => return None,
         }
 
         let mut new_size = interactive_resize.initial_window_geometry.size;
@@ -1796,9 +1799,13 @@ impl Workspace {
             let surface_data = cached_state.current();
             (surface_data.min_size, surface_data.max_size)
         });
-        new_size = clamp_size(new_size, min_size, max_size);
+        let clamped_size = clamp_size(new_size, min_size, max_size);
 
-        window.request_size(new_size);
+        if clamped_size != new_size {
+            return Some(false);
+        }
+
+        window.request_size(clamped_size);
         window.send_configure();
 
         // Don't forget to move the tile!
@@ -1809,7 +1816,7 @@ impl Workspace {
             .unwrap();
         tile.set_location(new_loc, false);
 
-        true
+        Some(true)
     }
 
     /// Handle an interactive resize grab motion.
