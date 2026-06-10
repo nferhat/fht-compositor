@@ -92,28 +92,9 @@ use crate::utils::{send_scale_transform, RectCenterExt};
 use crate::window::Window;
 use crate::{cli, ipc};
 
-/// State to check when was the last time we did a refresh on a main loop dispatch cycle.
-///
-/// To avoid flooding the Wayland socket with events, aswell as reducing redundant computation that
-/// is done every cycle (notably traversing the [`Space`] and refreshing [`Window`]s), we throttle
-/// when we do these expensive operations, yielding a much lower CPU usage.
-///
-/// This idea comes from cosmic-comp!
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum LastRefresh {
-    None,
-    At(Instant),
-    Scheduled(RegistrationToken),
-}
-
-/// The minimum time to wait between each refresh. This number is pretty arbitrary and might be
-/// added as a debug option if it causes issues on some systems.
-pub const MINIMUM_WAIT_TIME: Duration = Duration::from_millis(75);
-
 pub struct State {
     pub fht: Fht,
     pub backend: Backend,
-    pub last_refresh: LastRefresh,
 }
 
 impl State {
@@ -176,11 +157,7 @@ impl State {
         };
 
         #[allow(unreachable_code)]
-        Self {
-            fht,
-            backend,
-            last_refresh: LastRefresh::None,
-        }
+        Self { fht, backend }
     }
 
     pub fn dispatch(&mut self) -> anyhow::Result<()> {
@@ -194,32 +171,7 @@ impl State {
                 .context("Failed to flush_clients!")?;
         }
 
-        // Read LastRefresh doc comment
-        match self.last_refresh {
-            LastRefresh::Scheduled(_) => (), // wait for a future dispatch call
-            LastRefresh::At(instant)
-                if Instant::now().duration_since(instant) < MINIMUM_WAIT_TIME =>
-            {
-                if let Ok(token) = self.fht.loop_handle.insert_source(
-                    Timer::from_duration(MINIMUM_WAIT_TIME),
-                    |_, (), state| {
-                        state.last_refresh = LastRefresh::None;
-                        calloop::timer::TimeoutAction::Drop
-                    },
-                ) {
-                    self.last_refresh = LastRefresh::Scheduled(token);
-                } else {
-                    warn!("Failed to schedule periodic state refresh!");
-                    self.fht.refresh();
-                }
-            }
-            _ => {
-                // Enough time has passed for us todo an actual refresh
-                self.fht.refresh();
-                self.last_refresh = LastRefresh::At(Instant::now());
-            }
-        }
-
+        self.fht.refresh();
         ext_workspace::refresh(&mut self.fht);
         // Update keyboard and pointer focus **after** making sure there are no lock
         // surfaces in fht.refresh() (or ensuring the pending one gets confirmed)
