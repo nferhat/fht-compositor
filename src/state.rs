@@ -1183,28 +1183,22 @@ impl Fht {
     pub fn output_resized(&mut self, output: &Output) {
         crate::profile_function!();
 
-        layer_map_for_output(output).arrange();
+        let output_scale = output.current_scale();
+        let output_transform = output.current_transform();
+
+        {
+            // Fix layer shells since the workspace working areas depend on them.
+            let mut layer_map = layer_map_for_output(output);
+            for layer in layer_map.layers() {
+                layer.with_surfaces(|surface, data| {
+                    send_scale_transform(surface, data, output_scale, output_transform);
+                });
+            }
+            layer_map.arrange();
+        }
+
         self.space
             .output_resized(output, !self.config.animations.disable);
-
-        #[cfg(feature = "xdg-screencast-portal")]
-        {
-            // Even though casts should automatically resize, inform the cast stream sooner so that
-            // we dont have to some frames to run ensure size in the draw iteration
-            if let Some(pipewire) = self.pipewire.as_mut() {
-                let cast_source = CastSource::Output(output.downgrade());
-                let transform = output.current_transform();
-                let size = transform.transform_size(output.current_mode().unwrap().size);
-
-                pipewire
-                    .casts
-                    .iter_mut()
-                    .filter(|cast| *cast.source() == cast_source)
-                    .for_each(|cast| {
-                        let _ = cast.ensure_size(size);
-                    });
-            }
-        }
 
         let output_state = self.output_state.get_mut(output).unwrap();
         let _ = output_state.debug_damage_tracker.take();
@@ -1215,6 +1209,10 @@ impl Fht {
                 let size = output.geometry().size;
                 state.size = Some((size.w as _, size.h as _).into());
             });
+            let wl_surface = lock_surface.wl_surface();
+            with_states(wl_surface, |data| {
+                send_scale_transform(wl_surface, data, output_scale, output_transform);
+            });
             lock_surface.send_configure();
         }
 
@@ -1223,14 +1221,34 @@ impl Fht {
             buffer.resize(output.geometry().size);
         }
 
-        let output2 = output.clone();
-        self.loop_handle.insert_idle(move |state| {
-            state.backend.with_renderer(|renderer| {
-                if let Err(err) = EffectsFramebuffers::update_for_output(&output2, renderer) {
-                    error!(?err, "Failed to update output effects framebuffers")
-                }
+        {
+            let output = output.clone();
+            self.loop_handle.insert_idle(move |state| {
+                state.backend.with_renderer(|renderer| {
+                    if let Err(err) = EffectsFramebuffers::update_for_output(&output, renderer) {
+                        error!(?err, "Failed to update output effects framebuffers")
+                    }
+                });
             });
-        });
+        }
+
+        #[cfg(feature = "xdg-screencast-portal")]
+        {
+            // Even though casts should automatically resize, inform the cast stream sooner so that
+            // we dont have to some frames to run ensure size in the draw iteration
+            if let Some(pipewire) = self.pipewire.as_mut() {
+                let cast_source = CastSource::Output(output.downgrade());
+                let size = output_transform.transform_size(output.current_mode().unwrap().size);
+
+                pipewire
+                    .casts
+                    .iter_mut()
+                    .filter(|cast| *cast.source() == cast_source)
+                    .for_each(|cast| {
+                        let _ = cast.ensure_size(size);
+                    });
+            }
+        }
 
         self.queue_redraw(output);
     }
