@@ -226,6 +226,17 @@ impl CompositorHandler for State {
             return;
         }
 
+        // This could also be a lock surface.
+        // Discovered this with gtklock. oops
+        for (output, state) in &self.fht.output_state {
+            if let Some(lock_surface) = &state.lock_surface {
+                if lock_surface.wl_surface() == &root_surface {
+                    self.fht.queue_redraw(&output.clone());
+                    return;
+                }
+            }
+        }
+
         trace!(id = %surface.id(), "unknown surface commit");
     }
 
