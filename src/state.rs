@@ -17,7 +17,10 @@ use smithay::desktop::utils::{
     surface_primary_scanout_output, take_presentation_feedback_surface_tree,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, WindowSurfaceType};
+use smithay::desktop::{
+    find_popup_root_surface, layer_map_for_output, LayerSurface, PopupKind, PopupManager,
+    WindowSurfaceType,
+};
 use smithay::input::keyboard::{KeyboardHandle, Keysym, XkbConfig};
 use smithay::input::pointer::{CursorImageStatus, PointerHandle};
 use smithay::input::{Seat, SeatState};
@@ -85,7 +88,7 @@ use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
-use crate::utils::RectCenterExt;
+use crate::utils::{send_scale_transform, RectCenterExt};
 use crate::window::Window;
 use crate::{cli, ipc};
 
@@ -1416,6 +1419,11 @@ impl Fht {
         }
     }
 
+    pub fn output_for_popup(&self, popup: &PopupKind) -> Option<&Output> {
+        let root = find_popup_root_surface(popup).ok()?;
+        self.output_for_root_surface(&root)
+    }
+
     pub fn queue_redraw(&mut self, output: &Output) {
         let state = self.output_state.get_mut(output).unwrap();
         state.redraw_state.queue();
@@ -1449,9 +1457,12 @@ impl Fht {
         }
     }
 
-    pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+    pub fn output_for_root_surface(&self, surface: &WlSurface) -> Option<&Output> {
+        if let Some((_, ws)) = self.space.find_window_and_workspace(surface) {
+            return Some(ws.output());
+        }
+
         for output in self.space.outputs() {
-            // Lock surface and layer shells take priority.
             let output_state = self.output_state.get(output).unwrap();
             if output_state
                 .lock_surface
@@ -1463,14 +1474,14 @@ impl Fht {
 
             let layer_map = layer_map_for_output(output);
             if layer_map
-                .layer_for_surface(surface, WindowSurfaceType::ALL)
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .is_some()
             {
                 return Some(output);
             }
         }
 
-        self.space.output_for_surface(surface)
+        None
     }
 
     pub fn send_frames(&self, output: &Output) {

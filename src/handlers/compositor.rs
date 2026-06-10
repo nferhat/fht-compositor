@@ -15,6 +15,7 @@ use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::shell::xdg::XdgPopupSurfaceData;
 
 use crate::state::{Fht, State, UnmappedWindow};
+use crate::utils::send_scale_transform;
 
 fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
@@ -26,37 +27,6 @@ fn has_render_buffer(surface: &WlSurface) -> bool {
         );
         false
     })
-}
-
-impl State {
-    fn process_popup_commit(surface: &WlSurface, state: &mut Fht) -> Option<Output> {
-        let popup = state.popups.find_popup(surface)?;
-
-        match popup {
-            PopupKind::Xdg(ref popup) => {
-                let initial_configure_sent = with_states(surface, |states| {
-                    states
-                        .data_map
-                        .get::<XdgPopupSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .initial_configure_sent
-                });
-                if !initial_configure_sent {
-                    // NOTE: This should never fail as the initial configure is always
-                    // allowed.
-                    popup.send_configure().expect("initial configure failed");
-                }
-            }
-            PopupKind::InputMethod(_) => {
-                // Input method popups dont need an initial configure.
-            }
-        }
-
-        let root = find_popup_root_surface(&popup).ok()?;
-        state.visible_output_for_surface(&root).cloned()
-    }
 }
 
 impl CompositorHandler for State {
@@ -219,10 +189,37 @@ impl CompositorHandler for State {
         }
 
         // This could be a popup
-        self.fht.popups.commit(surface);
-        if let Some(output) = State::process_popup_commit(surface, &mut self.fht) {
-            self.fht.queue_redraw(&output);
-            return;
+        {
+            self.fht.popups.commit(surface);
+            if let Some(popup) = self.fht.popups.find_popup(surface) {
+                match popup {
+                    PopupKind::Xdg(ref popup) => {
+                        if !popup.is_initial_configure_sent() {
+                            if let Some(output) =
+                                self.fht.output_for_popup(&PopupKind::Xdg(popup.clone()))
+                            {
+                                let scale = output.current_scale();
+                                let transform = output.current_transform();
+                                with_states(surface, |data| {
+                                    send_scale_transform(surface, data, scale, transform);
+                                });
+                            }
+                            popup
+                                .send_configure()
+                                .expect("popup initial configure failed");
+                        }
+                    }
+                    // IME popups don't need a configure.
+                    PopupKind::InputMethod(_) => {}
+                }
+            }
+
+            if let Some(popup) = self.fht.popups.find_popup(surface) {
+                if let Some(output) = self.fht.output_for_popup(&popup) {
+                    self.fht.queue_redraw(&output.clone());
+                }
+                return;
+            }
         }
 
         // This could be a layer-shell.

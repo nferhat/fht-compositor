@@ -4,11 +4,14 @@ use std::time::Duration;
 
 mod spawn;
 
+use smithay::output;
 use smithay::reexports::rustix;
 use smithay::reexports::wayland_server::backend::Credentials;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
-use smithay::utils::{Coordinate, Point, Rectangle};
+use smithay::utils::{Coordinate, Point, Rectangle, Transform};
+use smithay::wayland::compositor::{send_surface_state, SurfaceData};
+use smithay::wayland::fractional_scale::with_fractional_scale;
 use smithay::wayland::xdg_activation::XdgActivationToken;
 
 #[cfg(feature = "xdg-screencast-portal")]
@@ -101,6 +104,18 @@ pub fn split_timestamp(time: Duration) -> (u32, u32, u32) {
     let tv_sec_lo = (secs & 0xFFFF_FFFF) as u32;
     let tv_nsec = time.subsec_nanos();
     (tv_sec_hi, tv_sec_lo, tv_nsec)
+}
+
+pub fn send_scale_transform(
+    surface: &WlSurface,
+    data: &SurfaceData,
+    scale: output::Scale,
+    transform: Transform,
+) {
+    send_surface_state(surface, data, scale.integer_scale(), transform);
+    with_fractional_scale(data, |fractional| {
+        fractional.set_preferred_scale(scale.fractional_scale());
+    });
 }
 
 pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {
