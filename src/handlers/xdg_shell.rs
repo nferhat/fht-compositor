@@ -476,6 +476,7 @@ impl Fht {
             let geo = no_resize.get_unconstrained_geometry(padded);
             if padded.contains_rect(geo) {
                 state.geometry = geo;
+                return;
             }
 
             // Could not unconstrain into the padded target, so resort to the regular one.
