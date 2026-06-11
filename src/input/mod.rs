@@ -259,7 +259,10 @@ impl State {
 
                 // We handled a virtual terminal switch, no need to handle other keybinds.
                 if handle_vt_switch(&mut state.backend, key_state, modified) {
-                    state.fht.suppressed_keys.insert(keycode.into(), (KeyPattern::default(), KeyAction::none()));
+                    state
+                        .fht
+                        .suppressed_keys
+                        .insert(keycode.into(), (KeyPattern::default(), KeyAction::none()));
                     return FilterResult::Intercept((KeyPattern::default(), KeyAction::none()));
                 }
 
@@ -512,6 +515,7 @@ impl State {
         if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
             let pointer_loc = pointer.current_location();
             let focus = self.fht.get_pointer_focus(pointer_loc);
+            dbg!(&focus);
 
             if let Some(layer) = focus
                 .as_ref()
@@ -1128,11 +1132,15 @@ fn handle_key_action(
     }
 
     if let Some(res) = suppressed.remove(&keycode) {
-        if let KeyActionType::GlobalShortcut { app_id, shortcut_id } = &res.1.r#type {
+        if let KeyActionType::GlobalShortcut {
+            app_id,
+            shortcut_id,
+        } = &res.1.r#type
+        {
             let time = crate::utils::get_monotonic_time();
             shortcuts.release_shortcut(app_id, shortcut_id, time);
         }
-        
+
         return FilterResult::Forward;
     }
 

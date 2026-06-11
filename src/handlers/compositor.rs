@@ -165,9 +165,6 @@ impl CompositorHandler for State {
                     self.fht
                         .unmapped_windows
                         .insert(surface.clone(), UnmappedWindow::Unconfigured(window));
-
-                    self.fht.queue_redraw(&output);
-                    return;
                 }
 
                 self.fht.queue_redraw(&output);
@@ -182,6 +179,12 @@ impl CompositorHandler for State {
             // FIXME: We should probably tell the workspace about the window update here, but we
             // instead wait until the next refresh. (IE next State::dispatch)
             window.on_commit();
+            self.fht.queue_redraw(&output);
+            return;
+        }
+
+        // This could be a layer-shell.
+        if let Some(output) = State::process_layer_shell_commit(&root_surface, &mut self.fht) {
             self.fht.queue_redraw(&output);
             return;
         }
@@ -210,20 +213,12 @@ impl CompositorHandler for State {
                     // IME popups don't need a configure.
                     PopupKind::InputMethod(_) => {}
                 }
-            }
 
-            if let Some(popup) = self.fht.popups.find_popup(surface) {
                 if let Some(output) = self.fht.output_for_popup(&popup) {
                     self.fht.queue_redraw(&output.clone());
                 }
                 return;
             }
-        }
-
-        // This could be a layer-shell.
-        if let Some(output) = State::process_layer_shell_commit(surface, &mut self.fht) {
-            self.fht.queue_redraw(&output);
-            return;
         }
 
         // This could also be a lock surface.
@@ -235,6 +230,12 @@ impl CompositorHandler for State {
                     return;
                 }
             }
+        }
+
+        // HACK: This is only done since things used to work pretty fine before this. However,
+        // still mark the commit as unknown since we don't know from where its coming.
+        if let Some(output) = self.fht.space.output_for_surface(surface).cloned() {
+            self.fht.queue_redraw(&output);
         }
 
         trace!(id = %surface.id(), "unknown surface commit");
