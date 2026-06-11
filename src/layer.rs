@@ -101,7 +101,7 @@ impl MappedLayer {
                 render_geo.loc,
                 scale as f64,
                 alpha,
-                Kind::Unspecified,
+                Kind::ScanoutCandidate,
             )
             .into_iter()
             .map(|surface| {
@@ -121,7 +121,7 @@ impl MappedLayer {
                 render_geo.loc,
                 scale as f64,
                 alpha,
-                Kind::Unspecified,
+                Kind::ScanoutCandidate,
             );
         }
 
