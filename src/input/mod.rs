@@ -515,7 +515,6 @@ impl State {
         if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
             let pointer_loc = pointer.current_location();
             let focus = self.fht.get_pointer_focus(pointer_loc);
-            dbg!(&focus);
 
             if let Some(layer) = focus
                 .as_ref()
