@@ -225,8 +225,9 @@ impl CompositorHandler for State {
         // Discovered this with gtklock. oops
         for (output, state) in &self.fht.output_state {
             if let Some(lock_surface) = &state.lock_surface {
-                if lock_surface.wl_surface() == &root_surface {
+                if *lock_surface.wl_surface() == root_surface {
                     self.fht.queue_redraw(&output.clone());
+                    self.fht.try_continue_locking();
                     return;
                 }
             }

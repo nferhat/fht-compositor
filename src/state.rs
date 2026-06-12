@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Context;
 use calloop::futures::Scheduler;
-use calloop::timer::Timer;
 use fht_compositor_config::{
-    BlurOverrides, BorderOverrides, DecorationMode, KeyPattern, ShadowOverrides, VrrMode
+    BlurOverrides, BorderOverrides, DecorationMode, KeyPattern, ShadowOverrides, VrrMode,
 };
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
@@ -182,19 +181,8 @@ impl State {
         {
             crate::profile_scope!("refresh_and_redraw_outputs");
             let mut outputs_to_redraw = vec![];
-            let locked = self.fht.is_locked();
             for output in self.fht.space.outputs() {
                 let output_state = self.fht.output_state.get_mut(output).unwrap();
-                if !locked {
-                    // Take away the lock surface
-                    output_state.lock_backdrop = None;
-                    output_state.lock_surface = None;
-                } else {
-                    let _ = output_state
-                        .lock_surface
-                        .take_if(|surface| !surface.alive());
-                }
-
                 if output_state.redraw_state.is_queued() {
                     outputs_to_redraw.push(output.clone());
                 }
@@ -255,6 +243,7 @@ impl State {
         }
 
         let output_state = self.fht.output_state.get_mut(&output).unwrap();
+        // If we had an error when rendering or didn't draw anything new, update redraw state.
         if render_result.as_ref().map_or(true, |&draw| draw == false) {
             // Update the redraw state on failed render.
             output_state.redraw_state =
@@ -270,21 +259,32 @@ impl State {
                 };
         }
 
-        {
-            let output_state = self.fht.output_state.get_mut(&output).unwrap();
-            if render_result.is_err() {
-                // Update the redraw state on failed render.
-                output_state.redraw_state =
-                    if let RedrawState::WaitingForEstimatedVblankTimer { token, .. } =
-                        output_state.redraw_state
-                    {
-                        RedrawState::WaitingForEstimatedVblankTimer {
-                            token,
-                            queued: false,
-                        }
+        // We managed to draw something
+        if render_result.is_ok() {
+            match std::mem::take(&mut self.fht.lock_state) {
+                LockState::Locking(locker) => {
+                    // Check if we created the lock backdrop on all outputs.
+                    // If yes, its safe to declare the session officially locked, since no content
+                    // may leak.
+                    let all_locked = self
+                        .fht
+                        .output_state
+                        .values()
+                        .map(|state| &state.lock_backdrop)
+                        .all(Option::is_some);
+
+                    if all_locked {
+                        // All outputs are locked, report success.
+                        let lock = locker.ext_session_lock().clone();
+                        locker.lock();
+                        self.fht.lock_state = LockState::Locked(lock);
                     } else {
-                        RedrawState::Idle
-                    };
+                        // Still waiting for other outputs.
+                        self.fht.lock_state = LockState::Locking(locker);
+                    }
+                }
+                // Not locked or didn't map all surfaces.
+                other => self.fht.lock_state = other,
             }
         }
 
@@ -1024,23 +1024,6 @@ impl Fht {
         self.refresh_idle_inhibit();
         // We space out calls to idle-notify by each refresh call.
         self.notified_idle_state = false;
-
-        self.lock_state = match std::mem::take(&mut self.lock_state) {
-            // Switch from pending to locked when we finished drawing a backdrop at least once.
-            LockState::Pending(locker)
-                if self.space.outputs().all(|output| {
-                    self.output_state
-                        .get(output)
-                        .unwrap()
-                        .lock_backdrop
-                        .is_some()
-                }) =>
-            {
-                locker.lock();
-                LockState::Locked
-            }
-            state => state,
-        };
 
         // Periodic cleanup, nothing special.
         self.space.refresh();
