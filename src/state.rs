@@ -270,8 +270,7 @@ impl State {
                         .fht
                         .output_state
                         .values()
-                        .map(|state| &state.lock_backdrop)
-                        .all(Option::is_some);
+                        .all(|state| state.rendered_with_lock);
 
                     if all_locked {
                         // All outputs are locked, report success.
@@ -1061,7 +1060,8 @@ impl Fht {
             screencopy_damage_tracker: None,
             debug_damage_tracker: None,
             lock_surface: None,
-            lock_backdrop: None,
+            // If we are already locked, the first frame should have the lock surface.
+            rendered_with_lock: self.is_locked(),
         };
         self.output_state.insert(output.clone(), state);
 
@@ -1148,11 +1148,6 @@ impl Fht {
                 send_scale_transform(wl_surface, data, output_scale, output_transform);
             });
             lock_surface.send_configure();
-        }
-
-        if let Some(buffer) = &mut output_state.lock_backdrop {
-            // Resize lock backdrop to make sure it always covers up everything
-            buffer.resize(output.geometry().size);
         }
 
         {

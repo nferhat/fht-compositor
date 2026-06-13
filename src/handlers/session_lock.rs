@@ -1,9 +1,8 @@
-use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::Color32F;
 use smithay::delegate_session_lock;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
@@ -24,8 +23,6 @@ crate::fht_render_elements! {
         LockSurface = WaylandSurfaceRenderElement<R>,
     }
 }
-
-const LOCKED_OUTPUT_BACKDROP_COLOR: Color32F = Color32F::new(0.05, 0.05, 0.05, 1.0);
 
 impl SessionLockHandler for State {
     fn lock_state(&mut self) -> &mut session_lock::SessionLockManagerState {
@@ -48,6 +45,9 @@ impl SessionLockHandler for State {
             info!("locking session with new session lock");
             let lock = locker.ext_session_lock().clone();
             locker.lock();
+
+            // No need to reset rendered_with_lock, the lock surface will just replace the previous
+            // one in the next frame.
             self.fht.lock_state = LockState::Locked(lock);
 
             return;
@@ -59,6 +59,9 @@ impl SessionLockHandler for State {
         // properly.
         // Whenever the lock client commits a surface, we try to pass into the locked state.
         self.fht.lock_state = LockState::WaitingForSurfaces(locker);
+        for state in self.fht.output_state.values_mut() {
+            state.rendered_with_lock = false;
+        }
 
         self.fht.queue_redraw_all();
     }
@@ -69,7 +72,7 @@ impl SessionLockHandler for State {
         let outputs = self.fht.space.outputs().cloned().collect::<Vec<_>>();
         for output in &outputs {
             let output_state = self.fht.output_state.get_mut(output).unwrap();
-            let _ = output_state.lock_backdrop.take();
+            output_state.rendered_with_lock = false;
             let _ = output_state.lock_surface.take();
         }
 
@@ -174,21 +177,7 @@ impl Fht {
             ));
         }
 
-        // We still render a black drop to not show desktop content
-        let solid_buffer = output_state.lock_backdrop.get_or_insert_with(|| {
-            SolidColorBuffer::new(output.geometry().size, LOCKED_OUTPUT_BACKDROP_COLOR)
-        });
-
-        elements.push(
-            SolidColorRenderElement::from_buffer(
-                &*solid_buffer,
-                Point::default(),
-                scale,
-                1.0,
-                Kind::Unspecified,
-            )
-            .into(),
-        );
+        output_state.rendered_with_lock = true;
 
         elements
     }
