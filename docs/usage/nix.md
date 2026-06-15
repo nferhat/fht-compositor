@@ -20,7 +20,7 @@ You can add it to your configuration like the following.
       # inputs.flake-parts.follows = "flake-parts";
 
       # Disable rust-overlay since it's only meant to be here for the devShell provided
-      # (IE. only for developement purposes, end users don't care)
+      # (IE. only for development purposes, end users don't care)
       inputs.rust-overlay.follows = "";
     };
   }
