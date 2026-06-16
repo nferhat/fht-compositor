@@ -808,7 +808,7 @@ impl Space {
             let window = tile.window();
             let loc = tile.location() + tile.window_loc();
             let bbox = {
-                let mut bbox = window.bbox();
+                let mut bbox = window.bbox_with_popups();
                 bbox.loc += loc;
                 bbox
             };

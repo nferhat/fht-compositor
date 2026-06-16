@@ -188,6 +188,18 @@ impl Window {
         self.inner.data.lock().unwrap().bbox
     }
 
+    pub fn bbox_with_popups(&self) -> Rectangle<i32, smithay::utils::Logical> {
+        let mut bounding_box = self.bbox();
+        let surface = self.wl_surface();
+        for (popup, location) in PopupManager::popups_for_surface(&surface) {
+            let surface = popup.wl_surface();
+            let offset = self.render_offset() + location - popup.geometry().loc;
+            bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
+        }
+
+        bounding_box
+    }
+
     pub fn size(&self) -> Size<i32, Logical> {
         let bbox = self.bbox();
         let surface = self.wl_surface();
@@ -599,18 +611,6 @@ mod weak {
             WeakWindow {
                 inner: std::sync::Arc::downgrade(&self.inner),
             }
-        }
-
-        pub fn bbox_with_popups(&self) -> Rectangle<i32, smithay::utils::Logical> {
-            let mut bounding_box = self.bbox();
-            let surface = self.wl_surface();
-            for (popup, location) in PopupManager::popups_for_surface(&surface) {
-                let surface = popup.wl_surface();
-                let offset = self.render_offset() + location - popup.geometry().loc;
-                bounding_box = bounding_box.merge(bbox_from_surface_tree(surface, offset));
-            }
-
-            bounding_box
         }
     }
 }
