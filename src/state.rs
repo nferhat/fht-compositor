@@ -180,16 +180,14 @@ impl State {
 
         {
             crate::profile_scope!("refresh_and_redraw_outputs");
-            let mut outputs_to_redraw = vec![];
-            for output in self.fht.space.outputs() {
-                let output_state = self.fht.output_state.get_mut(output).unwrap();
-                if output_state.redraw_state.is_queued() {
-                    outputs_to_redraw.push(output.clone());
-                }
-            }
-
-            for output in outputs_to_redraw {
-                self.redraw(output);
+            while let Some((output, _)) = self
+                .fht
+                .output_state
+                .iter()
+                .find(|(_, state)| state.redraw_state.is_queued())
+            {
+                trace!(output = %output.name(), "redrawing output");
+                self.redraw(output.clone());
             }
         }
 

@@ -1,7 +1,6 @@
 //! A frameclock for outputs.
 //!
-//! This implemenetation logic is inspired by Mutter's frame clock, `ClutterFrameClock`, with some
-//! cases and checks removed since we are a much simpler compositor overall.
+//! This implemenetation logic is inspired by Niri's frame clock,
 use std::num::NonZero;
 use std::time::Duration;
 
@@ -51,12 +50,8 @@ impl FrameClock {
 
     /// Get the next presentation time of this clock
     pub fn next_presentation_time(&self) -> Duration {
-        let now = get_monotonic_time();
-        let Some(refresh_interval) = self
-            .refresh_interval_ns
-            .map(NonZero::get)
-            .map(Duration::from_nanos)
-        else {
+        let mut now = get_monotonic_time();
+        let Some(refresh_interval_ns) = self.refresh_interval_ns.map(NonZero::get) else {
             // Winit backend presents as soon as a redraw is done, since we don't have to wait for
             // a VBlank and instead just swap buffers
             return now;
@@ -66,58 +61,22 @@ impl FrameClock {
             return now;
         };
 
-        // The common case is that the next presentation happens 1 refresh interval after the
-        // last/previous presentation.
-        //          |<last_presentation_time
-        // |--------|----o---------|------>
-        //           now>|         |<next_presentation_time
-        let mut next_presentation_time = last_presentation_time + refresh_interval;
-        // However, the last presentation could happen more than a frame ago, in the case of output
-        // idling (IE. no damage on the output, so we do not redraw/present), or due to the GPU
-        // being very busy (heavy render task)
-        //
-        // The following code adjusts next_presentation_time_us to be in the future,
-        // but still aligned to display presentation times. Instead of
-        if next_presentation_time < now {
-            // Let's say we're just past next_presentation_time_us.
-            //
-            // First, we calculate current_phase_us, corresponding to the time since
-            // the last integer multiple of the refresh interval passed after the last
-            // presentation time. Subtracting this phase from now_us and adding a
-            // refresh interval gets us the next possible presentation time after
-            // now_us.
-            //
-            //     last_presentation_time_us
-            //    /       next_presentation_time_us
-            //   /       /   now_us
-            //  /       /   /    new next_presentation_time_us
-            // |-------|---o---|-------|--> possible presentation times
-            //          \_/     \_____/
-            //          /           \
-            // current_phase_us      refresh_interval_us
-            //
-
-            let current_phase = Duration::from_nanos(
-                ((now.as_nanos() - last_presentation_time.as_nanos()) % refresh_interval.as_nanos())
-                    as u64, // FIXME: can overflow, but we dont care about it
-            );
-            next_presentation_time = now - current_phase + refresh_interval;
-        } else {
-            // If we are enabled VRR and more than one frame has passed, we must present immediatly.
-            if self.vrr {
-                return now;
-            }
+        if now <= last_presentation_time {
+            // Early vlank event, shift for next redraw cycle
+            now += Duration::from_nanos(refresh_interval_ns);
         }
 
-        // time_since_last_next_presentation_time_us =
-        //   next_presentation_time_us - last_presentation->next_presentation_time_us;
-        // if (time_since_last_next_presentation_time_us > 0 &&
-        //     time_since_last_next_presentation_time_us < (refresh_interval_us / 2))
-        //   {
-        //     next_presentation_time_us =
-        //       frame_clock->next_presentation_time_us + refresh_interval_us;
-        //   }
+        let since_last = now - last_presentation_time;
+        let since_last_ns =
+            since_last.as_secs() * 1_000_000_000 + u64::from(since_last.subsec_nanos());
+        let to_next_ns = (since_last_ns / refresh_interval_ns + 1) * refresh_interval_ns;
 
-        next_presentation_time
+        // If VRR is enabled and more than one frame passed since last presentation, assume that we
+        // can present immediately.
+        if self.vrr && to_next_ns > refresh_interval_ns {
+            now
+        } else {
+            last_presentation_time + Duration::from_nanos(to_next_ns)
+        }
     }
 }
