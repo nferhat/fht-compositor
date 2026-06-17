@@ -524,8 +524,10 @@ impl State {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
                 }
             } else {
-                self.fht.set_on_demand_layer_shell_focus(None);
-                self.set_keyboard_focus(None);
+                if focus.is_none() {
+                    self.fht.set_on_demand_layer_shell_focus(None);
+                    self.set_keyboard_focus(None);
+                }
             }
 
             if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {
