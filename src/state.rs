@@ -592,7 +592,10 @@ impl State {
                         },
                         size,
                         refresh,
-                        false,
+                        // NOTE: Include alpha here since we are only rendering the workspace
+                        // windows, this allows end users to show something
+                        // behind the workspaces, without resorting to a chroma key.
+                        true,
                     )
                 }
                 ScreencastSource::Window { id, .. } => {
