@@ -223,6 +223,10 @@ pub enum SimpleKeyAction {
     CenterFloatingWindow,
     FocusNextWindow,
     FocusPreviousWindow,
+    FocusWindowDown,
+    FocusWindowUp,
+    FocusWindowLeft,
+    FocusWindowRight,
     SwapWithNextWindow,
     SwapWithPreviousWindow,
     FocusNextOutput,
@@ -254,6 +258,10 @@ pub enum ComplexKeyAction {
     FocusPreviousWindow,
     SwapWithNextWindow,
     SwapWithPreviousWindow,
+    FocusWindowDown,
+    FocusWindowUp,
+    FocusWindowLeft,
+    FocusWindowRight,
     FocusNextOutput,
     FocusPreviousOutput,
     FocusNextWorkspace,
@@ -661,6 +669,8 @@ pub enum WorkspaceLayout {
     BottomStack,
     CenteredMaster,
     Floating,
+    BinaryTree,
+    SpiralTree,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
@@ -1551,12 +1561,17 @@ pub enum GestureAction {
     FocusPreviousOutput,
     FocusPreviousWindow,
     FocusPreviousWorkspace,
+    FocusWindowDown,
+    FocusWindowUp,
+    FocusWindowLeft,
+    FocusWindowRight,
     FullscreenFocusedWindow,
     SelectNextLayout,
     SelectPreviousLayout,
     SwapWithNextWindow,
     SwapWithPreviousWindow,
 }
+
 impl<'de> Deserialize<'de> for GestureAction {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1577,6 +1592,10 @@ impl<'de> Deserialize<'de> for GestureAction {
             "select-previous-layout" => Ok(GestureAction::SelectPreviousLayout),
             "swap-with-next-window" => Ok(GestureAction::SwapWithNextWindow),
             "swap-with-previous-window" => Ok(GestureAction::SwapWithPreviousWindow),
+            "focus-window-down" => Ok(GestureAction::FocusWindowDown),
+            "focus-window-up" => Ok(GestureAction::FocusWindowUp),
+            "focus-window-left" => Ok(GestureAction::FocusWindowLeft),
+            "focus-window-right" => Ok(GestureAction::FocusWindowRight),
             _ => Err(serde::de::Error::unknown_variant(
                 &s,
                 &[
@@ -1593,6 +1612,10 @@ impl<'de> Deserialize<'de> for GestureAction {
                     "select-previous-layout",
                     "swap-with-next-window",
                     "swap-with-previous-window",
+                    "focus-window-down",
+                    "focus-window-up",
+                    "focus-window-left",
+                    "focus-window-right",
                 ],
             )),
         }

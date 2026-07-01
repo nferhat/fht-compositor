@@ -14,6 +14,7 @@ use smithay::wayland::shell::xdg::SurfaceCachedState;
 
 use super::closing_tile::{ClosingTile, ClosingTileRenderElement};
 use super::tile::{Tile, TileRenderElement};
+use super::tree::Tree;
 use super::Config;
 use crate::fht_render_elements;
 use crate::input::resize_tile_grab::ResizeEdge;
@@ -399,6 +400,61 @@ impl Workspace {
             None => self.tiles.len() - 1,
             Some(idx) => idx,
         });
+        self.arrange_tiles(animate);
+        self.active_window()
+    }
+
+    /// Activate the [`Tile`] that is in the given direction in the same [`Workspace`]
+    ///
+    /// Accepts a normalized direction vector depending on the KeyActionType enum pressed
+    pub fn activate_tile_by_direction(
+        &mut self,
+        (dirvec_x, dirvec_y): (f64, f64),
+        animate: bool,
+    ) -> Option<Window> {
+        if self.tiles.len() < 2 {
+            return None;
+        }
+        self.remove_current_fullscreen();
+
+        let current_center = self.active_tile()?
+            .geometry()
+            .center();
+
+        if let Some(index) = 
+            self.tiles()
+                .enumerate()
+                .filter_map(|(index, tile)| {
+                    let center = tile.geometry().center();
+
+                    let vector_x = (center.x - current_center.x) as f64;
+                    let vector_y = (center.y - current_center.y) as f64;
+
+                    let dot = vector_x * dirvec_x + vector_y * dirvec_y;
+
+                    // Reject tiles that aren't in the correct direction.
+                    // If positive, then candidate tile is in front of our
+                    // diretion vector
+                    if dot <= 0.0 {
+                        return None;
+                    }
+
+                    let distance = (vector_x * vector_x + vector_y * vector_y).sqrt();
+                    let alignment = dot / distance;
+
+                    // strongly prefer tiles that are nearby, but in the correct direction
+                    let score = alignment / (distance * distance);
+
+                    Some((index, score))
+                })
+                .max_by(|(_, score_a), (_, score_b)| {
+                    // SAFETY: comparison is always possible
+                    score_a.partial_cmp(score_b).unwrap()
+                })
+                .map(|(index, _)| index) {
+                    self.active_tile_idx = Some(index);
+                }
+
         self.arrange_tiles(animate);
         self.active_window()
     }
@@ -861,8 +917,9 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::Floating => {
+            WorkspaceLayout::Floating | WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
                 // Just insert it, who cares really.
+                // Also handles tree-based layouts since cursor position doesn't matter
                 self.tiles.push(tile);
             }
         }
@@ -1385,6 +1442,41 @@ impl Workspace {
                     }
                 }
             }
+            WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                stack_geo.size.h -= (tiles_len - nmaster - 1) * inner_gaps;
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                let mut tree = Tree::new(
+                    self.layouts[self.active_layout_idx],
+                    stack_geo,
+                    (tiles_len - nmaster) as usize,
+                    inner_gaps,
+                );
+                tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = tree.into_leaves(0);
+
+                if (0..nmaster).contains(&(unconfigured_idx as i32)) {
+                    let tiles = tiled_proportions
+                        .get(0..nmaster as usize)
+                        .unwrap_or_default();
+                    let proportions = tiles.to_vec();
+                    let lengths = proportion_length(&proportions, master_geo.size.h);
+                    let prepared_height = lengths[unconfigured_idx] - (2 * border_width);
+                    let prepared_width = master_geo.size.w - (2 * border_width);
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                } else {
+                    let prepared_width = leaves[unconfigured_idx - nmaster as usize].size.w;
+                    let prepared_height = leaves[unconfigured_idx - nmaster as usize].size.h;
+                    unconfigured_window.request_size(Size::from((prepared_width, prepared_height)));
+                }
+            }
             WorkspaceLayout::Floating => {}
         }
     }
@@ -1644,6 +1736,52 @@ impl Workspace {
                     let geo = Rectangle::new(right_geo.loc, (right_geo.size.w, height).into());
                     tile.set_geometry(geo, animate);
                     right_geo.loc.y += height + inner_gaps;
+                }
+            }
+            WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
+                master_geo.size.h -= (nmaster - 1).max(0) * inner_gaps;
+                // we handle inner gaps for stack tiles in the BSP tree instead
+
+                if tiles_len > nmaster {
+                    stack_geo.size.w =
+                        (f64::from(master_geo.size.w - inner_gaps) * (1.0 - mwfact)).round() as i32;
+                    master_geo.size.w -= inner_gaps + stack_geo.size.w;
+                    stack_geo.loc.x = master_geo.loc.x + master_geo.size.w + inner_gaps;
+                }
+
+                let master_heights = {
+                    let tiles = tiles.get(0..nmaster as usize).unwrap_or_default();
+                    let proportions = tiles
+                        .iter()
+                        .map(|tile| tile.proportion())
+                        .collect::<Vec<_>>();
+                    proportion_length(&proportions, master_geo.size.h)
+                };
+
+                let mut tree = Tree::new(
+                    layout,
+                    stack_geo,
+                    (tiles_len - nmaster) as usize,
+                    inner_gaps,
+                );
+                tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
+                let leaves = tree.into_leaves(0);
+
+                for (idx, tile) in tiles.into_iter().enumerate() {
+                    if Some(idx) == self.fullscreened_tile_idx {
+                        continue;
+                    }
+                    if (idx as i32) < nmaster {
+                        let master_height = master_heights[idx];
+                        let geo = Rectangle::new(
+                            master_geo.loc,
+                            (master_geo.size.w, master_height).into(),
+                        );
+                        tile.set_geometry(geo, animate);
+                        master_geo.loc.y += master_height + inner_gaps;
+                    } else {
+                        tile.set_geometry(leaves[idx - nmaster as usize], animate);
+                    }
                 }
             }
             WorkspaceLayout::Floating => {}
