@@ -900,7 +900,7 @@ where
                                 fht_compositor_config::Output {
                                     disable: false,
                                     mode: pending.mode.map(|(s, rr)| {
-                                        (s.w as _, s.h as _, rr.map(|v| v.get() as _))
+                                        (s.w as _, s.h as _, rr.map(|v| v.get() as f64 / 1000.))
                                     }),
                                     position: pending.position.map(|pos| {
                                         fht_compositor_config::Position { x: pos.x, y: pos.y }
