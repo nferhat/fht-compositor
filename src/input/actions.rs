@@ -330,6 +330,67 @@ impl State {
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
+            KeyActionType::FocusWindowDown => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_tile_by_direction((0.0, 1.0), true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            KeyActionType::FocusWindowUp => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_tile_by_direction((0.0, -1.0), true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            KeyActionType::FocusWindowRight => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_tile_by_direction((1.0, 0.0), true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+            KeyActionType::FocusWindowLeft => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_tile_by_direction((-1.0, 0.0), true) {
+                    if config.general.cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window));
+                }
+            }
+>>>>>>> 550d0e5 (Window focusing based on direction)
             KeyActionType::SwapWithNextWindow => {
                 let active = self.fht.space.active_workspace_mut();
                 if active.swap_active_tile_with_next(true, true) {
