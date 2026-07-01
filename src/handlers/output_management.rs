@@ -17,7 +17,7 @@ impl OutputManagementHandler for State {
         let changed = self.fht.config.outputs != config;
         self.fht.config.outputs = config;
         self.fht.has_transient_output_changes = changed;
-        self.fht.reload_output_config();
+        self.fht.reload_output_config(false);
         // FIXME: Actually check whether the output configs have been applied.
         // This is more complicated since we need to ask the backend whether we actually applied
         // everything properly

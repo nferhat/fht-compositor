@@ -352,8 +352,10 @@ impl State {
         // If we made it up to here, the configuration must be valid
         self.fht.config = config;
 
+        dbg!(old_config.outputs != self.fht.config.outputs);
+        dbg!(self.fht.has_transient_output_changes);
         if old_config.outputs != self.fht.config.outputs || self.fht.has_transient_output_changes {
-            self.fht.reload_output_config();
+            self.fht.reload_output_config(true);
         }
 
         // These devices are just handles, so cleaning the devices vector and adding them all
@@ -1183,7 +1185,7 @@ impl Fht {
         self.queue_redraw(output);
     }
 
-    pub fn reload_output_config(&mut self) {
+    pub fn reload_output_config(&mut self, force: bool) {
         // We only care about the outputs that have associated configuration
         //
         // NOTE: Maybe we should 'undo' the configuration of outputs that had a configuration set
@@ -1208,9 +1210,11 @@ impl Fht {
         }
 
         // If we had previous output changes, we force re-apply all config.
-        let force = self.has_transient_output_changes;
         let outputs = self.space.outputs().cloned().collect::<Vec<_>>();
         outputs.iter().for_each(|o| self.output_resized(o));
+        // has_transient_output_changes is true only if we touched an output with wlr-output-mgmt
+        // that exists.
+        let force = force || self.has_transient_output_changes;
         self.loop_handle.insert_idle(move |state| {
             // Apply the config then re-arrange, since the outputs' sizes might
             // have changed, we could have created overlap.
