@@ -225,8 +225,6 @@ impl State {
         );
         // After motion, try to activate new pointer constraint under surface
         self.fht.activate_pointer_constraint();
-
-        pointer.frame(self);
     }
 }
 
