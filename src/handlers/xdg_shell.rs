@@ -1,3 +1,5 @@
+use std::convert::identity;
+
 use fht_compositor_config::DecorationMode;
 use smithay::delegate_xdg_shell;
 use smithay::desktop::{
@@ -16,7 +18,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::protocol::{wl_output, wl_seat};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Rectangle, Serial};
+use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
 };
@@ -31,7 +33,7 @@ use crate::focus::KeyboardFocus;
 use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::input::swap_tile_grab::SwapTileGrab;
 use crate::output::OutputExt;
-use crate::space::{Workspace, WorkspaceId};
+use crate::space::Workspace;
 use crate::state::{Fht, ResolvedWindowRules, State, UnmappedWindow};
 use crate::utils::RectCenterExt as _;
 use crate::window::Window;
@@ -47,7 +49,7 @@ impl XdgShellHandler for State {
         if let Some(_) = self
             .fht
             .unmapped_windows
-            .insert(surface.clone(), UnmappedWindow::Unconfigured(window))
+            .insert(surface.clone(), UnmappedWindow::new(window))
         {
             warn!(id = %surface.id(), "Surface opened toplevel twice");
         }
@@ -242,23 +244,52 @@ impl XdgShellHandler for State {
                 state.capabilities.contains(WmCapabilities::Maximize)
             })
         });
-        if can_maximize {
-            let wl_surface = toplevel.wl_surface();
-            if let Some(window) = self.fht.space.find_window(wl_surface) {
-                if self.fht.space.maximize_window(
-                    &window,
-                    true,
-                    !self.fht.config.animations.disable,
-                ) {
-                    window.request_maximized(true);
-                }
-            }
+
+        let wl_surface = toplevel.wl_surface();
+        if !can_maximize {
+            trace!(id = %wl_surface.id(), "Received maximize_request for a toplevel that can't maximize");
+            toplevel.send_configure();
+            return;
         }
 
-        toplevel.send_configure();
+        if let Some(unmapped_window) = self.fht.unmapped_windows.get_mut(toplevel.wl_surface()) {
+            match unmapped_window {
+                UnmappedWindow::Unconfigured { is_maximized, .. } => *is_maximized = true,
+                UnmappedWindow::Configured { window, .. } => window.request_maximized(true),
+            }
+
+            toplevel.send_configure();
+            return;
+        }
+
+        let wl_surface = toplevel.wl_surface();
+        if let Some(window) = self.fht.space.find_window(wl_surface) {
+            if self
+                .fht
+                .space
+                .maximize_window(&window, true, !self.fht.config.animations.disable)
+            {
+                window.request_maximized(true);
+            }
+
+            toplevel.send_configure();
+            return;
+        }
+
+        trace!(id = %toplevel.wl_surface().id(), "Received maximize_request on a non-existent toplevel");
     }
 
     fn unmaximize_request(&mut self, toplevel: ToplevelSurface) {
+        if let Some(unmapped_window) = self.fht.unmapped_windows.get_mut(toplevel.wl_surface()) {
+            match unmapped_window {
+                UnmappedWindow::Unconfigured { is_maximized, .. } => *is_maximized = false,
+                UnmappedWindow::Configured { window, .. } => window.request_maximized(false),
+            }
+
+            toplevel.send_configure();
+            return;
+        }
+
         if let Some((window, ws)) = self
             .fht
             .space
@@ -266,9 +297,11 @@ impl XdgShellHandler for State {
         {
             window.request_maximized(false);
             ws.arrange_tiles(true);
+            toplevel.send_configure();
+            return;
         }
 
-        toplevel.send_configure();
+        trace!(id = %toplevel.wl_surface().id(), "Received unmaximize_request on a non-existent toplevel");
     }
 
     fn fullscreen_request(
@@ -282,35 +315,92 @@ impl XdgShellHandler for State {
             })
         });
 
-        if can_fullscreen {
-            let wl_surface = toplevel.wl_surface();
-            if let Some(window) = self.fht.space.find_window(wl_surface) {
-                if let Some(requested) = wl_output.as_ref().and_then(Output::from_resource) {
-                    self.fht
-                        .space
-                        .move_window_to_output(&window, &requested, true);
-                }
+        let wl_surface = toplevel.wl_surface();
+        if !can_fullscreen {
+            trace!(id = %wl_surface.id(), "Received fullscreen_request for a toplevel that can't fullscreen");
+            toplevel.send_configure();
+            return;
+        }
 
-                window.request_fullscreen(true);
-                if !self.fht.space.fullscreen_window(&window, true) {
-                    window.request_fullscreen(false);
+        let requested_output = wl_output.as_ref().and_then(Output::from_resource);
+
+        if let Some(unmapped_window) = self.fht.unmapped_windows.get_mut(toplevel.wl_surface()) {
+            match unmapped_window {
+                UnmappedWindow::Unconfigured {
+                    is_fullscreen,
+                    fullscreen_output,
+                    ..
+                } => {
+                    *is_fullscreen = true;
+                    *fullscreen_output = requested_output;
+                }
+                UnmappedWindow::Configured {
+                    window,
+                    workspace_id,
+                    ..
+                } => {
+                    window.request_fullscreen(true);
+                    // Make it fullscreen on the active workspace on the requested output
+                    if let Some(output) = requested_output {
+                        if let Some(mon) = self.fht.space.monitor_for_output(&output) {
+                            *workspace_id = mon.active_workspace().id();
+                        }
+                    }
                 }
             }
+
+            unmapped_window.window().send_configure();
+            return;
         }
 
-        toplevel.send_configure();
+        if let Some(window) = self.fht.space.find_window(wl_surface) {
+            if let Some(requested) = wl_output.as_ref().and_then(Output::from_resource) {
+                self.fht
+                    .space
+                    .move_window_to_output(&window, &requested, true);
+            }
+
+            window.request_fullscreen(true);
+            if !self.fht.space.fullscreen_window(&window, true) {
+                window.request_fullscreen(false);
+            }
+
+            window.send_configure();
+            return;
+        }
+
+        trace!(id = %wl_surface.id(), "Received fullscreen_request on a non-existent toplevel");
     }
 
-    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
-            // NOTE: Workspaces take care of unfullscreening and arranging
-            window.request_fullscreen(false);
+    fn unfullscreen_request(&mut self, toplevel: ToplevelSurface) {
+        if let Some(unmapped_window) = self.fht.unmapped_windows.get_mut(toplevel.wl_surface()) {
+            match unmapped_window {
+                UnmappedWindow::Unconfigured {
+                    is_fullscreen,
+                    fullscreen_output,
+                    ..
+                } => {
+                    *is_fullscreen = false;
+                    let _ = fullscreen_output.take();
+                }
+                UnmappedWindow::Configured { window, .. } => window.request_fullscreen(false),
+            }
+
+            toplevel.send_configure();
+            return;
         }
 
-        surface.send_configure();
+        if let Some(window) = self.fht.space.find_window(toplevel.wl_surface()) {
+            // NOTE: Workspaces take care of unfullscreening and arranging
+            window.request_fullscreen(false);
+            toplevel.send_configure();
+        }
+
+        trace!(id = %toplevel.wl_surface().id(), "Received unfullscreen_request on a non-existent toplevel");
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
+        // NOTE: We don't advertise unmapped/unconfigured windows in foreign-toplevel
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
             self.fht.send_foreign_window_details(&window);
             self.fht.resolve_rules_for_window(&window);
@@ -318,6 +408,7 @@ impl XdgShellHandler for State {
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        // NOTE: We don't advertise unmapped/unconfigured windows in foreign-toplevel
         if let Some(window) = self.fht.space.find_window(surface.wl_surface()) {
             self.fht.send_foreign_window_details(&window);
             self.fht.resolve_rules_for_window(&window);
@@ -484,13 +575,26 @@ impl Fht {
         });
     }
 
-    pub fn queue_initial_configure(&self, surface: WlSurface, window: Window) {
+    pub fn queue_initial_configure(&self, surface: WlSurface, window: UnmappedWindow) {
         self.loop_handle.insert_idle(move |state| {
             state.fht.send_initial_configure(surface, window);
         });
     }
 
-    fn send_initial_configure(&mut self, surface: WlSurface, window: Window) {
+    fn send_initial_configure(&mut self, surface: WlSurface, window: UnmappedWindow) {
+        let UnmappedWindow::Unconfigured {
+            window,
+            is_maximized,
+            is_modal,
+            is_fullscreen,
+            ..
+        } = window
+        else {
+            warn!("Tried to send initial configure twice");
+            self.unmapped_windows.insert(surface, window);
+            return;
+        };
+
         let window_id = window.id();
         trace!(?window_id, "Preparing unconfigured window");
         window.on_commit();
@@ -563,25 +667,26 @@ impl Fht {
         let open_floating = if let Some(open_floating) = rules.floating {
             open_floating
         } else {
-            should_open_window_floating(&window)
+            // Modal state is handled separately here.
+            should_open_window_floating(&window) || is_modal
         };
+
+        // We need to handle for the XDG shell requests the window made while its unmapped.
+        let fullscreen = rules.fullscreen.is_some_and(identity) || is_fullscreen;
+        let maximized = rules.maximized.is_some_and(identity) || is_maximized;
 
         window.toplevel().with_pending_state(|pending| {
             pending.decoration_mode = decoration_mode;
-            if let Some(fullscreen) = rules.fullscreen {
-                if fullscreen {
-                    pending.states.set(ToplevelState::Fullscreen);
-                } else {
-                    pending.states.unset(ToplevelState::Fullscreen);
-                }
+            if fullscreen {
+                pending.states.set(ToplevelState::Fullscreen);
+            } else {
+                pending.states.unset(ToplevelState::Fullscreen);
             }
 
-            if let Some(maximized) = rules.maximized {
-                if maximized {
-                    pending.states.set(ToplevelState::Maximized);
-                } else {
-                    pending.states.unset(ToplevelState::Maximized);
-                }
+            if maximized {
+                pending.states.set(ToplevelState::Maximized);
+            } else {
+                pending.states.unset(ToplevelState::Maximized);
             }
 
             if !open_floating {
@@ -622,20 +727,29 @@ impl Fht {
                 window,
                 workspace_id: open_on_workspace,
                 opening_location,
+                is_modal,
             },
         );
     }
 
-    /// Maps the given [`Window`]. Returns the [`Output`] on which it gets mapped.
-    pub fn map_window(
-        &mut self,
-        window: Window,
-        workspace_id: WorkspaceId,
-        opening_location: Option<Point<i32, Logical>>,
-    ) -> Output {
+    /// Maps the given [`UnmappedWindow`]. Returns the [`Output`] on which it gets mapped.
+    pub fn map_window(&mut self, window: UnmappedWindow) -> Option<Output> {
+        let UnmappedWindow::Configured {
+            window,
+            workspace_id,
+            is_modal,
+            opening_location,
+        } = window
+        else {
+            warn!("Tried to send initial configure twice");
+            self.unmapped_windows
+                .insert(window.window().wl_surface().clone(), window);
+            return None;
+        };
+
         // Do another check again just in-case the window decided to change
         // its mind for absolutely no reason. (which happens)
-        let is_floating = !window.tiled();
+        let is_floating = !window.tiled() || is_modal;
         let opening_location = opening_location.filter(|_| is_floating);
 
         self.advertise_new_foreign_window(&window);
@@ -672,7 +786,7 @@ impl Fht {
             });
         }
 
-        output
+        Some(output)
     }
 }
 

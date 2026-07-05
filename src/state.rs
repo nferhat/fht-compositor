@@ -2138,22 +2138,46 @@ impl ClientData for ClientState {
 // We track ourselves window configure state since some clients may set initial_configure_sent to
 // true even if its NOT (example: electron + ozone wayland)
 pub enum UnmappedWindow {
-    Unconfigured(Window),
+    Unconfigured {
+        window: Window,
+        is_maximized: bool,
+
+        /// Modals like dialogs should always be opened floating.
+        is_modal: bool,
+
+        is_fullscreen: bool,
+        /// If the window request a specific output to be fullscreened on.
+        /// If `None`, use active/focused monitor.
+        fullscreen_output: Option<Output>,
+    },
     Configured {
         // A big different between an unconfigured and configured unmapped window is that the
         // configured window will have a resolved set of window rules.
         window: Window,
         workspace_id: WorkspaceId,
+        // Modals for opening centered.
+        is_modal: bool,
         /// Where to open the window, if its floating.
         opening_location: Option<Point<i32, Logical>>,
+        // NOTE: while fullscreen_output isn't tracked, it's reflected in the workspace_id that the
+        // window will open on.
     },
 }
 
 impl UnmappedWindow {
+    pub fn new(window: Window) -> Self {
+        Self::Unconfigured {
+            window,
+            is_maximized: false,
+            is_modal: false,
+            is_fullscreen: false,
+            fullscreen_output: None,
+        }
+    }
+
     pub fn window(&self) -> &Window {
         match self {
-            Self::Unconfigured(window) => window,
-            Self::Configured { window, .. } => window,
+            Self::Unconfigured { window, .. } | Self::Configured { window, .. } => window,
         }
     }
 }

@@ -107,11 +107,9 @@ impl CompositorHandler for State {
         if surface == &root_surface {
             // Maybe it's an unmapped window.
             if let Entry::Occupied(entry) = self.fht.unmapped_windows.entry(surface.clone()) {
-                if matches!(entry.get(), UnmappedWindow::Unconfigured(_)) {
-                    let UnmappedWindow::Unconfigured(window) = entry.remove() else {
-                        unreachable!()
-                    };
-                    self.fht.queue_initial_configure(surface.clone(), window);
+                if matches!(entry.get(), UnmappedWindow::Unconfigured { .. }) {
+                    let unmapped = entry.remove();
+                    self.fht.queue_initial_configure(surface.clone(), unmapped);
                     return; // nothing happening yet!
                 } else {
                     if !has_render_buffer(surface) {
@@ -122,17 +120,10 @@ impl CompositorHandler for State {
                         return;
                     }
 
-                    let UnmappedWindow::Configured {
-                        window,
-                        workspace_id,
-                        opening_location,
-                    } = entry.remove()
-                    else {
-                        unreachable!()
-                    };
-
-                    let output = self.fht.map_window(window, workspace_id, opening_location);
-                    self.fht.queue_redraw(&output);
+                    let unmapped = entry.remove();
+                    if let Some(output) = self.fht.map_window(unmapped) {
+                        self.fht.queue_redraw(&output);
+                    }
                     return;
                 }
             }
@@ -164,7 +155,7 @@ impl CompositorHandler for State {
                     // sequence again to set its render buffers and toplevel surface again.
                     self.fht
                         .unmapped_windows
-                        .insert(surface.clone(), UnmappedWindow::Unconfigured(window));
+                        .insert(surface.clone(), UnmappedWindow::new(window));
                 }
 
                 self.fht.queue_redraw(&output);

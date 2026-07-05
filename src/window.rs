@@ -582,10 +582,6 @@ impl Window {
 // shut up.
 #[cfg(feature = "xdg-screencast-portal")]
 mod weak {
-    use smithay::desktop::utils::bbox_from_surface_tree;
-    use smithay::desktop::PopupManager;
-    use smithay::utils::Rectangle;
-
     #[derive(Clone, Debug)]
     pub struct WeakWindow {
         inner: std::sync::Weak<super::WindowInner>,
