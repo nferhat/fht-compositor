@@ -427,10 +427,8 @@ impl State {
         }
         pointer_location = new_pos;
 
-        let new_under = self
-            .fht
-            .get_pointer_focus(pointer_location)
-            .and_then(|focus| focus.surface);
+        let focus = self.fht.get_pointer_focus(pointer_location);
+        let under = focus.as_ref().and_then(|u| u.surface.clone());
         let maybe_new_output = self
             .fht
             .space
@@ -444,11 +442,7 @@ impl State {
         // Confine pointer if possible.
         if confine_region.is_some() {
             if let Some((ft, loc)) = &under {
-                if new_under
-                    .as_ref()
-                    .and_then(|(new_ft, _)| new_ft.wl_surface())
-                    != ft.wl_surface()
-                {
+                if under.as_ref().and_then(|(new_ft, _)| new_ft.wl_surface()) != ft.wl_surface() {
                     pointer.frame(self);
                     return;
                 }
@@ -472,6 +466,7 @@ impl State {
         );
         pointer.frame(self);
 
+        self.handle_focus_follows_mouse(focus.as_ref());
         // Try to activate new pointer constraint, if any.
         self.fht.activate_pointer_constraint();
     }
@@ -486,14 +481,11 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.fht.pointer.clone();
-        let under = self
-            .fht
-            .get_pointer_focus(pointer_location)
-            .and_then(|focus| focus.surface);
+        let under = self.fht.get_pointer_focus(pointer_location);
 
         pointer.motion(
             self,
-            under,
+            under.as_ref().and_then(|u| u.surface.clone()),
             &MotionEvent {
                 location: pointer_location,
                 serial,
@@ -502,6 +494,7 @@ impl State {
         );
         pointer.frame(self);
 
+        self.handle_focus_follows_mouse(under.as_ref());
         // Try to activate new pointer constraint, if any.
         self.fht.activate_pointer_constraint();
     }
