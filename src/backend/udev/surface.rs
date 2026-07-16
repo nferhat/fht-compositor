@@ -199,7 +199,7 @@ impl Surface {
         output_elements: &OutputElementsResult<super::UdevRenderer<'render>>,
         // NOTE: This is only used when handling screencasting
         #[allow(unused)] target_presentation_time: Duration,
-        frame_mode: FrameFlags,
+        frame_flags: FrameFlags,
         fht: &mut Fht,
     ) -> Result<bool, SwapBuffersError> {
         let res = self
@@ -208,7 +208,7 @@ impl Surface {
                 renderer,
                 &output_elements.elements,
                 [0.1, 0.1, 0.1, 1.0],
-                frame_mode,
+                frame_flags,
             )
             .map_err(|err| -> SwapBuffersError {
                 match err {

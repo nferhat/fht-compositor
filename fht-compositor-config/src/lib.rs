@@ -1446,11 +1446,8 @@ fn default_disable_10bit() -> bool {
         .unwrap_or(false)
 }
 
-fn default_disable_overlay_planes() -> bool {
-    std::env::var("FHTC_DISABLE_OVERLAY_PLANES")
-        .ok()
-        .and_then(|str| str.parse::<bool>().ok())
-        .unwrap_or(false)
+const fn default_disable_overlay_planes() -> bool {
+    true
 }
 
 fn default_render_node() -> Option<std::path::PathBuf> {
@@ -1464,26 +1461,31 @@ fn default_render_node() -> Option<std::path::PathBuf> {
 pub struct Debug {
     #[serde(default = "default_disable_10bit")]
     pub disable_10bit: bool,
-    #[serde(default = "default_disable_overlay_planes")]
-    pub disable_overlay_planes: bool,
     #[serde(default = "default_render_node")]
     pub render_node: Option<std::path::PathBuf>,
     pub draw_damage: bool,
     pub draw_opaque_regions: bool,
     pub debug_overlay: bool,
-    pub tile_debug_overlay: bool,
+
+    // Multiple flags to limit scanout.
+    // This can help on some nvidia gpus or some display configurations.
+    #[serde(default = "default_disable_overlay_planes")]
+    pub disable_overlay_planes: bool,
+    pub disable_primary_plane: bool,
+    pub disable_cursor_plane: bool,
 }
 
 impl Default for Debug {
     fn default() -> Self {
         Self {
             disable_10bit: default_disable_10bit(),
-            disable_overlay_planes: default_disable_overlay_planes(),
             render_node: default_render_node(),
             draw_damage: false,
             draw_opaque_regions: false,
             debug_overlay: false,
-            tile_debug_overlay: false,
+            disable_overlay_planes: default_disable_overlay_planes(),
+            disable_primary_plane: false,
+            disable_cursor_plane: false,
         }
     }
 }

@@ -610,9 +610,10 @@ impl UdevData {
 
         let mut renderer = renderer.context("Failed to get surface renderer")?;
         let mut output_elements_result = fht.output_elements(&mut renderer, output);
+        let debug_config = &fht.config.debug;
 
         // To render damage we just use solid color elements,
-        if fht.config.debug.draw_damage {
+        if debug_config.draw_damage {
             let state = fht.output_state.get_mut(output).unwrap();
             draw_damage(
                 output,
@@ -621,17 +622,34 @@ impl UdevData {
             );
         }
 
-        if fht.config.debug.draw_opaque_regions {
+        if debug_config.draw_opaque_regions {
             let scale = output.current_scale().integer_scale() as f64;
             draw_opaque_regions(&mut output_elements_result.elements, scale.into());
         }
 
         // Renderand check for damage.
+        let frame_flags = {
+            // Default in smithay allows primary/overlay and cursor plane.
+            let mut flags = FrameFlags::DEFAULT;
+            if debug_config.disable_primary_plane {
+                flags.remove(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY);
+                flags.remove(FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT);
+            }
+            if debug_config.disable_overlay_planes {
+                flags.remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+            }
+            if debug_config.disable_cursor_plane {
+                flags.remove(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT);
+            }
+
+            flags
+        };
+
         let res = surface.render(
             &mut renderer,
             &output_elements_result,
             target_presentation_time,
-            FrameFlags::DEFAULT,
+            frame_flags,
             fht,
         );
 
