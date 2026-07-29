@@ -230,7 +230,7 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     // implemented now. For now we only support systemd, but keep this in the back of our head
     // for the future.
     if cli.session {
-        let vars = [
+        let mut vars = vec![
             "WAYLAND_DISPLAY",
             "XDG_CURRENT_DESKTOP",
             "XDG_SESSION_TYPE",
@@ -238,6 +238,10 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
             "FHTC_SOCKET_PATH",
             "_JAVA_AWT_NONREPARENTING",
         ];
+        // Also include user environment variables.
+        vars.reserve_exact(state.fht.config.env.len());
+        vars.extend(state.fht.config.env.keys().map(|s| AsRef::<str>::as_ref(s)));
+
         let vars_str = vars.join(" ");
 
         let system_manager_cmd = if cfg!(feature = "systemd") {
