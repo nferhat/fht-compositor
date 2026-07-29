@@ -1076,6 +1076,37 @@ impl State {
                     .space
                     .move_window_to_workspace(&window, workspace_id, true);
             }
+            fht_compositor_ipc::Action::SendWindowToOutput {
+                window_id,
+                output_name,
+            } => {
+                let window = match window_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .windows()
+                        .find(|window| window.id() == id)
+                        .cloned()
+                        .context("No window with matching ID")?,
+                    None => {
+                        if let Some(tile) = self.fht.space.active_window() {
+                            tile
+                        } else {
+                            // If there's no active window, we just silently return
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let output = self
+                    .fht
+                    .space
+                    .outputs()
+                    .find(|o| o.name() == output_name)
+                    .cloned()
+                    .context("no output with given name!")?;
+                self.fht.space.move_window_to_output(&window, &output, true);
+            }
         }
 
         Ok(())

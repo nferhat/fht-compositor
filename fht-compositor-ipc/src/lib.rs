@@ -634,6 +634,17 @@ pub enum Action {
         #[serde(rename = "workspace-id")]
         workspace_id: usize,
     },
+    /// Send a [`Window`] to an [`Output`].
+    SendWindowToOutput {
+        /// The [`Window::id`] to resize. Leave as `None` for the focused one.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
+        window_id: Option<usize>,
+        /// The [`Output`] name to send the window to.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "output")]
+        output_name: String,
+    },
 }
 
 /// A window location change.
