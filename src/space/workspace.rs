@@ -123,6 +123,8 @@ pub struct Workspace {
     /// - `gaps.0`: outer gaps, around the screen edge.
     /// - `gaps.1`: inner gaps, between [`Tile`]s
     gaps: (i32, i32),
+    /// The cached work area of this workspace. Calculated from the gaps and layer-shells.
+    work_area: Rectangle<i32, Logical>,
 
     /// Whether this [`Workspace`] has transient layout changes.
     ///
@@ -160,6 +162,7 @@ pub struct Workspace {
 impl Workspace {
     /// Create a new [`Workspace`] on this [`Output`].
     pub fn new(output: Output, index: usize, config: &Rc<Config>) -> Self {
+        let work_area = calculate_work_area(&output, config.gaps.0);
         Self {
             id: WorkspaceId::unique(),
             index,
@@ -173,6 +176,7 @@ impl Workspace {
             mwfact: config.mwfact,
             nmaster: config.nmaster,
             gaps: config.gaps,
+            work_area,
             has_transient_layout_changes: false,
             render_offset_animation: None,
             fullscreen_fade_animation: None,
@@ -237,8 +241,10 @@ impl Workspace {
         self.layouts = config.layouts.clone();
         self.active_layout_idx = self.active_layout_idx.clamp(0, self.layouts.len() - 1);
 
-        // Gaps are purely visual, they should do not affect the layout much...
-        self.gaps = config.gaps;
+        if self.gaps != config.gaps {
+            self.has_transient_layout_changes = true;
+            self.gaps = config.gaps;
+        }
 
         if !self.has_transient_layout_changes {
             self.mwfact = config.mwfact;
@@ -1145,8 +1151,8 @@ impl Workspace {
             return;
         }
 
-        let (outer_gaps, inner_gaps) = self.gaps;
-        let work_area = calculate_work_area(&self.output, outer_gaps);
+        let (_, inner_gaps) = self.gaps;
+        let work_area = self.work_area;
 
         if self.tiles.is_empty() || unconfigured_window.maximized() {
             let maximized_size = Size::<_, Logical>::from((
@@ -1409,7 +1415,7 @@ impl Workspace {
             return;
         }
 
-        let (outer_gaps, inner_gaps) = self.gaps;
+        let (_, inner_gaps) = self.gaps;
 
         // We distinguish between tiled, maximized, and floating since a floating tile can be
         // maximized.
@@ -1434,7 +1440,7 @@ impl Workspace {
             // We do not want to affect the fullscreened tile
             .filter(|tile| tile.window().tiled() && !tile.window().fullscreen())
             .partition::<Vec<_>, _>(|tile| tile.window().maximized());
-        let work_area = calculate_work_area(&self.output, outer_gaps);
+        let work_area = self.work_area;
 
         for tile in maximized {
             // Maximized tiles get all the work area, while the tiled abide to layout algo.
@@ -1647,6 +1653,18 @@ impl Workspace {
                 }
             }
             WorkspaceLayout::Floating => {}
+        }
+    }
+
+    /// Update the work area of this [`Workspace`]
+    ///
+    /// Recomputes the work area (IE the area used for tiling), and checks if it has changed. If it
+    /// did, re-arrange the workspace tiles.
+    pub fn update_work_area(&mut self, animate: bool) {
+        let work_area = calculate_work_area(&self.output, self.gaps.0);
+        if self.work_area != work_area {
+            self.work_area = work_area;
+            self.arrange_tiles(animate);
         }
     }
 

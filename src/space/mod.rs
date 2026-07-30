@@ -299,7 +299,7 @@ impl Space {
         };
 
         for workspace in monitor.workspaces_mut() {
-            workspace.arrange_tiles(animate);
+            workspace.update_work_area(animate);
             workspace.refresh();
         }
     }
