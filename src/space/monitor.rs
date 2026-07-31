@@ -47,13 +47,6 @@ pub struct Monitor {
     pub swipe_state: Option<MonitorSwipeState>,
 }
 
-pub struct MonitorRenderResult<R: FhtRenderer> {
-    /// The elements rendered from this result.
-    pub elements: Vec<MonitorRenderElement<R>>,
-    /// The elements to be rendered above the top layer.
-    pub elements_above_top: Vec<MonitorRenderElement<R>>,
-}
-
 fht_render_elements! {
     MonitorRenderElement<R> => {
         Workspace = WorkspaceRenderElement<R>,
@@ -439,55 +432,48 @@ impl Monitor {
         }
     }
 
-    /// Create the render elements for this [`Monitor`]
-    pub fn render<R: FhtRenderer>(&self, renderer: &mut R, scale: i32) -> MonitorRenderResult<R> {
+    /// Push render elements for this [`Monitor`] that should be drawn below top layer shells,
+    /// controlled using the `above_top` flag.
+    pub fn render<R: FhtRenderer>(
+        &self,
+        renderer: &mut R,
+        scale: i32,
+        // Whether we should only render elements that go above [`Layer::Top`] layer-shells.
+        above_top: bool,
+        push: &mut dyn FnMut(MonitorRenderElement<R>),
+    ) {
         crate::profile_function!();
-        let mut elements = vec![];
-        let mut elements_above_top = vec![];
 
         // If a swipe gesture is in progress, render accordingly
         if let Some(swipe_state) = &self.swipe_state {
-            return self.render_with_swipe(renderer, scale, swipe_state);
+            return self.render_with_swipe(renderer, scale, swipe_state, above_top, push);
         }
 
         // Normal behavior: render workspaces with their animations
         for (idx, workspace) in self.workspaces.iter().enumerate() {
             if idx == self.active_idx || workspace.render_offset().is_some() {
                 let render_above_top = workspace.fullscreened_tile_idx().is_some();
-                let elements = if render_above_top {
-                    &mut elements_above_top
-                } else {
-                    &mut elements
-                };
+                if render_above_top != above_top {
+                    continue; // nope, we don't want this.
+                }
 
                 let render_offset = workspace.render_offset();
-                let ws_elements = workspace
-                    .render(renderer, scale, None)
-                    .into_iter()
-                    .map(Into::into);
-
                 if let Some(render_offset) = render_offset {
                     let render_offset = render_offset.to_physical(scale);
-                    elements.extend(
-                        ws_elements
-                            .map(|e| {
-                                RelocateRenderElement::from_element(
-                                    e,
-                                    render_offset,
-                                    Relocate::Relative,
-                                )
-                            })
-                            .map(Into::into),
-                    )
+                    workspace.render(renderer, scale, &mut |elem| {
+                        let relocated = RelocateRenderElement::from_element(
+                            elem,
+                            render_offset,
+                            Relocate::Relative,
+                        );
+                        push(MonitorRenderElement::SwitchingWorkspace(relocated))
+                    });
                 } else {
-                    elements.extend(ws_elements.map(Into::into))
+                    workspace.render(renderer, scale, &mut |elem| {
+                        push(MonitorRenderElement::Workspace(elem))
+                    });
                 }
             }
-        }
-
-        MonitorRenderResult {
-            elements,
-            elements_above_top,
         }
     }
 
@@ -497,10 +483,9 @@ impl Monitor {
         renderer: &mut R,
         scale: i32,
         swipe_state: &MonitorSwipeState,
-    ) -> MonitorRenderResult<R> {
-        let mut elements = vec![];
-        let mut elements_above_top = vec![];
-
+        above_top: bool,
+        push: &mut dyn FnMut(MonitorRenderElement<R>),
+    ) {
         let output_size = self.output.geometry().size;
 
         // Calculate the offset of the current workspace based on the swipe progress
@@ -514,30 +499,20 @@ impl Monitor {
         };
 
         // Render the current workspace with its offset
-        let current_ws_elements = self.workspaces[self.active_idx]
-            .render(renderer, scale, Some(current_offset))
-            .into_iter();
-
-        let current_offset_physical = current_offset.to_physical(scale);
-        let current_ws_elements = current_ws_elements
-            .map(|e| {
-                RelocateRenderElement::from_element(
+        let active_ws = &self.workspaces[self.active_idx];
+        if active_ws.fullscreened_tile_idx().is_some() == above_top {
+            let current_offset_physical = current_offset.to_physical(scale);
+            active_ws.render(renderer, scale, &mut |e| {
+                let relocate = RelocateRenderElement::from_element(
                     e.into(),
                     current_offset_physical,
                     Relocate::Relative,
-                )
-            })
-            .map(Into::into);
-        if self.workspaces[self.active_idx]
-            .fullscreened_tile_idx()
-            .is_some()
-        {
-            elements_above_top.extend(current_ws_elements);
-        } else {
-            elements.extend(current_ws_elements);
+                );
+                push(MonitorRenderElement::SwitchingWorkspace(relocate))
+            });
         }
 
-        // DDetermine which adjacent workspace to render
+        // Determine which adjacent workspace to render
         let (adjacent_idx, adjacent_base_offset) = match swipe_state.direction {
             Some(GestureDirection::Left) | Some(GestureDirection::Up) => {
                 // Swipe vers la gauche/haut = workspace suivant
@@ -576,31 +551,21 @@ impl Monitor {
 
         // Render the adjacent workspace if it exists
         if let Some(idx) = adjacent_idx {
-            let adjacent_offset = adjacent_base_offset + current_offset;
-            let adjacent_ws_elements = self.workspaces[idx]
-                .render(renderer, scale, Some(adjacent_offset))
-                .into_iter();
-
-            let adjacent_offset_physical = adjacent_offset.to_physical(scale);
-            let adjacent_ws_elements = adjacent_ws_elements
-                .map(|e| {
-                    RelocateRenderElement::from_element(
-                        e.into(),
-                        adjacent_offset_physical,
-                        Relocate::Relative,
-                    )
-                })
-                .map(Into::into);
-            if self.workspaces[idx].fullscreened_tile_idx().is_some() {
-                elements_above_top.extend(adjacent_ws_elements);
-            } else {
-                elements.extend(adjacent_ws_elements);
+            let adjacent_ws = &self.workspaces[idx];
+            if adjacent_ws.fullscreened_tile_idx().is_some() != above_top {
+                return;
             }
-        }
 
-        MonitorRenderResult {
-            elements,
-            elements_above_top,
+            let adjacent_offset = adjacent_base_offset + current_offset;
+            let adjacent_offset_physical = adjacent_offset.to_physical(scale);
+            adjacent_ws.render(renderer, scale, &mut |e| {
+                let relocate = RelocateRenderElement::from_element(
+                    e.into(),
+                    adjacent_offset_physical,
+                    Relocate::Relative,
+                );
+                push(MonitorRenderElement::SwitchingWorkspace(relocate));
+            });
         }
     }
 }
