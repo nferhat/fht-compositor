@@ -99,7 +99,6 @@ impl State {
             map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .is_some()
         }) {
-            layer_output = Some(output.clone());
             let initial_configure_sent = with_states(surface, |states| {
                 states
                     .data_map
@@ -112,9 +111,9 @@ impl State {
 
             let mut map = layer_map_for_output(output);
 
-            // arrange the layers before sending the initial configure
-            // to respect any size the client may have sent
-            map.arrange();
+            let changed = map.arrange();
+            layer_output = Some((output.clone(), changed));
+
             let layer = map
                 .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .unwrap();
@@ -133,12 +132,13 @@ impl State {
             let mapped_layer = state.mapped_layer_surfaces.get_mut(layer).unwrap();
             mapped_layer.refresh(&state.config, layer_geo);
         }
-        if let Some(output) = layer_output.as_ref() {
-            // fighting rust's borrow checker episode 32918731287
-            state.output_resized(output);
+        if let Some((output, changed)) = layer_output.as_ref() {
+            if *changed {
+                state.space.output_resized(output, true);
+            }
         }
 
-        layer_output
+        layer_output.map(|(o, _)| o)
     }
 }
 
