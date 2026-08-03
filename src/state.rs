@@ -70,6 +70,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use crate::backend::Backend;
 use crate::config::ui as config_ui;
 use crate::cursor::CursorThemeManager;
+use crate::focus::PointerFocus;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::input::KeyAction;
@@ -729,6 +730,9 @@ pub struct Fht {
     // on the layer surface. Then, when we update the keyboard focus, we check against the clicked
     // layer surface
     pub focused_on_demand_layer_shell: Option<LayerSurface>,
+    // Pointer focus. This isn't really up to-date (you should use fht.get_pointer_focus if you need
+    // accurate results). This is cached to not spam pointer motion events.
+    pub pointer_focus: Option<PointerFocus>,
 
     pub devices: Vec<input::Device>,
 
@@ -968,6 +972,7 @@ impl Fht {
             mapped_layer_surfaces: HashMap::new(),
             lock_state: LockState::Unlocked,
             focused_on_demand_layer_shell: None,
+            pointer_focus: None,
 
             dnd_icon: None,
             cursor_theme_manager,

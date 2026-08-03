@@ -53,7 +53,7 @@ impl KeyboardFocus {
 }
 
 /// Calculated contents that are below the pointer. Calculated using [`Fht::get_pointer_focus`].
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PointerFocus {
     /// The output that contains the pointer.
     pub output: Output,
@@ -210,8 +210,13 @@ impl State {
         // encountered, we send a motion and frame event to the new one.
         let pointer = self.fht.pointer.clone();
         let pointer_loc = pointer.current_location();
-        let Some(focus) = self.fht.get_pointer_focus(pointer_loc) else {
+        let focus = self.fht.get_pointer_focus(pointer_loc);
+        if self.fht.pointer_focus != focus {
             return;
+        }
+        self.fht.pointer_focus = focus.clone();
+        let Some(focus) = focus else {
+            return; // no outputs or pointer is OOB.
         };
 
         pointer.motion(
