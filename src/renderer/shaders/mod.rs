@@ -50,6 +50,7 @@ impl Shaders {
                 preprocess_shader_source(ROUNDED_WINDOW_SRC),
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
                     UniformName::new("input_to_geo", UniformType::Matrix3x3),
                 ],
@@ -60,6 +61,7 @@ impl Shaders {
                 BLUR_FINISH_SRC,
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
                     UniformName::new("noise", UniformType::_1f),
                     UniformName::new("geo", UniformType::_4f),
                 ],
@@ -71,6 +73,7 @@ impl Shaders {
                 preprocess_shader_source(RESIZING_TEXTURE_SRC),
                 &[
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
                     // the size of the window texture we sampled from
                     UniformName::new("win_size", UniformType::_2f),
                     UniformName::new("curr_size", UniformType::_2f),
@@ -86,6 +89,7 @@ impl Shaders {
                     UniformName::new("color_angle", UniformType::_1f),
                     UniformName::new("color_kind", UniformType::_1i),
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
                     UniformName::new("thickness", UniformType::_1f),
                 ],
             )
@@ -96,6 +100,7 @@ impl Shaders {
                 &[
                     UniformName::new("shadow_color", UniformType::_4f),
                     UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
                     UniformName::new("blur_sigma", UniformType::_1f),
                 ],
             )

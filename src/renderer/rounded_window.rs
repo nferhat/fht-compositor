@@ -19,7 +19,8 @@ use crate::backend::udev::{UdevFrame, UdevRenderError, UdevRenderer};
 #[derive(Debug)]
 pub struct RoundedWindowElement<R: FhtRenderer> {
     element: WaylandSurfaceRenderElement<R>,
-    corner_radius: f32,
+    radius: f32,
+    power: f32,
     input_to_geo: Mat3,
     // where is the rounded rectangle that is going to contain everything.
     geo: Rectangle<i32, Logical>,
@@ -28,7 +29,8 @@ pub struct RoundedWindowElement<R: FhtRenderer> {
 impl<R: FhtRenderer> RoundedWindowElement<R> {
     pub fn new(
         element: WaylandSurfaceRenderElement<R>,
-        corner_radius: f32,
+        radius: f32,
+        power: f32,
         geometry: Rectangle<i32, Logical>,
         scale: impl Into<Scale<f64>>,
     ) -> Self {
@@ -62,7 +64,8 @@ impl<R: FhtRenderer> RoundedWindowElement<R> {
 
         Self {
             element,
-            corner_radius,
+            radius,
+            power,
             geo: geometry,
             input_to_geo,
         }
@@ -185,11 +188,11 @@ impl<R: FhtRenderer> Element for RoundedWindowElement<R> {
             .filter_map(|rect| rect.intersection(geo));
 
         // We are not clipping anything.
-        if self.corner_radius == 0.0 {
+        if self.radius == 0.0 {
             return regions.collect();
         }
 
-        let corners = Self::rounded_corners_regions(self.corner_radius, self.geo, scale);
+        let corners = Self::rounded_corners_regions(self.radius, self.geo, scale);
 
         let elem_loc = self.geometry(scale).loc;
         let corners = corners.into_iter().map(|mut rect| {
@@ -219,7 +222,7 @@ impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        if self.corner_radius == 0.0 {
+        if self.radius == 0.0 {
             self.element
                 .draw(frame, src, dst, damage, opaque_regions, cache)
         } else {
@@ -233,7 +236,8 @@ impl RenderElement<GlowRenderer> for RoundedWindowElement<GlowRenderer> {
                 program,
                 vec![
                     Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
-                    Uniform::new("corner_radius", self.corner_radius),
+                    Uniform::new("corner_radius", self.radius),
+                    Uniform::new("corner_power", self.power),
                     super::mat3_uniform("input_to_geo", self.input_to_geo),
                 ],
             );
@@ -265,7 +269,7 @@ impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), UdevRenderError> {
-        if self.corner_radius == 0.0 {
+        if self.radius == 0.0 {
             self.element
                 .draw(frame, src, dst, damage, opaque_regions, cache)
         } else {
@@ -279,7 +283,8 @@ impl<'a> RenderElement<UdevRenderer<'a>> for RoundedWindowElement<UdevRenderer<'
                 program,
                 vec![
                     Uniform::new("geo_size", (self.geo.size.w as f32, self.geo.size.h as f32)),
-                    Uniform::new("corner_radius", self.corner_radius),
+                    Uniform::new("corner_radius", self.radius),
+                    Uniform::new("corner_power", self.power),
                     super::mat3_uniform("input_to_geo", self.input_to_geo),
                 ],
             );

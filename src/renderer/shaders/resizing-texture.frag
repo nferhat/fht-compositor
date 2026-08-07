@@ -24,6 +24,7 @@ uniform vec2 win_size;
 uniform vec2 curr_size;
 varying vec2 v_coords;
 uniform float corner_radius;
+uniform float corner_power;
 
 #if defined(DEBUG_FLAGS)
 uniform float tint;
@@ -38,7 +39,7 @@ void main() {
     vec4 color = texture2D(tex, tex_coords);
 
     if (corner_radius > 0.0)
-        color *= rounding_alpha(v_coords * curr_size, curr_size, corner_radius);
+        color *= rounding_alpha(v_coords * curr_size, curr_size, corner_radius, corner_power);
 
     #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);

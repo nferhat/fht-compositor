@@ -113,7 +113,8 @@ impl Tile {
         let shadow = config.shadow.with_overrides(&rules.shadow);
         let border_parameters = super::border::Parameters {
             color: border.normal_color,
-            corner_radius: border.radius,
+            power: border.power,
+            radius: border.radius,
             thickness: border.thickness,
         };
         let shadow_parameters = shadow::Parameters {
@@ -121,6 +122,7 @@ impl Tile {
             floating_only: shadow.floating_only,
             blur_sigma: shadow.sigma,
             corner_radius: border.radius,
+            corner_power: border.power,
             color: shadow.color,
         };
         let border_geometry = Rectangle::from_size(Size::from((
@@ -199,12 +201,14 @@ impl Tile {
             } else {
                 border.normal_color
             },
-            corner_radius: border.radius,
+            power: border.power,
+            radius: border.radius,
             thickness: border.thickness,
         });
         let border::Parameters {
             thickness: border_thickness,
-            corner_radius,
+            radius: corner_radius,
+            power: corner_power,
             ..
         } = self.border.current_parameters();
         self.shadow.update_parameters(shadow::Parameters {
@@ -212,6 +216,7 @@ impl Tile {
             floating_only: shadow.floating_only,
             blur_sigma: shadow.sigma,
             corner_radius,
+            corner_power,
             color: shadow.color,
         });
         // Keep the geometry updated, though if there's a mismatch the render function will handle
@@ -560,7 +565,8 @@ impl Tile {
 
         let border::Parameters {
             thickness: mut border_thickness,
-            corner_radius: border_radius,
+            radius: corner_radius,
+            power: corner_power,
             ..
         } = self.border.current_parameters();
         if is_fullscreen {
@@ -581,10 +587,10 @@ impl Tile {
         );
 
         // Use the inner radius here
-        let border_radius = (border_radius - border_thickness as f32).max(0.0);
-        let border_radius = border::fit_corner_radius_to_geometry(tile_geometry, border_radius);
+        let corner_radius = (corner_radius - border_thickness as f32).max(0.0);
+        let corner_radius = border::fit_corner_radius_to_geometry(tile_geometry, corner_radius);
 
-        if border_radius != 0.0 {
+        if corner_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
             push(TileRenderElement::RoundedSurfaceDamage(damage));
         }
@@ -656,7 +662,8 @@ impl Tile {
                     program,
                     vec![
                         // FIXME: Why divide by scale to get proper rounding?
-                        Uniform::new("corner_radius", border_radius / scale as f32),
+                        Uniform::new("corner_radius", corner_radius / scale as f32),
+                        Uniform::new("corner_power", corner_power),
                         Uniform::new("win_size", [win_size.w as f32, win_size.h as f32]),
                         Uniform::new("curr_size", [curr_size.w as f32, curr_size.h as f32]),
                     ],
@@ -668,7 +675,7 @@ impl Tile {
             }
         } else {
             // FIXME: Why divide by scale to get proper rounding?
-            let border_radius = border_radius / scale as f32;
+            let corner_radius = corner_radius / scale as f32;
             self.window.render_toplevel_elements(
                 renderer,
                 window_geometry.loc.to_physical_precise_round(scale),
@@ -687,11 +694,12 @@ impl Tile {
                         &e,
                         scale as f64,
                         window_geometry,
-                        border_radius,
+                        corner_radius,
                     ) {
                         let rounded = RoundedWindowElement::new(
                             e,
-                            border_radius,
+                            corner_radius,
+                            corner_power,
                             window_geometry,
                             scale as f64,
                         );
@@ -804,7 +812,8 @@ impl Tile {
         let rules = self.window.rules();
         let border::Parameters {
             thickness: mut border_thickness,
-            corner_radius: border_radius,
+            radius: corner_radius,
+            power: corner_power,
             ..
         } = self.border.current_parameters();
         if is_fullscreen {
@@ -821,8 +830,6 @@ impl Tile {
             tile_geometry.loc + Point::<i32, Logical>::from((border_thickness, border_thickness)),
             tile_geometry.size - Size::from((border_thickness, border_thickness)).upscale(2),
         );
-
-
 
         if let Some(element) = self.border.render(renderer, alpha) {
             let element = element
@@ -843,7 +850,6 @@ impl Tile {
         }
 
         if !blur.disabled() && self.has_transparent_region() {
-
             // Optimized blur uses a pre-blurred texture containing background and bottom
             // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
             // window.
@@ -869,7 +875,8 @@ impl Tile {
                 output,
                 sample_area,
                 window_geometry.loc.to_physical(scale),
-                border_radius,
+                corner_radius,
+                corner_power,
                 optimized,
                 scale,
                 alpha,
@@ -878,7 +885,6 @@ impl Tile {
 
             push(element.into());
         }
-
     }
 }
 

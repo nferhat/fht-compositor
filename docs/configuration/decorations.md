@@ -44,9 +44,13 @@ normal-color = "#101112"
 > detect which kind of border color you want. Note however that you must specify **all fields** of gradient color for the configuration to be
 > (re)loaded successfully
 
-#### `border.thickness`, `border.radius`
+#### `border.thickness`, `border.radius`, `border.power`
 
 Controls the size and corner radius of the border. Having a thickness of `0` will disable all border logic.
+
+The `power` variable controls how much of a squircle the rounded rectangle will be. If `power === 4`, you will get
+a perfect superellipse squircle. Defaults to `2` (circled corner)
+
 
 ## Shadows
 

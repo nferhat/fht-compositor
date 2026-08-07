@@ -731,6 +731,21 @@ const fn default_radius() -> f32 {
     10.0
 }
 
+const fn default_power() -> f32 {
+    2.0
+}
+
+fn deserialize_power<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let value = f32::deserialize(deserializer)?;
+    if value < 2.0 || value > 10.0 {
+        return Err(<D::Error as serde::de::Error>::invalid_value(
+            serde::de::Unexpected::Float(value as f64),
+            &"value in [2..10] inclusive",
+        ));
+    }
+    Ok(value)
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Border {
@@ -740,6 +755,8 @@ pub struct Border {
     pub thickness: i32,
     #[serde(default = "default_radius")]
     pub radius: f32,
+    #[serde(default = "default_power", deserialize_with = "deserialize_power")]
+    pub power: f32,
 }
 
 impl Default for Border {
@@ -753,6 +770,7 @@ impl Default for Border {
             normal_color: Color::Solid(csscolorparser::parse("#222230").unwrap().to_array()),
             thickness: default_thickness(),
             radius: default_radius(),
+            power: default_power(),
         }
     }
 }

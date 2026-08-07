@@ -24,9 +24,10 @@ uniform float tint;
 
 uniform vec4 geo;
 uniform float corner_radius;
+uniform float corner_power;
 uniform float noise;
 
-float rounding_alpha(vec2 coords, vec2 size, float radius) {
+float rounding_alpha(vec2 coords, vec2 size, float radius, float power) {
     vec2 center;
 
     if (coords.x < corner_radius && coords.y < corner_radius) {
@@ -41,7 +42,8 @@ float rounding_alpha(vec2 coords, vec2 size, float radius) {
         return 1.0;
     }
 
-    float dist = distance(coords, center);
+    vec2 d = abs(coords - center);
+    float dist = pow(pow(d.x, power) + pow(d.y, power), 1.0 / power);
     return 1.0 - smoothstep(radius - 0.5, radius + 0.5, dist);
 }
 
@@ -63,7 +65,7 @@ void main() {
 #endif
 
     // This shader exists to make blur rounding correct.
-    // 
+    //
     // Since we are scr-ing a texture that is the size of the output, the v_coords are always
     // relative to the output. This corresponds to gl_FragCoord.
     vec2 size = geo.zw;
@@ -76,7 +78,7 @@ void main() {
     color.rgb += noiseAmount * noise;
 
     // Apply corner rounding inside geometry.
-    color *= rounding_alpha(loc, size, corner_radius);
+    color *= rounding_alpha(loc, size, corner_radius, corner_power);
 
 
     // Apply final alpha and tint.

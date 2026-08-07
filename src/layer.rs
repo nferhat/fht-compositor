@@ -42,6 +42,7 @@ impl MappedLayer {
                 color: shadow.color,
                 blur_sigma: shadow.sigma,
                 corner_radius: rules.corner_radius.unwrap_or(0.0),
+                corner_power: rules.corner_power.unwrap_or(2.0),
             },
         );
 
@@ -91,8 +92,9 @@ impl MappedLayer {
         }
 
         // Then render the actual surfaces
-        let corner_radius = self.rules.corner_radius.unwrap_or(0.0);
-        if corner_radius > 0.0 {
+        let radius = self.rules.corner_radius.unwrap_or(0.0);
+        let power = self.rules.corner_power.unwrap_or(2.0);
+        if radius > 0.0 {
             push_elements_from_surface_tree(
                 renderer,
                 wl_surface,
@@ -105,11 +107,12 @@ impl MappedLayer {
                         &surface,
                         scale as f64,
                         layer_geo,
-                        corner_radius,
+                        radius,
                     ) {
                         let rounded = RoundedWindowElement::new(
                             surface,
-                            corner_radius,
+                            radius,
+                            power,
                             layer_geo,
                             scale as f64,
                         );
@@ -144,7 +147,8 @@ impl MappedLayer {
                 &self.output,
                 layer_geo,
                 render_geo.loc,
-                corner_radius,
+                radius,
+                power,
                 false, // FIXME: Configurable
                 scale,
                 alpha,
@@ -162,6 +166,7 @@ impl MappedLayer {
 pub struct ResolvedLayerRules {
     pub blur: BlurOverrides,
     pub corner_radius: Option<f32>,
+    pub corner_power: Option<f32>,
     pub shadow: ShadowOverrides,
     pub opacity: Option<f32>,
 }
@@ -174,6 +179,7 @@ impl Default for ResolvedLayerRules {
                 ..Default::default()
             },
             corner_radius: None,
+            corner_power: None,
             shadow: ShadowOverrides {
                 disable: Some(true),
                 ..Default::default()

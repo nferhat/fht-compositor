@@ -14,6 +14,7 @@ precision highp float;
 uniform vec4 shadow_color;
 uniform float blur_sigma;
 uniform float corner_radius;
+uniform float corner_power;
 
 uniform vec2 size;
 uniform float alpha;
@@ -33,37 +34,32 @@ vec2 erf(vec2 x) {
     return s - s / (x * x);
 }
 
-// Return the blurred mask along the x dimension
-float rounded_box_shadow_x(float x, float y, float sigma, float corner, vec2 halfSize) {
+float rounded_box_shadow_x(float x, float y, float sigma, float corner, float power, vec2 halfSize) {
     float delta = min(halfSize.y - corner - abs(y), 0.0);
-    float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+    float ratio = clamp(abs(delta) / max(corner, 0.0001), 0.0, 1.0);
+    float curved = halfSize.x - corner + corner * pow(1.0 - pow(ratio, power), 1.0 / power);
+
     vec2 integral = 0.5 + 0.5 * erf((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
     return integral.y - integral.x;
 }
 
 // Return the mask for the shadow of a box from lower to upper
-float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner) {
-    // Center everything to make the math easier
+float rounded_box_shadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner, float power) {
     vec2 center = (lower + upper) * 0.5;
     vec2 halfSize = (upper - lower) * 0.5;
     point -= center;
-
-    // The signal is only non-zero in a limited range, so don't waste samples
     float low = point.y - halfSize.y;
     float high = point.y + halfSize.y;
     float start = clamp(-3.0 * sigma, low, high);
     float end = clamp(3.0 * sigma, low, high);
-
-    // Accumulate samples (we can get away with surprisingly few samples)
     float step = (end - start) / 4.0;
     float y = start + step * 0.5;
     float value = 0.0;
     for (int i = 0; i < 4; i++)
     {
-        value += rounded_box_shadow_x(point.x, point.y - y, sigma, corner, halfSize) * gaussian(y, sigma) * step;
+        value += rounded_box_shadow_x(point.x, point.y - y, sigma, corner, power, halfSize) * gaussian(y, sigma) * step;
         y += step;
     }
-
     return value;
 }
 
@@ -73,12 +69,13 @@ void main() {
     vec2 rect_size = size - vec2(2. * blur_sigma);
     vec2 pos = v_coords * size;
     float frag_alpha = shadow_color.a;
-    frag_alpha *= rounded_box_shadow(rect_pos, rect_pos + rect_size, pos, blur_sigma / 2., corner_radius);
+    frag_alpha *= rounded_box_shadow(rect_pos, rect_pos + rect_size, pos, blur_sigma / 2., corner_radius, corner_power);
 
     // Cut out the inner side, for transparent windows
     pos -= vec2(blur_sigma);
     if (0.0 <= pos.x && pos.x <= rect_size.x && 0.0 <= pos.y && pos.y <= rect_size.y)
-        frag_alpha *= 1.0 - rounding_alpha(pos, rect_size, corner_radius);
+        // FIMXE: Add power to this too. Will require more stuff to be changed
+        frag_alpha *= 1.0 - rounding_alpha(pos, rect_size, corner_radius, corner_power);
 
     gl_FragColor = vec4(shadow_color.xyz * frag_alpha, frag_alpha) * alpha;
 }

@@ -27,6 +27,7 @@ uniform float tint;
 
 uniform vec2 geo_size;
 uniform float corner_radius;
+uniform float corner_power;
 uniform mat3 input_to_geo;
 
 void main() {
@@ -44,7 +45,7 @@ void main() {
         color = vec4(0.0);
     } else {
         // Apply corner rounding inside geometry.
-        color *= rounding_alpha(coords_geo.xy * geo_size, geo_size, corner_radius);
+        color *= rounding_alpha(coords_geo.xy * geo_size, geo_size, corner_radius, corner_power);
     }
 
     // Apply final alpha and tint.

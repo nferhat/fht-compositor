@@ -26,7 +26,8 @@ pub enum BlurElement {
     /// render this texture no matter what is below the blur render element.
     Optimized {
         tex: FhtTextureElement,
-        corner_radius: f32,
+        radius: f32,
+        power: f32,
         noise: f32,
     },
     /// Use true blur.
@@ -41,7 +42,8 @@ pub enum BlurElement {
         transform: Transform,
         src: Rectangle<f64, Logical>,
         size: Size<i32, Logical>,
-        corner_radius: f32,
+        radius: f32,
+        power: f32,
         loc: Point<i32, Physical>,
         output: Output,
         alpha: f32,
@@ -66,7 +68,8 @@ impl BlurElement {
         output: &Output,
         sample_area: Rectangle<i32, Logical>,
         loc: Point<i32, Physical>,
-        corner_radius: f32,
+        radius: f32,
+        power: f32,
         optimized: bool,
         scale: i32,
         alpha: f32,
@@ -99,7 +102,8 @@ impl BlurElement {
 
             Self::Optimized {
                 tex: texture.into(),
-                corner_radius,
+                radius,
+                power,
                 noise: blur_config.noise,
             }
         } else {
@@ -109,7 +113,8 @@ impl BlurElement {
                 src: sample_area.to_f64(),
                 transform: Transform::Normal,
                 size: sample_area.size,
-                corner_radius,
+                radius,
+                power,
                 loc,
                 alpha,
                 output: output.clone(), // fixme i hate this
@@ -225,10 +230,11 @@ impl RenderElement<GlowRenderer> for BlurElement {
         match self {
             Self::Optimized {
                 tex,
-                corner_radius,
+                radius,
+                power,
                 noise,
             } => {
-                if *corner_radius == 0.0 {
+                if *radius == 0.0 {
                     <FhtTextureElement as RenderElement<GlowRenderer>>::draw(
                         tex,
                         frame,
@@ -255,7 +261,8 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                     dst.size.h as f32,
                                 ],
                             ),
-                            Uniform::new("corner_radius", *corner_radius),
+                            Uniform::new("corner_radius", *radius),
+                            Uniform::new("corner_power", *power),
                             Uniform::new("noise", *noise),
                         ],
                     );
@@ -279,7 +286,8 @@ impl RenderElement<GlowRenderer> for BlurElement {
             Self::TrueBlur {
                 output,
                 scale,
-                corner_radius,
+                radius,
+                power,
                 blur_config,
                 alpha,
                 ..
@@ -313,7 +321,7 @@ impl RenderElement<GlowRenderer> for BlurElement {
                     )
                 })??;
 
-                let (program, additional_uniforms) = if *corner_radius == 0.0 {
+                let (program, additional_uniforms) = if *radius == 0.0 {
                     (None, vec![])
                 } else {
                     let program = Shaders::get_from_frame(gles_frame).blur_finish.clone();
@@ -329,7 +337,8 @@ impl RenderElement<GlowRenderer> for BlurElement {
                                     dst.size.h as f32,
                                 ],
                             ),
-                            Uniform::new("corner_radius", *corner_radius),
+                            Uniform::new("corner_radius", *radius),
+                            Uniform::new("corner_power", *power),
                             Uniform::new("noise", blur_config.noise),
                         ],
                     )

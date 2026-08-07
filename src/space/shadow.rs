@@ -30,6 +30,8 @@ pub struct Parameters {
     pub blur_sigma: f32,
     /// The corner radius of the shadowed rectangle.
     pub corner_radius: f32,
+    /// The corner power of the shadowed rectangle.
+    pub corner_power: f32,
 }
 
 impl Shadow {
@@ -80,6 +82,7 @@ impl Shadow {
             color,
             blur_sigma,
             corner_radius,
+            corner_power,
             ..
         } = self.parameters;
 
@@ -87,6 +90,7 @@ impl Shadow {
             Uniform::new("shadow_color", color),
             Uniform::new("blur_sigma", blur_sigma),
             Uniform::new("corner_radius", corner_radius),
+            Uniform::new("corner_power", corner_power),
         ]
     }
 

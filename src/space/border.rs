@@ -22,8 +22,9 @@ pub struct Border {
     // We store the parameters with the struct
     parameters: Parameters,
     // And we animate each of them below
-    corner_radius: Animation<f32>,
-    color: Animation<fht_compositor_config::Color>,
+    radius_animation: Animation<f32>,
+    power_animation: Animation<f32>,
+    color_animation: Animation<fht_compositor_config::Color>,
 }
 
 /// [`Border`] parameters.
@@ -32,7 +33,9 @@ pub struct Parameters {
     /// The border color.
     pub color: fht_compositor_config::Color,
     /// The border radius.
-    pub corner_radius: f32,
+    pub radius: f32,
+    /// The border corner radius power.
+    pub power: f32,
     /// The border thickness.
     pub thickness: i32,
 }
@@ -47,7 +50,8 @@ impl Border {
             animation_config.unwrap_or(&AnimationConfig::DISABLED);
         let Parameters {
             color,
-            corner_radius: radius,
+            radius,
+            power,
             ..
         } = parameters;
 
@@ -56,8 +60,9 @@ impl Border {
             geometry,
             parameters,
             // Each animation starts as empty
-            corner_radius: Animation::new(radius, radius, *duration).with_curve(*curve),
-            color: Animation::new(color, color, *duration).with_curve(*curve),
+            radius_animation: Animation::new(radius, radius, *duration).with_curve(*curve),
+            power_animation: Animation::new(power, power, *duration).with_curve(*curve),
+            color_animation: Animation::new(color, color, *duration).with_curve(*curve),
         }
     }
 
@@ -65,13 +70,18 @@ impl Border {
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         let mut ongoing = false;
 
-        if !self.color.is_finished() {
-            self.color.tick(target_presentation_time);
+        if !self.color_animation.is_finished() {
+            self.color_animation.tick(target_presentation_time);
             ongoing = true;
         }
 
-        if !self.corner_radius.is_finished() {
-            self.corner_radius.tick(target_presentation_time);
+        if !self.radius_animation.is_finished() {
+            self.radius_animation.tick(target_presentation_time);
+            ongoing = true;
+        }
+
+        if !self.power_animation.is_finished() {
+            self.power_animation.tick(target_presentation_time);
             ongoing = true;
         }
 
@@ -105,13 +115,13 @@ impl Border {
         // happening while the config update (say the user changed both border color and
         // animation config at once)
 
-        self.corner_radius = self
-            .corner_radius
+        self.radius_animation = self
+            .radius_animation
             .clone()
             .with_duration(*duration)
             .with_curve(*curve);
-        self.color = self
-            .color
+        self.color_animation = self
+            .color_animation
             .clone()
             .with_duration(*duration)
             .with_curve(*curve);
@@ -125,13 +135,23 @@ impl Border {
 
         self.parameters = parameters;
 
-        self.color.start = *self.color.value();
-        self.color.end = parameters.color;
-        self.color.restart();
+        if self.color_animation.end != parameters.color {
+            self.color_animation.start = *self.color_animation.value();
+            self.color_animation.end = parameters.color;
+            self.color_animation.restart();
+        }
 
-        self.corner_radius.start = *self.corner_radius.value();
-        self.corner_radius.end = parameters.corner_radius;
-        self.corner_radius.restart();
+        if self.radius_animation.end != parameters.radius {
+            self.radius_animation.start = *self.radius_animation.value();
+            self.radius_animation.end = parameters.radius;
+            self.radius_animation.restart();
+        }
+
+        if self.power_animation.end != parameters.power {
+            self.power_animation.start = *self.power_animation.value();
+            self.power_animation.end = parameters.power;
+            self.power_animation.restart();
+        }
 
         let uniforms = self.uniforms();
         if let Some(element) = self.element.get_mut() {
@@ -147,8 +167,9 @@ impl Border {
     /// Get the currently used parameters, IE the effective values from the animations
     pub fn current_parameters(&self) -> Parameters {
         Parameters {
-            color: *self.color.value(),
-            corner_radius: *self.corner_radius.value(),
+            color: *self.color_animation.value(),
+            radius: *self.radius_animation.value(),
+            power: *self.power_animation.value(),
             thickness: self.parameters.thickness,
         }
     }
@@ -156,13 +177,15 @@ impl Border {
     fn uniforms(&self) -> Vec<Uniform<'static>> {
         let Parameters {
             color,
-            corner_radius,
+            radius,
+            power,
             thickness,
         } = self.current_parameters();
-        let corner_radius = fit_corner_radius_to_geometry(self.geometry, corner_radius);
+        let radius = fit_corner_radius_to_geometry(self.geometry, radius);
 
         let mut uniforms = vec![
-            Uniform::new("corner_radius", corner_radius),
+            Uniform::new("corner_radius", radius),
+            Uniform::new("corner_power", power),
             Uniform::new("thickness", thickness as f32),
         ];
 

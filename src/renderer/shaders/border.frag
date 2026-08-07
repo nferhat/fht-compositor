@@ -18,6 +18,7 @@ uniform vec4 color_start;
 uniform vec4 color_end;
 uniform float color_angle;
 uniform float corner_radius;
+uniform float corner_power;
 uniform float thickness;
 
 uniform vec2 size;
@@ -53,7 +54,7 @@ vec4 get_pixel_color() {
 void main() {
     vec2 loc = v_coords * size;
     vec4 color = get_pixel_color();
-    color *= rounding_alpha(loc, size, corner_radius);
+    color *= rounding_alpha(loc, size, corner_radius, corner_power);
 
     if (thickness > 0.0) {
         // Second pass: inner rounding
@@ -62,7 +63,7 @@ void main() {
         vec2 inner_size = size - vec2(thickness * 2.0);
         if (0.0 <= loc.x && loc.x <= inner_size.x && 0.0 <= loc.y && loc.y <= inner_size.y) {
             float inner_radius = max(corner_radius - thickness, 0.0);
-            color = color * (1.0 - rounding_alpha(loc, inner_size, inner_radius));
+            color = color * (1.0 - rounding_alpha(loc, inner_size, inner_radius, corner_power));
         }
     }
 
