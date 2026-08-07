@@ -117,12 +117,6 @@ pub struct Workspace {
     /// This must NEVER be 0.
     nmaster: usize,
 
-    /// The gaps of this workspace.
-    ///
-    /// The gaps are in the following order:
-    /// - `gaps.0`: outer gaps, around the screen edge.
-    /// - `gaps.1`: inner gaps, between [`Tile`]s
-    gaps: (i32, i32),
     /// The cached work area of this workspace. Calculated from the gaps and layer-shells.
     work_area: Rectangle<i32, Logical>,
 
@@ -175,7 +169,6 @@ impl Workspace {
             active_layout_idx: 0,
             mwfact: config.mwfact,
             nmaster: config.nmaster,
-            gaps: config.gaps,
             work_area,
             has_transient_layout_changes: false,
             render_offset_animation: None,
@@ -240,11 +233,6 @@ impl Workspace {
         // These are only the layout parameters, layout list still gets updated as usual.
         self.layouts = config.layouts.clone();
         self.active_layout_idx = self.active_layout_idx.clamp(0, self.layouts.len() - 1);
-
-        if self.gaps != config.gaps {
-            self.has_transient_layout_changes = true;
-            self.gaps = config.gaps;
-        }
 
         if !self.has_transient_layout_changes {
             self.mwfact = config.mwfact;
@@ -1151,7 +1139,7 @@ impl Workspace {
             return;
         }
 
-        let (_, inner_gaps) = self.gaps;
+        let (_, inner_gaps) = self.config.gaps;
         let work_area = self.work_area;
 
         if self.tiles.is_empty() || unconfigured_window.maximized() {
@@ -1415,7 +1403,7 @@ impl Workspace {
             return;
         }
 
-        let (_, inner_gaps) = self.gaps;
+        let (_, inner_gaps) = self.config.gaps;
 
         // We distinguish between tiled, maximized, and floating since a floating tile can be
         // maximized.
@@ -1661,7 +1649,7 @@ impl Workspace {
     /// Recomputes the work area (IE the area used for tiling), and checks if it has changed. If it
     /// did, re-arrange the workspace tiles.
     pub fn update_work_area(&mut self, animate: bool) {
-        let work_area = calculate_work_area(&self.output, self.gaps.0);
+        let work_area = calculate_work_area(&self.output, self.config.gaps.0);
         if self.work_area != work_area {
             self.work_area = work_area;
             self.arrange_tiles(animate);
