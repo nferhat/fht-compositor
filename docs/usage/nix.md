@@ -1,9 +1,12 @@
 # Nix modules
 
 To ease setups with [NixOS](https://nixos.org) and [home-manager](https://github.com/nix-community/home-manager/), the
-[`fht-compositor` repository](https://github.com/nferhat/fht-compositor) is a [Nix Flake](https://nixos.wiki/wiki/flakes).
+[`fht-compositor` repository](https://github.com/nferhat/fht-compositor) provides NixOS and home-manager modules. While it
+is also a [Nix Flake](https://nixos.wiki/wiki/flakes), the modules and packages are plain Nix expressions and work
+**without** flakes as well.
 
-You can add it to your configuration like the following.
+## Using flakes
+You can add it to your configuration as follows:
 
 ```nix
 {
@@ -16,9 +19,6 @@ You can add it to your configuration like the following.
       url = "github:nferhat/fht-compositor";
       inputs.nixpkgs.follows = "nixpkgs";
 
-      # If you make use of flake-parts yourself, override here
-      # inputs.flake-parts.follows = "flake-parts";
-
       # Disable rust-overlay since it's only meant to be here for the devShell provided
       # (IE. only for development purposes, end users don't care)
       inputs.rust-overlay.follows = "";
@@ -26,6 +26,41 @@ You can add it to your configuration like the following.
   }
 }
 ```
+
+## Using without flakes
+Everything also works from a plain git checkout, so you don't need flakes enabled in your configuration:
+
+```nix
+{ pkgs, ... }:
+
+let
+  fht-compositor = import /path/to/fht-compositor; # or use a channel / fetchTarball
+in {
+  imports = [
+    "${fht-compositor}/nix/nixos-module.nix"
+    # For home-manager:
+    # "${fht-compositor}/nix/hm-module.nix"
+  ];
+
+  programs.fht-compositor.enable = true;
+
+  # Optionally, make the packages available as `pkgs.fht-compositor` and
+  # `pkgs.fht-share-picker` through an overlay:
+  nixpkgs.overlays = [ (import "${fht-compositor}/nix/overlay.nix" {}) ];
+}
+```
+
+Alternatively, you can build the packages directly with `pkgs.callPackage` or use the overlay on their own:
+
+```nix
+pkgs.fht-compositor = pkgs.callPackage /path/to/fht-compositor/default.nix {};
+pkgs.fht-share-picker = pkgs.callPackage /path/to/fht-compositor/fht-share-picker/default.nix {};
+```
+
+> [!NOTE] Package source
+> When using the modules without the flake, the `programs.fht-compositor.package` option defaults to a build from source
+> using your system's nixpkgs. With flakes, you can pin it to the flake's own build with:
+> `programs.fht-compositor.package = inputs.fht-compositor.packages.${pkgs.system}.fht-compositor;`
 
 ## NixOS module
 
@@ -50,7 +85,7 @@ Whether to enable `fht-compositor`
 
 The `fht-compositor` package to use.
 
-Default: `<fht-compositor-flake>.packages.${pkgs.system}.fht-compositor`
+Default: a build from source using your system's nixpkgs (`pkgs.callPackage ../default.nix {}`)
 
 ## home-manager module
 
@@ -70,7 +105,7 @@ Whether to enable `fht-compositor`
 
 The `fht-compositor` package to use.
 
-Default: `<fht-compositor-flake>.packages.${pkgs.system}.fht-compositor`
+Default: a build from source using your system's nixpkgs (`pkgs.callPackage ../default.nix {}`)
 
 ---
 
