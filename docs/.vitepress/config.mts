@@ -87,5 +87,5 @@ export default defineConfig({
       md.use(tabsMarkdownPlugin);
     },
   },
-  base: "/fht-compositor/",
+  base: "/",
 });
