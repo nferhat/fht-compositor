@@ -24,12 +24,12 @@
 
     overlays.x86-64-linux.default = import ./nix/overlay.nix {inherit rev;};
 
-    nixosModules.x86_64-linux = {
+    nixosModules = {
       fht-compositor = import ./nix/nixos-module.nix;
       default = self.nixosModules.fht-compositor;
     };
 
-    homeModules.x86_64-linux = {
+    homeModules = {
       fht-compositor = import ./nix/hm-module.nix;
       default = self.homeModules.fht-compositor;
     };
