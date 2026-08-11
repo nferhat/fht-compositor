@@ -5,8 +5,11 @@
 ::: tabs
 == Nix (flake)
 
-If you are using Nix(OS) with [Nix Flakes](https://nixos.wiki/wiki/flakes) enabled, refer to the [Nix](/usage/nix) page,
-and the [example Nix flakes setup](./example-nix-setup)
+Refer to the "Using flakes" [Nix](/usage/nix) page, and the [example Nix flakes setup](./example-nix-setup)
+
+== Nix (without flakes)
+
+Refer to "Using without flakes" section of the [Nix](/usage/nix) page.
 
 == Arch (AUR)
 
