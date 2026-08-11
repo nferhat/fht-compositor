@@ -2,6 +2,7 @@
   lib,
   libGL,
   libdisplay-info,
+  libdisplay-info_0_3 ? null,
   libinput,
   seatd,
   libxkbcommon,
@@ -55,7 +56,22 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [rustPlatform.bindgenHook pkg-config installShellFiles];
   buildInputs =
-    [libGL libdisplay-info libinput seatd libxkbcommon mesa libgbm wayland]
+    [
+      (
+        # If libdisplay-info_0_3 is null then that means this an older nixpkgs
+        # is being used where libdisplay-info is still on version 0.3 anyways
+        if builtins.isNull libdisplay-info_0_3
+        then libdisplay-info
+        else libdisplay-info_0_3
+      )
+      libGL
+      libinput
+      seatd
+      libxkbcommon
+      mesa
+      libgbm
+      wayland
+    ]
     ++ lib.optional withXdgScreenCast dbus
     ++ lib.optional withXdgScreenCast pipewire;
 
