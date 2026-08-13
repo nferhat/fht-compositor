@@ -13,6 +13,7 @@
   pipewire,
   dbus,
   libdisplay-info,
+  libdisplay-info_0_3 ? null,
   libinput,
   pkg-config,
   rustPlatform,
@@ -33,7 +34,25 @@ rustPlatform.buildRustPackage {
   strictDeps = true;
   # NOTE: We need glib in nativeBuildInputs for glib-compile-resources
   nativeBuildInputs = [rustPlatform.bindgenHook pkg-config glib];
-  buildInputs = [glib gtk4 libadwaita libxkbcommon udev seatd dbus libgbm pipewire libdisplay-info libinput];
+  buildInputs = [
+    (
+      # See /default.nix
+      if builtins.isNull libdisplay-info_0_3
+      then libdisplay-info
+      else libdisplay-info_0_3
+    )
+    glib
+    gtk4
+    libadwaita
+    libxkbcommon
+    udev
+    seatd
+    dbus
+    libgbm
+    pipewire
+    libdisplay-info
+    libinput
+  ];
 
   meta = {
     homepage = "https://github.com/nferht/fht-share-picker";
