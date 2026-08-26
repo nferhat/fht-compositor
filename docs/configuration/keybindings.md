@@ -173,6 +173,18 @@ Swaps the currently focused window with next/previous window in the workspace. R
 
 ---
 
+#### `focus-window-down/up/left/right`
+
+Focus the window in the given direction in the same workspace. Removes the currently active fullscreen window, if any.
+
+---
+
+#### `swap-window-down/up/left/right`
+
+Swaps the currently focused window with the window in the given direction in the same workspace. Removes the currently active fullscreen window, if any.
+
+---
+
 #### `focus-next-output`, `focus-previous-output`
 
 Focus the next/previous output in the gloabl space. Outputs are ordered by the way they got detected/inserted.

@@ -115,7 +115,7 @@ pub fn get_custom_mode(
         int_rqd: false,
         margins_rqd: false,
     };
-  
+
     let timing = cvt::Timing::compute(cvt_options);
     let hsync_start = width as f64 + timing.h_front_porch;
     let vsync_start = timing.v_lines_rnd + timing.v_front_porch;
@@ -130,7 +130,7 @@ pub fn get_custom_mode(
         }
         name
     };
-  
+
     let mode_info = drm_ffi::drm_mode_modeinfo {
         clock: (timing.act_pixel_freq * 1000.).round() as u32,
         hdisplay: width,

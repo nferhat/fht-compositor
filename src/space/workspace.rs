@@ -18,6 +18,7 @@ use super::tree::Tree;
 use super::Config;
 use crate::fht_render_elements;
 use crate::input::resize_tile_grab::ResizeEdge;
+use crate::input::Direction;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::utils::RectCenterExt;
@@ -62,6 +63,28 @@ struct InteractiveResize {
 
 #[derive(Debug)]
 pub struct RenderOffsetAnimation(Animation<[i32; 2]>);
+
+#[derive(Debug)]
+struct Edges {
+    left: i64,
+    right: i64,
+    top: i64,
+    bottom: i64,
+}
+
+impl From<Rectangle<i32, Logical>> for Edges {
+    fn from(rect: Rectangle<i32, Logical>) -> Self {
+        let left = i64::from(rect.loc.x);
+        let top = i64::from(rect.loc.y);
+
+        Self {
+            left,
+            right: left + i64::from(rect.size.w),
+            top,
+            bottom: top + i64::from(rect.size.h),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -400,10 +423,10 @@ impl Workspace {
 
     /// Activate the [`Tile`] that is in the given direction in the same [`Workspace`]
     ///
-    /// Accepts a normalized direction vector depending on the KeyActionType enum pressed
+    /// Accepts a [`Direction`] enum based on the given input
     pub fn activate_tile_by_direction(
         &mut self,
-        (dirvec_x, dirvec_y): (f64, f64),
+        direction: &Direction,
         animate: bool,
     ) -> Option<Window> {
         if self.tiles.len() < 2 {
@@ -411,44 +434,18 @@ impl Workspace {
         }
         self.remove_current_fullscreen();
 
-        let current_center = self.active_tile()?
-            .geometry()
-            .center();
-
-        if let Some(index) = 
-            self.tiles()
+        let target_idx = directional_candidate(
+            // SAFETY: we know by this point that we have an active tile
+            Edges::from(self.active_tile().unwrap().geometry()),
+            self.tiles
+                .iter()
                 .enumerate()
-                .filter_map(|(index, tile)| {
-                    let center = tile.geometry().center();
+                .filter(|(_, tile)| tile.window().alive())
+                .map(|(idx, tile)| (idx, Edges::from(tile.geometry()))),
+            direction,
+        )?;
 
-                    let vector_x = (center.x - current_center.x) as f64;
-                    let vector_y = (center.y - current_center.y) as f64;
-
-                    let dot = vector_x * dirvec_x + vector_y * dirvec_y;
-
-                    // Reject tiles that aren't in the correct direction.
-                    // If positive, then candidate tile is in front of our
-                    // diretion vector
-                    if dot <= 0.0 {
-                        return None;
-                    }
-
-                    let distance = (vector_x * vector_x + vector_y * vector_y).sqrt();
-                    let alignment = dot / distance;
-
-                    // strongly prefer tiles that are nearby, but in the correct direction
-                    let score = alignment / (distance * distance);
-
-                    Some((index, score))
-                })
-                .max_by(|(_, score_a), (_, score_b)| {
-                    // SAFETY: comparison is always possible
-                    score_a.partial_cmp(score_b).unwrap()
-                })
-                .map(|(index, _)| index) {
-                    self.active_tile_idx = Some(index);
-                }
-
+        self.active_tile_idx = Some(target_idx);
         self.arrange_tiles(animate);
         self.active_window()
     }
@@ -493,6 +490,43 @@ impl Workspace {
         self.tiles.swap(active_idx, prev_idx);
         self.arrange_tiles(animate);
         true
+    }
+
+    /// Swap the [`Tile`] with one in the given direction in the same [`Workspace`]
+    ///
+    /// Accepts a [`Direction`] enum based on the given input
+    pub fn swap_tile_by_direction(
+        &mut self,
+        direction: &Direction,
+        keep_focus: bool,
+        animate: bool,
+    ) -> bool {
+        if self.tiles.len() < 2 {
+            return false;
+        }
+        self.remove_current_fullscreen();
+
+        // SAFETY: self.active_tile_idx is always some since self.tiles.len() >= 2
+        let active_idx = self.active_tile_idx.unwrap();
+        if let Some(target_idx) = directional_candidate(
+            // SAFETY: we know by this point that we have an active tile
+            Edges::from(self.active_tile().unwrap().geometry()),
+            self.tiles
+                .iter()
+                .enumerate()
+                .filter(|(_, tile)| tile.window().alive())
+                .map(|(idx, tile)| (idx, Edges::from(tile.geometry()))),
+            direction,
+        ) {
+            if keep_focus {
+                self.active_tile_idx = Some(target_idx);
+            }
+            self.tiles.swap(active_idx, target_idx);
+            self.arrange_tiles(animate);
+            true
+        } else {
+            false
+        }
     }
 
     /// Get the [`Workspace`]'s active [`Window`] index, if any.
@@ -911,7 +945,9 @@ impl Workspace {
 
                 self.arrange_tiles(true);
             }
-            WorkspaceLayout::Floating | WorkspaceLayout::BinaryTree | WorkspaceLayout::SpiralTree => {
+            WorkspaceLayout::Floating
+            | WorkspaceLayout::BinaryTree
+            | WorkspaceLayout::SpiralTree => {
                 // Just insert it, who cares really.
                 // Also handles tree-based layouts since cursor position doesn't matter
                 self.tiles.push(tile);
@@ -1454,7 +1490,7 @@ impl Workspace {
                     inner_gaps,
                 );
                 tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
-                let leaves = tree.into_leaves(0);
+                let leaves = tree.leaf_rects(0);
 
                 if (0..nmaster).contains(&(unconfigured_idx as i32)) {
                     let tiles = tiled_proportions
@@ -1759,7 +1795,7 @@ impl Workspace {
                     inner_gaps,
                 );
                 tree.grow(0, (tiles_len - nmaster) as usize, mwfact);
-                let leaves = tree.into_leaves(0);
+                let leaves = tree.leaf_rects(0);
 
                 for (idx, tile) in tiles.into_iter().enumerate() {
                     if Some(idx) == self.fullscreened_tile_idx {
@@ -2206,4 +2242,160 @@ pub fn clamp_size(
     }
 
     size
+}
+
+/// Score struct for determining best tile to move to when using
+/// [`Workspace::activate_tile_by_direction`]
+///
+/// Only ever used by [`directional_candidate`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Score {
+    // are two tiles off-axis or not?
+    off_axis: u8,
+
+    // how much space is between the current tile's edge and the candidate's?
+    forward_gap: i64,
+
+    // if they are not in the same perpendicular space, how far away diagonally is it?
+    perpendicular_gap: i64,
+
+    // which tile's center is closest to the active tile's
+    center_offset: i64,
+
+    // how much are they overlapped? (negative because we use `min_by_key`)
+    negative_overlap: i64,
+}
+
+/// Determine best tile to move to when selecting by direction
+///
+/// Helper function for [`Workspace::activate_tile_by_direction`] and
+/// [`Workspace::swap_tile_by_direction`]
+fn directional_candidate(
+    current: Edges,
+    geometries: impl Iterator<Item = (usize, Edges)>,
+    direction: &Direction,
+) -> Option<usize> {
+    geometries
+        // check if we have windows in the right direction at all, and pass those along
+        .filter_map(|(idx, candidate)| match direction {
+            Direction::Down => (candidate.top >= current.bottom).then_some((
+                idx,
+                candidate.top - current.bottom,
+                (current.left, current.right),
+                (candidate.left, candidate.right),
+            )),
+            Direction::Up => (candidate.bottom <= current.top).then_some((
+                idx,
+                current.top - candidate.bottom,
+                (current.left, current.right),
+                (candidate.left, candidate.right),
+            )),
+            Direction::Left => (candidate.right <= current.left).then_some((
+                idx,
+                current.left - candidate.right,
+                (current.top, current.bottom),
+                (candidate.top, candidate.bottom),
+            )),
+            Direction::Right => (candidate.left >= current.right).then_some((
+                idx,
+                candidate.left - current.right,
+                (current.top, current.bottom),
+                (candidate.top, candidate.bottom),
+            )),
+        })
+        // for every window that's aligned right, we calculate how much candidate overlaps with
+        // active tile, and how diagonally offset the two tiles are
+        .map(|(idx, forward_gap, current_cross, candidate_cross)| {
+            let overlap = (current_cross.1.min(candidate_cross.1)
+                - current_cross.0.max(candidate_cross.0))
+            .max(0);
+
+            let perpendicular_gap = if current_cross.1 < candidate_cross.0 {
+                candidate_cross.0 - current_cross.1
+            } else if candidate_cross.1 < current_cross.0 {
+                current_cross.0 - candidate_cross.1
+            } else {
+                0
+            };
+
+            let center_offset = ((current_cross.0 + current_cross.1)
+                - (candidate_cross.0 + candidate_cross.1))
+                .abs();
+
+            (
+                idx,
+                Score {
+                    off_axis: u8::from(overlap == 0),
+                    forward_gap,
+                    perpendicular_gap,
+                    center_offset,
+                    negative_overlap: -overlap,
+                },
+            )
+        })
+        .min_by_key(|(_, score)| *score)
+        .map(|(idx, _)| idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use smithay::utils::Rectangle;
+
+    use super::*;
+
+    fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
+        Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    #[test]
+    fn chooses_nearest_window_to_the_right() {
+        let current = rect(0, 0, 100, 100);
+        let geometries = [rect(300, 0, 100, 100), rect(100, 0, 100, 100)];
+
+        assert_eq!(
+            directional_candidate(
+                Edges::from(current),
+                geometries
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, geom)| (idx, Edges::from(*geom))),
+                &Direction::Right
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn prefers_perpendicular_overlap_over_diagonal() {
+        let current = rect(0, 0, 100, 50);
+        let geometries = [rect(100, 50, 100, 50), rect(100, 0, 100, 50)];
+
+        assert_eq!(
+            directional_candidate(
+                Edges::from(current),
+                geometries
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, geom)| (idx, Edges::from(*geom))),
+                &Direction::Right
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn returns_none_on_outer_edge() {
+        let current = rect(0, 0, 100, 100);
+        let geometries = [rect(100, 0, 100, 100)];
+
+        assert!(directional_candidate(
+            Edges::from(current),
+            geometries
+                .iter()
+                .enumerate()
+                .map(|(idx, geom)| (idx, Edges::from(*geom))),
+            &Direction::Left
+        )
+        .is_none());
+    }
 }

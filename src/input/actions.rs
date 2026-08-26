@@ -14,6 +14,17 @@ use crate::output::OutputExt;
 use crate::state::State;
 use crate::utils::RectCenterExt;
 
+/// Direction of window to focus or swap
+///
+/// Used with [`KeyActionType::FocusWindowDirection`] and [`KeyActionType::SwapWindowDirection`]
+#[derive(Debug, Clone)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 /// The "type" of a [`KeyAction`].
 ///
 /// A [`KeyAction`] needs additional data associated with it, for example, whether we should allow
@@ -39,10 +50,8 @@ pub enum KeyActionType {
     FocusPreviousWindow,
     SwapWithNextWindow,
     SwapWithPreviousWindow,
-    FocusWindowDown,
-    FocusWindowUp,
-    FocusWindowLeft,
-    FocusWindowRight,
+    FocusWindowDirection(Direction),
+    SwapWindowDirection(Direction),
     FocusNextOutput,
     FocusPreviousOutput,
     CloseFocusedWindow,
@@ -110,14 +119,34 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     SimpleKeyAction::FocusNextWindow => KeyActionType::FocusNextWindow,
                     SimpleKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow,
                     SimpleKeyAction::FocusPreviousWindow => KeyActionType::FocusPreviousWindow,
+                    SimpleKeyAction::FocusWindowDown => {
+                        KeyActionType::FocusWindowDirection(Direction::Down)
+                    }
+                    SimpleKeyAction::FocusWindowUp => {
+                        KeyActionType::FocusWindowDirection(Direction::Up)
+                    }
+                    SimpleKeyAction::FocusWindowLeft => {
+                        KeyActionType::FocusWindowDirection(Direction::Left)
+                    }
+                    SimpleKeyAction::FocusWindowRight => {
+                        KeyActionType::FocusWindowDirection(Direction::Right)
+                    }
+                    SimpleKeyAction::SwapWindowDown => {
+                        KeyActionType::SwapWindowDirection(Direction::Down)
+                    }
+                    SimpleKeyAction::SwapWindowUp => {
+                        KeyActionType::SwapWindowDirection(Direction::Up)
+                    }
+                    SimpleKeyAction::SwapWindowLeft => {
+                        KeyActionType::SwapWindowDirection(Direction::Left)
+                    }
+                    SimpleKeyAction::SwapWindowRight => {
+                        KeyActionType::SwapWindowDirection(Direction::Right)
+                    }
                     SimpleKeyAction::SwapWithNextWindow => KeyActionType::SwapWithNextWindow,
                     SimpleKeyAction::SwapWithPreviousWindow => {
                         KeyActionType::SwapWithPreviousWindow
                     }
-                    SimpleKeyAction::FocusWindowDown => KeyActionType::FocusWindowDown,
-                    SimpleKeyAction::FocusWindowUp => KeyActionType::FocusWindowUp,
-                    SimpleKeyAction::FocusWindowLeft => KeyActionType::FocusWindowLeft,
-                    SimpleKeyAction::FocusWindowRight => KeyActionType::FocusWindowRight,
                     SimpleKeyAction::FocusNextOutput => KeyActionType::FocusNextOutput,
                     SimpleKeyAction::FocusPreviousOutput => KeyActionType::FocusPreviousOutput,
                     SimpleKeyAction::CloseFocusedWindow => KeyActionType::CloseFocusedWindow,
@@ -165,10 +194,30 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     ComplexKeyAction::FocusPreviousWorkspace => {
                         KeyActionType::FocusPreviousWorkspace
                     }
-                    ComplexKeyAction::FocusWindowDown => KeyActionType::FocusWindowDown,
-                    ComplexKeyAction::FocusWindowUp => KeyActionType::FocusWindowUp,
-                    ComplexKeyAction::FocusWindowLeft => KeyActionType::FocusWindowLeft,
-                    ComplexKeyAction::FocusWindowRight => KeyActionType::FocusWindowRight,
+                    ComplexKeyAction::FocusWindowDown => {
+                        KeyActionType::FocusWindowDirection(Direction::Down)
+                    }
+                    ComplexKeyAction::FocusWindowUp => {
+                        KeyActionType::FocusWindowDirection(Direction::Up)
+                    }
+                    ComplexKeyAction::FocusWindowLeft => {
+                        KeyActionType::FocusWindowDirection(Direction::Left)
+                    }
+                    ComplexKeyAction::FocusWindowRight => {
+                        KeyActionType::FocusWindowDirection(Direction::Right)
+                    }
+                    ComplexKeyAction::SwapWindowDown => {
+                        KeyActionType::SwapWindowDirection(Direction::Down)
+                    }
+                    ComplexKeyAction::SwapWindowUp => {
+                        KeyActionType::SwapWindowDirection(Direction::Up)
+                    }
+                    ComplexKeyAction::SwapWindowLeft => {
+                        KeyActionType::SwapWindowDirection(Direction::Left)
+                    }
+                    ComplexKeyAction::SwapWindowRight => {
+                        KeyActionType::SwapWindowDirection(Direction::Right)
+                    }
                     ComplexKeyAction::CloseFocusedWindow => KeyActionType::CloseFocusedWindow,
                     ComplexKeyAction::DisableOutputs => KeyActionType::DisableOuptuts,
                     ComplexKeyAction::None => KeyActionType::None,
@@ -342,9 +391,9 @@ impl State {
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
-            KeyActionType::FocusWindowDown => {
+            KeyActionType::FocusWindowDirection(direction) => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((0.0, 1.0), true) {
+                if let Some(window) = active.activate_tile_by_direction(direction, true) {
                     if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
@@ -357,48 +406,16 @@ impl State {
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
-            KeyActionType::FocusWindowUp => {
+            KeyActionType::SwapWindowDirection(direction) => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((0.0, -1.0), true) {
+                if active.swap_tile_by_direction(direction, true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
                     if cursor_warps {
-                        let window_geometry = Rectangle::new(
-                            active.window_location(&window).unwrap()
-                                + active.output().current_location(),
-                            window.size(),
-                        );
-
-                        self.move_pointer(window_geometry.center().to_f64())
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64())
                     }
-                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
-                }
-            }
-            KeyActionType::FocusWindowRight => {
-                let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((1.0, 0.0), true) {
-                    if cursor_warps {
-                        let window_geometry = Rectangle::new(
-                            active.window_location(&window).unwrap()
-                                + active.output().current_location(),
-                            window.size(),
-                        );
 
-                        self.move_pointer(window_geometry.center().to_f64())
-                    }
-                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
-                }
-            }
-            KeyActionType::FocusWindowLeft => {
-                let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((-1.0, 0.0), true) {
-                    if cursor_warps {
-                        let window_geometry = Rectangle::new(
-                            active.window_location(&window).unwrap()
-                                + active.output().current_location(),
-                            window.size(),
-                        );
-
-                        self.move_pointer(window_geometry.center().to_f64())
-                    }
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }
             }
@@ -826,7 +843,7 @@ impl State {
             }
             GestureAction::FocusWindowDown => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((0.0, 1.0), true) {
+                if let Some(window) = active.activate_tile_by_direction(&Direction::Down, true) {
                     if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
@@ -841,22 +858,7 @@ impl State {
             }
             GestureAction::FocusWindowUp => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((0.0, -1.0), true) {
-                    if cursor_warps {
-                        let window_geometry = Rectangle::new(
-                            active.window_location(&window).unwrap()
-                                + active.output().current_location(),
-                            window.size(),
-                        );
-
-                        self.move_pointer(window_geometry.center().to_f64())
-                    }
-                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
-                }
-            }
-            GestureAction::FocusWindowRight => {
-                let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((1.0, 0.0), true) {
+                if let Some(window) = active.activate_tile_by_direction(&Direction::Up, true) {
                     if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
@@ -871,7 +873,7 @@ impl State {
             }
             GestureAction::FocusWindowLeft => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(window) = active.activate_tile_by_direction((-1.0, 0.0), true) {
+                if let Some(window) = active.activate_tile_by_direction(&Direction::Left, true) {
                     if cursor_warps {
                         let window_geometry = Rectangle::new(
                             active.window_location(&window).unwrap()
@@ -880,6 +882,69 @@ impl State {
                         );
 
                         self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
+                }
+            }
+            GestureAction::FocusWindowRight => {
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.activate_tile_by_direction(&Direction::Right, true) {
+                    if cursor_warps {
+                        let window_geometry = Rectangle::new(
+                            active.window_location(&window).unwrap()
+                                + active.output().current_location(),
+                            window.size(),
+                        );
+
+                        self.move_pointer(window_geometry.center().to_f64())
+                    }
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
+                }
+            }
+            GestureAction::SwapWindowDown => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_tile_by_direction(&Direction::Down, true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    if cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64());
+                    }
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
+                }
+            }
+            GestureAction::SwapWindowUp => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_tile_by_direction(&Direction::Up, true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    if cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64());
+                    }
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
+                }
+            }
+            GestureAction::SwapWindowLeft => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_tile_by_direction(&Direction::Left, true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    if cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64());
+                    }
+                    self.set_keyboard_focus(Some(window.wl_surface().clone()));
+                }
+            }
+            GestureAction::SwapWindowRight => {
+                let active = self.fht.space.active_workspace_mut();
+                if active.swap_tile_by_direction(&Direction::Right, true, true) {
+                    let tile = active.active_tile().unwrap();
+                    let window = tile.window().clone();
+                    if cursor_warps {
+                        let tile_geo = tile.geometry();
+                        self.move_pointer(tile_geo.center().to_f64());
                     }
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
                 }

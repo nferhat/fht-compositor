@@ -1,7 +1,7 @@
 use fht_compositor_config::WorkspaceLayout;
 use smithay::utils::{Logical, Rectangle};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Split {
     Horizontal,
     Vertical,
@@ -50,7 +50,12 @@ impl Tree {
     ) -> Self {
         let root = Node::new(rect, Split::Horizontal, None);
 
-        let mut arena = Vec::with_capacity(len);
+        let capacity = len
+            .checked_mul(2)
+            .and_then(|value| value.checked_sub(1))
+            .unwrap_or(1);
+
+        let mut arena = Vec::with_capacity(capacity);
         arena.push(root);
 
         Tree {
@@ -75,72 +80,82 @@ impl Tree {
         idx
     }
 
-    pub fn grow(&mut self, idx: usize, len: usize, split_ratio: f64) {
-        if self.arena[idx].is_leaf() && self.leaves < len {
-            let mut first_rect = self.arena[idx].rect;
-            let mut second_rect = self.arena[idx].rect;
-            let mut first_split = Split::Vertical;
-            let mut second_split = Split::Vertical;
-
-            match self.arena[idx].split {
-                Split::Horizontal => {
-                    let nh = (self.arena[idx].rect.size.h as f64 * split_ratio) as i32
-                        - (self.inner_gaps / 2);
-                    first_rect.size = (first_rect.size.w, nh).into();
-                    second_rect.size = (second_rect.size.w, nh).into();
-                    let nly = self.arena[idx].rect.loc.y + nh + self.inner_gaps;
-
-                    if self.leaves % 4 == 3 && self.layout == WorkspaceLayout::SpiralTree {
-                        first_rect.loc = (first_rect.loc.x, nly).into();
-                    } else {
-                        second_rect.loc = (second_rect.loc.x, nly).into();
-                    }
-                }
-                Split::Vertical => {
-                    let nw = (self.arena[idx].rect.size.w as f64 * split_ratio) as i32
-                        - (self.inner_gaps / 2);
-                    first_rect.size = (nw, first_rect.size.h).into();
-                    second_rect.size = (nw, second_rect.size.h).into();
-                    let nlx = self.arena[idx].rect.loc.x + nw + self.inner_gaps;
-
-                    if self.leaves % 4 == 2 && self.layout == WorkspaceLayout::SpiralTree {
-                        first_rect.loc = (nlx, first_rect.loc.y).into();
-                    } else {
-                        second_rect.loc = (nlx, second_rect.loc.y).into();
-                    }
-
-                    first_split = Split::Horizontal;
-                    second_split = Split::Horizontal;
-                }
+    pub fn grow(&mut self, mut idx: usize, target_leaves: usize, split_ratio: f64) {
+        while self.leaves < target_leaves {
+            if !self.arena[idx].is_leaf() {
+                break;
             }
 
-            let first_child = Node::new(first_rect, first_split, Some(idx));
-            let second_child = Node::new(second_rect, second_split, Some(idx));
-
-            let _ = self.add_child(first_child);
-            let n_idx = self.add_child(second_child);
-
-            // We're technically adding two leaves, but then we iterate into another branch in the
-            // `build_tree` call, so it's plus two, minus one
+            idx = self.split_leaf(idx, split_ratio);
             self.leaves += 1;
-
-            self.grow(n_idx, len, split_ratio);
-        } else {
-            return;
         }
     }
 
-    pub fn into_leaves(&mut self, root: usize) -> Vec<Rectangle<i32, Logical>> {
-        let mut leaves = Vec::new();
+    fn split_leaf(&mut self, idx: usize, split_ratio: f64) -> usize {
+        let mut first_rect = self.arena[idx].rect;
+        let mut second_rect = self.arena[idx].rect;
 
-        if self.arena[root].is_leaf() {
-            leaves.push(self.arena[root].rect);
-        } else {
-            if let Some(first) = self.arena[root].first_child {
-                leaves.append(&mut self.into_leaves(first));
+        let child_split = match self.arena[idx].split {
+            Split::Horizontal => {
+                let usable = self.arena[idx].rect.size.h - self.inner_gaps;
+                let first_h = (usable as f64 * split_ratio).round() as i32;
+                let second_h = usable - first_h;
+
+                first_rect.size.h = first_h;
+                second_rect.size.h = second_h;
+
+                if self.leaves % 4 == 3 && self.layout == WorkspaceLayout::SpiralTree {
+                    first_rect.loc.y = self.arena[idx].rect.loc.y + second_h + self.inner_gaps;
+                } else {
+                    second_rect.loc.y = self.arena[idx].rect.loc.y + first_h + self.inner_gaps;
+                }
+
+                Split::Vertical
             }
-            if let Some(second) = self.arena[root].second_child {
-                leaves.append(&mut self.into_leaves(second));
+            Split::Vertical => {
+                let usable = self.arena[idx].rect.size.w - self.inner_gaps;
+                let first_w = (usable as f64 * split_ratio).round() as i32;
+                let second_w = usable - first_w;
+
+                first_rect.size.w = first_w;
+                second_rect.size.w = second_w;
+
+                if self.leaves % 4 == 2 && self.layout == WorkspaceLayout::SpiralTree {
+                    first_rect.loc.x = self.arena[idx].rect.loc.x + second_w + self.inner_gaps;
+                } else {
+                    second_rect.loc.x = self.arena[idx].rect.loc.x + first_w + self.inner_gaps;
+                }
+
+                Split::Horizontal
+            }
+        };
+
+        let first_child = Node::new(first_rect, child_split, Some(idx));
+        let second_child = Node::new(second_rect, child_split, Some(idx));
+
+        self.add_child(first_child);
+        self.add_child(second_child)
+    }
+
+    pub fn leaf_rects(&self, root: usize) -> Vec<Rectangle<i32, Logical>> {
+        let mut leaves = Vec::new();
+        let mut pending = vec![root];
+
+        while let Some(idx) = pending.pop() {
+            let node = &self.arena[idx];
+
+            if node.is_leaf() {
+                leaves.push(node.rect);
+                continue;
+            }
+
+            // LIFO stack, we push the second child first so that one pops
+            if let Some(second) = node.second_child {
+                pending.push(second);
+            }
+
+            if let Some(first) = node.first_child {
+                pending.push(first);
             }
         }
 
@@ -161,7 +176,7 @@ mod tests {
             0,
         );
         tree.grow(0, 4, 0.5);
-        let leaves = tree.into_leaves(0);
+        let leaves = tree.leaf_rects(0);
 
         assert_eq!(leaves[0].size.w, 100);
         assert_eq!(leaves[0].size.h, 50);
@@ -197,7 +212,7 @@ mod tests {
             0,
         );
         tree.grow(0, 5, 0.5);
-        let leaves = tree.into_leaves(0);
+        let leaves = tree.leaf_rects(0);
 
         assert_eq!(leaves[0].loc.x, 0);
         assert_eq!(leaves[0].loc.y, 0);
@@ -224,7 +239,7 @@ mod tests {
             4,
         );
         tree.grow(0, 4, 0.5);
-        let leaves = tree.into_leaves(0);
+        let leaves = tree.leaf_rects(0);
 
         assert_eq!(leaves[0].size.w, 100);
         assert_eq!(leaves[0].size.h, 48);
