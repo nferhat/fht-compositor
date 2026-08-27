@@ -108,7 +108,10 @@ impl PipeWire {
         loop_handle
             .insert_source(source, |_, main_loop, _| {
                 crate::profile_scope!("pipewire_loop_dispatch");
-                main_loop.0.loop_().iterate(pipewire::loop_::Timeout::Finite(Duration::ZERO));
+                main_loop
+                    .0
+                    .loop_()
+                    .iterate(pipewire::loop_::Timeout::Finite(Duration::ZERO));
                 Ok(PostAction::Continue)
             })
             .map_err(|err| anyhow::anyhow!("Failed to insert PipeWire event source! {err}"))?;

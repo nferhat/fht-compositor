@@ -35,6 +35,7 @@ mod closing_tile;
 mod monitor;
 pub mod shadow;
 mod tile;
+mod tree;
 mod workspace;
 
 /// The workspace system [`Space`].

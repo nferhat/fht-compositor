@@ -25,6 +25,8 @@ float-focused-window = { fingers = 4, direction = "down", min-swipe-distance = 5
 - `focus-previous-window`: Focuses the previous window in the current workspace.
 - `swap-with-next-window`: Swaps the focused window with the next window in the current workspace.
 - `swap-with-previous-window`: Swaps the focused window with the previous window in the current workspace.
+- `focus-window-down/up/left/right`: Focuses the window in the given direction in the current workspace.
+- `swap-window-down/up/left/right`: Swaps the focused window with the window in the given direction in the current workspace.
 - `focus-next-workspace`: Switches to the next workspace.
 - `focus-previous-workspace`: Switches to the previous workspace.
 - `focus-next-output`: Focuses the next output (monitor).
