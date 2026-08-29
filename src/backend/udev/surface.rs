@@ -460,7 +460,7 @@ impl Surface {
                 };
 
                 unsafe {
-                    if libc::ioctl(drm_device.as_raw_fd(), ioctl_num, &mut create_blob) != 0 {
+                    if libc::ioctl(drm_device.as_raw_fd(), ioctl_num as _, &mut create_blob) != 0 {
                         return Err(std::io::Error::last_os_error().into());
                     }
                 }
