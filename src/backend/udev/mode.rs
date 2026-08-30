@@ -37,6 +37,10 @@ pub fn get_matching_mode(
         if let Some(mode) = modes
             .iter()
             .filter(|mode| mode.size() == (width, height))
+            // close enough candidates.
+            // This avoids us asking for a 150hz mode but then getting falled back to 165, and instead
+            // will make us take the custom mode path.
+            .filter(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs() <= 5000)
             // Get the mode with the closest refresh.
             // Since generally you will type `@180` not `@179.998`
             .min_by_key(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs())

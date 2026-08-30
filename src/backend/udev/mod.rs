@@ -876,76 +876,54 @@ impl UdevData {
                 fht.output_management_manager_state
                     .set_head_enabled::<State>(surface.output(), true);
 
-                // Sometimes DRM connectors can have custom modes.
-                // ---
-                // The user specifies one, for example 1920x1080@165 and we build a new DrmMode out
-                // of this and the connector info. We test it, it works, nice, otherwise, use
-                // fallback
                 let modes = connector.modes();
-                let mut requested_mode = mode::get_default_mode(modes);
-                let mut custom_mode = None;
-
+                let mut requested_mode = None;
                 if let Some((width, height, refresh)) = output_config.mode {
                     requested_mode = mode::get_matching_mode(modes, width, height, refresh)
-                        .unwrap_or(requested_mode);
-                    custom_mode = mode::get_custom_mode(width, height, refresh);
+                        .or_else(|| mode::get_custom_mode(width, height, refresh));
                 }
 
                 let render_elements = generate_output_render_elements(fht, &mut renderer);
-                let new_mode = custom_mode.unwrap_or(requested_mode);
+                let mode_changed = requested_mode
+                    .as_ref()
+                    .is_some_and(|m| *m != surface.pending_mode());
 
-                let mode_changed = surface.pending_mode() == new_mode;
-                let vrr_enabled = surface.vrr_enabled();
-                let mut vrr_changed = false;
-                // if we are OnDemand we wait for redraw to update.
-                vrr_changed |= output_config.vrr == VrrMode::On && !vrr_enabled;
-                vrr_changed |= output_config.vrr == VrrMode::Off && vrr_enabled;
-
-                if !mode_changed && !vrr_changed && !force {
-                    continue;
+                let vrr_enabled = output_config.vrr == VrrMode::On;
+                if let Err(err) = surface.set_vrr_enabled(vrr_enabled) {
+                    warn!(?err, "Failed to update surface VRR mode");
                 }
 
-                // First try custom mode
-                let mut new_mode = None;
-                let mut used_custom = false;
-                if let Some(custom_mode) = custom_mode {
-                    if let Err(err) = surface.use_mode(custom_mode, &mut renderer, &render_elements)
-                    {
-                        error!(?err, "Failed to apply custom mode for {output_name}");
-                    } else {
-                        new_mode = Some(custom_mode);
-                        used_custom = true;
+                if mode_changed || force {
+                    // First try custom mode
+                    let mut new_mode = None;
+                    if let Some(mode) = requested_mode {
+                        // Try the requested mode first, and then fallback to using the generated
+                        // one instead. Sometimes the connector will not
+                        // accept even a mode from its own list.
+                        if let Err(err) = surface.use_mode(mode, &mut renderer, &render_elements) {
+                            error!(
+                                ?err,
+                                "Failed to apply requested mode for {output_name}, trying custom."
+                            );
+                        } else {
+                            new_mode = Some(mode);
+                        }
+                    }
+
+                    if let Some(mode) = new_mode {
+                        let wl_mode = OutputMode::from(mode);
+                        surface
+                            .output()
+                            .change_current_state(Some(wl_mode), None, None, None);
+                        let output_state = fht.output_state.get_mut(surface.output()).unwrap();
+                        let refresh_interval =
+                            Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&mode));
+                        let vrr_enabled = surface.vrr_enabled();
+                        output_state.frame_clock =
+                            FrameClock::new(Some(refresh_interval), vrr_enabled);
+                        fht.output_resized(surface.output());
                     }
                 }
-
-                if !used_custom {
-                    if let Err(err) =
-                        surface.use_mode(requested_mode, &mut renderer, &render_elements)
-                    {
-                        error!(
-                            ?err,
-                            "Failed to apply requested/fallback mode for {output_name}"
-                        );
-                        continue;
-                    } else {
-                        new_mode = Some(requested_mode);
-                    }
-                }
-
-                // SAFETY: If there was any error above we would have either fallbacked or
-                // continued to the next iteration.
-                let new_mode = new_mode.unwrap();
-
-                let wl_mode = OutputMode::from(new_mode);
-                surface
-                    .output()
-                    .change_current_state(Some(wl_mode), None, None, None);
-                let output_state = fht.output_state.get_mut(surface.output()).unwrap();
-                let refresh_interval =
-                    Duration::from_secs_f64(1_000f64 / mode::calculate_refresh_rate(&new_mode));
-                let vrr_enabled = surface.vrr_enabled();
-                output_state.frame_clock = FrameClock::new(Some(refresh_interval), vrr_enabled);
-                fht.output_resized(surface.output());
             }
 
             for (connector, crtc) in device.drm_scanner.crtcs() {

@@ -353,9 +353,7 @@ impl State {
         // If we made it up to here, the configuration must be valid
         self.fht.config = config;
 
-        dbg!(old_config.outputs != self.fht.config.outputs);
-        dbg!(self.fht.has_transient_output_changes);
-        if old_config.outputs != self.fht.config.outputs || self.fht.has_transient_output_changes {
+        if old_config.outputs != self.fht.config.outputs || !self.fht.has_transient_output_changes {
             self.fht.reload_output_config(true);
         }
 
