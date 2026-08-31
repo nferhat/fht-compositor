@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use fht_animation::Animation;
 use fht_compositor_config::{InsertWindowStrategy, WorkspaceLayout};
+use fht_compositor_ipc::Direction;
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::desktop::layer_map_for_output;
 use smithay::output::Output;
@@ -18,7 +19,6 @@ use super::tree::Tree;
 use super::Config;
 use crate::fht_render_elements;
 use crate::input::resize_tile_grab::ResizeEdge;
-use crate::input::Direction;
 use crate::output::OutputExt;
 use crate::renderer::FhtRenderer;
 use crate::utils::RectCenterExt;

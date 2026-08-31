@@ -819,6 +819,22 @@ impl State {
                 workspace.activate_previous_tile(true);
                 self.update_keyboard_focus();
             }
+            types::Action::FocusWindowDirectional {
+                direction,
+                workspace_id,
+            } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(id)
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.activate_tile_by_direction(&direction, true);
+                self.update_keyboard_focus();
+            }
             types::Action::SwapWithNextWindow {
                 keep_focus,
                 workspace_id,
@@ -849,6 +865,19 @@ impl State {
                 };
 
                 workspace.swap_active_tile_with_previous(keep_focus, true);
+                self.update_keyboard_focus();
+            }
+            types::Action::SwapWindowDirectional { direction, keep_focus, workspace_id } => {
+                let workspace = match workspace_id {
+                    Some(id) => self
+                        .fht
+                        .space
+                        .workspace_mut_for_id(id)
+                        .context("No workspace with matching ID")?,
+                    None => self.fht.space.active_workspace_mut(),
+                };
+
+                workspace.swap_tile_by_direction(&direction, keep_focus, true);
                 self.update_keyboard_focus();
             }
             types::Action::FocusOutput { output } => {

@@ -3,6 +3,7 @@ use std::time::Duration;
 use fht_compositor_config::{
     ComplexKeyAction, GestureAction, KeyPattern, MouseAction, SimpleKeyAction, WorkspaceLayout,
 };
+use fht_compositor_ipc::Direction;
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -13,17 +14,6 @@ use crate::input::resize_tile_grab::{ResizeEdge, ResizeTileGrab};
 use crate::output::OutputExt;
 use crate::state::State;
 use crate::utils::RectCenterExt;
-
-/// Direction of window to focus or swap
-///
-/// Used with [`KeyActionType::FocusWindowDirection`] and [`KeyActionType::SwapWindowDirection`]
-#[derive(Debug, Clone)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
 
 /// The "type" of a [`KeyAction`].
 ///

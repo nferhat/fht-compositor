@@ -527,6 +527,17 @@ pub enum Action {
         #[serde(rename = "workspace-id")]
         workspace_id: Option<usize>,
     },
+    /// Focus a window in the given [`Direction`].
+    FocusWindowDirectional {
+        /// The direction to use.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "direction")]
+        direction: Direction,
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
+        workspace_id: Option<usize>,
+    },
     /// Swap thee currently focused window with the next window in a [`Workspace`].
     SwapWithNextWindow {
         /// Whether we should keep the currently focused window as is, or
@@ -542,6 +553,20 @@ pub enum Action {
         /// Whether we should keep the currently focused window as is, or
         #[cfg_attr(feature = "clap", arg(long, default_value_t = true))]
         keep_focus: bool,
+        /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "workspace-id")]
+        workspace_id: Option<usize>,
+    },
+    /// Swap a window with it's sibling in the given [`Direction`].
+    SwapWindowDirectional {
+        /// Whether we should keep the currently focused window as is, or
+        #[cfg_attr(feature = "clap", arg(long, default_value_t = true))]
+        keep_focus: bool,
+        /// The direction to use.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "direction")]
+        direction: Direction,
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
         #[cfg_attr(feature = "clap", arg(long))]
         #[serde(rename = "workspace-id")]
@@ -645,6 +670,16 @@ pub enum Action {
         #[serde(rename = "output")]
         output_name: String,
     },
+}
+
+/// A direction to focus/swap a [`Window`] with.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 /// A window location change.
