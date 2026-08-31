@@ -38,8 +38,8 @@ pub fn get_matching_mode(
             .iter()
             .filter(|mode| mode.size() == (width, height))
             // close enough candidates.
-            // This avoids us asking for a 150hz mode but then getting falled back to 165, and instead
-            // will make us take the custom mode path.
+            // This avoids us asking for a 150hz mode but then getting falled back to 165, and
+            // instead will make us take the custom mode path.
             .filter(|mode| (refresh_milli_hz - get_refresh_milli_hz(mode)).abs() <= 5000)
             // Get the mode with the closest refresh.
             // Since generally you will type `@180` not `@179.998`
@@ -67,12 +67,12 @@ pub fn get_matching_mode(
 
 /// Get the default mode from a mode list.
 /// It first tries to find the preferred mode, if not found, uses the first one available
-pub fn get_default_mode(modes: &[drm::control::Mode]) -> drm::control::Mode {
+pub fn get_default_mode(modes: &[drm::control::Mode]) -> Option<drm::control::Mode> {
     modes
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .or_else(|| modes.first())
         .copied()
-        .unwrap_or_else(|| *modes.first().unwrap())
 }
 
 /// Get a [`Mode`](drm::control::Mode)'s refresh rate in millihertz

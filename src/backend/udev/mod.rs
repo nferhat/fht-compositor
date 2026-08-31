@@ -877,11 +877,12 @@ impl UdevData {
                     .set_head_enabled::<State>(surface.output(), true);
 
                 let modes = connector.modes();
-                let mut requested_mode = None;
-                if let Some((width, height, refresh)) = output_config.mode {
-                    requested_mode = mode::get_matching_mode(modes, width, height, refresh)
-                        .or_else(|| mode::get_custom_mode(width, height, refresh));
-                }
+                let requested_mode = if let Some((width, height, refresh)) = output_config.mode {
+                    mode::get_matching_mode(modes, width, height, refresh)
+                        .or_else(|| mode::get_custom_mode(width, height, refresh))
+                } else {
+                    mode::get_default_mode(&modes)
+                };
 
                 let render_elements = generate_output_render_elements(fht, &mut renderer);
                 let mode_changed = requested_mode

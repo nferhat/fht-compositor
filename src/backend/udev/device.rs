@@ -430,7 +430,7 @@ impl Device {
         // of this and the connector info. We test it, it works, nice, otherwise, use
         // closest requested, or fallback.
         let modes = conn.modes();
-        let default_mode = get_default_mode(modes);
+        let default_mode = get_default_mode(modes).unwrap();
         let mut requested_mode = None;
         let output_config = fht
             .config
