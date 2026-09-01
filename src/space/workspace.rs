@@ -654,7 +654,7 @@ impl Workspace {
                         // Output geometry cannot contain centered in parent geometry.
                         // Fallback to simple centering
                         tile.set_location(
-                            output_geometry.center()
+                            self.work_area.center()
                                 - size.downscale(2).to_point()
                                 - output_geometry.loc,
                             false,
@@ -666,7 +666,7 @@ impl Workspace {
                     // We did not find the parent in this workspace.
                     // Fallback to simple centering.
                     tile.set_location(
-                        output_geometry.center()
+                        self.work_area.center()
                             - size.downscale(2).to_point()
                             - output_geometry.loc,
                         false,
