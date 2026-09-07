@@ -58,6 +58,7 @@ impl WlrLayerShellHandler for State {
             // Otherwise, it was already mapped, unmap it then close
             layer_map.unmap_layer(&layer);
             layer.layer_surface().send_close();
+            self.fht.mapped_layer_surfaces.remove(&layer);
 
             if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
                 // the optimized blur buffer has been dirtied, re-render on next State::dispatch
