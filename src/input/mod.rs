@@ -509,18 +509,21 @@ impl State {
             let pointer_loc = pointer.current_location();
             let focus = self.fht.get_pointer_focus(pointer_loc);
 
-            if let Some(layer) = focus
-                .as_ref()
-                .and_then(|focus| focus.layer_surface.as_ref())
-            {
-                if matches!(layer.layer(), Layer::Top | Layer::Overlay) {
+            if let Some(ref focus) = focus {
+                if let Some(layer) = focus
+                    .layer_surface
+                    .as_ref()
+                    .filter(|l| matches!(l.layer(), Layer::Top | Layer::Overlay))
+                    .filter(|l| l.can_receive_keyboard_focus())
+                {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));
+                } else {
+                    // No layer focus here. But still, don't reset keyboard focus otherwise
+                    self.fht.set_on_demand_layer_shell_focus(None);
                 }
             } else {
-                if focus.is_none() {
-                    self.fht.set_on_demand_layer_shell_focus(None);
-                    self.set_keyboard_focus(None);
-                }
+                self.fht.set_on_demand_layer_shell_focus(None);
+                self.set_keyboard_focus(None);
             }
 
             if let Some(window) = focus.as_ref().and_then(|focus| focus.window.as_ref()) {

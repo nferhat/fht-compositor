@@ -95,14 +95,10 @@ impl State {
             .focused_on_demand_layer_shell
             .take_if(|layer_shell| {
                 if !layer_shell.alive() {
-                    return false; // dead, byebye
+                    return true;
                 }
 
-                let keyboard_interactivity = layer_shell.cached_state().keyboard_interactivity;
-                !matches!(
-                    keyboard_interactivity,
-                    KeyboardInteractivity::Exclusive | KeyboardInteractivity::OnDemand
-                )
+                !layer_shell.can_receive_keyboard_focus()
             });
 
         let new_focus = if self.fht.is_locked() {
