@@ -2259,19 +2259,10 @@ impl Workspace {
             .map(|(idx, anim)| (*idx, *anim.value()))
             .unwrap_or((None, 1.0));
 
-        let render_offset = self.render_offset().unwrap_or_default();
-
         if let Some(fullscreen_idx) = self.fullscreened_tile_idx {
             // Fullscreen gets rendered above all others.
             let tile = &self.tiles[fullscreen_idx];
-            tile.render(
-                renderer,
-                scale,
-                1.0,
-                &self.output,
-                render_offset,
-                &mut |e| push(e.into()),
-            );
+            tile.render(renderer, scale, 1.0, &mut |e| push(e.into()));
 
             if skip_alpha_animation_idx.is_none() {
                 return;
@@ -2299,7 +2290,7 @@ impl Workspace {
                 alpha
             };
 
-            tile.render(renderer, scale, alpha, &self.output, render_offset, push);
+            tile.render(renderer, scale, alpha, push);
         };
 
         // First render ontop tiles.
