@@ -241,19 +241,6 @@ impl Monitor {
         })
     }
 
-    /// Returns whether this monitor has any blurred regions.
-    pub fn has_blur(&self) -> bool {
-        for workspace in &self.workspaces {
-            if (workspace.index() == self.active_idx || workspace.render_offset().is_some())
-                && workspace.tiles().any(|tile| tile.has_transparent_region())
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
     /// Return whether the monitor contents should be rendered above the top layer shells
     pub fn render_above_top(&self) -> bool {
         let ws = self.active_workspace();
