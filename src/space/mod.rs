@@ -1033,7 +1033,7 @@ impl Space {
 
         interactive_swap
             .tile
-            .render(renderer, scale, 1.0, output, Point::default(), &mut |e| {
+            .render(renderer, scale, 1.0, &mut |e| {
                 let relocate = RelocateRenderElement::from_element(
                     e,
                     output_loc.upscale(-1),
