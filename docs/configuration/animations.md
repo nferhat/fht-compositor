@@ -73,11 +73,11 @@ Animation settings used for window geometry changes: both *location* and *size* 
 Default curve:
 
 ```toml
-[animations.window-geomtry.curve]
+[animations.window-geometry.curve]
 initial-velocity = 1.0
 clamp = false
 mass = 1.0
-damping-radio = 1.2
+damping-ratio = 1.2
 stiffness = 800.0
 epsilon = 0.0001
 ```
@@ -96,7 +96,25 @@ Default curve:
 initial-velocity = 1.0
 clamp = false
 mass = 1.0
-damping-radio = 1.2
+damping-ratio = 1.2
+stiffness = 800.0
+epsilon = 0.0001
+```
+
+---
+
+#### `border`
+
+Animation settings used when the border color/size changes (for example when a window gains/loses focus).
+
+Default curve:
+
+```toml
+[animations.border.curve]
+initial-velocity = 1.0
+clamp = false
+mass = 1.0
+damping-ratio = 1.2
 stiffness = 800.0
 epsilon = 0.0001
 ```
@@ -129,7 +147,7 @@ direction-detection-threshold = 5.0
 initial-velocity = 1.0
 clamp = false
 mass = 0.85
-damping-radio = 1.0
+damping-ratio = 1.0
 stiffness = 600.0
 epsilon = 0.0001
 ```

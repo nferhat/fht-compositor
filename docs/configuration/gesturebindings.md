@@ -19,7 +19,6 @@ float-focused-window = { fingers = 4, direction = "down", min-swipe-distance = 5
 ## Available gesture actions
 - `close-focused-window`: Closes the currently focused window.
 - `float-focused-window`: Toggles the focused window between tiled and floating mode.
-- `maximize-focused-window`: Toggles the focused window between maximized and normal state.
 - `fullscreen-focused-window`: Toggles the focused window between fullscreen and normal state.
 - `focus-next-window`: Focuses the next window in the current workspace.
 - `focus-previous-window`: Focuses the previous window in the current workspace.

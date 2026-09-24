@@ -8,7 +8,7 @@ name = "Vimix-cursors"
 size = 32
 ```
 
-If these are not specified, the compositor will try to load these values from the `XCURSOR_NAME`
+If these are not specified, the compositor will try to load these values from the `XCURSOR_THEME`
 and `XCURSOR_SIZE` variables.
 
 When loading and applying the cursor theme, the compositor will set these variables.

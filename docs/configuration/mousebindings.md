@@ -1,7 +1,7 @@
 # Mousebindings
 
-These are exactly the same as [keybindings](/configuration/keybindings), expect the available mouse buttonss (instead of
-key names) are: `left`, `right`, `middle`, `right`, `forward`, `back`, `scrollup` (or `wheelup`), `scrolldown` (or `wheeldown`), `scrollleft` (or `wheelleft`), `scrollright` (or `wheelright`)
+These are exactly the same as [keybindings](/configuration/keybindings), expect the available mouse buttons (instead of
+key names) are: `left`, `right`, `middle`, `forward`, `back`, `scrollup` (or `wheelup`), `scrolldown` (or `wheeldown`), `scrollleft` (or `wheelleft`), `scrollright` (or `wheelright`)
 
 ## Available mouse actions
 

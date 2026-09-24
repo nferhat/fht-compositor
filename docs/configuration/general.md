@@ -63,6 +63,9 @@ Available layouts are
 - `tile`: A classic master-slave layout, with the master stack on the left.
 - `bottom-stack`: A variant of the `tile` layout with the master stack on the upper half of the screen.
 - `centered-master`: A three column layout where the master stack is centered
+- `floating`: No tiling, windows are freely placed
+- `binary-tree`: Recursively splits the screen in two for each new window
+- `spiral-tree`: Like `binary-tree`, but arranged in a spiral
 
 Default is `["tile"]`
 

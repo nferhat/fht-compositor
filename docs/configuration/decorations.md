@@ -58,7 +58,8 @@ Drop shadows can be rendered behind windows. With floating windows, this becomes
 
 #### `shadow.disable`, `shadow.floating-only`
 
-Toggles to disable completely shadows, or only for non-floating/tiled windows. Both are `false` by default
+Toggles to disable completely shadows, or only render them for floating windows. `disable` is `false` and
+`floating-only` is `true` by default
 
 #### `shadow.color`
 
@@ -102,3 +103,11 @@ though nothing stops you from using high number of passes with low blur values, 
 
 Additional noise effect to add when rendering blur. It just looks nice and can give off the "glassy blur" effect, similar to Windows 11 Acrylic
 blur look.
+
+## Decoration mode
+
+#### `decoration-mode`
+
+Controls whether windows should draw their own (client-side) decorations or let the compositor draw them
+(server-side). One of `client-preference`, `prefer-server-side`, `prefer-client-side`, `force-server-side`,
+`force-client-side`. Default is `prefer-server-side`.

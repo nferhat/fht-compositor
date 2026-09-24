@@ -45,7 +45,7 @@ Depending on your mouse type, you can use:
 
 How should the pointer cursor accelerate with mouse movement. Available values are:
 - `adaptive`: Takes the current speed of the device into account when deciding on acceleration.
-- `linear`: Constant factor `acceleration-speed` applied to all deltas, regardless of the speed of motion.
+- `flat`: Constant factor `acceleration-speed` applied to all deltas, regardless of the speed of motion.
 
 ---
 
@@ -88,7 +88,7 @@ Available values are:
 - `button-areas`: The bottom area is divided into three thirds, like the following:
 <p align=center> <img src="/assets/software-buttons-visualized.svg" /> </p>
 
-- `click-finger`: Emulate clicks based on the number of fingers used, 1 is left, 2 is right, 3 is middle.
+- `clickfinger`: Emulate clicks based on the number of fingers used, 1 is left, 2 is right, 3 is middle.
 
 ---
 

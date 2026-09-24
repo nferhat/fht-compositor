@@ -8,6 +8,7 @@ contents itself is broken down into multiple sub-sections:
 - [Input configuration](./input)
 - [Key-bindings](./keybindings)
 - [Mouse-bindings](./mousebindings)
+- [Gesture-bindings](./gesturebindings)
 - [Window rules](./window-rules)
 - [Layer-shell rules](./layer-rules)
 - [Outputs](./outputs)
@@ -33,8 +34,7 @@ The configuration is live-reloaded. You can edit and save the file and `fht-comp
 apply changes.
 
 If you made a mistake when writing your configuration (let that be syntax, invalid values, unknown enum variant, etc.), the
-compositor will warn you with a popup window slidi
-ng from the top of your screen. You can run `fht-comopsitor check-configuration`
+compositor will warn you with a popup window sliding from the top of your screen. You can run `fht-compositor check-configuration`
 to get that error in your terminal.
 
 

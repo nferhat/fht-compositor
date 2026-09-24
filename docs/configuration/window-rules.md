@@ -230,7 +230,7 @@ The opacity of a window, `0.0` is fully transparent, `1.0` is fully opaque.
 
 #### `decoration-mode`
 
-The decoration mode for this window. See [`decorations.decorations-mode`](/configuration/decorations#decorations-mode)
+The decoration mode for this window. See [`decorations.decoration-mode`](/configuration/decorations#decoration-mode)
 for more information about differences between these values.
 
 Useful when a client misbehaves when using specifically SSD/CSD.
@@ -258,7 +258,15 @@ Whether to place this window above all other windows. This only applies for floa
 
 ```toml
 [[rules]]
-is-floating = true
+# Matching by is-floating would make the compositor behave like Hyprland or Sway, with a separate
+# floating layer that's above tiled windows.
+# is-floating = true
+
+# Match firefox PiP window
+match-title = ["Picture-in-Picture"]
+match-app-id = ["firefox"] # or zen(-twilight), librewolf...
+
+ontop = true
 ```
 
 ---
@@ -274,7 +282,7 @@ is fullscreened)
 ### `skip-focus`
 
 Don't focus this window immediately when it gets opened, regardless of the
-[`general.focus-follows`](/configuration/general#focus-new-windows) setting.
+[`general.focus-new-windows`](/configuration/general#focus-new-windows) setting.
 
 This is a hack for "notification windows" for XWwayland programs, such as
 [gpu-screen-recorder](https://git.dec05eba.com/gpu-screen-recorder-ui/about/).

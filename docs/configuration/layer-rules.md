@@ -30,7 +30,7 @@ opacity = 0.5
 
 ## Layer-shell properties
 
-#### `border`, `blur`, `shadow`
+#### `blur`, `shadow`
 
 These values take the same fields as their versions in the [decorations configuration](/configuration/decorations),
 however, they will *override* the decorations configuration with whatever fields you have provided.
@@ -42,3 +42,9 @@ By default, layer-shells have all of these disabled. Set `disable=false` to enab
 #### `opacity`
 
 The opacity of the layer-shell, `0.0` is fully transparent, `1.0` is fully opaque.
+
+---
+
+#### `corner-radius`
+
+The corner radius applied to the layer-shell's surface.
