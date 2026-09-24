@@ -105,13 +105,24 @@ Reload compositor configuration. You should have to-do this, since the composito
 
 ---
 
-#### `run-command`
+#### `run-command-line` (alias `run-command`)
 
 Runs an arbitrary command line. Evaluated with `/bin/sh -c "<command line>"`. Example:
 
 ```toml
 [keybinds]
 Super-Return = { action = "run-command", arg = "ghostty" }
+```
+
+---
+
+#### `run`
+
+Runs a command directly, without going through a shell. Takes an argument vector `[program, arg1, arg2, ...]`:
+
+```toml
+[keybinds]
+Super-Return = { action = "run", arg = ["ghostty"] }
 ```
 
 ---
@@ -123,9 +134,9 @@ pages for more information.
 
 ---
 
-#### `change-nmaster`, `change-mwfact`, `change-proportion`
+#### `change-nmaster`, `change-mwfact`, `change-window-proportion`
 
-Changes each of these parameters, `change-proportion` for the active window. See [dynamic layouts](/usage/layouts) page.
+Changes each of these parameters, `change-window-proportion` for the active window. See [dynamic layouts](/usage/layouts) page.
 
 ---
 
@@ -191,13 +202,15 @@ Focus the next/previous output in the gloabl space. Outputs are ordered by the w
 
 ---
 
-#### `focus-workspace`, `send-focused-window-to-workspace`
+#### `focus-workspace`, `send-to-workspace`, `send-and-follow-to-workspace`
 
-Key actions to focus or send the focused window to a workspace. Takes in the workspace **index**
+Key actions to focus a workspace, send the focused window to a workspace, or send the focused window to a
+workspace and follow it (switching to that workspace too). Takes in the workspace **index**
 
 ```toml
 Super-1 = { action = "focus-workspace", arg = 0 }
-Super-Shift-1 = { action = "send-focused-window-to-workspace", arg = 0 }
+Super-Shift-1 = { action = "send-to-workspace", arg = 0 }
+Super-Ctrl-Shift-1 = { action = "send-and-follow-to-workspace", arg = 0 }
 ```
 
 ---
@@ -205,6 +218,25 @@ Super-Shift-1 = { action = "send-focused-window-to-workspace", arg = 0 }
 #### `focus-next-workspace`, `focus-previous-workspace`,
 
 I think these are clear.
+
+---
+
+#### `disable-outputs`
+
+Turns off all outputs (useful for binding to a lock screen command, for example). Outputs are re-enabled
+automatically on the next input event.
+
+---
+
+#### `global-shortcut`
+
+Forwards the key press to a client registered through the [`hyprland-global-shortcuts`](https://wayland.app/protocols/hyprland-global-shortcuts-v1)
+protocol. Takes an argument in the form of `"<app-id>:<shortcut-id>"`:
+
+```toml
+[keybinds]
+Super-m = { action = "global-shortcut", arg = "com.spotify.Client:play-pause" }
+```
 
 ---
 
