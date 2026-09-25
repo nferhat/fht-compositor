@@ -20,12 +20,10 @@
 `fht-compositor` is a dynamic tiling Wayland compositor that implements a window management model
 inspired by X11 window managers such as [dwm](https://dwm.suckless.org) and [xmonad](https://xmonad.org)
 
-<!-- TODO: Link with wiki layouts -->
 Each output gets assigned 9 independent workspaces, each one holding windows that get automatically
 arranged on the screen space using layouts, minimizing lost screen real estate, and providing a
 keyboard-focused workflow
 
-<!-- TODO: Link with features tab of wiki -->
 In addition, the compositor also provides some nice-to-have features that elevate the experience
 from a visual and practical standpoint, see features for more information.
 
@@ -33,6 +31,12 @@ from a visual and practical standpoint, see features for more information.
 
 https://github.com/user-attachments/assets/4ea9b294-85a8-49ab-9f42-2f76111f063b
 
+## Acknowledgements
 
+This is a non-exhaustive list. Feel free to contact me if I forgot to give you attribution.
 
-
+- [Smithay](https://github.com/smithay/smithay), for their amazing library.
+- [cosmic-comp](https://github.com/pop-os/cosmic-comp), for examples on how to do Wayland stuff.
+- [niri](https://github.com/niri-wm/niri), for examples on how to do wayland stuff and the screencast portal.
+- [SwayFX](https://github.com/wlrfx/swayfx), for the Dual-Kawase blur implementation.
+- [KDE's desktop portal](https://github.com/KDE/xdg-desktop-portal-kde) and [Hyprland's desktop portal](https://github.com/hyprwm/xdg-desktop-portal-hyprland) for a reference on how to write correct portal implementations.
