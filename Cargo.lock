@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "fht-compositor"
-version = "25.10.1"
+version = "26.9.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "fht-compositor-config"
-version = "25.10.1"
+version = "26.9.0"
 dependencies = [
  "csscolorparser",
  "fht-animation",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "fht-compositor-ipc"
-version = "25.10.1"
+version = "26.9.0"
 dependencies = [
  "anyhow",
  "clap",
