@@ -2017,7 +2017,8 @@ impl Workspace {
         }
 
         window.request_size(clamped_size);
-        window.send_configure();
+        // NOTE: don't send a configure here, instead wait for the next refresh cycle
+        // to throttle the requests we send.
 
         // Don't forget to move the tile!
         let tile = self

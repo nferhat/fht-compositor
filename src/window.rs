@@ -17,11 +17,14 @@ use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::Resource as _;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size};
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
-use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
+use smithay::wayland::shell::xdg::{
+    SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
+};
 
 use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
@@ -127,6 +130,68 @@ impl Window {
 
     pub fn send_configure(&self) -> Serial {
         self.toplevel().send_configure()
+    }
+
+    /// Returns the configure throttle state.
+    ///
+    /// In order to not spam the window with configure requests, we check for specific state changes
+    /// (like buffer size changes) and only send if the previous value we sent is committed.
+    ///
+    /// This helps with stuff like interactive resize on high polling rate mice, and avoids us
+    /// sending a ton of configure request calls in each loop cycle.
+    ///
+    /// Code is from niri, thank you very much
+    pub fn configure_throttle_state(&self) -> ConfigureThrottleState {
+        let toplevel = self.toplevel();
+        let _span = trace_span!("Window::configure_intent", surface = ?toplevel.wl_surface().id())
+            .entered();
+
+        with_states(toplevel.wl_surface(), |states| {
+            let attributes = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            let mut guard = states.cached_state.get::<ToplevelCachedState>();
+            let current_committed = guard.current().last_acked.as_ref().map(|c| &c.state);
+
+            if let Some(server_pending) = &attributes.server_pending {
+                let current_server = attributes.current_server_state();
+                if *server_pending != current_server {
+                    let mut current_server_same_size = current_server.clone();
+                    current_server_same_size.size = server_pending.size;
+                    if current_server_same_size == *server_pending {
+                        let Some(current_committed) = current_committed else {
+                            error!("mapped must have had initial commit");
+                            return ConfigureThrottleState::ShouldSend;
+                        };
+
+                        if current_committed.size == current_server.size {
+                            // the window has commited our size change, we can now send the new size
+                            // doing so will make the window recreate/update the buffer less, even if
+                            // we do fast resizes.
+                            trace!(
+                                "current size matches server size: {:?}",
+                                current_committed.size
+                            );
+                            return ConfigureThrottleState::CanSend;
+                        } else {
+                            // the window didn't commit our size change yet, don't spam one while
+                            // it's still processing.
+                            trace!("throttling resize");
+                            return ConfigureThrottleState::Throttled;
+                        }
+                    } else {
+                        // Something else changed other than the size; send it.
+                        trace!("something changed other than the size");
+                        return ConfigureThrottleState::ShouldSend;
+                    }
+                }
+            }
+
+            ConfigureThrottleState::NotNeeded
+        })
     }
 
     pub fn set_rules(&self, rules: ResolvedWindowRules) {
@@ -579,6 +644,20 @@ impl Window {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ConfigureThrottleState {
+    /// A configure is not needed (no changes to server pending state).
+    NotNeeded,
+    /// A configure is throttled (due to resizing too fast for example).
+    Throttled,
+    /// Can send the configure if it isn't throttled externally (only size changed).
+    CanSend,
+    /// Should send the configure regardless of external throttling (something other than size
+    /// changed).
+    ShouldSend,
+}
+
+/// Tile that was just removed from the layout.
 // Put the weak window reference implementation behind a module since we don't make use of it unless
 // we are using pipewire (since CastTarget keep a weak ref to the window) in order to make cargo
 // shut up.

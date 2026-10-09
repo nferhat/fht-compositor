@@ -30,7 +30,7 @@ use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
 use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
-use crate::window::Window;
+use crate::window::{ConfigureThrottleState, Window};
 
 /// A single workspace tile.
 ///
@@ -166,7 +166,12 @@ impl Tile {
             window.enter_output(output, overlap);
         }
 
-        window.send_pending_configure();
+        if matches!(
+            window.configure_throttle_state(),
+            ConfigureThrottleState::ShouldSend | ConfigureThrottleState::CanSend
+        ) {
+            window.send_pending_configure();
+        }
         window.refresh();
 
         // Update the decorations too.
