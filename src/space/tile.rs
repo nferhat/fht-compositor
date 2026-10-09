@@ -84,6 +84,9 @@ pub struct Tile {
     /// create a "snapshot" of the window to animate the [`ClosingTile`]
     close_animation_snapshot: Option<Vec<TileRenderElement<GlowRenderer>>>,
 
+    /// The last saved floating geometry
+    previous_floating_geometry: Option<Rectangle<i32, Logical>>,
+
     /// Configuration specific to the workspace system.
     pub config: Rc<Config>,
 }
@@ -147,6 +150,7 @@ impl Tile {
             shadow: shadow::Shadow::new(border_geometry, shadow_parameters),
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
+            previous_floating_geometry: None,
             config,
         }
     }
@@ -328,6 +332,20 @@ impl Tile {
         Rectangle::new(self.location, self.size())
     }
 
+    /// Get this [`Tile`]'s previous floating geometry.
+    pub fn previous_floating_geometry(&self) -> Option<Rectangle<i32, Logical>> {
+        self.previous_floating_geometry
+    }
+
+    /// Save this [`Tile`]'s geometry if it's floating
+    pub fn save_floating_geometry(&mut self) {
+        if self.window.tiled() || self.window.fullscreen() || self.window.maximized() {
+            return;
+        }
+
+        self.previous_floating_geometry = Some(self.geometry());
+    }
+
     /// Get this [`Tile`]'s visual geometry, in other words where the [`Tile`]'s [`Rectangle`] will
     /// end up at when rendering.
     ///
@@ -374,6 +392,8 @@ impl Tile {
         } else if self.location != new_location {
             self.location = new_location
         }
+
+        self.save_floating_geometry();
     }
 
     /// Get this [`Tile`]'s visual location, in orther words where the tile is going to **render**.
@@ -470,6 +490,8 @@ impl Tile {
                 );
             }
         }
+
+        self.save_floating_geometry();
     }
 
     /// Return whether this tile has a transparent region.

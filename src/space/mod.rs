@@ -642,17 +642,7 @@ impl Space {
     pub fn float_window(&mut self, window: &Window, floating: bool, animate: bool) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                let mut arrange = false;
-                for tile in workspace.tiles_mut() {
-                    if tile.window() == window {
-                        window.request_tiled(!floating);
-                        arrange = true;
-                        break;
-                    }
-                }
-
-                if arrange {
-                    workspace.arrange_tiles(animate);
+                if workspace.set_floating(window, floating, animate) {
                     return true;
                 }
             }

@@ -311,11 +311,7 @@ impl State {
             }
             KeyActionType::FloatFocusedWindow => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(tile) = active.active_tile() {
-                    let prev = tile.window().tiled();
-                    tile.window().request_tiled(!prev);
-                }
-                active.arrange_tiles(true);
+                active.toggle_floating(true);
             }
             KeyActionType::CenterFloatingWindow => {
                 let active = self.fht.space.active_workspace_mut();
@@ -741,11 +737,7 @@ impl State {
             }
             GestureAction::FloatFocusedWindow => {
                 let active = self.fht.space.active_workspace_mut();
-                if let Some(tile) = active.active_tile() {
-                    let prev = tile.window().tiled();
-                    tile.window().request_tiled(!prev);
-                }
-                active.arrange_tiles(true);
+                active.toggle_floating(true);
             }
             GestureAction::FocusNextOutput => {
                 let outputs: Vec<_> = self.fht.space.outputs().cloned().collect();

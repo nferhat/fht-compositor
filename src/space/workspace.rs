@@ -1127,6 +1127,38 @@ impl Workspace {
         true
     }
 
+    /// Request a floating state for the [`Tile`] associated with this [`Window`]
+    pub fn set_floating(&mut self, window: &Window, floating: bool, animate: bool) -> bool {
+        let Some(tile) = self.tiles_mut().find(|t| *t.window() == *window) else {
+            return false;
+        };
+
+        if floating {
+            tile.window().request_tiled(false);
+            if let Some(previous_size) = tile.previous_floating_geometry() {
+                tile.set_geometry(previous_size, animate);
+            }
+        } else {
+            tile.save_floating_geometry();
+            tile.window().request_tiled(true);
+        }
+
+        tile.window().send_configure();
+        self.arrange_tiles(animate);
+        true
+    }
+
+    /// Toggle the floating state of a active tile.
+    pub fn toggle_floating(&mut self, animate: bool) -> bool {
+        let Some(window) = self.active_tile().map(Tile::window).cloned() else {
+            return false;
+        };
+
+        let previous = window.tiled();
+        self.set_floating(&window, previous, animate);
+        true
+    }
+
     /// Removes the current fullscreened [`Tile`] of this [`Workspace`], if any.
     ///
     /// You must call [`Workspace::arrange_tiles`]
