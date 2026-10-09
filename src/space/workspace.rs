@@ -602,6 +602,9 @@ impl Workspace {
         if self.tiles.iter().any(|tile| *tile.window() == window) {
             return;
         }
+        // If we are trying to insert a fullscreen window, we will unfullscreen any window that
+        // was in the workspace and insert the current one as the fullscreened one.
+        // FIXME: Configurable?
         self.remove_current_fullscreen();
 
         window.request_bounds(Some(self.output.geometry().size));
@@ -684,6 +687,7 @@ impl Workspace {
             let new_idx = self.tiles.len() - 1;
             // Exception is made for fullscreen since its exclusive.
             self.active_tile_idx = Some(new_idx);
+            self.fullscreened_tile_idx = Some(new_idx);
             new_idx
         } else if let Some(parent_idx) = parent_idx {
             // If there's a parent index, insert it just after to make a logical stacking order.
