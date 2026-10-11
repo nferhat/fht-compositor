@@ -267,7 +267,7 @@ impl XdgShellHandler for State {
             if self
                 .fht
                 .space
-                .maximize_window(&window, true, !self.fht.config.animations.disable)
+                .set_maximized(&window, true, !self.fht.config.animations.disable)
             {
                 window.request_maximized(true);
             }
@@ -361,7 +361,7 @@ impl XdgShellHandler for State {
             }
 
             window.request_fullscreen(true);
-            if !self.fht.space.fullscreen_window(&window, true) {
+            if !self.fht.space.set_fullscreen(&window, true, true) {
                 window.request_fullscreen(false);
             }
 

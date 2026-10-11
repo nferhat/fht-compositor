@@ -616,20 +616,10 @@ impl Space {
     }
 
     /// Maximize the [`Tile`] associated with this [`Window`].
-    pub fn maximize_window(&mut self, window: &Window, maximize: bool, animate: bool) -> bool {
+    pub fn set_maximized(&mut self, window: &Window, maximize: bool, animate: bool) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                let mut arrange = false;
-                for tile in workspace.tiles_mut() {
-                    if tile.window() == window {
-                        window.request_maximized(maximize);
-                        arrange = true;
-                        break;
-                    }
-                }
-
-                if arrange {
-                    workspace.arrange_tiles(animate);
+                if workspace.set_maximized(window, maximize, animate) {
                     return true;
                 }
             }
@@ -652,10 +642,10 @@ impl Space {
     }
 
     /// Fullscreen the [`Tile`] associated with this [`Window`].
-    pub fn fullscreen_window(&mut self, window: &Window, animate: bool) -> bool {
+    pub fn set_fullscreen(&mut self, window: &Window, fullscreen: bool, animate: bool) -> bool {
         for monitor in &mut self.monitors {
             for workspace in monitor.workspaces_mut() {
-                if workspace.fullscreen_window(window, animate) {
+                if workspace.set_fullscreen(window, fullscreen, animate) {
                     return true;
                 }
             }

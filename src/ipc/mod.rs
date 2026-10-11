@@ -599,7 +599,7 @@ impl State {
                     Some(s) => s,
                     None => !window.maximized(),
                 };
-                self.fht.space.maximize_window(&window, new_state, true);
+                self.fht.space.set_maximized(&window, new_state, true);
             }
             types::Action::FullscreenWindow { state, window_id } => {
                 let window = match window_id {
@@ -624,11 +624,8 @@ impl State {
                     Some(s) => s,
                     None => !window.fullscreen(),
                 };
-                if new_state {
-                    self.fht.space.fullscreen_window(&window, true);
-                } else {
-                    window.request_fullscreen(false);
-                }
+
+                self.fht.space.set_fullscreen(&window, new_state, true);
             }
             types::Action::FloatWindow { state, window_id } => {
                 let window = match window_id {

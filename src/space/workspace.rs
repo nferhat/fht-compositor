@@ -1102,8 +1102,55 @@ impl Workspace {
         tile.clear_close_animation_snapshot();
     }
 
+    /// Request a maximized state for the [`Tile`] associated with this [`Window`]
+    pub fn set_maximized(&mut self, window: &Window, maximized: bool, animate: bool) -> bool {
+        let Some(idx) = self.tiles_mut().position(|t| *t.window() == *window) else {
+            return false;
+        };
+
+        if maximized {
+            self.tiles[idx].save_floating_geometry();
+            self.tiles[idx].window().request_maximized(true);
+        } else {
+            self.tiles[idx].window().request_maximized(false);
+            self.fullscreened_tile_idx = None;
+            if !self.tiles[idx].window().tiled() {
+                if let Some(geo) = self.tiles[idx].previous_floating_geometry() {
+                    self.tiles[idx].set_geometry(geo, animate);
+                }
+            }
+        }
+
+        self.arrange_tiles(animate);
+        true
+    }
+
+    /// Request a fullscreen state for the [`Tile`] associated with this [`Window`]
+    pub fn set_fullscreen(&mut self, window: &Window, fullscreen: bool, animate: bool) -> bool {
+        let Some(idx) = self.tiles_mut().position(|t| *t.window() == *window) else {
+            return false;
+        };
+
+        if fullscreen {
+            self.tiles[idx].save_floating_geometry();
+            self.fullscreen_window(window, animate)
+        } else {
+            self.tiles[idx].window().request_fullscreen(false);
+            self.fullscreened_tile_idx = None;
+            if !self.tiles[idx].window().tiled() {
+                if let Some(geo) = self.tiles[idx].previous_floating_geometry() {
+                    self.tiles[idx].set_geometry(geo, animate);
+                }
+            }
+
+            self.arrange_tiles(animate);
+
+            true
+        }
+    }
+
     /// Fullscreen the [`Tile`] associated with this window.
-    pub fn fullscreen_window(&mut self, window: &Window, animate: bool) -> bool {
+    fn fullscreen_window(&mut self, window: &Window, animate: bool) -> bool {
         let Some(idx) = self
             .tiles
             .iter_mut()
@@ -1118,6 +1165,7 @@ impl Workspace {
         }
 
         self.remove_current_fullscreen();
+        self.tiles[idx].window().request_fullscreen(true);
         self.fullscreened_tile_idx = Some(idx);
         self.arrange_tiles(animate);
         if animate {

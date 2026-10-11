@@ -295,18 +295,13 @@ impl State {
             KeyActionType::MaximizeFocusedWindow => {
                 if let Some(window) = active_window {
                     let prev = window.maximized();
-                    self.fht.space.maximize_window(&window, !prev, true);
+                    self.fht.space.set_maximized(&window, !prev, true);
                 }
             }
             KeyActionType::FullscreenFocusedWindow => {
                 if let Some(window) = active_window {
-                    if window.fullscreen() {
-                        // Workspace will take care of removing fullscreen
-                        window.request_fullscreen(false);
-                    } else {
-                        window.request_fullscreen(true);
-                        self.fht.space.fullscreen_window(&window, true);
-                    }
+                    let prev = window.fullscreen();
+                    self.fht.space.set_fullscreen(&window, !prev, true);
                 }
             }
             KeyActionType::FloatFocusedWindow => {
@@ -932,14 +927,10 @@ impl State {
                 }
             }
             GestureAction::FullscreenFocusedWindow => {
-                if let Some(window) = self.fht.space.active_window() {
-                    if window.fullscreen() {
-                        // Workspace will take care of removing fullscreen
-                        window.request_fullscreen(false);
-                    } else {
-                        window.request_fullscreen(true);
-                        self.fht.space.fullscreen_window(&window, true);
-                    }
+                let active = self.fht.space.active_workspace_mut();
+                if let Some(window) = active.active_window() {
+                    let fs = window.fullscreen();
+                    active.set_fullscreen(&window, !fs, true);
                 }
             }
             GestureAction::SelectNextLayout => self.fht.space.select_next_layout(true),
