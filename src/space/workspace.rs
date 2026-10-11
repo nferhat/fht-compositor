@@ -1136,6 +1136,7 @@ impl Workspace {
             self.fullscreen_window(window, animate)
         } else {
             self.tiles[idx].window().request_fullscreen(false);
+            self.start_fullscreen_fade_in(Some(idx));
             self.fullscreened_tile_idx = None;
             if !self.tiles[idx].window().tiled() {
                 if let Some(geo) = self.tiles[idx].previous_floating_geometry() {
@@ -1641,6 +1642,16 @@ impl Workspace {
     }
 
     /// Arrange all the [`Tile`]s in this [`Workspace`]
+    // FIXME: Fuck this function. It's horrible.
+    //
+    // This initially started as a huge copy of DWM's layout functions put inside a huge one with a
+    // match on an enum, but with many layouts (and the code needing to be re-used elsewhere too),
+    // this function is not really nice to have/use.
+    //
+    // Optimally layouts would self-describe into some sort of <impl Layout> trait or whatever and
+    // we'd only care about the high level API exposed.
+    //
+    // This would allow new contributors to add new layouts without having to think about code.
     pub fn arrange_tiles(&mut self, animate: bool) {
         crate::profile_function!();
         let mut output_geometry = self.output.geometry();
