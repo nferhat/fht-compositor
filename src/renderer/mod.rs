@@ -836,7 +836,7 @@ where
             anyhow::ensure!(
                 dmabuf.width() == region.size.w as u32
                     && dmabuf.height() == region.size.h as u32
-                    && dmabuf.format().code == Fourcc::Xrgb8888,
+                    && dmabuf.format().code == Fourcc::Xbgr8888,
                 "Invalid dmabuf!"
             );
 

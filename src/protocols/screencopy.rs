@@ -18,7 +18,7 @@ use smithay::reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm};
 use smithay::reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource};
 use smithay::utils::{Physical, Point, Rectangle};
 use smithay::wayland::dmabuf::get_dmabuf;
-use smithay::wayland::shm::{self, shm_format_to_fourcc};
+use smithay::wayland::shm;
 use tracing::trace;
 
 const VERSION: u32 = 3;
@@ -199,7 +199,7 @@ where
         if manager.version() >= 3 {
             // Send desired DMA buffer parameters.
             frame.linux_dmabuf(
-                smithay::backend::allocator::Fourcc::Xrgb8888 as u32,
+                smithay::backend::allocator::Fourcc::Xbgr8888 as u32,
                 buffer_size.w as u32,
                 buffer_size.h as u32,
             );
@@ -326,7 +326,7 @@ where
             }
             Some(BufferType::Dma) => {
                 let dmabuf = get_dmabuf(&buffer).unwrap();
-                if !(Some(dmabuf.format().code) == shm_format_to_fourcc(wl_shm::Format::Xrgb8888)
+                if !(Some(dmabuf.format().code) == Some(smithay::backend::allocator::Fourcc::Xbgr8888)
                     && dmabuf.width() == info.physical_region.size.w as u32
                     && dmabuf.height() == info.physical_region.size.h as u32)
                 {
