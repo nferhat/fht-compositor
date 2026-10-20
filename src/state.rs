@@ -719,6 +719,9 @@ pub struct Fht {
     pub seat: Seat<State>,
     pub keyboard: KeyboardHandle<State>,
     pub pointer: PointerHandle<State>,
+    // Accumulated high-resolution scroll (in 1/120ths of a wheel notch), horizontal then vertical,
+    // for scroll bindings, so that they trigger once per notch rather than once per event.
+    pub scroll_binding_accumulator: (f64, f64),
     pub clock: Clock<Monotonic>,
     pub suppressed_keys: HashMap<u32, (KeyPattern, KeyAction)>,
     // We store both the timer and the keysym used to trigger the key action.
@@ -967,6 +970,7 @@ impl Fht {
             seat_state,
             keyboard,
             pointer,
+            scroll_binding_accumulator: (0.0, 0.0),
             mapped_layer_surfaces: HashMap::new(),
             lock_state: LockState::Unlocked,
             focused_on_demand_layer_shell: None,
