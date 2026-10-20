@@ -165,7 +165,9 @@ impl Portal {
         (CursorMode::HIDDEN | CursorMode::EMBEDDED).bits()
     }
 
-    #[zbus(property)]
+    // The spec calls this "version" (zbus would otherwise publish it as "Version"), and
+    // xdg-desktop-portal treats the portal as version 0 without it, rejecting cursor modes.
+    #[zbus(property, name = "version")]
     pub fn version(&self) -> u32 {
         PORTAL_VERSION
     }
