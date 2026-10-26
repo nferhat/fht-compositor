@@ -19,6 +19,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::Sta
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size};
+use smithay::wayland::background_effect::BackgroundEffectSurfaceCachedState;
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
@@ -29,6 +30,7 @@ use smithay::wayland::shell::xdg::{
 use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::state::ResolvedWindowRules;
+use crate::utils::region::region_to_non_overlapping_rects;
 
 #[derive(Debug, Clone)]
 pub struct Window {
@@ -297,6 +299,22 @@ impl Window {
                 .map(|geo| geo.loc)
         })
         .unwrap_or(bbox.loc)
+    }
+
+    /// Get the background effect region of the toplevel surface, in surface-local coordinates.
+    ///
+    /// Rects are non-overlapping. Empty when the client did not set a region.
+    pub fn background_effect_region(&self) -> Vec<Rectangle<i32, Logical>> {
+        with_states(self.wl_surface(), |states| {
+            let mut cached = states
+                .cached_state
+                .get::<BackgroundEffectSurfaceCachedState>();
+            let mut rects = Vec::new();
+            if let Some(region) = &cached.current().blur_region {
+                region_to_non_overlapping_rects(region, &mut rects);
+            }
+            rects
+        })
     }
 
     pub fn request_fullscreen(&self, fullscreen: bool) {

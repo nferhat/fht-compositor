@@ -3,6 +3,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 mod spawn;
+pub mod region;
 
 use smithay::output;
 use smithay::reexports::rustix;
