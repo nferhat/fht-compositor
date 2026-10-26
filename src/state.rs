@@ -32,6 +32,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -901,6 +902,7 @@ impl Fht {
         SinglePixelBufferState::new::<State>(dh);
         AlphaModifierState::new::<State>(dh);
         RelativePointerManagerState::new::<State>(dh);
+        BackgroundEffectState::new::<State>(dh);
 
         // Initialize a seat and immediatly attach a keyboard and pointer to it.
         // If clients try to connect and do not find any of them they will try to initialize them
