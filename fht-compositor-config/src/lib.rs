@@ -1501,6 +1501,7 @@ pub struct Debug {
     pub render_node: Option<std::path::PathBuf>,
     pub draw_damage: bool,
     pub draw_opaque_regions: bool,
+    pub draw_background_effect_regions: bool,
     pub debug_overlay: bool,
 
     // Multiple flags to limit scanout.
@@ -1518,6 +1519,7 @@ impl Default for Debug {
             render_node: default_render_node(),
             draw_damage: false,
             draw_opaque_regions: false,
+            draw_background_effect_regions: false,
             debug_overlay: false,
             disable_overlay_planes: default_disable_overlay_planes(),
             disable_primary_plane: false,

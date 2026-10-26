@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use fht_animation::Animation;
 use smithay::backend::allocator::Fourcc;
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
@@ -10,7 +11,8 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::Renderer as _;
+use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::{Color32F, Renderer as _};
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -90,6 +92,8 @@ pub struct Tile {
     pub config: Rc<Config>,
 }
 
+const BACKGROUND_EFFECT_REGION_COLOR: Color32F = Color32F::new(0.3, 0.3, 0.0, 0.3);
+
 crate::fht_render_elements! {
     TileRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
@@ -99,6 +103,7 @@ crate::fht_render_elements! {
         Decoration = ShaderElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
+        BackgroundEffectRegion = SolidColorRenderElement,
     }
 }
 
@@ -609,6 +614,24 @@ impl Tile {
         if corner_radius != 0.0 {
             let damage = self.extra_damage.clone().with_location(window_geometry.loc);
             push(TileRenderElement::RoundedSurfaceDamage(damage));
+        }
+
+        if self.config.draw_background_effect_regions {
+            // Region rects are surface-local, so offset them by where the surface is drawn.
+            let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
+                - self.window.render_offset().to_physical_precise_round(scale);
+            for rect in self.window.background_effect_region() {
+                let mut rect = rect.to_physical_precise_round(scale);
+                rect.loc += surface_loc;
+                let color = SolidColorRenderElement::new(
+                    Id::new(),
+                    rect,
+                    CommitCounter::default(),
+                    BACKGROUND_EFFECT_REGION_COLOR,
+                    Kind::Unspecified,
+                );
+                push(TileRenderElement::BackgroundEffectRegion(color));
+            }
         }
 
         self.window.render_popup_elements(

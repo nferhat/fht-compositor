@@ -1122,6 +1122,7 @@ pub struct Config {
     pub mwfact: f64,
     pub focus_new_windows: bool,
     pub blur: fht_compositor_config::Blur,
+    pub draw_background_effect_regions: bool,
 }
 
 impl Config {
@@ -1157,6 +1158,7 @@ impl Config {
             mwfact: config.general.mwfact,
             border: config.decorations.border,
             blur: config.decorations.blur,
+            draw_background_effect_regions: config.debug.draw_background_effect_regions,
         })
     }
 }
