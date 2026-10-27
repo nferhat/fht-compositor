@@ -232,11 +232,15 @@ impl RenderElement<GlowRenderer> for BlurElement {
         };
         let tex_size = textures[0].size();
         let (tex_w, tex_h) = (tex_size.w as f32, tex_size.h as f32);
-        let bounds_loc = self.bounds.loc - state.area.loc;
+        // dst doesn't get changed by RelocateRenderElement which is used for the workspace switch
+        // so we have to account for it here... annoying.
+        let offset = dst.loc - self.geometry.loc;
+        let bounds_loc = self.bounds.loc + offset - state.area.loc;
         let bounds_size = self.bounds.size;
 
         let mut res = Ok(());
         for rect in &self.rects {
+            let rect = Rectangle::new(rect.loc + offset, rect.size);
             let Some(visible) = rect.intersection(state.area) else {
                 continue;
             };
@@ -318,11 +322,12 @@ impl RenderElement<GlowRenderer> for BlurElement {
         &self,
         frame: &mut GlowFrame<'_, '_>,
         _src: Rectangle<f64, Buffer>,
-        _dst: Rectangle<i32, Physical>,
+        dst: Rectangle<i32, Physical>,
         _cache: &UserDataMap,
     ) -> Result<(), GlesError> {
+        // Capture where we're drawn, not where we were built, see `draw`.
         let output_rect = Rectangle::from_size(frame.output_size());
-        let Some(area) = self.geometry.intersection(output_rect) else {
+        let Some(area) = dst.intersection(output_rect) else {
             return Ok(());
         };
 
