@@ -29,6 +29,7 @@ impl WlrLayerShellHandler for State {
             .and_then(Output::from_resource)
             .unwrap_or_else(|| self.fht.space.active_output().clone());
         let layer_surface = LayerSurface::new(surface, namespace);
+        super::background_effect::add_blur_region_hook(layer_surface.wl_surface());
 
         let mut map = layer_map_for_output(&output);
         if let Err(err) = map.map_layer(&layer_surface.clone()) {
