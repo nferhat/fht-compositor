@@ -66,13 +66,15 @@ fn mark_pending(wl_surface: &WlSurface) {
     });
 }
 
-fn blur_region(wl_surface: &WlSurface) -> (Arc<Vec<Rectangle<i32, Logical>>>, CommitCounter) {
+/// Access the cached blur region state.
+fn with_cached_blur_region_state<F, T>(wl_surface: &WlSurface, f: F) -> T
+where
+    F: FnOnce(&Inner) -> T,
+{
     with_states(wl_surface, |states| {
-        let Some(cache) = states.data_map.get::<BlurRegionCache>() else {
-            return (Arc::default(), CommitCounter::default());
-        };
-        let inner = cache.0.lock().unwrap();
-        (inner.rects.clone(), inner.commit)
+        let cached = states.data_map.get_or_insert(BlurRegionCache::default);
+        let inner = cached.0.lock().unwrap();
+        f(&*inner)
     })
 }
 
@@ -89,7 +91,10 @@ pub fn surface_background_effect_region(
     crop: Rectangle<i32, Physical>,
     fallback: Option<Rectangle<i32, Physical>>,
 ) -> (Vec<Rectangle<i32, Physical>>, CommitCounter) {
-    let (rects, commit) = blur_region(wl_surface);
+    let (rects, commit) = with_cached_blur_region_state(wl_surface, |cached_state| {
+        (cached_state.rects.clone(), cached_state.commit)
+    });
+
     let rects: Vec<_> = if rects.is_empty() {
         fallback.into_iter().collect()
     } else {
