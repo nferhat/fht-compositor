@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::delegate_background_effect;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::background_effect::{
     BackgroundEffectSurfaceCachedState, ExtBackgroundEffectHandler,
 };
@@ -78,26 +78,34 @@ fn blur_region(wl_surface: &WlSurface) -> (Arc<Vec<Rectangle<i32, Logical>>>, Co
 
 /// The committed blur region of `wl_surface` in physical coordinates, offset by `surface_loc`.
 ///
-/// Without a region, `fallback` is used instead, if there is one.
+/// `stretch` scales the rects around the surface origin, first, for windows that are being resized.
+/// Without a region, `fallback` is used instead, if there is one. The rects are cropped to `crop`
+/// afterwards, so they never go past it.
 pub fn surface_background_effect_region(
     wl_surface: &WlSurface,
     scale: i32,
     surface_loc: Point<i32, Physical>,
+    stretch: Scale<f64>,
+    crop: Rectangle<i32, Physical>,
     fallback: Option<Rectangle<i32, Physical>>,
 ) -> (Vec<Rectangle<i32, Physical>>, CommitCounter) {
     let (rects, commit) = blur_region(wl_surface);
-    if rects.is_empty() {
-        return (fallback.into_iter().collect(), commit);
-    }
+    let rects: Vec<_> = if rects.is_empty() {
+        fallback.into_iter().collect()
+    } else {
+        rects
+            .iter()
+            .map(|r| r.to_physical_precise_round::<_, i32>(scale))
+            .map(|r| r.to_f64().upscale(stretch).to_i32_round())
+            .map(|mut rect| {
+                rect.loc += surface_loc;
+                rect
+            })
+            // Intersect on physical coordinates since its what we will be rendering with.
+            .filter_map(|rect| rect.intersection(crop))
+            .collect()
+    };
 
-    let rects = rects
-        .iter()
-        .map(|rect| {
-            let mut rect = rect.to_physical_precise_round(scale);
-            rect.loc += surface_loc;
-            rect
-        })
-        .collect();
     (rects, commit)
 }
 
