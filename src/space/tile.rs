@@ -604,8 +604,6 @@ impl Tile {
             border_thickness = 0
         }
 
-        let blur = self.config.blur.with_overrides(&rules.blur);
-
         drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
@@ -628,49 +626,8 @@ impl Tile {
             push(TileRenderElement::RoundedSurfaceDamage(damage));
         }
 
-        // Region rects are surface-local, so offset them by where the surface is drawn.
-        let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
-            - self.window.render_offset().to_physical_precise_round(scale);
-        // calculate how much we should stretch the background effect regions.
-        //
-        // if the target size is larger than the current one, we will simply crop off the region to
-        // the window visual size, instead of scaling it down.
-        let stretch = if has_size_animation {
-            let win = self.window.size();
-            let curr = window_geometry.size;
-            Scale::from((
-                if win.w > 0 && win.w < curr.w {
-                    curr.w as f64 / win.w as f64
-                } else {
-                    1.0
-                },
-                if win.h > 0 && win.h < curr.h {
-                    curr.h as f64 / win.h as f64
-                } else {
-                    1.0
-                },
-            ))
-        } else {
-            Scale::from(1.0)
-        };
-        let window_rect: Rectangle<i32, Physical> = Rectangle::new(
-            window_geometry.loc.to_physical_precise_round(scale),
-            window_geometry.size.to_physical_precise_round(scale),
-        );
-        // Without a region, blur the whole window, unless blur is disabled.
-        let fallback = (!blur.disabled()).then_some(window_rect);
-        // Growing resizes crop the window content instead of stretching it, so the region can
-        // extend past the window while it's animating.
-        let (region, region_commit) = surface_background_effect_region(
-            self.window.wl_surface(),
-            scale,
-            surface_loc,
-            stretch,
-            window_rect,
-            fallback,
-        );
-
         if self.config.draw_background_effect_regions {
+            let (region, _) = self.background_effect_region(location, scale);
             for rect in &region {
                 let color = SolidColorRenderElement::new(
                     Id::new(),
@@ -798,18 +755,137 @@ impl Tile {
                 },
             );
         };
+    }
 
-        // The blur is below the window surfaces, so it only sees what is behind the tile.
-        if !blur.disabled() && !region.is_empty() {
-            push(TileRenderElement::BlurElement(BlurElement::new(
-                region,
-                blur,
-                self.blur.clone(),
-                corner_radius * scale as f32,
-                corner_power,
-                region_commit,
-            )));
+    /// The background effect region of the window, in physical coordinates.
+    ///
+    /// `location` is where the [`Tile`] is drawn, see [`Tile::render_inner`]. Without a region,
+    /// this is the whole window, unless blur is disabled.
+    fn background_effect_region(
+        &self,
+        location: Point<i32, Logical>,
+        scale: i32,
+    ) -> (Vec<Rectangle<i32, Physical>>, CommitCounter) {
+        let border_thickness = if self.window.fullscreen() {
+            0
+        } else {
+            self.border.current_parameters().thickness
+        };
+        let blur = self.config.blur.with_overrides(&self.window.rules().blur);
+        let window_geometry = Rectangle::new(
+            location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
+            (
+                self.visual_size().w - 2 * border_thickness,
+                self.visual_size().h - 2 * border_thickness,
+            )
+                .into(),
+        );
+
+        // Region rects are surface-local, so offset them by where the surface is drawn.
+        let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
+            - self.window.render_offset().to_physical_precise_round(scale);
+        // calculate how much we should stretch the background effect regions.
+        //
+        // if the target size is larger than the current one, we will simply crop off the region to
+        // the window visual size, instead of scaling it down.
+        let stretch = if self.size_animation.is_some() {
+            let win = self.window.size();
+            let curr = window_geometry.size;
+            Scale::from((
+                if win.w > 0 && win.w < curr.w {
+                    curr.w as f64 / win.w as f64
+                } else {
+                    1.0
+                },
+                if win.h > 0 && win.h < curr.h {
+                    curr.h as f64 / win.h as f64
+                } else {
+                    1.0
+                },
+            ))
+        } else {
+            Scale::from(1.0)
+        };
+        let window_rect: Rectangle<i32, Physical> = Rectangle::new(
+            window_geometry.loc.to_physical_precise_round(scale),
+            window_geometry.size.to_physical_precise_round(scale),
+        );
+        // Without a region, blur the whole window, unless blur is disabled.
+        let fallback = (!blur.disabled()).then_some(window_rect);
+        // Growing resizes crop the window content instead of stretching it, so the region can
+        // extend past the window while it's animating.
+        surface_background_effect_region(
+            self.window.wl_surface(),
+            scale,
+            surface_loc,
+            stretch,
+            window_rect,
+            fallback,
+        )
+    }
+
+    /// Push the blur of the background effect region, it is below the window surfaces.
+    ///
+    /// `location` is the same as [`Tile::render_inner`] got, the blur follows it.
+    fn render_blur<R: FhtRenderer>(
+        &self,
+        location: Point<i32, Logical>,
+        scale: i32,
+        push: &mut dyn FnMut(TileRenderElement<R>),
+    ) {
+        let blur = self.config.blur.with_overrides(&self.window.rules().blur);
+        if blur.disabled() {
+            return;
         }
+
+        let (mut region, region_commit) = self.background_effect_region(location, scale);
+        if region.is_empty() {
+            return;
+        }
+
+        // NOTE: the opening anim rescales the window texture around the tile center, so do the
+        // same with the blur region, otherwise it just sits there at full size.
+        let open_scale = self
+            .opening_animation
+            .as_ref()
+            .map_or(1.0, |a| opening_animation_progress_to_scale(*a.value()));
+        if open_scale != 1.0 {
+            let center = Rectangle::new(location, self.visual_size())
+                .to_physical(scale)
+                .center();
+            for rect in &mut region {
+                rect.loc -= center;
+                *rect = rect.to_f64().upscale(open_scale).to_i32_round();
+                rect.loc += center;
+            }
+        }
+
+        let border::Parameters {
+            thickness,
+            radius,
+            power,
+            ..
+        } = self.border.current_parameters();
+        let border_thickness = if self.window.fullscreen() {
+            0
+        } else {
+            thickness
+        };
+        // Use the inner radius, like the window does.
+        let corner_radius = (radius - border_thickness as f32).max(0.0);
+        let corner_radius = border::fit_corner_radius_to_geometry(
+            Rectangle::new(location, self.visual_size()),
+            corner_radius,
+        );
+
+        push(TileRenderElement::BlurElement(BlurElement::new(
+            region,
+            blur,
+            self.blur.clone(),
+            corner_radius * scale as f32 * open_scale as f32,
+            power,
+            region_commit,
+        )));
     }
 
     /// Render the elements for this [`Tile`].
@@ -828,12 +904,12 @@ impl Tile {
         // Rendering tile goes through the following phases.
         //
         // 1. Tile::render_inner renders the tile's window and popups, and applies the resize the
-        //    current size_animation if any to the main window surface(s) and rounded corners
+        //    current size_animation if any to the main window surface(s) and rounded corners.
         //
         // 2. If there's a resize animation ongoing, we draw the generated render elements into a
         //    texture and draw it with a custom size and rescale it.
         //
-        // 3. We draw additional decorations: blur, shadow, border, etc.
+        // 3. We draw additional decorations: shadow, border, etc.
         //
         // FIXME: Redundant calculations here and and in render_inner, but compiler should optimize
         // them away (hopefully)? Either way they are not too expensive.
@@ -940,6 +1016,11 @@ impl Tile {
             let element = shadow.with_location(expanded.loc).with_size(expanded.size);
             push(TileRenderElement::Decoration(element))
         }
+
+        // Push the element here since pushing it above would make it blur the shadow and border.
+        // We can't do this in render-inner either since it would make the blur not appear during
+        // the opening animation (since we pre-render everything to a temporary texture)
+        self.render_blur(self.visual_location(), scale, push);
     }
 }
 
