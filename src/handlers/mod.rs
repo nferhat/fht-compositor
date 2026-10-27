@@ -1,5 +1,5 @@
 mod alpha_modifiers;
-mod background_effect;
+pub mod background_effect;
 mod buffer;
 mod compositor;
 mod content_type;

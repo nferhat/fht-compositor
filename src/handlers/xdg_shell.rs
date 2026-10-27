@@ -46,6 +46,7 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         let surface = toplevel.wl_surface().clone();
         let window = Window::new(toplevel);
+        super::background_effect::add_window_post_commit_hook(&surface);
         if let Some(_) = self
             .fht
             .unmapped_windows

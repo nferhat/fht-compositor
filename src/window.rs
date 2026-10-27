@@ -6,6 +6,7 @@ use std::time::Duration;
 use owning_ref::MutexGuardRef;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{self, Kind};
+use smithay::backend::renderer::utils::CommitCounter;
 // use smithay::desktop::Window;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_frames_surface_tree,
@@ -19,7 +20,6 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::Sta
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size};
-use smithay::wayland::background_effect::BackgroundEffectSurfaceCachedState;
 use smithay::wayland::compositor::{send_surface_state, with_states, HookId, SurfaceData};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::with_fractional_scale;
@@ -30,7 +30,6 @@ use smithay::wayland::shell::xdg::{
 use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::renderer::FhtRenderer;
 use crate::state::ResolvedWindowRules;
-use crate::utils::region::region_to_non_overlapping_rects;
 
 #[derive(Debug, Clone)]
 pub struct Window {
@@ -171,8 +170,8 @@ impl Window {
 
                         if current_committed.size == current_server.size {
                             // the window has commited our size change, we can now send the new size
-                            // doing so will make the window recreate/update the buffer less, even if
-                            // we do fast resizes.
+                            // doing so will make the window recreate/update the buffer less, even
+                            // if we do fast resizes.
                             trace!(
                                 "current size matches server size: {:?}",
                                 current_committed.size
@@ -304,17 +303,8 @@ impl Window {
     /// Get the background effect region of the toplevel surface, in surface-local coordinates.
     ///
     /// Rects are non-overlapping. Empty when the client did not set a region.
-    pub fn background_effect_region(&self) -> Vec<Rectangle<i32, Logical>> {
-        with_states(self.wl_surface(), |states| {
-            let mut cached = states
-                .cached_state
-                .get::<BackgroundEffectSurfaceCachedState>();
-            let mut rects = Vec::new();
-            if let Some(region) = &cached.current().blur_region {
-                region_to_non_overlapping_rects(region, &mut rects);
-            }
-            rects
-        })
+    pub fn background_effect_region(&self) -> (Arc<Vec<Rectangle<i32, Logical>>>, CommitCounter) {
+        crate::handlers::background_effect::blur_region(self.wl_surface())
     }
 
     pub fn request_fullscreen(&self, fullscreen: bool) {

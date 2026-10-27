@@ -117,6 +117,8 @@ pub struct BlurElement {
     /// Rounding of the corners of `bounds`, in physical pixels, matching the window.
     corner_radius: f32,
     corner_power: f32,
+    /// Changes whenever the region does, so the element is damaged.
+    commit: CommitCounter,
     config: BlurConfig,
     state: Rc<RefCell<Blur>>,
 }
@@ -128,6 +130,7 @@ impl BlurElement {
         state: Rc<RefCell<Blur>>,
         corner_radius: f32,
         corner_power: f32,
+        commit: CommitCounter,
     ) -> Self {
         let id = RefCell::borrow(&state).id.clone();
 
@@ -170,6 +173,7 @@ impl BlurElement {
             bounds,
             corner_radius,
             corner_power,
+            commit,
             config,
             state,
         }
@@ -182,7 +186,7 @@ impl Element for BlurElement {
     }
 
     fn current_commit(&self) -> CommitCounter {
-        CommitCounter::default()
+        self.commit
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
