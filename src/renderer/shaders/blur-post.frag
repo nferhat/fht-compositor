@@ -1,8 +1,8 @@
 //! Texture shader applied to the blurred backdrop of every blur element.
 //!
 //! It rounds the corners of the blurred rectangle like the window, optionally draws additional effects
-//! ontop of the blurred texture. Right now we only have a liquid glass-esque material/effect from a
-//! hyprland plugin.
+//! ontop of the blurred texture. We have a liquid glass-esque material/effect from a hyprland plugin,
+//! and sea glass, which is the blurred backdrop with some grain and a static wave over it.
 
 precision highp float;
 #include "rounded-corners.glsl"
@@ -27,6 +27,12 @@ uniform float chromatic_aberration;
 uniform float fresnel_strength;
 uniform float specular_strength;
 uniform float glass_opacity;
+
+// Options related to sea glass being enabled or not.
+uniform float sea_glass_enabled;
+uniform float grain;
+uniform float ripple_strength;
+uniform float ripple_scale;
 
 uniform float brightness;
 uniform float contrast;
@@ -90,6 +96,11 @@ vec3 liquid_glass(vec2 pixel) {
     return color * (1.0 - edge_shade) + vec3(fresnel + specular);
 }
 
+// Cheap per pixel noise in [0, 1), good enough for grain.
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
 vec3 tone(vec3 color) {
     float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
     color = mix(vec3(luma), color, saturation);
@@ -109,20 +120,31 @@ vec3 tone(vec3 color) {
 
 void main() {
     vec2 pixel = (v_coords - rect_origin) / rect_size * geo_size;
-    // Coverage of the rounded rectangle, outside of it the window below shows through.
+    // rounded corners first
     float corner = rounding_alpha(pixel, geo_size, corner_radius, corner_power);
 
+    // we can sample directly, or apply a material ontop of the blurred texture for funny effects
+    // however materials don't look really nice with high blur values, but still...
     vec3 color;
     float material_alpha;
     if (glass_enabled > 0.5) {
         color = liquid_glass(pixel);
         material_alpha = clamp(glass_opacity / 0.78, 0.0, 1.0);
+    } else if (sea_glass_enabled > 0.5) {
+        float wavelength = max(ripple_scale, 1.0);
+        // calculate a static wave pattern with our given wavelength
+        vec2 wave = vec2(
+            sin(pixel.y / wavelength * 6.2831853 + sin(pixel.x / wavelength * 2.0)),
+            cos(pixel.x / wavelength * 6.2831853 + cos(pixel.y / wavelength * 2.0))
+        ) * ripple_strength;
+        vec4 backdrop = texture2D(tex, uv_at(pixel + wave));
+        color = backdrop.rgb + (hash(floor(pixel)) - 0.5) * grain;
+        material_alpha = backdrop.a;
     } else {
         vec4 backdrop = texture2D(tex, v_coords);
         color = backdrop.rgb;
         material_alpha = backdrop.a;
     }
 
-    // Output is premultiplied, like the blend the element is drawn with.
     gl_FragColor = vec4(tone(color) * material_alpha, material_alpha) * alpha * corner;
 }

@@ -3,7 +3,7 @@ use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fht_compositor_config::{Blur as BlurConfig, BlurKind, LiquidGlass};
+use fht_compositor_config::{Blur as BlurConfig, BlurKind, LiquidGlass, SeaGlass};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{
@@ -219,16 +219,26 @@ impl RenderElement<GlowRenderer> for BlurElement {
 
         let gles: &mut GlesFrame = frame.borrow_mut();
         let program = Shaders::get_from_frame(gles).blur_post.clone();
-        let glass_enabled = f32::from(self.config.kind.is_some());
-        let glass = match self.config.kind {
+        let kind = self.config.kind;
+        let glass_enabled = f32::from(matches!(kind, Some(BlurKind::LiquidGlass(_))));
+        let sea_glass_enabled = f32::from(matches!(kind, Some(BlurKind::SeaGlass(_))));
+        let glass = match kind {
             Some(BlurKind::LiquidGlass(glass)) => glass,
-            None => LiquidGlass::default(),
+            _ => LiquidGlass::default(),
+        };
+        let sea_glass = match kind {
+            Some(BlurKind::SeaGlass(sea_glass)) => sea_glass,
+            _ => SeaGlass::default(),
+        };
+        let (grain, ripple_strength) = match kind {
+            Some(BlurKind::SeaGlass(sea_glass)) => (sea_glass.grain, sea_glass.ripple_strength),
+            _ => (0.0, 0.0),
         };
         // Without a kind the tone is neutral, so only the rounding is applied.
-        let (brightness, tint_color) = if glass_enabled > 0.0 {
-            (glass.brightness, glass.tint_color)
-        } else {
-            (1.0, [0.0; 4])
+        let (brightness, tint_color) = match kind {
+            Some(BlurKind::LiquidGlass(glass)) => (glass.brightness, glass.tint_color),
+            Some(BlurKind::SeaGlass(sea_glass)) => (sea_glass.brightness, sea_glass.tint_color),
+            None => (1.0, [0.0; 4]),
         };
         let tex_size = textures[0].size();
         let (tex_w, tex_h) = (tex_size.w as f32, tex_size.h as f32);
@@ -276,6 +286,10 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 Uniform::new("corner_radius", self.corner_radius),
                 Uniform::new("corner_power", self.corner_power),
                 Uniform::new("glass_enabled", glass_enabled),
+                Uniform::new("sea_glass_enabled", sea_glass_enabled),
+                Uniform::new("grain", grain),
+                Uniform::new("ripple_strength", ripple_strength),
+                Uniform::new("ripple_scale", sea_glass.ripple_scale),
                 Uniform::new("edge_thickness", glass.edge_thickness),
                 Uniform::new("refraction_strength", glass.refraction_strength),
                 Uniform::new("lens_distortion", glass.lens_distortion),

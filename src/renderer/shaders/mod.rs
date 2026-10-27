@@ -102,6 +102,11 @@ impl Shaders {
                     UniformName::new("corner_power", UniformType::_1f),
                     // blur kind: liquid glass
                     UniformName::new("glass_enabled", UniformType::_1f),
+                    // blur kind: sea glass
+                    UniformName::new("sea_glass_enabled", UniformType::_1f),
+                    UniformName::new("grain", UniformType::_1f),
+                    UniformName::new("ripple_strength", UniformType::_1f),
+                    UniformName::new("ripple_scale", UniformType::_1f),
                     UniformName::new("edge_thickness", UniformType::_1f),
                     UniformName::new("refraction_strength", UniformType::_1f),
                     UniformName::new("lens_distortion", UniformType::_1f),
