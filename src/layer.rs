@@ -137,9 +137,9 @@ impl MappedLayer {
             );
         }
 
-        // Like the shadow, the blur is below the surfaces.
         if !blur.disabled() {
-            let fallback = Some(render_geo);
+            // force layer shells to specify a blur region otherwise we will get buggy results
+            // annoying I know, but its for the best.
             let (region, commit) =
                 surface_background_effect_region(
                     wl_surface,
@@ -147,7 +147,7 @@ impl MappedLayer {
                     render_geo.loc,
                     Scale::from(1.0),
                     render_geo,
-                    fallback,
+                    None,
                 );
             if !region.is_empty() {
                 push(LayerShellRenderElement::Blur(BlurElement::new(
