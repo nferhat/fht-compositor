@@ -17,7 +17,7 @@ use smithay::backend::renderer::{Color32F, Renderer as _};
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 
 use super::border::Border;
@@ -631,17 +631,42 @@ impl Tile {
         // Region rects are surface-local, so offset them by where the surface is drawn.
         let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
             - self.window.render_offset().to_physical_precise_round(scale);
+        // calculate how much we should stretch the background effect regions.
+        //
+        // if the target size is larger than the current one, we will simply crop off the region to
+        // the window visual size, instead of scaling it down.
+        let stretch = if has_size_animation {
+            let win = self.window.size();
+            let curr = window_geometry.size;
+            Scale::from((
+                if win.w > 0 && win.w < curr.w {
+                    curr.w as f64 / win.w as f64
+                } else {
+                    1.0
+                },
+                if win.h > 0 && win.h < curr.h {
+                    curr.h as f64 / win.h as f64
+                } else {
+                    1.0
+                },
+            ))
+        } else {
+            Scale::from(1.0)
+        };
+        let window_rect: Rectangle<i32, Physical> = Rectangle::new(
+            window_geometry.loc.to_physical_precise_round(scale),
+            window_geometry.size.to_physical_precise_round(scale),
+        );
         // Without a region, blur the whole window, unless blur is disabled.
-        let fallback = (!blur.disabled()).then(|| {
-            Rectangle::new(
-                window_geometry.loc.to_physical_precise_round(scale),
-                window_geometry.size.to_physical_precise_round(scale),
-            )
-        });
+        let fallback = (!blur.disabled()).then_some(window_rect);
+        // Growing resizes crop the window content instead of stretching it, so the region can
+        // extend past the window while it's animating.
         let (region, region_commit) = surface_background_effect_region(
             self.window.wl_surface(),
             scale,
             surface_loc,
+            stretch,
+            window_rect,
             fallback,
         );
 
