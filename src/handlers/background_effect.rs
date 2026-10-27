@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::delegate_background_effect;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Physical, Point, Rectangle};
 use smithay::wayland::background_effect::{
     BackgroundEffectSurfaceCachedState, ExtBackgroundEffectHandler,
 };
@@ -31,8 +31,8 @@ struct Inner {
 /// Adds the post commit hook that updates the blur region of `wl_surface` once it commits.
 ///
 /// The hook does nothing for surfaces that never requested a blur region, so it can be added to
-/// every window surface.
-pub(super) fn add_window_post_commit_hook(wl_surface: &WlSurface) {
+/// every window and layer surface.
+pub fn add_blur_region_hook(wl_surface: &WlSurface) {
     add_post_commit_hook::<State, _>(wl_surface, |_state, _dh, surface| {
         with_states(surface, |states| {
             let Some(cache) = states.data_map.get::<BlurRegionCache>() else {
@@ -66,8 +66,7 @@ fn mark_pending(wl_surface: &WlSurface) {
     });
 }
 
-/// The committed blur region of `wl_surface`, relative to it, and the counter that changes with it.
-pub fn blur_region(wl_surface: &WlSurface) -> (Arc<Vec<Rectangle<i32, Logical>>>, CommitCounter) {
+fn blur_region(wl_surface: &WlSurface) -> (Arc<Vec<Rectangle<i32, Logical>>>, CommitCounter) {
     with_states(wl_surface, |states| {
         let Some(cache) = states.data_map.get::<BlurRegionCache>() else {
             return (Arc::default(), CommitCounter::default());
@@ -75,6 +74,31 @@ pub fn blur_region(wl_surface: &WlSurface) -> (Arc<Vec<Rectangle<i32, Logical>>>
         let inner = cache.0.lock().unwrap();
         (inner.rects.clone(), inner.commit)
     })
+}
+
+/// The committed blur region of `wl_surface` in physical coordinates, offset by `surface_loc`.
+///
+/// Without a region, `fallback` is used instead, if there is one.
+pub fn surface_background_effect_region(
+    wl_surface: &WlSurface,
+    scale: i32,
+    surface_loc: Point<i32, Physical>,
+    fallback: Option<Rectangle<i32, Physical>>,
+) -> (Vec<Rectangle<i32, Physical>>, CommitCounter) {
+    let (rects, commit) = blur_region(wl_surface);
+    if rects.is_empty() {
+        return (fallback.into_iter().collect(), commit);
+    }
+
+    let rects = rects
+        .iter()
+        .map(|rect| {
+            let mut rect = rect.to_physical_precise_round(scale);
+            rect.loc += surface_loc;
+            rect
+        })
+        .collect();
+    (rects, commit)
 }
 
 impl ExtBackgroundEffectHandler for State {
