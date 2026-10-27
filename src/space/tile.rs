@@ -776,6 +776,8 @@ impl Tile {
                 region,
                 blur,
                 self.blur.clone(),
+                corner_radius * scale as f32,
+                corner_power,
             )));
         }
     }
