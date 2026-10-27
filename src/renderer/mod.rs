@@ -6,6 +6,7 @@
 //!
 //! This module also has some helpers to create render elements.
 
+pub mod blur;
 mod debug;
 pub mod extra_damage;
 pub mod render_elements;
