@@ -855,6 +855,63 @@ pub struct Blur {
     pub radius: f32,
     #[serde(default)]
     pub noise: f32,
+    /// Contrast of the blurred backdrop, 1.0 leaves it as it is.
+    pub contrast: f32,
+    /// Saturation of the blurred backdrop, 1.0 leaves it as it is.
+    pub saturation: f32,
+    /// Boosts the saturation of the unsaturated colors of the blurred backdrop, 0.0 leaves it as it
+    /// is.
+    pub vibrancy: f32,
+    /// Like `vibrancy`, but only in the shadows of the blurred backdrop.
+    pub dark_vibrancy: f32,
+    /// Post-processing applied to the blurred backdrop, none by default.
+    #[serde(default)]
+    pub kind: Option<BlurKind>,
+}
+
+/// Post-processing of the blurred backdrop.
+///
+/// Enabled with `decorations.blur.kind.<name>`, for example `decorations.blur.kind.liquid-glass`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum BlurKind {
+    LiquidGlass(LiquidGlass),
+}
+
+/// A liquid glass material over the blurred backdrop, it refracts the edges of the blurred region.
+///
+/// The backdrop is blurred with the same dual kawase passes as the blur, see `blur`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LiquidGlass {
+    pub edge_thickness: f32,
+    pub refraction_strength: f32,
+    pub lens_distortion: f32,
+    pub chromatic_aberration: f32,
+    pub fresnel_strength: f32,
+    pub specular_strength: f32,
+    pub glass_opacity: f32,
+    /// Tone adjustments, 1.0 and 0.0 leave the backdrop as it is.
+    pub brightness: f32,
+    /// Color mixed over the backdrop, its alpha is how strongly it is mixed in.
+    #[serde(deserialize_with = "deserialize_color")]
+    pub tint_color: [f32; 4],
+}
+
+impl Default for LiquidGlass {
+    fn default() -> Self {
+        Self {
+            edge_thickness: 0.05,
+            refraction_strength: 1.17,
+            lens_distortion: 1.15,
+            chromatic_aberration: 0.8,
+            fresnel_strength: 1.55,
+            specular_strength: 0.38,
+            glass_opacity: 0.8,
+            brightness: 1.0,
+            tint_color: [0.722, 0.847, 1.0, 0.0],
+        }
+    }
 }
 
 impl Default for Blur {
@@ -864,6 +921,11 @@ impl Default for Blur {
             passes: default_blur_passes(),
             radius: default_blur_radius(),
             noise: 0.0,
+            contrast: 1.0,
+            saturation: 1.0,
+            vibrancy: 0.0,
+            dark_vibrancy: 0.0,
+            kind: None,
         }
     }
 }
@@ -874,6 +936,11 @@ impl Blur {
         passes: 0,
         radius: 0.0,
         noise: 0.0,
+        contrast: 1.0,
+        saturation: 1.0,
+        vibrancy: 0.0,
+        dark_vibrancy: 0.0,
+        kind: None,
     };
 
     pub fn disabled(&self) -> bool {
