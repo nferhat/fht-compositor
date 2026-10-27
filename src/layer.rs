@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use fht_compositor_config::{BlurOverrides, ShadowOverrides};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
@@ -5,6 +8,8 @@ use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
 use smithay::utils::{Logical, Rectangle};
 
+use crate::handlers::background_effect::surface_background_effect_region;
+use crate::renderer::blur::{Blur, BlurElement};
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
 use crate::renderer::surface::push_elements_from_surface_tree;
@@ -21,6 +26,8 @@ pub struct MappedLayer {
     pub output: Output,
     /// The shadow surrounding this layer surface.
     pub shadow: Shadow,
+    /// The blur state of the background effect regions.
+    pub blur: Rc<RefCell<Blur>>,
     /// The resolved rules for this layer surface.
     pub rules: ResolvedLayerRules,
 }
@@ -49,6 +56,7 @@ impl MappedLayer {
             layer,
             output,
             shadow,
+            blur: Rc::new(RefCell::new(Blur::new())),
             rules,
         }
     }
@@ -69,12 +77,13 @@ impl MappedLayer {
         renderer: &mut R,
         layer_geo: Rectangle<i32, Logical>,
         scale: i32,
-        _config: &fht_compositor_config::Config,
+        config: &fht_compositor_config::Config,
         push: &mut dyn FnMut(LayerShellRenderElement<R>),
     ) {
         let wl_surface = self.layer.wl_surface();
         let render_geo = layer_geo.to_physical(scale);
         let alpha = self.rules.opacity.unwrap_or(1.0);
+        let blur = config.decorations.blur.with_overrides(&self.rules.blur);
 
         // First render popups above everything else.
         for (popup, popup_offset) in PopupManager::popups_for_surface(wl_surface) {
@@ -126,6 +135,23 @@ impl MappedLayer {
                 Kind::ScanoutCandidate,
                 &mut |e| push(e.into()),
             );
+        }
+
+        // Like the shadow, the blur is below the surfaces.
+        if !blur.disabled() {
+            let fallback = Some(render_geo);
+            let (region, commit) =
+                surface_background_effect_region(wl_surface, scale, render_geo.loc, fallback);
+            if !region.is_empty() {
+                push(LayerShellRenderElement::Blur(BlurElement::new(
+                    region,
+                    blur,
+                    self.blur.clone(),
+                    radius * scale as f32,
+                    power,
+                    commit,
+                )));
+            }
         }
 
         if let Some(shadow) = self.shadow.render(renderer, alpha, true) {
@@ -248,5 +274,6 @@ crate::fht_render_elements! {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedWindowElement<R>,
         Shadow = ShaderElement,
+        Blur = BlurElement,
     }
 }
