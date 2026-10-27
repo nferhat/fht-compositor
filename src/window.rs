@@ -6,7 +6,6 @@ use std::time::Duration;
 use owning_ref::MutexGuardRef;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::{self, Kind};
-use smithay::backend::renderer::utils::CommitCounter;
 // use smithay::desktop::Window;
 use smithay::desktop::utils::{
     bbox_from_surface_tree, output_update, send_frames_surface_tree,
@@ -298,13 +297,6 @@ impl Window {
                 .map(|geo| geo.loc)
         })
         .unwrap_or(bbox.loc)
-    }
-
-    /// Get the background effect region of the toplevel surface, in surface-local coordinates.
-    ///
-    /// Rects are non-overlapping. Empty when the client did not set a region.
-    pub fn background_effect_region(&self) -> (Arc<Vec<Rectangle<i32, Logical>>>, CommitCounter) {
-        crate::handlers::background_effect::blur_region(self.wl_surface())
     }
 
     pub fn request_fullscreen(&self, fullscreen: bool) {
