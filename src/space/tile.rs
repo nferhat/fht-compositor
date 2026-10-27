@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -24,6 +25,7 @@ use super::closing_tile::ClosingTile;
 use super::{border, shadow, Config};
 use crate::egui::EguiRenderElement;
 use crate::output::OutputExt;
+use crate::renderer::blur::{Blur, BlurElement};
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::{ShaderElement, Shaders};
@@ -88,6 +90,11 @@ pub struct Tile {
     /// The last saved floating geometry
     previous_floating_geometry: Option<Rectangle<i32, Logical>>,
 
+    /// Blur state for the background effect regions.
+    ///
+    /// Shared with the [`BlurElement`] of each frame, since the capture happens during rendering.
+    blur: Rc<RefCell<Blur>>,
+
     /// Configuration specific to the workspace system.
     pub config: Rc<Config>,
 }
@@ -104,6 +111,7 @@ crate::fht_render_elements! {
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
         BackgroundEffectRegion = SolidColorRenderElement,
+        BlurElement = BlurElement,
     }
 }
 
@@ -154,6 +162,7 @@ impl Tile {
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             previous_floating_geometry: None,
+            blur: Rc::new(RefCell::new(Blur::new())),
             config,
         }
     }
@@ -594,6 +603,8 @@ impl Tile {
             border_thickness = 0
         }
 
+        let blur = self.config.blur.with_overrides(&rules.blur);
+
         drop(rules); // Avoid deadlock :skull:
 
         let has_size_animation = self.size_animation.is_some();
@@ -616,16 +627,25 @@ impl Tile {
             push(TileRenderElement::RoundedSurfaceDamage(damage));
         }
 
-        if self.config.draw_background_effect_regions {
-            // Region rects are surface-local, so offset them by where the surface is drawn.
-            let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
-                - self.window.render_offset().to_physical_precise_round(scale);
-            for rect in self.window.background_effect_region() {
+        // Region rects are surface-local, so offset them by where the surface is drawn.
+        let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
+            - self.window.render_offset().to_physical_precise_round(scale);
+        let region: Vec<_> = self
+            .window
+            .background_effect_region()
+            .into_iter()
+            .map(|rect| {
                 let mut rect = rect.to_physical_precise_round(scale);
                 rect.loc += surface_loc;
+                rect
+            })
+            .collect();
+
+        if self.config.draw_background_effect_regions {
+            for rect in &region {
                 let color = SolidColorRenderElement::new(
                     Id::new(),
-                    rect,
+                    *rect,
                     CommitCounter::default(),
                     BACKGROUND_EFFECT_REGION_COLOR,
                     Kind::Unspecified,
@@ -749,6 +769,15 @@ impl Tile {
                 },
             );
         };
+
+        // The blur is below the window surfaces, so it only sees what is behind the tile.
+        if !blur.disabled() && !region.is_empty() {
+            push(TileRenderElement::BlurElement(BlurElement::new(
+                region,
+                blur,
+                self.blur.clone(),
+            )));
+        }
     }
 
     /// Render the elements for this [`Tile`].
