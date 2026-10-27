@@ -7,6 +7,8 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 
+use crate::renderer::blur::BlurProgram;
+
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
@@ -30,6 +32,7 @@ pub struct Shaders {
     // matrices, only used in src/space/tile.rs
     pub rounded_window: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
+    pub blur: BlurProgram,
 }
 
 impl Shaders {
@@ -86,11 +89,14 @@ impl Shaders {
             )
             .expect("Shader source should always compile!");
 
+        let blur = BlurProgram::compile(renderer).expect("Shader source should always compile!");
+
         let shaders = Self {
             border,
             box_shadow,
             rounded_window,
             resizing_texture,
+            blur,
         };
 
         renderer
