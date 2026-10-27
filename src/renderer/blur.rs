@@ -3,15 +3,15 @@ use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fht_compositor_config::Blur as BlurConfig;
+use fht_compositor_config::{Blur as BlurConfig, BlurKind, LiquidGlass};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::{Element, Id, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{
-    ffi, link_program, GlesError, GlesFrame, GlesRenderer, GlesTexture,
+    ffi, link_program, GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform,
 };
 use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::backend::renderer::{Frame as _, FrameContext as _, Offscreen, Texture as _};
+use smithay::backend::renderer::{Frame, FrameContext as _, Offscreen, Texture as _};
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Physical, Rectangle, Scale, Size, Transform};
 
@@ -112,6 +112,11 @@ pub struct BlurElement {
     rects: Vec<Rectangle<i32, Physical>>,
     /// Bounding box of `rects` expanded by the blur reach, this is the area that gets captured.
     geometry: Rectangle<i32, Physical>,
+    /// Bounding box of `rects`, the corners are rounded along it.
+    bounds: Rectangle<i32, Physical>,
+    /// Rounding of the corners of `bounds`, in physical pixels, matching the window.
+    corner_radius: f32,
+    corner_power: f32,
     config: BlurConfig,
     state: Rc<RefCell<Blur>>,
 }
@@ -121,6 +126,8 @@ impl BlurElement {
         rects: Vec<Rectangle<i32, Physical>>,
         config: BlurConfig,
         state: Rc<RefCell<Blur>>,
+        corner_radius: f32,
+        corner_power: f32,
     ) -> Self {
         let id = RefCell::borrow(&state).id.clone();
 
@@ -151,11 +158,18 @@ impl BlurElement {
         let right = -(-(expanded.loc.x + expanded.size.w)).div_euclid(grid) * grid;
         let bottom = -(-(expanded.loc.y + expanded.size.h)).div_euclid(grid) * grid;
         let geometry = Rectangle::from_extremities((left, top), (right, bottom));
-
+        let bounds = rects
+            .iter()
+            .copied()
+            .reduce(|a, b| a.merge(b))
+            .unwrap_or_default();
         Self {
             id,
             rects,
             geometry,
+            bounds,
+            corner_radius,
+            corner_power,
             config,
             state,
         }
@@ -199,6 +213,25 @@ impl RenderElement<GlowRenderer> for BlurElement {
             return Ok(());
         };
 
+        let gles: &mut GlesFrame = frame.borrow_mut();
+        let program = Shaders::get_from_frame(gles).blur_post.clone();
+        let glass_enabled = f32::from(self.config.kind.is_some());
+        let glass = match self.config.kind {
+            Some(BlurKind::LiquidGlass(glass)) => glass,
+            None => LiquidGlass::default(),
+        };
+        // Without a kind the tone is neutral, so only the rounding is applied.
+        let (brightness, tint_color) = if glass_enabled > 0.0 {
+            (glass.brightness, glass.tint_color)
+        } else {
+            (1.0, [0.0; 4])
+        };
+        let tex_size = textures[0].size();
+        let (tex_w, tex_h) = (tex_size.w as f32, tex_size.h as f32);
+        let bounds_loc = self.bounds.loc - state.area.loc;
+        let bounds_size = self.bounds.size;
+
+        let mut res = Ok(());
         for rect in &self.rects {
             let Some(visible) = rect.intersection(state.area) else {
                 continue;
@@ -220,7 +253,41 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 (loc.x as f64, loc.y as f64).into(),
                 (visible.size.w as f64, visible.size.h as f64).into(),
             );
-            frame.render_texture_from_to(
+
+            // Every blurred rect is rounded like the window, the glass and the tone come on top.
+            let uniforms = vec![
+                Uniform::new("geo_size", (bounds_size.w as f32, bounds_size.h as f32)),
+                Uniform::new(
+                    "rect_origin",
+                    (bounds_loc.x as f32 / tex_w, bounds_loc.y as f32 / tex_h),
+                ),
+                Uniform::new(
+                    "rect_size",
+                    (bounds_size.w as f32 / tex_w, bounds_size.h as f32 / tex_h),
+                ),
+                Uniform::new("corner_radius", self.corner_radius),
+                Uniform::new("corner_power", self.corner_power),
+                Uniform::new("glass_enabled", glass_enabled),
+                Uniform::new("edge_thickness", glass.edge_thickness),
+                Uniform::new("refraction_strength", glass.refraction_strength),
+                Uniform::new("lens_distortion", glass.lens_distortion),
+                Uniform::new("chromatic_aberration", glass.chromatic_aberration),
+                Uniform::new("fresnel_strength", glass.fresnel_strength),
+                Uniform::new("specular_strength", glass.specular_strength),
+                Uniform::new("glass_opacity", glass.glass_opacity),
+                Uniform::new("brightness", brightness),
+                Uniform::new("contrast", self.config.contrast),
+                Uniform::new("saturation", self.config.saturation),
+                Uniform::new("vibrancy", self.config.vibrancy),
+                Uniform::new("dark_vibrancy", self.config.dark_vibrancy),
+                Uniform::new(
+                    "tint_color",
+                    (tint_color[0], tint_color[1], tint_color[2], tint_color[3]),
+                ),
+            ];
+            gles.override_default_tex_program(program.clone(), uniforms);
+            res = Frame::render_texture_from_to(
+                gles,
                 &textures[0],
                 src,
                 visible,
@@ -228,10 +295,15 @@ impl RenderElement<GlowRenderer> for BlurElement {
                 &[],
                 Transform::Normal,
                 1.0,
-            )?;
+            );
+            if res.is_err() {
+                break;
+            }
         }
 
-        Ok(())
+        // Never leave the override behind, the next element would be drawn with it.
+        gles.clear_tex_program_override();
+        res
     }
 
     fn underlying_storage(&self, _renderer: &mut GlowRenderer) -> Option<UnderlyingStorage<'_>> {
@@ -400,7 +472,8 @@ unsafe fn blur_in_place(
     // One level pixel is one texel of the texture, half of it is the sampling step.
     let half_pixel = (0.5 / tex_size.w as f32, 0.5 / tex_size.h as f32);
 
-    // Draws level `dst` from level `src` with `pass`, sampling `src` through its part of the texture.
+    // Draws level `dst` from level `src` with `pass`, sampling `src` through its part of the
+    // texture.
     let draw = |pass: &BlurPass, src: usize, dst: usize| unsafe {
         gl.UseProgram(pass.program);
         gl.Uniform1i(pass.uniform_tex, 0);
