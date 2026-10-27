@@ -630,10 +630,9 @@ impl Tile {
         // Region rects are surface-local, so offset them by where the surface is drawn.
         let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
             - self.window.render_offset().to_physical_precise_round(scale);
-        let region: Vec<_> = self
-            .window
-            .background_effect_region()
-            .into_iter()
+        let (surface_region, region_commit) = self.window.background_effect_region();
+        let region: Vec<_> = surface_region
+            .iter()
             .map(|rect| {
                 let mut rect = rect.to_physical_precise_round(scale);
                 rect.loc += surface_loc;
@@ -778,6 +777,7 @@ impl Tile {
                 self.blur.clone(),
                 corner_radius * scale as f32,
                 corner_power,
+                region_commit,
             )));
         }
     }
