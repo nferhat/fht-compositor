@@ -95,6 +95,12 @@ macro_rules! fht_render_elements {
                     $($name::$variant(elem) => elem.kind()),+
                 }
             }
+
+            fn is_framebuffer_effect(&self) -> bool {
+                match self {
+                    $($name::$variant(elem) => elem.is_framebuffer_effect()),+
+                }
+            }
         }
 
         impl smithay::backend::renderer::element::RenderElement<smithay::backend::renderer::glow::GlowRenderer>
@@ -119,6 +125,20 @@ macro_rules! fht_render_elements {
             fn underlying_storage(&self, renderer: &mut smithay::backend::renderer::glow::GlowRenderer) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
                 match self {
                     $($name::$variant(elem) => elem.underlying_storage(renderer)),+
+                }
+            }
+
+            fn capture_framebuffer(
+                &self,
+                frame: &mut smithay::backend::renderer::glow::GlowFrame<'_, '_>,
+                src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
+                dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
+                cache: &smithay::utils::user_data::UserDataMap,
+            ) -> Result<(), smithay::backend::renderer::gles::GlesError> {
+                match self {
+                    $($name::$variant(elem) => {
+                        smithay::backend::renderer::element::RenderElement::<smithay::backend::renderer::glow::GlowRenderer>::capture_framebuffer(elem, frame, src, dst, cache)
+                    })+
                 }
             }
         }
@@ -149,6 +169,20 @@ macro_rules! fht_render_elements {
             ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
                 match self {
                     $($name::$variant(elem) => elem.underlying_storage(renderer)),+
+                }
+            }
+
+            fn capture_framebuffer(
+                &self,
+                frame: &mut $crate::backend::udev::UdevFrame<'render, '_, '_>,
+                src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
+                dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
+                cache: &smithay::utils::user_data::UserDataMap,
+            ) -> Result<(), $crate::backend::udev::UdevRenderError> {
+                match self {
+                    $($name::$variant(elem) => {
+                        smithay::backend::renderer::element::RenderElement::<$crate::backend::udev::UdevRenderer<'render>>::capture_framebuffer(elem, frame, src, dst, cache)
+                    })+
                 }
             }
         }
