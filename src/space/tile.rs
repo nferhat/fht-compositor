@@ -24,6 +24,7 @@ use super::border::Border;
 use super::closing_tile::ClosingTile;
 use super::{border, shadow, Config};
 use crate::egui::EguiRenderElement;
+use crate::handlers::background_effect::surface_background_effect_region;
 use crate::output::OutputExt;
 use crate::renderer::blur::{Blur, BlurElement};
 use crate::renderer::extra_damage::ExtraDamage;
@@ -630,15 +631,19 @@ impl Tile {
         // Region rects are surface-local, so offset them by where the surface is drawn.
         let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
             - self.window.render_offset().to_physical_precise_round(scale);
-        let (surface_region, region_commit) = self.window.background_effect_region();
-        let region: Vec<_> = surface_region
-            .iter()
-            .map(|rect| {
-                let mut rect = rect.to_physical_precise_round(scale);
-                rect.loc += surface_loc;
-                rect
-            })
-            .collect();
+        // Without a region, blur the whole window, unless blur is disabled.
+        let fallback = (!blur.disabled()).then(|| {
+            Rectangle::new(
+                window_geometry.loc.to_physical_precise_round(scale),
+                window_geometry.size.to_physical_precise_round(scale),
+            )
+        });
+        let (region, region_commit) = surface_background_effect_region(
+            self.window.wl_surface(),
+            scale,
+            surface_loc,
+            fallback,
+        );
 
         if self.config.draw_background_effect_regions {
             for rect in &region {
