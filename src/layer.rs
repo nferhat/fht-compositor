@@ -6,7 +6,7 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Rectangle, Scale};
 
 use crate::handlers::background_effect::surface_background_effect_region;
 use crate::renderer::blur::{Blur, BlurElement};
@@ -141,7 +141,14 @@ impl MappedLayer {
         if !blur.disabled() {
             let fallback = Some(render_geo);
             let (region, commit) =
-                surface_background_effect_region(wl_surface, scale, render_geo.loc, fallback);
+                surface_background_effect_region(
+                    wl_surface,
+                    scale,
+                    render_geo.loc,
+                    Scale::from(1.0),
+                    render_geo,
+                    fallback,
+                );
             if !region.is_empty() {
                 push(LayerShellRenderElement::Blur(BlurElement::new(
                     region,
