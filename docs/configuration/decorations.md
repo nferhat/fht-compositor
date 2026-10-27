@@ -104,6 +104,48 @@ though nothing stops you from using high number of passes with low blur values, 
 Additional noise effect to add when rendering blur. It just looks nice and can give off the "glassy blur" effect, similar to Windows 11 Acrylic
 blur look.
 
+#### `blur.contrast`
+
+Contrast of the blurred backdrop, `1.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.saturation`
+
+Saturation of the blurred backdrop, `1.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.vibrancy`
+
+Boosts the saturation of the colors of the blurred backdrop that are not saturated yet, so muted colors get more vivid while
+already vivid ones are left alone. `0.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.dark-vibrancy`
+
+Like `blur.vibrancy`, but only applied in the shadows of the blurred backdrop. `0.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.kind`
+
+Post-processing applied to the blurred backdrop. By default there is none, the blur is only rounded like the window corners.
+The kind is a tagged table, the name of the table selects the effect.
+
+##### `blur.kind.liquid-glass`
+
+Draws a liquid glass material over the backdrop, the edges of the blurred region refract what is behind them.
+The backdrop is blurred with the same dual kawase passes as the blur, so `radius` and `passes` control the blur strength.
+The `brightness` and `tint-color` adjustments are applied as well, along with the blur's `contrast` and `saturation`.
+The `tint-color` is a color string, its alpha channel is how strongly it is mixed over the backdrop.
+
+```toml
+[decorations.blur.kind.liquid-glass]
+edge-thickness = 0.05
+refraction-strength = 1.17
+lens-distortion = 1.15
+chromatic-aberration = 0.8
+fresnel-strength = 1.55
+specular-strength = 0.38
+glass-opacity = 0.8
+brightness = 1.0
+tint-color = "#b8d8ff00"
+```
+
 ## Decoration mode
 
 #### `decoration-mode`
