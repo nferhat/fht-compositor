@@ -381,6 +381,8 @@ unsafe fn blur_in_place(
     passes: usize,
     offset: f32,
 ) {
+    const VERTICES: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+
     let passes = passes.max(1);
     let tex_size = textures[0].size();
 
@@ -398,80 +400,25 @@ unsafe fn blur_in_place(
     // One level pixel is one texel of the texture, half of it is the sampling step.
     let half_pixel = (0.5 / tex_size.w as f32, 0.5 / tex_size.h as f32);
 
-    gl.Disable(ffi::BLEND);
-    gl.Disable(ffi::SCISSOR_TEST);
-    gl.ActiveTexture(ffi::TEXTURE0);
+    // Draws level `dst` from level `src` with `pass`, sampling `src` through its part of the texture.
+    let draw = |pass: &BlurPass, src: usize, dst: usize| unsafe {
+        gl.UseProgram(pass.program);
+        gl.Uniform1i(pass.uniform_tex, 0);
+        gl.Uniform1f(pass.uniform_offset, offset);
+        gl.Uniform2f(pass.uniform_half_pixel, half_pixel.0, half_pixel.1);
+        gl.Uniform2f(pass.uniform_uv_scale, uv_scale(src).0, uv_scale(src).1);
 
-    let mut fbo = 0;
-    gl.GenFramebuffers(1, &mut fbo);
-    gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, fbo);
-
-    // Downsample: level k - 1 -> level k
-    for k in 1..=passes {
-        let pass = DrawPass {
-            src: tex(k - 1),
-            dst: tex(k),
-            dst_size: level_size(k),
-            uv_scale: uv_scale(k - 1),
-            half_pixel,
-            offset,
-        };
-        draw_pass(gl, &program.down, &pass);
-    }
-
-    // Upsample: level k -> level k - 1
-    for k in (1..=passes).rev() {
-        let pass = DrawPass {
-            src: tex(k),
-            dst: tex(k - 1),
-            dst_size: level_size(k - 1),
-            uv_scale: uv_scale(k),
-            half_pixel,
-            offset,
-        };
-        draw_pass(gl, &program.up, &pass);
-    }
-
-    gl.DeleteFramebuffers(1, &fbo);
-}
-
-struct DrawPass<'a> {
-    src: &'a GlesTexture,
-    dst: &'a GlesTexture,
-    dst_size: Size<i32, Buffer>,
-    uv_scale: (f32, f32),
-    half_pixel: (f32, f32),
-    offset: f32,
-}
-
-unsafe fn draw_pass(gl: &ffi::Gles2, pass_program: &BlurPass, pass: &DrawPass<'_>) {
-    const VERTICES: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
-
-    unsafe {
-        gl.UseProgram(pass_program.program);
-        gl.Uniform1i(pass_program.uniform_tex, 0);
-        gl.Uniform1f(pass_program.uniform_offset, pass.offset);
-        gl.Uniform2f(
-            pass_program.uniform_half_pixel,
-            pass.half_pixel.0,
-            pass.half_pixel.1,
-        );
-        gl.Uniform2f(
-            pass_program.uniform_uv_scale,
-            pass.uv_scale.0,
-            pass.uv_scale.1,
-        );
-        gl.Viewport(0, 0, pass.dst_size.w, pass.dst_size.h);
-
+        let dst_size = level_size(dst);
+        gl.Viewport(0, 0, dst_size.w, dst_size.h);
         gl.FramebufferTexture2D(
             ffi::DRAW_FRAMEBUFFER,
             ffi::COLOR_ATTACHMENT0,
             ffi::TEXTURE_2D,
-            pass.dst.tex_id(),
+            tex(dst).tex_id(),
             0,
         );
 
-        gl.BindTexture(ffi::TEXTURE_2D, pass.src.tex_id());
+        gl.BindTexture(ffi::TEXTURE_2D, tex(src).tex_id());
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
         gl.TexParameteri(
@@ -485,7 +432,7 @@ unsafe fn draw_pass(gl: &ffi::Gles2, pass_program: &BlurPass, pass: &DrawPass<'_
             ffi::CLAMP_TO_EDGE as i32,
         );
 
-        let attrib = pass_program.attrib_vert as u32;
+        let attrib = pass.attrib_vert as u32;
         gl.EnableVertexAttribArray(attrib);
         gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
         gl.VertexAttribPointer(
@@ -498,5 +445,25 @@ unsafe fn draw_pass(gl: &ffi::Gles2, pass_program: &BlurPass, pass: &DrawPass<'_
         );
         gl.DrawArrays(ffi::TRIANGLES, 0, 6);
         gl.DisableVertexAttribArray(attrib);
+    };
+
+    gl.Disable(ffi::BLEND);
+    gl.Disable(ffi::SCISSOR_TEST);
+    gl.ActiveTexture(ffi::TEXTURE0);
+
+    let mut fbo = 0;
+    gl.GenFramebuffers(1, &mut fbo);
+    gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, fbo);
+
+    // Downsample: level k - 1 -> level k
+    for k in 1..=passes {
+        draw(&program.down, k - 1, k);
     }
+
+    // Upsample: level k -> level k - 1
+    for k in (1..=passes).rev() {
+        draw(&program.up, k, k - 1);
+    }
+
+    gl.DeleteFramebuffers(1, &fbo);
 }
