@@ -876,6 +876,7 @@ pub struct Blur {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum BlurKind {
     LiquidGlass(LiquidGlass),
+    SeaGlass(SeaGlass),
 }
 
 /// A liquid glass material over the blurred backdrop, it refracts the edges of the blurred region.
@@ -910,6 +911,38 @@ impl Default for LiquidGlass {
             glass_opacity: 0.8,
             brightness: 1.0,
             tint_color: [0.722, 0.847, 1.0, 0.0],
+        }
+    }
+}
+
+/// A sea glass material over the blurred backdrop, with gentle ripples and grain in it.
+///
+/// The ripples depend on the position only, so they don't animate and cost nothing extra to draw.
+/// The backdrop is blurred with the same dual kawase passes as the blur, see `blur`.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SeaGlass {
+    /// Amplitude of the ripples in pixels, `0.0` leaves the backdrop undistorted.
+    pub ripple_strength: f32,
+    /// Wavelength of the ripples in pixels.
+    pub ripple_scale: f32,
+    /// Amount of noise added over the backdrop, `0.0` leaves it smooth.
+    pub grain: f32,
+    /// Tone adjustments, 1.0 and 0.0 leave the backdrop as it is.
+    pub brightness: f32,
+    /// Color mixed over the backdrop, its alpha is how strongly it is mixed in.
+    #[serde(deserialize_with = "deserialize_color")]
+    pub tint_color: [f32; 4],
+}
+
+impl Default for SeaGlass {
+    fn default() -> Self {
+        Self {
+            ripple_strength: 3.0,
+            ripple_scale: 40.0,
+            grain: 0.03,
+            brightness: 1.0,
+            tint_color: [0.55, 0.85, 0.78, 0.25],
         }
     }
 }
