@@ -6,7 +6,6 @@ use smithay::backend::renderer::glow::{GlowFrame, GlowRenderer};
 use smithay::backend::renderer::multigpu::MultiTexture;
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::Texture;
-#[cfg(feature = "udev-backend")]
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Transform};
 
