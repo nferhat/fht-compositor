@@ -1,15 +1,19 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use fht_compositor_config::{BlurOverrides, ShadowOverrides};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager};
 use smithay::output::Output;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Rectangle, Scale};
 
-use crate::renderer::blur::element::BlurElement;
+use crate::handlers::background_effect::surface_background_effect_region;
+use crate::renderer::blur::{Blur, BlurElement};
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
-use crate::renderer::{has_transparent_region, FhtRenderer};
 use crate::renderer::surface::push_elements_from_surface_tree;
+use crate::renderer::FhtRenderer;
 use crate::space::shadow::{self, Shadow};
 use crate::state::Fht;
 
@@ -22,6 +26,8 @@ pub struct MappedLayer {
     pub output: Output,
     /// The shadow surrounding this layer surface.
     pub shadow: Shadow,
+    /// The blur state of the background effect regions.
+    pub blur: Rc<RefCell<Blur>>,
     /// The resolved rules for this layer surface.
     pub rules: ResolvedLayerRules,
 }
@@ -50,6 +56,7 @@ impl MappedLayer {
             layer,
             output,
             shadow,
+            blur: Rc::new(RefCell::new(Blur::new())),
             rules,
         }
     }
@@ -76,6 +83,7 @@ impl MappedLayer {
         let wl_surface = self.layer.wl_surface();
         let render_geo = layer_geo.to_physical(scale);
         let alpha = self.rules.opacity.unwrap_or(1.0);
+        let blur = config.decorations.blur.with_overrides(&self.rules.blur);
 
         // First render popups above everything else.
         for (popup, popup_offset) in PopupManager::popups_for_surface(wl_surface) {
@@ -103,12 +111,7 @@ impl MappedLayer {
                 alpha,
                 Kind::Unspecified,
                 &mut |surface| {
-                    if RoundedWindowElement::will_clip(
-                        &surface,
-                        scale as f64,
-                        layer_geo,
-                        radius,
-                    ) {
+                    if RoundedWindowElement::will_clip(&surface, scale as f64, layer_geo, radius) {
                         let rounded = RoundedWindowElement::new(
                             surface,
                             radius,
@@ -134,29 +137,33 @@ impl MappedLayer {
             );
         }
 
+        if !blur.disabled() {
+            // force layer shells to specify a blur region otherwise we will get buggy results
+            // annoying I know, but its for the best.
+            let (region, commit) =
+                surface_background_effect_region(
+                    wl_surface,
+                    scale,
+                    render_geo.loc,
+                    Scale::from(1.0),
+                    render_geo,
+                    None,
+                );
+            if !region.is_empty() {
+                push(LayerShellRenderElement::Blur(BlurElement::new(
+                    region,
+                    blur,
+                    self.blur.clone(),
+                    radius * scale as f32,
+                    power,
+                    commit,
+                )));
+            }
+        }
+
         if let Some(shadow) = self.shadow.render(renderer, alpha, true) {
             push(LayerShellRenderElement::Shadow(shadow))
         }
-
-        let blur = config.decorations.blur.with_overrides(&self.rules.blur);
-        let is_transparent = alpha < 1.0 || has_transparent_region(wl_surface, layer_geo.size);
-        if !blur.disabled() && is_transparent {
-
-            let element = BlurElement::new(
-                renderer,
-                &self.output,
-                layer_geo,
-                render_geo.loc,
-                radius,
-                power,
-                false, // FIXME: Configurable
-                scale,
-                alpha,
-                blur,
-            );
-            push(element.into())
-        }
-
     }
 }
 
@@ -273,7 +280,7 @@ crate::fht_render_elements! {
     LayerShellRenderElement<R> => {
         Surface = WaylandSurfaceRenderElement<R>,
         RoundedSurface = RoundedWindowElement<R>,
-        Blur = BlurElement,
         Shadow = ShaderElement,
+        Blur = BlurElement,
     }
 }

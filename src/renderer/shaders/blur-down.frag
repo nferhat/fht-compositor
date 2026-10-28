@@ -1,31 +1,24 @@
 #version 100
 
-//_DEFINES_
-
-#if defined(EXTERNAL)
-#extension GL_OES_EGL_image_external : require
-#endif
-
 precision highp float;
-#if defined(EXTERNAL)
-uniform samplerExternalOES tex;
-#else
-uniform sampler2D tex;
-#endif
 
 varying vec2 v_coords;
-uniform float radius;
-uniform vec2 half_pixel;
 
+uniform sampler2D tex;
+uniform vec2 half_pixel;
+uniform vec2 uv_scale;
+uniform float offset;
+
+// Dual kawase downsample: centre sample weighted 4x plus four diagonal neighbours.
 void main() {
-    vec2 uv = v_coords * 2.0;
+    vec2 uv = v_coords * uv_scale;
+    vec2 o = half_pixel * offset;
 
     vec4 sum = texture2D(tex, uv) * 4.0;
-    sum += texture2D(tex, uv - half_pixel.xy * radius);
-    sum += texture2D(tex, uv + half_pixel.xy * radius);
-    sum += texture2D(tex, uv + vec2(half_pixel.x, -half_pixel.y) * radius);
-    sum += texture2D(tex, uv - vec2(half_pixel.x, -half_pixel.y) * radius);
+    sum += texture2D(tex, uv + vec2(-o.x, -o.y));
+    sum += texture2D(tex, uv + vec2( o.x, -o.y));
+    sum += texture2D(tex, uv + vec2(-o.x,  o.y));
+    sum += texture2D(tex, uv + vec2( o.x,  o.y));
 
     gl_FragColor = sum / 8.0;
 }
-

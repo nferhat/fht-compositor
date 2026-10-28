@@ -7,17 +7,14 @@ use smithay::backend::renderer::gles::{
 };
 use smithay::backend::renderer::glow::GlowRenderer;
 
-use super::blur::shader::BlurShaders;
+use crate::renderer::blur::BlurProgram;
 
 const BORDER_SRC: &str = include_str!("./border.frag");
 const BOX_SHADOW_SRC: &str = include_str!("./box-shadow.frag");
 const ROUNDED_WINDOW_SRC: &str = include_str!("./rounded-window.frag");
-const BLUR_FINISH_SRC: &str = include_str!("./blur-finish.frag");
 const RESIZING_TEXTURE_SRC: &str = include_str!("./resizing-texture.frag");
+const BLUR_POST_SRC: &str = include_str!("./blur-post.frag");
 const ROUNDED_CORNERS_SRC: &str = include_str!("./rounded-corners.glsl");
-pub(super) const BLUR_DOWN_SRC: &str = include_str!("./blur-down.frag");
-pub(super) const BLUR_UP_SRC: &str = include_str!("./blur-up.frag");
-pub(super) const VERTEX_SRC: &str = include_str!("./texture.vert");
 
 /// Preprocess shaders to handle includes.
 fn preprocess_shader_source(source: &str) -> String {
@@ -35,10 +32,9 @@ pub struct Shaders {
     // rounded_window => complex shader that takes into account subsurface position through
     // matrices, only used in src/space/tile.rs
     pub rounded_window: GlesTexProgram,
-    // blur_finish => apply rounded corners and additional effects
-    pub blur_finish: GlesTexProgram,
     pub resizing_texture: GlesTexProgram,
-    pub blur: BlurShaders,
+    pub blur_post: GlesTexProgram,
+    pub blur: BlurProgram,
 }
 
 impl Shaders {
@@ -53,17 +49,6 @@ impl Shaders {
                     UniformName::new("corner_power", UniformType::_1f),
                     UniformName::new("geo_size", UniformType::_2f),
                     UniformName::new("input_to_geo", UniformType::Matrix3x3),
-                ],
-            )
-            .expect("Shader source should always compile!");
-        let blur_finish = renderer
-            .compile_custom_texture_shader(
-                BLUR_FINISH_SRC,
-                &[
-                    UniformName::new("corner_radius", UniformType::_1f),
-                    UniformName::new("corner_power", UniformType::_1f),
-                    UniformName::new("noise", UniformType::_1f),
-                    UniformName::new("geo", UniformType::_4f),
                 ],
             )
             .expect("Shader source should always compile!");
@@ -105,14 +90,49 @@ impl Shaders {
                 ],
             )
             .expect("Shader source should always compile!");
-        let blur = BlurShaders::compile(renderer).expect("Shader source should always compile!");
+
+        let blur_post = renderer
+            .compile_custom_texture_shader(
+                preprocess_shader_source(BLUR_POST_SRC),
+                &[
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("rect_origin", UniformType::_2f),
+                    UniformName::new("rect_size", UniformType::_2f),
+                    UniformName::new("corner_radius", UniformType::_1f),
+                    UniformName::new("corner_power", UniformType::_1f),
+                    // blur kind: liquid glass
+                    UniformName::new("glass_enabled", UniformType::_1f),
+                    // blur kind: sea glass
+                    UniformName::new("sea_glass_enabled", UniformType::_1f),
+                    UniformName::new("grain", UniformType::_1f),
+                    UniformName::new("ripple_strength", UniformType::_1f),
+                    UniformName::new("ripple_scale", UniformType::_1f),
+                    UniformName::new("edge_thickness", UniformType::_1f),
+                    UniformName::new("refraction_strength", UniformType::_1f),
+                    UniformName::new("lens_distortion", UniformType::_1f),
+                    UniformName::new("chromatic_aberration", UniformType::_1f),
+                    UniformName::new("fresnel_strength", UniformType::_1f),
+                    UniformName::new("specular_strength", UniformType::_1f),
+                    UniformName::new("glass_opacity", UniformType::_1f),
+                    UniformName::new("brightness", UniformType::_1f),
+                    UniformName::new("tint_color", UniformType::_4f),
+                    // post processing unrelated to blur kind
+                    UniformName::new("contrast", UniformType::_1f),
+                    UniformName::new("saturation", UniformType::_1f),
+                    UniformName::new("vibrancy", UniformType::_1f),
+                    UniformName::new("dark_vibrancy", UniformType::_1f),
+                ],
+            )
+            .expect("Shader source should always compile!");
+
+        let blur = BlurProgram::compile(renderer).expect("Shader source should always compile!");
 
         let shaders = Self {
             border,
             box_shadow,
             rounded_window,
-            blur_finish,
             resizing_texture,
+            blur_post,
             blur,
         };
 

@@ -115,8 +115,6 @@ impl WinitData {
         fht.output_management_manager_state
             .set_head_enabled::<State>(&output, true);
 
-        crate::renderer::blur::EffectsFramebuffers::init_for_output(&output, backend.renderer());
-
         let render_node = EGLDevice::device_for_display(backend.renderer().egl_context().display())
             .and_then(|device| device.try_get_render_node());
 
