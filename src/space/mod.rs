@@ -19,7 +19,7 @@ use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle};
 pub use tile::{Tile, TileRenderElement};
 #[allow(unused)] // re-export WorkspaceRenderElement for screencopy type bounds
 pub use workspace::{Workspace, WorkspaceId, WorkspaceRenderElement};
@@ -95,6 +95,12 @@ impl Space {
     /// Run periodic clean-up tasks.
     pub fn refresh(&mut self) {
         crate::profile_function!();
+
+        // Clean up if the window is dead
+        // FIXME: Animate out but since the window is dead I kinda have nothing todo about it
+        let _ = self
+            .interactive_swap
+            .take_if(|swap| !swap.tile.window().alive());
 
         if let Some(InteractiveSwap {
             tile,
