@@ -9,7 +9,6 @@ use smithay::desktop::{
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus};
 use smithay::input::Seat;
 use smithay::output::Output;
-use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_positioner::ConstraintAdjustment;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{
@@ -22,7 +21,6 @@ use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states, BufferAssignment, SurfaceAttributes,
 };
-use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
@@ -798,7 +796,6 @@ impl Fht {
 /// The current list of heuristics include
 /// - Window has a parent
 /// - Window requests a size with limits (min/max)
-/// - Window has a content type
 /// - Window is a modal/dialog
 fn should_open_window_floating(window: &Window) -> bool {
     // Window with parents should always open floating. If you don't like it just use
@@ -819,23 +816,6 @@ fn should_open_window_floating(window: &Window) -> bool {
     if min_size.h > 0 && min_size.h == max_size.h {
         trace!("floating window due to matching fixed-height");
         // Heuristics from sway.
-        return true;
-    }
-
-    // Games and media players get floating.
-    // FIXME: Make this a window rule
-    let has_content_type = with_states(&*wl_surface, |data| {
-        use wp_content_type_v1::Type;
-        let mut guard = data.cached_state.get::<ContentTypeSurfaceCachedState>();
-        let current = guard.current();
-        matches!(
-            current.content_type(),
-            Type::Photo | Type::Video | Type::Game
-        )
-    });
-
-    if has_content_type {
-        trace!("floating window due to matching content-type");
         return true;
     }
 

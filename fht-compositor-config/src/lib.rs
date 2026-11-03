@@ -899,6 +899,17 @@ impl Blur {
     }
 }
 
+// NOTE: mirrors wp_content_type_v1::Type, `none` is also what you get when the client didn't
+// bother setting a hint
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContentType {
+    None,
+    Photo,
+    Video,
+    Game,
+}
+
 #[derive(Default, Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum DecorationMode {
@@ -1216,6 +1227,7 @@ pub struct WindowRule {
     pub match_title: Vec<Regex>,
     #[serde(deserialize_with = "deserialize_regexes")]
     pub match_app_id: Vec<Regex>,
+    pub match_content_type: Vec<ContentType>,
     pub on_output: Option<String>,
     pub on_workspace: Option<usize>,
     pub is_focused: Option<bool>,

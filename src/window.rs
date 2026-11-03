@@ -414,6 +414,22 @@ impl Window {
         })
     }
 
+    pub fn content_type(&self) -> fht_compositor_config::ContentType {
+        use fht_compositor_config::ContentType;
+        use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1::Type;
+        use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
+
+        with_states(self.wl_surface(), |states| {
+            let mut guard = states.cached_state.get::<ContentTypeSurfaceCachedState>();
+            match guard.current().content_type() {
+                Type::Photo => ContentType::Photo,
+                Type::Video => ContentType::Video,
+                Type::Game => ContentType::Game,
+                _ => ContentType::None,
+            }
+        })
+    }
+
     pub fn set_offscreen_element_id(&self, id: Option<element::Id>) {
         let mut guard = self.inner.data.lock().unwrap();
         guard.offscreen_element_id = id

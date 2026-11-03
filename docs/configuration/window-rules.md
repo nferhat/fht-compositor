@@ -123,6 +123,22 @@ on-workspace = 5
 
 ---
 
+#### `match-content-type`
+
+A list of content types, from the [`content-type-v1`](https://wayland.app/protocols/content-type-v1)
+protocol hint the client sets. Can be `none`, `photo`, `video` or `game`. Windows that don't set the
+hint are `none`.
+
+The following rule matches all games and video players
+
+```toml
+[[rules]]
+match-content-type = ["game", "video"]
+open-on-workspace = 5
+```
+
+---
+
 #### `on-output`
 
 Match on the output the window is opened on. Nothing fancy.

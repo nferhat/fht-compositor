@@ -2342,6 +2342,12 @@ fn rule_matches(
             }
         }
 
+        if !rule.match_content_type.is_empty()
+            && !rule.match_content_type.contains(&window.content_type())
+        {
+            return false;
+        }
+
         if let Some(rule_output) = rule.on_output.as_ref() {
             if rule_output != current_output {
                 return false;
@@ -2386,6 +2392,10 @@ fn rule_matches(
             {
                 return true;
             }
+        }
+
+        if rule.match_content_type.contains(&window.content_type()) {
+            return true;
         }
 
         if let Some(rule_output) = rule.on_output.as_ref() {
