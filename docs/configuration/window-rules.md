@@ -102,6 +102,8 @@ This allows you to make very precise window rules.
 Both are a list of [Regular Expression](https://en.wikipedia.org/wiki/Regular_expression)s. This match conditions
 requires that the window matches only *one* regex from the given regexes.
 
+All `match-*` fields also accept a single value, `match-app-id = "foo"` is the same as `match-app-id = ["foo"]`.
+
 The following window rule matches WebCord, Telegram, and Fractal windows
 
 ```toml

@@ -1204,8 +1204,25 @@ impl Default for BorderAnimation {
     }
 }
 
+// NOTE: lets match-* fields take either `"x"` or `["x", "y"]`
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+fn deserialize_one_or_many<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    Ok(match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(x) => vec![x],
+        OneOrMany::Many(xs) => xs,
+    })
+}
+
 fn deserialize_regexes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Regex>, D::Error> {
-    let patterns = Vec::<String>::deserialize(deserializer)?;
+    let patterns: Vec<String> = deserialize_one_or_many(deserializer)?;
     let mut regexes = vec![];
     for pattern in patterns {
         let regex = Regex::new(&pattern).map_err(|err| {
@@ -1227,6 +1244,7 @@ pub struct WindowRule {
     pub match_title: Vec<Regex>,
     #[serde(deserialize_with = "deserialize_regexes")]
     pub match_app_id: Vec<Regex>,
+    #[serde(deserialize_with = "deserialize_one_or_many")]
     pub match_content_type: Vec<ContentType>,
     pub on_output: Option<String>,
     pub on_workspace: Option<usize>,
