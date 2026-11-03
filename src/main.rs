@@ -111,7 +111,14 @@ fn main() -> anyhow::Result<(), Box<dyn Error>> {
     let (config, loaded_config_paths) = match fht_compositor_config::load(cli.config_path) {
         Ok(ret) => ret,
         Err(err) => {
-            error!(?err, "Failed to load compositor configuration");
+            match err {
+                fht_compositor_config::Error::IO(err) => {
+                    error!(?err, "Failed to load compositor configuration")
+                }
+                fht_compositor_config::Error::Parse(parse_error) => {
+                    eprintln!("\n{}", parse_error.render(true))
+                }
+            }
             std::process::exit(1);
         }
     };
@@ -355,12 +362,11 @@ fn check_configuration(cli: cli::Cli) -> ! {
         }
         Err(err) => match err {
             fht_compositor_config::Error::IO(err) => {
-                error!(?err, "Failed to load your configuration");
+                error!(?err, "Failed to load compositor configuration");
                 std::process::exit(1)
             }
             fht_compositor_config::Error::Parse(err) => {
-                // toml error has a pretty formatter that is good enough for this.
-                print!("\n{}", err);
+                eprintln!("\n{}", err.render(true));
                 std::process::exit(1)
             }
         },

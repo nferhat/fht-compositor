@@ -15,8 +15,9 @@ use std::{fs, path};
 
 use fht_animation::AnimationCurve;
 use regex::Regex;
-use serde::de::Unexpected;
+use serde::de::{DeserializeOwned, IntoDeserializer, Unexpected};
 use serde::{Deserialize, Deserializer};
+use serde_untagged::UntaggedEnumVisitor;
 use smithay::backend::input::MouseButton as SmithayMouseButton;
 use smithay::input::keyboard::{
     keysyms, xkb, Keysym, ModifiersState as SmithayModifiersState, XkbConfig,
@@ -78,6 +79,9 @@ pub struct Config {
     pub outputs: HashMap<String, Output>,
     pub debug: Debug,
     pub gesturebinds: HashMap<GestureAction, GesturePattern>,
+    // NOTE: only here so a single file (with its `imports`) can be deserialized as a Config on
+    // its own, see ParseError. load() handles the actual importing
+    pub imports: Vec<PathBuf>,
 }
 
 // Custom default implementation to use default_keybinds() as the true default
@@ -100,6 +104,7 @@ impl Default for Config {
             outputs: HashMap::new(),
             debug: Default::default(),
             gesturebinds: Default::default(),
+            imports: Vec::new(),
         }
     }
 }
@@ -193,21 +198,44 @@ impl<'de> Deserialize<'de> for KeyPattern {
 // # This is still right, but the above is more ergonomic
 // Super-Shift-q.action = "quit"
 // ```
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields, untagged)]
+#[derive(Debug, Clone)]
 pub enum KeyActionDesc {
     Simple(SimpleKeyAction),
     Complex {
-        #[serde(flatten)]
         action: ComplexKeyAction,
-        // HACK: rename_all = "kebab-case" does not affect enum struct fields.
-        #[serde(default)]
-        #[serde(rename = "allow-while-locked")]
         allow_while_locked: bool,
-        #[serde(default)]
-        #[serde(rename = "repeat")]
         repeat: bool,
     },
+}
+
+// NOTE: the table form of KeyActionDesc::Complex
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct ComplexKeyActionDesc {
+    #[serde(flatten)]
+    action: ComplexKeyAction,
+    #[serde(default)]
+    allow_while_locked: bool,
+    #[serde(default)]
+    repeat: bool,
+}
+
+// NOTE: not #[serde(untagged)], since it hides the error behind a cryptic message.
+impl<'de> Deserialize<'de> for KeyActionDesc {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a key action, or a table with an `action` key")
+            .string(|s| SimpleKeyAction::deserialize(s.into_deserializer()).map(Self::Simple))
+            .map(|map| {
+                let desc: ComplexKeyActionDesc = map.deserialize()?;
+                Ok(Self::Complex {
+                    action: desc.action,
+                    allow_while_locked: desc.allow_while_locked,
+                    repeat: desc.repeat,
+                })
+            })
+            .deserialize(deserializer)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -941,29 +969,58 @@ impl Border {
     }
 }
 
+// NOTE: csscolorparser's errors are just "invalid unknown format", say what we were parsing at least
+fn parse_color<E: serde::de::Error>(s: &str) -> Result<[f32; 4], E> {
+    csscolorparser::parse(s)
+        .map(|c| c.to_array())
+        .map_err(|err| E::custom(format!("invalid color `{s}`: {err}")))
+}
+
 fn deserialize_color<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 4], D::Error> {
-    csscolorparser::Color::deserialize(deserializer).map(|c| c.to_array())
+    parse_color(&String::deserialize(deserializer)?)
 }
 
 fn deserialize_color_maybe<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<[f32; 4]>, D::Error> {
-    let color = Option::<csscolorparser::Color>::deserialize(deserializer)?;
-    Ok(color.map(|c| c.to_array()))
+    Option::<String>::deserialize(deserializer)?
+        .map(|s| parse_color(&s))
+        .transpose()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color {
-    Solid(#[serde(deserialize_with = "deserialize_color")] [f32; 4]),
+    Solid([f32; 4]),
     Gradient {
-        #[serde(deserialize_with = "deserialize_color")]
         start: [f32; 4],
-        #[serde(deserialize_with = "deserialize_color")]
         end: [f32; 4],
         angle: f32,
     },
+}
+
+// NOTE: the table form of Color::Gradient
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Gradient {
+    #[serde(deserialize_with = "deserialize_color")]
+    start: [f32; 4],
+    #[serde(deserialize_with = "deserialize_color")]
+    end: [f32; 4],
+    angle: f32,
+}
+
+// NOTE: same as KeyActionDesc, no #[serde(untagged)] to keep the real error around
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a color, or a gradient table with `start`, `end` and `angle`")
+            .string(|s| parse_color(s).map(Self::Solid))
+            .map(|map| {
+                let Gradient { start, end, angle } = map.deserialize()?;
+                Ok(Self::Gradient { start, end, angle })
+            })
+            .deserialize(deserializer)
+    }
 }
 
 impl fht_animation::Animable for Color {
@@ -1205,20 +1262,14 @@ impl Default for BorderAnimation {
 }
 
 // NOTE: lets match-* fields take either `"x"` or `["x", "y"]`
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum OneOrMany<T> {
-    One(T),
-    Many(Vec<T>),
-}
-
-fn deserialize_one_or_many<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+fn deserialize_one_or_many<'de, D: Deserializer<'de>, T: DeserializeOwned>(
     deserializer: D,
 ) -> Result<Vec<T>, D::Error> {
-    Ok(match OneOrMany::deserialize(deserializer)? {
-        OneOrMany::One(x) => vec![x],
-        OneOrMany::Many(xs) => xs,
-    })
+    UntaggedEnumVisitor::new()
+        .expecting("a string, or a list of strings")
+        .string(|s| T::deserialize(s.into_deserializer()).map(|x| vec![x]))
+        .seq(|seq| seq.deserialize())
+        .deserialize(deserializer)
 }
 
 fn deserialize_regexes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Regex>, D::Error> {
@@ -1740,8 +1791,11 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
     let _ = file.read_to_string(&mut buf)?;
 
     // First deserialize as a toml::Value and try to get the imports table to merge with.
-    let mut config: Value = toml::from_str(buf.as_str())?;
+    let mut config: Value =
+        toml::from_str(&buf).map_err(|err| ParseError::new(path.clone(), buf.clone(), err))?;
     let mut paths = vec![path];
+    // NOTE: kept around for ParseError, see below
+    let mut sources = vec![buf];
 
     if let Some(imports) = config.get("imports").cloned() {
         let imports = Value::try_into::<Vec<PathBuf>>(imports);
@@ -1771,10 +1825,12 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
                     Ok(value) => {
                         debug!(?path, "Merging configuration from path");
                         paths.push(path);
+                        sources.push(buf);
                         config = merge(config, value);
                     }
                     Err(err) => {
-                        error!(?err, ?path, "Failed to read configuration from import path")
+                        let err = ParseError::new(path, buf, err);
+                        error!("Failed to read configuration from import path\n{err}")
                     }
                 }
             }
@@ -1787,7 +1843,20 @@ pub fn load(path: Option<path::PathBuf>) -> Result<(Config, Vec<path::PathBuf>),
         table.remove("imports");
     }
 
-    let config = Value::try_into(config)?;
+    let config = Value::try_into(config).map_err(|err| {
+        // XXX: the merged Value has no spans, so `err` doesn't know *where* it happened. Re-parse
+        // every file on its own to find the culprit, and fall back to the span-less error if the
+        // problem only shows up after merging.
+        paths
+            .iter()
+            .zip(&sources)
+            .find_map(|(path, src)| {
+                let err = toml::from_str::<Config>(src).err()?;
+                err.span()?;
+                Some(ParseError::new(path.clone(), src.clone(), err))
+            })
+            .unwrap_or_else(|| ParseError::new(paths[0].clone(), String::new(), err))
+    })?;
     Ok((config, paths))
 }
 
@@ -1827,6 +1896,56 @@ fn merge(base: Value, replacement: Value) -> Value {
 pub enum Error {
     #[error("I/O error occured when loading the configuration file: {0}")]
     IO(#[from] io::Error),
-    #[error("An error occured while parsing the configuration file: {0}")]
-    Parse(#[from] toml::de::Error),
+    #[error("{0}")]
+    Parse(#[from] ParseError),
 }
+
+/// A TOML error along with the file it came from, rendered rustc-style.
+#[derive(Debug)]
+pub struct ParseError {
+    path: PathBuf,
+    src: String,
+    inner: Box<toml::de::Error>,
+}
+
+impl ParseError {
+    fn new(path: PathBuf, src: String, inner: toml::de::Error) -> Self {
+        Self { path, src, inner: Box::new(inner) }
+    }
+
+    pub fn render(&self, color: bool) -> String {
+        use annotate_snippets::{Level, Renderer, Snippet};
+
+        let origin = self.path.display().to_string();
+        let note = format!("in {origin}");
+        let mut message = Level::Error.title(self.inner.message().trim());
+        message = match self.inner.span() {
+            Some(span) => message.snippet(
+                Snippet::source(&self.src)
+                    .origin(&origin)
+                    .fold(true)
+                    .annotation(Level::Error.span(span)),
+            ),
+            // no span, the best we can do is point at the file
+            None => message.footer(Level::Note.title(&note)),
+        };
+
+        let renderer = if color {
+            Renderer::styled()
+        } else {
+            Renderer::plain()
+        };
+        // NOTE: the binding is load-bearing, tail-expr temporaries outlive the locals they borrow
+        #[allow(clippy::let_and_return)]
+        let rendered = renderer.render(message).to_string();
+        rendered
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.render(false))
+    }
+}
+
+impl std::error::Error for ParseError {}

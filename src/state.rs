@@ -313,7 +313,7 @@ impl State {
                     (config, paths)
                 }
                 Err(err) => {
-                    error!(?err, "Failed to load configuration, using default");
+                    error!("Failed to load configuration, keeping the current one\n{err}");
                     self.fht.config_ui.show(
                         config_ui::Content::ReloadError { error: err },
                         !self.fht.config.animations.disable,
