@@ -104,6 +104,65 @@ though nothing stops you from using high number of passes with low blur values, 
 Additional noise effect to add when rendering blur. It just looks nice and can give off the "glassy blur" effect, similar to Windows 11 Acrylic
 blur look.
 
+#### `blur.contrast`
+
+Contrast of the blurred backdrop, `1.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.saturation`
+
+Saturation of the blurred backdrop, `1.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.vibrancy`
+
+Boosts the saturation of the colors of the blurred backdrop that are not saturated yet, so muted colors get more vivid while
+already vivid ones are left alone. `0.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.dark-vibrancy`
+
+Like `blur.vibrancy`, but only applied in the shadows of the blurred backdrop. `0.0` leaves it as it is. Applies with any blur kind.
+
+#### `blur.kind`
+
+Post-processing applied to the blurred backdrop. By default there is none, the blur is only rounded like the window corners.
+The kind is a tagged table, the name of the table selects the effect.
+
+##### `blur.kind.liquid-glass`
+
+Draws a liquid glass material over the backdrop, the edges of the blurred region refract what is behind them.
+The backdrop is blurred with the same dual kawase passes as the blur, so `radius` and `passes` control the blur strength.
+The `brightness` and `tint-color` adjustments are applied as well, along with the blur's `contrast` and `saturation`.
+The `tint-color` is a color string, its alpha channel is how strongly it is mixed over the backdrop.
+
+```toml
+[decorations.blur.kind.liquid-glass]
+edge-thickness = 0.05
+refraction-strength = 1.17
+lens-distortion = 1.15
+chromatic-aberration = 0.8
+fresnel-strength = 1.55
+specular-strength = 0.38
+glass-opacity = 0.8
+brightness = 1.0
+tint-color = "#b8d8ff00"
+```
+
+##### `blur.kind.sea-glass`
+
+Draws sea glass over the backdrop, the blurred backdrop with gentle ripples and grain in it. The ripples depend on the position only,
+so they don't animate and cost nothing extra to draw. The backdrop is blurred with the same dual kawase passes as the blur,
+so `radius` and `passes` control the blur strength.
+The `ripple-strength` is the amplitude of the ripples in pixels, `0.0` leaves the backdrop undistorted, and `ripple-scale` is their wavelength in pixels.
+The `grain` is the amount of noise over the backdrop, `0.0` leaves it smooth. The `brightness` and `tint-color` adjust the tone of the backdrop.
+
+```toml
+[decorations.blur.kind.sea-glass]
+ripple-strength = 3.0
+ripple-scale = 40.0
+grain = 0.03
+brightness = 1.0
+tint-color = "#8dd9c740"
+```
+
 ## Decoration mode
 
 #### `decoration-mode`

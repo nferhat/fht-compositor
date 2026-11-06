@@ -32,6 +32,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Clock, IsAlive, Logical, Monotonic, Point, Rectangle};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward, CompositorClientState, CompositorState, SurfaceData,
     TraversalAction,
@@ -84,7 +85,6 @@ use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::hyprland_global_shortcuts::HyprlandGlobalShortcutsState;
 use crate::protocols::output_management::{self, OutputManagementManagerState};
 use crate::protocols::screencopy::ScreencopyManagerState;
-use crate::renderer::blur::EffectsFramebuffers;
 use crate::space::{Space, WorkspaceId};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::utils::pipewire::{CastId, CastSource, PipeWire, PwToCompositor};
@@ -369,12 +369,6 @@ impl State {
         // just don't commit (for example your wallpaper). so we must refresh them at least once
         // here.
         self.fht.resolve_rules_for_all_layer_shells();
-
-        // Queue a redraw to ensure everything is up-to-date visually.
-        self.fht
-            .space
-            .outputs()
-            .for_each(|o| EffectsFramebuffers::get(o).optimized_blur_dirty = true);
         self.fht.queue_redraw_all();
     }
 
@@ -908,6 +902,7 @@ impl Fht {
         SinglePixelBufferState::new::<State>(dh);
         AlphaModifierState::new::<State>(dh);
         RelativePointerManagerState::new::<State>(dh);
+        BackgroundEffectState::new::<State>(dh);
 
         // Initialize a seat and immediatly attach a keyboard and pointer to it.
         // If clients try to connect and do not find any of them they will try to initialize them
@@ -1158,17 +1153,6 @@ impl Fht {
                 send_scale_transform(wl_surface, data, output_scale, output_transform);
             });
             lock_surface.send_configure();
-        }
-
-        {
-            let output = output.clone();
-            self.loop_handle.insert_idle(move |state| {
-                state.backend.with_renderer(|renderer| {
-                    if let Err(err) = EffectsFramebuffers::update_for_output(&output, renderer) {
-                        error!(?err, "Failed to update output effects framebuffers")
-                    }
-                });
-            });
         }
 
         #[cfg(feature = "xdg-screencast-portal")]
