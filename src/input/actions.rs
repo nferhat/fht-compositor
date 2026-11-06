@@ -4,7 +4,7 @@ use fht_compositor_config::{
     ComplexKeyAction, GestureAction, KeyPattern, MouseAction, SimpleKeyAction, WorkspaceLayout,
 };
 use fht_compositor_ipc::Direction;
-use smithay::desktop::WindowSurfaceType;
+use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::input::pointer::{self, CursorIcon, CursorImageStatus, Focus};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Point, Rectangle, Serial};
@@ -33,7 +33,9 @@ pub enum KeyActionType {
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FloatFocusedWindow,
-    CenterFloatingWindow,
+    CenterFloatingWindow {
+        ignore_layershells: bool,
+    },
     MoveFloatingWindow([i32; 2]),
     ResizeFloatingWindow([i32; 2]),
     FocusNextWindow,
@@ -107,7 +109,9 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                     }
                     SimpleKeyAction::FloatFocusedWindow => KeyActionType::FloatFocusedWindow,
                     SimpleKeyAction::FocusNextWindow => KeyActionType::FocusNextWindow,
-                    SimpleKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow,
+                    SimpleKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow {
+                        ignore_layershells: false,
+                    },
                     SimpleKeyAction::FocusPreviousWindow => KeyActionType::FocusPreviousWindow,
                     SimpleKeyAction::FocusWindowDown => {
                         KeyActionType::FocusWindowDirection(Direction::Down)
@@ -165,7 +169,11 @@ impl From<fht_compositor_config::KeyActionDesc> for KeyAction {
                         KeyActionType::FullscreenFocusedWindow
                     }
                     ComplexKeyAction::FloatFocusedWindow => KeyActionType::FloatFocusedWindow,
-                    ComplexKeyAction::CenterFloatingWindow => KeyActionType::CenterFloatingWindow,
+                    ComplexKeyAction::CenterFloatingWindow(args) => {
+                        KeyActionType::CenterFloatingWindow {
+                            ignore_layershells: args.is_some_and(|a| a.ignore_layershells),
+                        }
+                    }
                     ComplexKeyAction::MoveFloatingWindow(change) => {
                         KeyActionType::MoveFloatingWindow(change)
                     }
@@ -308,13 +316,19 @@ impl State {
                 let active = self.fht.space.active_workspace_mut();
                 active.toggle_floating(true);
             }
-            KeyActionType::CenterFloatingWindow => {
+            KeyActionType::CenterFloatingWindow { ignore_layershells } => {
                 let active = self.fht.space.active_workspace_mut();
                 let output_geometry = active.output().geometry();
+                let center = if *ignore_layershells {
+                    output_geometry.center()
+                } else {
+                    layer_map_for_output(&output).non_exclusive_zone().center()
+                        + output_geometry.loc
+                };
                 if let Some(tile) = active.active_tile_mut() {
                     if !tile.window().tiled() {
                         let size = tile.size();
-                        tile.set_location(output_geometry.center() - size.downscale(2), true);
+                        tile.set_location(center - size.downscale(2), true);
                     }
                 }
             }

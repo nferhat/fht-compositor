@@ -283,7 +283,7 @@ pub enum ComplexKeyAction {
     MaximizeFocusedWindow,
     FullscreenFocusedWindow,
     FloatFocusedWindow,
-    CenterFloatingWindow,
+    CenterFloatingWindow(Option<CenterFloatingWindowArgs>),
     MoveFloatingWindow([i32; 2]),
     ResizeFloatingWindow([i32; 2]),
     FocusNextWindow,
@@ -315,6 +315,14 @@ pub enum ComplexKeyAction {
     SendToWorkspace(usize),
     SendAndFollowToWorkspace(usize),
     GlobalShortcut(String),
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CenterFloatingWindowArgs {
+    /// Center on the whole output instead of the area left free by layer shells (bars, docks).
+    #[serde(default)]
+    pub ignore_layershells: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]

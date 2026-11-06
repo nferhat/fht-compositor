@@ -156,6 +156,13 @@ Toggle each of these states on the focused window.
 
 Centers the currently focused floating window. If the window is not floating, nothing happens
 
+By default the window is centered in the area left free by layer shells (bars, docks). Set `ignore-layershells` to center on the whole output instead:
+
+```toml
+[keybinds]
+Super-c = { action = "center-floating-window", arg = { ignore-layershells = true } }
+```
+
 ---
 
 #### `move-floating-window`, `resize-floating-window`
