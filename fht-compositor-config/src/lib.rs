@@ -977,7 +977,8 @@ impl Border {
     }
 }
 
-// NOTE: csscolorparser's errors are just "invalid unknown format", say what we were parsing at least
+// NOTE: csscolorparser's errors are just "invalid unknown format", say what we were parsing at
+// least
 fn parse_color<E: serde::de::Error>(s: &str) -> Result<[f32; 4], E> {
     csscolorparser::parse(s)
         .map(|c| c.to_array())
@@ -1918,7 +1919,11 @@ pub struct ParseError {
 
 impl ParseError {
     fn new(path: PathBuf, src: String, inner: toml::de::Error) -> Self {
-        Self { path, src, inner: Box::new(inner) }
+        Self {
+            path,
+            src,
+            inner: Box::new(inner),
+        }
     }
 
     pub fn render(&self, color: bool) -> String {

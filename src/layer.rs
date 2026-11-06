@@ -8,8 +8,8 @@ use smithay::utils::{Logical, Rectangle};
 use crate::renderer::blur::element::BlurElement;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::ShaderElement;
-use crate::renderer::{has_transparent_region, FhtRenderer};
 use crate::renderer::surface::push_elements_from_surface_tree;
+use crate::renderer::{has_transparent_region, FhtRenderer};
 use crate::space::shadow::{self, Shadow};
 use crate::state::Fht;
 
@@ -103,12 +103,7 @@ impl MappedLayer {
                 alpha,
                 Kind::Unspecified,
                 &mut |surface| {
-                    if RoundedWindowElement::will_clip(
-                        &surface,
-                        scale as f64,
-                        layer_geo,
-                        radius,
-                    ) {
+                    if RoundedWindowElement::will_clip(&surface, scale as f64, layer_geo, radius) {
                         let rounded = RoundedWindowElement::new(
                             surface,
                             radius,
@@ -141,7 +136,6 @@ impl MappedLayer {
         let blur = config.decorations.blur.with_overrides(&self.rules.blur);
         let is_transparent = alpha < 1.0 || has_transparent_region(wl_surface, layer_geo.size);
         if !blur.disabled() && is_transparent {
-
             let element = BlurElement::new(
                 renderer,
                 &self.output,
@@ -156,7 +150,6 @@ impl MappedLayer {
             );
             push(element.into())
         }
-
     }
 }
 

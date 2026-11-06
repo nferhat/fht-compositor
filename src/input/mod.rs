@@ -607,8 +607,7 @@ impl State {
 
         // Check horizontal axis bindings using discrete amounts
         if !handled {
-            if let Some(discrete) = horizontal_amount_discrete.filter(|discrete| *discrete != 0.0)
-            {
+            if let Some(discrete) = horizontal_amount_discrete.filter(|discrete| *discrete != 0.0) {
                 let mouse_axis = if discrete > 0.0 {
                     fht_compositor_config::MouseAxis::WheelRight
                 } else {

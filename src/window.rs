@@ -169,8 +169,8 @@ impl Window {
 
                         if current_committed.size == current_server.size {
                             // the window has commited our size change, we can now send the new size
-                            // doing so will make the window recreate/update the buffer less, even if
-                            // we do fast resizes.
+                            // doing so will make the window recreate/update the buffer less, even
+                            // if we do fast resizes.
                             trace!(
                                 "current size matches server size: {:?}",
                                 current_committed.size

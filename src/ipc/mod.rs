@@ -864,7 +864,11 @@ impl State {
                 workspace.swap_active_tile_with_previous(keep_focus, true);
                 self.update_keyboard_focus();
             }
-            types::Action::SwapWindowDirectional { direction, keep_focus, workspace_id } => {
+            types::Action::SwapWindowDirectional {
+                direction,
+                keep_focus,
+                workspace_id,
+            } => {
                 let workspace = match workspace_id {
                     Some(id) => self
                         .fht

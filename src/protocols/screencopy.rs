@@ -326,7 +326,8 @@ where
             }
             Some(BufferType::Dma) => {
                 let dmabuf = get_dmabuf(&buffer).unwrap();
-                if !(Some(dmabuf.format().code) == Some(smithay::backend::allocator::Fourcc::Xbgr8888)
+                if !(Some(dmabuf.format().code)
+                    == Some(smithay::backend::allocator::Fourcc::Xbgr8888)
                     && dmabuf.width() == info.physical_region.size.w as u32
                     && dmabuf.height() == info.physical_region.size.h as u32)
                 {

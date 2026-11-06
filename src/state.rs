@@ -731,8 +731,8 @@ pub struct Fht {
     // on the layer surface. Then, when we update the keyboard focus, we check against the clicked
     // layer surface
     pub focused_on_demand_layer_shell: Option<LayerSurface>,
-    // Pointer focus. This isn't really up to-date (you should use fht.get_pointer_focus if you need
-    // accurate results). This is cached to not spam pointer motion events.
+    // Pointer focus. This isn't really up to-date (you should use fht.get_pointer_focus if you
+    // need accurate results). This is cached to not spam pointer motion events.
     pub pointer_focus: Option<PointerFocus>,
 
     pub devices: Vec<input::Device>,
