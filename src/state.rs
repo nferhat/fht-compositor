@@ -730,6 +730,9 @@ pub struct Fht {
     // We store both the timer and the keysym used to trigger the key action.
     // When we remove the keysym from suppressed keys we stop it.
     pub repeated_keyaction_timer: Option<(RegistrationToken, Keysym)>,
+    // A modifier key that was pressed on its own, with no other key, button or scroll since.
+    // Keybinds on just a modifier key (e.g. `Super_L`) run when it's released in that state.
+    pub lone_modifier: Option<Keysym>,
     // To focus a layer-surface with an OnDemand keyboard exclusivity mode, the user must click
     // on the layer surface. Then, when we update the keyboard focus, we check against the clicked
     // layer surface
@@ -968,6 +971,7 @@ impl Fht {
             clock,
             suppressed_keys: HashMap::new(),
             repeated_keyaction_timer: None,
+            lone_modifier: None,
             seat,
             devices: vec![],
             seat_state,

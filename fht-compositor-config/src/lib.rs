@@ -118,6 +118,22 @@ pub struct ModifiersState {
     shift: bool,
 }
 
+impl ModifiersState {
+    /// Set the modifier called `name`, returning the keysym of its (left) key.
+    fn add(&mut self, name: &str) -> Option<Keysym> {
+        let (flag, keysym) = match name {
+            "Super" | "Mod" | "Logo" | "Meta" | "M" => (&mut self.logo, Keysym::Super_L),
+            "Shift" | "S" => (&mut self.shift, Keysym::Shift_L),
+            "Alt" | "A" => (&mut self.alt, Keysym::Alt_L),
+            "Ctrl" | "Control" | "C" => (&mut self.ctrl, Keysym::Control_L),
+            "AltGr" => (&mut self.alt_gr, Keysym::ISO_Level3_Shift),
+            _ => return None,
+        };
+        *flag = true;
+        Some(keysym)
+    }
+}
+
 impl From<SmithayModifiersState> for ModifiersState {
     fn from(value: SmithayModifiersState) -> Self {
         Self {
@@ -144,6 +160,11 @@ impl<'de> Deserialize<'de> for KeyPattern {
         // Shift-a, S-c
         // Alt-c, A-c
         // C-c, A-C-c, A-/
+        // A lone modifier (Super, Alt, ...) binds to tapping its key, see `ModifiersState::add`
+        if let Some(keysym) = ModifiersState::default().add(raw.trim()) {
+            return Ok(KeyPattern(ModifiersState::default(), keysym));
+        }
+
         let mut modifiers = ModifiersState::default();
         let mut keysym = None;
         for part in raw.split('-') {
@@ -155,11 +176,7 @@ impl<'de> Deserialize<'de> for KeyPattern {
             }
 
             match part.trim() {
-                "Super" | "Mod" | "Logo" | "Meta" | "M" => modifiers.logo = true,
-                "Shift" | "S" => modifiers.shift = true,
-                "Alt" | "A" => modifiers.alt = true,
-                "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
-                "AltGr" => modifiers.alt_gr = true,
+                value if modifiers.add(value).is_some() => (),
                 value => {
                     // We tried all the possible modifier patterns that we support
                     // Try to get a keysym from xkb, if we can't get the keysym, we can't build the
@@ -396,11 +413,7 @@ impl<'de> Deserialize<'de> for MousePattern {
             }
 
             match part.trim() {
-                "Super" | "Mod" | "Logo" | "Meta" | "M" => modifiers.logo = true,
-                "Shift" | "S" => modifiers.shift = true,
-                "Alt" | "A" => modifiers.alt = true,
-                "Ctrl" | "Control" | "C" => modifiers.ctrl = true,
-                "AltGr" => modifiers.alt_gr = true,
+                x if modifiers.add(x).is_some() => (),
                 x => match x.to_lowercase().as_str() {
                     // Buttons
                     "left" => input = Some(MouseInput::Button(MouseButton::Left)),

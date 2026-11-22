@@ -244,6 +244,7 @@ impl State {
             })
             .map(|inhibitor| inhibitor.is_active())
             .unwrap_or(false);
+        let mut lone_modifier_action = None;
         let action = keyboard.input(
             self,
             keycode,
@@ -270,6 +271,28 @@ impl State {
                     // FIXME: Add a way to override this for specific keybinds (this could be quite
                     // bad if you couldn't reload your compositor config or quit)
                     return FilterResult::Forward;
+                }
+
+                // Lone modifier taps. The key release is still forwarded to clients, and the
+                // action is run after the input is processed.
+                if let Some(raw) = raw {
+                    if key_state == KeyState::Pressed {
+                        state.fht.lone_modifier = raw.is_modifier_key().then_some(raw);
+                    } else if state.fht.lone_modifier.take() == Some(raw) {
+                        // NOTE: `Super = ...` in the config is stored as Super_L, so try the
+                        // exact key first, then its left-hand twin
+                        let left = match raw {
+                            Keysym::Super_R => Keysym::Super_L,
+                            Keysym::Shift_R => Keysym::Shift_L,
+                            Keysym::Alt_R => Keysym::Alt_L,
+                            Keysym::Control_R => Keysym::Control_L,
+                            k => k,
+                        };
+                        let keybinds = &state.fht.config.keybinds;
+                        let no_mods = ModifiersState::default();
+                        lone_modifier_action = find_keyaction(keybinds, &no_mods, raw)
+                            .or_else(|| find_keyaction(keybinds, &no_mods, left));
+                    }
                 }
 
                 // Handle repeating keybinds
@@ -329,6 +352,9 @@ impl State {
         );
 
         if let Some((key_pattern, key_action)) = action {
+            self.process_key_action(key_action, key_pattern);
+        }
+        if let Some((key_pattern, key_action)) = lone_modifier_action {
             self.process_key_action(key_action, key_pattern);
         }
     }
@@ -505,6 +531,11 @@ impl State {
         let state = wl_pointer::ButtonState::from(event.state());
         let pointer = self.fht.pointer.clone();
 
+        if state == wl_pointer::ButtonState::Pressed {
+            // e.g. Super+click shouldn't count as a lone Super tap
+            self.fht.lone_modifier = None;
+        }
+
         if state == wl_pointer::ButtonState::Pressed && !pointer.is_grabbed() {
             let pointer_loc = pointer.current_location();
             let focus = self.fht.get_pointer_focus(pointer_loc);
@@ -555,6 +586,9 @@ impl State {
     }
 
     fn on_pointer_axis<B: InputBackend>(&mut self, event: B::PointerAxisEvent) {
+        // e.g. Super+scroll shouldn't count as a lone Super tap
+        self.fht.lone_modifier = None;
+
         let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
         let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
         let horizontal_amount = event
