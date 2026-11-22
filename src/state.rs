@@ -8,6 +8,7 @@ use calloop::futures::Scheduler;
 use fht_compositor_config::{
     BlurOverrides, BorderOverrides, DecorationMode, KeyPattern, ShadowOverrides, VrrMode,
 };
+use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, PrimaryScanoutOutput, RenderElementStates,
 };
@@ -268,8 +269,10 @@ impl State {
                     let all_locked = self
                         .fht
                         .output_state
-                        .values()
-                        .all(|state| state.rendered_with_lock);
+                        .iter()
+                        // Disconnected outputs will never render again, ignore them.
+                        .filter(|(output, _)| self.fht.space.outputs().any(|o| o == *output))
+                        .all(|(_, state)| state.rendered_with_lock);
 
                     if all_locked {
                         // All outputs are locked, report success.
@@ -1070,6 +1073,7 @@ impl Fht {
             screencopy_damage_tracker: None,
             debug_damage_tracker: None,
             lock_surface: None,
+            lock_backdrop: SolidColorBuffer::new(output.geometry().size, [0., 0., 0., 1.]),
             // If we are already locked, the first frame should have the lock surface.
             rendered_with_lock: self.is_locked(),
         };
@@ -1107,6 +1111,10 @@ impl Fht {
         for layer in layer_map_for_output(output).layers() {
             layer.layer_surface().send_close()
         }
+
+        // A pending session lock might have only been waiting on this output.
+        self.try_continue_locking();
+        self.queue_redraw_all();
     }
 
     pub fn focus_output(&mut self, output: &Output) {
@@ -1127,6 +1135,7 @@ impl Fht {
     pub fn output_resized(&mut self, output: &Output) {
         crate::profile_function!();
 
+        let size = output.geometry().size;
         let output_scale = output.current_scale();
         let output_transform = output.current_transform();
 
@@ -1150,7 +1159,6 @@ impl Fht {
         if let Some(lock_surface) = output_state.lock_surface.as_ref() {
             // Resize lock surface to make sure it always covers up everything
             lock_surface.with_pending_state(|state| {
-                let size = output.geometry().size;
                 state.size = Some((size.w as _, size.h as _).into());
             });
             let wl_surface = lock_surface.wl_surface();
@@ -1158,6 +1166,7 @@ impl Fht {
                 send_scale_transform(wl_surface, data, output_scale, output_transform);
             });
             lock_surface.send_configure();
+            output_state.lock_backdrop.resize(size);
         }
 
         {

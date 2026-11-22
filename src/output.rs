@@ -1,4 +1,5 @@
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::solid::SolidColorBuffer;
 use smithay::output::Output;
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::wayland::session_lock::LockSurface;
@@ -57,6 +58,8 @@ pub struct OutputState {
     pub lock_surface: Option<LockSurface>,
     /// Whether the output rendered a frame with the [`lock_surface`] yet.
     pub rendered_with_lock: bool,
+    /// Backdrop drawn below the [`lock_surface`], covering the output while locked.
+    pub lock_backdrop: SolidColorBuffer,
 }
 
 /// A state machine to describe where an [`Output`](smithay::output::Output) in the redraw loop.

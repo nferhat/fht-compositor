@@ -117,9 +117,11 @@ delegate_session_lock!(State);
 
 impl Fht {
     pub fn is_locked(&self) -> bool {
+        // Fail closed: as soon as a lock is requested, session contents and input must be hidden,
+        // even if the lock client is slow (or never) providing surfaces.
         matches!(
             &self.lock_state,
-            LockState::Locked(_) | LockState::Locking(_)
+            LockState::Locked(_) | LockState::Locking(_) | LockState::WaitingForSurfaces(_)
         )
     }
 
@@ -130,8 +132,11 @@ impl Fht {
 
         let has_surfaces = self
             .output_state
-            .values()
-            .all(|state| state.lock_surface.is_some());
+            .iter()
+            // State of disconnected outputs is never removed, and they will never get a lock
+            // surface, so only wait for outputs that still exist.
+            .filter(|(output, _)| self.space.outputs().any(|o| o == *output))
+            .all(|(_, state)| state.lock_surface.is_some());
         if !has_surfaces {
             trace!("not locking session, waiting for other lock surfaces");
             // still didn't map everything.
@@ -161,6 +166,14 @@ impl Fht {
             return;
         }
 
+        // Black while the lock client is still mapping its surfaces, red once locked, where it
+        // can only be seen if a lock surface is missing (the lock client died, new output, etc).
+        let backdrop_color = if matches!(self.lock_state, LockState::Locked(_)) {
+            [1., 0., 0., 1.]
+        } else {
+            [0., 0., 0., 1.]
+        };
+
         let output_state = self.output_state.get_mut(output).unwrap();
         // Inform that we finally rendered this output with its designated lock surface.
         output_state.rendered_with_lock = true;
@@ -176,6 +189,21 @@ impl Fht {
                 &mut |e| push(e.into()),
             );
         }
+
+        // Always cover the output, so nothing leaks when there's no lock surface (yet), for
+        // example on a newly connected output or if the lock client died.
+        output_state
+            .lock_backdrop
+            .update(output.geometry().size, backdrop_color);
+        push(SessionLockRenderElement::ClearBackdrop(
+            SolidColorRenderElement::from_buffer(
+                &output_state.lock_backdrop,
+                Point::default(),
+                scale,
+                1.0,
+                Kind::Unspecified,
+            ),
+        ));
     }
 }
 
