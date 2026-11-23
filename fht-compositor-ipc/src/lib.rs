@@ -270,6 +270,12 @@ pub struct Window {
     /// Whether this window is focused. This means that the window is currently receiving keyboard
     /// input. Make sure to read [`Window::activated`].
     pub focused: bool,
+    /// The `ext-foreign-toplevel-list-v1` handle identifier of this window, if available.
+    #[serde(default)]
+    pub wayland_id: Option<String>,
+    /// The process ID (PID) of the Wayland client that owns this window surface, if available.
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 /// A single workspace.
@@ -591,8 +597,8 @@ pub enum Action {
     },
     /// Focus a given [`Workspace`] using an index.
     FocusWorkspaceByIndex {
-        /// The [`Workspace`] to focus, r
-        /// #[serde(rename = "workspace-ideferenced by index.
+        /// The [`Workspace`] to focus, referenced by index.
+        #[serde(rename = "workspace-idx", alias = "workspace_idx")]
         workspace_idx: usize,
         /// The [`Monitor`] to change the focused [`Workspace`] on. Leave as `None` for the active
         /// one.
@@ -616,6 +622,7 @@ pub enum Action {
         window_id: Option<usize>,
         /// Whether to force-kill the window.
         #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = false))]
+        #[serde(default)]
         kill: bool,
     },
     /// Change the master width factor on a [`Workspace`]

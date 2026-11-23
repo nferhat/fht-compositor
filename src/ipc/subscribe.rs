@@ -180,6 +180,11 @@ impl Fht {
                         tiled: window.tiled(),
                         activated: Some(idx) == active_tile_idx,
                         focused: workspace_active && Some(idx) == active_tile_idx,
+                        wayland_id: window
+                            .foreign_toplevel_handle()
+                            .map(|h| h.identifier().to_string()),
+                        pid: crate::utils::get_credentials_for_surface(window.wl_surface())
+                            .map(|c| c.pid as u32),
                     }
                 };
 
@@ -305,9 +310,14 @@ impl Fht {
 fn window_changed(window: &fht_compositor_ipc::Window, workspace_id: usize, tile: &Tile) -> bool {
     let location = tile.location() + tile.window_loc();
     let size = tile.window().size();
+    let wayland_id = tile
+        .window()
+        .foreign_toplevel_handle()
+        .map(|h| h.identifier().to_string());
 
     tile.window().title() != window.title
         || tile.window().app_id() != window.app_id
+        || wayland_id != window.wayland_id
         || tile.window().maximized() != window.maximized
         || tile.window().fullscreen() != window.fullscreened
         || tile.window().tiled() != window.tiled
