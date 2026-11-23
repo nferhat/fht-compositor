@@ -1119,6 +1119,7 @@ pub struct Animations {
     pub window_open_close: WindowOpenCloseAnimation,
     pub window_geometry: WindowGeometryAnimation,
     pub border: BorderAnimation,
+    pub layer_open_close: LayerOpenCloseAnimation,
 }
 
 const fn default_workspace_switch_animation_duration() -> Duration {
@@ -1283,6 +1284,123 @@ impl Default for BorderAnimation {
     }
 }
 
+const fn default_layer_animation_duration() -> Duration {
+    Duration::from_millis(250)
+}
+
+fn default_layer_animation_curve() -> AnimationCurve {
+    fht_animation::SpringCurve::new(1.0, false, 1.0, 1.2, 800.0, Some(0.0001)).into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LayerAnimationStyle {
+    None,
+    Fade,
+    Popin { min_scale: f64 },
+    Slide,
+    SlideTop,
+    SlideBottom,
+    SlideLeft,
+    SlideRight,
+}
+
+impl Default for LayerAnimationStyle {
+    fn default() -> Self {
+        Self::Popin { min_scale: 0.9 }
+    }
+}
+
+impl<'de> Deserialize<'de> for LayerAnimationStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        let s = raw.trim().to_ascii_lowercase();
+        match s.as_str() {
+            "none" | "noanim" | "no-anim" => Ok(Self::None),
+            "fade" => Ok(Self::Fade),
+            "popin" => Ok(Self::Popin { min_scale: 0.9 }),
+            "slide" => Ok(Self::Slide),
+            "slide-top" | "slide top" | "slide-up" | "slide up" => Ok(Self::SlideTop),
+            "slide-bottom" | "slide bottom" | "slide-down" | "slide down" => Ok(Self::SlideBottom),
+            "slide-left" | "slide left" => Ok(Self::SlideLeft),
+            "slide-right" | "slide right" => Ok(Self::SlideRight),
+            _ if s.starts_with("popin") => {
+                let rest = s.trim_start_matches("popin").trim().trim_start_matches('-').trim();
+                let min_scale = if let Some(pct) = rest.strip_suffix('%') {
+                    pct.trim()
+                        .parse::<f64>()
+                        .map(|v| (v / 100.0).clamp(0.01, 1.0))
+                        .map_err(|_| {
+                            serde::de::Error::invalid_value(
+                                Unexpected::Str(&raw),
+                                &"popin <percentage>%",
+                            )
+                        })?
+                } else {
+                    rest.parse::<f64>()
+                        .map(|v| {
+                            if v > 1.0 {
+                                (v / 100.0).clamp(0.01, 1.0)
+                            } else {
+                                v.clamp(0.01, 1.0)
+                            }
+                        })
+                        .map_err(|_| {
+                            serde::de::Error::invalid_value(
+                                Unexpected::Str(&raw),
+                                &"popin <scale>",
+                            )
+                        })?
+                };
+                Ok(Self::Popin { min_scale })
+            }
+            _ => Err(serde::de::Error::unknown_variant(
+                &raw,
+                &[
+                    "none",
+                    "fade",
+                    "popin",
+                    "slide",
+                    "slide-top",
+                    "slide-bottom",
+                    "slide-left",
+                    "slide-right",
+                ],
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LayerOpenCloseAnimation {
+    #[serde(default = "default_false")]
+    pub disable: bool,
+    #[serde(default = "default_layer_animation_curve")]
+    pub curve: AnimationCurve,
+    #[serde(
+        default = "default_layer_animation_duration",
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration_millis"
+    )]
+    pub duration: Duration,
+    #[serde(default)]
+    pub style: LayerAnimationStyle,
+}
+
+impl Default for LayerOpenCloseAnimation {
+    fn default() -> Self {
+        Self {
+            disable: false,
+            curve: default_layer_animation_curve(),
+            duration: default_layer_animation_duration(),
+            style: LayerAnimationStyle::default(),
+        }
+    }
+}
+
 // NOTE: lets match-* fields take either `"x"` or `["x", "y"]`
 fn deserialize_one_or_many<'de, D: Deserializer<'de>, T: DeserializeOwned>(
     deserializer: D,
@@ -1373,6 +1491,8 @@ pub struct LayerRule {
     pub shadow: ShadowOverrides,
     pub opacity: Option<f32>,
     pub corner_radius: Option<f32>,
+    pub animation: Option<LayerAnimationStyle>,
+    pub no_anim: Option<bool>,
 }
 
 #[derive(Default, Debug, Clone, Copy, Deserialize)]

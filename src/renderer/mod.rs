@@ -212,6 +212,15 @@ impl Fht {
         let layer_map = layer_map_for_output(output);
         let push_from_layer =
             |layer, renderer: &mut R, push: &mut dyn FnMut(LayerShellRenderElement<R>)| {
+                for closing in self
+                    .closing_layer_surfaces
+                    .iter()
+                    .filter(|c| &c.output == output && c.wlr_layer == layer)
+                {
+                    if let Some(elem) = closing.render(scale) {
+                        push(elem);
+                    }
+                }
                 for mapped in layer_map
                     .layers_on(layer)
                     .filter_map(|layer| self.mapped_layer_surfaces.get(layer))
