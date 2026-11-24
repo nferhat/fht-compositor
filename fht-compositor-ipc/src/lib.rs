@@ -272,7 +272,7 @@ pub struct Window {
     pub focused: bool,
     /// The `ext-foreign-toplevel-list-v1` handle identifier of this window, if available.
     #[serde(default)]
-    pub wayland_id: Option<String>,
+    pub foreign_handle: Option<String>,
     /// The process ID (PID) of the Wayland client that owns this window surface, if available.
     #[serde(default)]
     pub pid: Option<u32>,

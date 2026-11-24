@@ -305,6 +305,7 @@ fn print_window(
     writeln!(writer, "Window #{}", window.id)?;
     writeln!(writer, "\tTitle: {:?}", window.title)?;
     writeln!(writer, "\tApplication ID: {:?}", window.app_id)?;
+    writeln!(writer, "\tForeign handle: {:?}", window.foreign_handle)?;
     writeln!(writer, "\tCurrent workspace ID: {}", window.workspace_id)?;
     writeln!(writer, "\tSize: ({}, {})", window.size.0, window.size.1)?;
     writeln!(
