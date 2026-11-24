@@ -75,7 +75,7 @@ use crate::focus::PointerFocus;
 use crate::frame_clock::FrameClock;
 use crate::handlers::session_lock::LockState;
 use crate::input::KeyAction;
-use crate::layer::MappedLayer;
+use crate::layer::{ClosingLayer, MappedLayer};
 use crate::output::{self, OutputExt, RedrawState};
 #[cfg(feature = "xdg-screencast-portal")]
 use crate::portals::screencast::{
@@ -172,6 +172,29 @@ impl State {
                 .context("Failed to flush_clients!")?;
         }
 
+        let dead_layers: Vec<_> = self
+            .fht
+            .mapped_layer_surfaces
+            .keys()
+            .filter(|layer| !layer.alive())
+            .cloned()
+            .collect();
+        for layer in dead_layers {
+            if let Some(mapped) = self.fht.mapped_layer_surfaces.remove(&layer) {
+                let output = mapped.output.clone();
+                let scale = smithay::utils::Scale::from(output.current_scale().integer_scale() as f64);
+                let config = self.fht.config.clone();
+                let mut closing = None;
+                self.backend.with_renderer(|renderer| {
+                    closing = mapped.into_closing_layer(renderer, scale, &config);
+                });
+                if let Some(closing) = closing {
+                    self.fht.closing_layer_surfaces.push(closing);
+                    self.fht.queue_redraw(&output);
+                }
+            }
+        }
+
         self.fht.refresh();
         ext_workspace::refresh(&mut self.fht);
         // Update keyboard and pointer focus **after** making sure there are no lock
@@ -231,6 +254,12 @@ impl State {
                     .fht
                     .space
                     .advance_animations(target_presentation_time, &output);
+                ongoing |= Fht::advance_layer_animations(
+                    &mut self.fht.mapped_layer_surfaces,
+                    &mut self.fht.closing_layer_surfaces,
+                    target_presentation_time,
+                    &output,
+                ).clone();
 
                 ongoing
             };
@@ -752,6 +781,7 @@ pub struct Fht {
     pub idle_inhibiting_surfaces: Vec<WlSurface>,
     pub notified_idle_state: bool,
     pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
+    pub closing_layer_surfaces: Vec<ClosingLayer>,
     pub lock_state: LockState,
     // Gesturebinds state
     pub current_swipe_fingers: Option<u32>,
@@ -979,6 +1009,7 @@ impl Fht {
             pointer,
             scroll_binding_accumulator: (0.0, 0.0),
             mapped_layer_surfaces: HashMap::new(),
+            closing_layer_surfaces: Vec::new(),
             lock_state: LockState::Unlocked,
             focused_on_demand_layer_shell: None,
             pointer_focus: None,
@@ -1044,10 +1075,35 @@ impl Fht {
         // Periodic cleanup, nothing special.
         self.space.refresh();
         self.popups.cleanup();
+        self.mapped_layer_surfaces.retain(|layer, _| layer.alive());
+        self.closing_layer_surfaces.retain(|c| !c.is_finished());
         // We do this after everything to make sure we send accurate state.
         self.refresh_ipc_space();
         self.refresh_ipc_workspaces();
         self.refresh_ipc_windows();
+    }
+
+    pub fn advance_layer_animations(
+        mapped_layer_surfaces: &mut HashMap<LayerSurface, MappedLayer>,
+        closing_layer_surfaces: &mut Vec<ClosingLayer>,
+        target_presentation_time: Duration,
+        output: &Output,
+    ) -> bool {
+        let mut ongoing = false;
+        for mapped in mapped_layer_surfaces.values_mut() {
+            if &mapped.output == output {
+                ongoing |= mapped.advance_animations(target_presentation_time);
+            }
+        }
+        for closing in closing_layer_surfaces.iter_mut() {
+            if &closing.output == output {
+                closing.advance_animations(target_presentation_time);
+                ongoing = true;
+            }
+        }
+        closing_layer_surfaces
+            .retain(|closing| &closing.output != output || !closing.is_finished());
+        ongoing
     }
 
     pub fn add_output(

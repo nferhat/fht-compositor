@@ -7,8 +7,8 @@ use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
-    with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
+    add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
+    remove_pre_commit_hook, with_states, BufferAssignment, CompositorHandler, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 #[cfg(feature = "udev-backend")]
@@ -17,7 +17,7 @@ use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 use crate::state::{State, UnmappedWindow};
 use crate::utils::send_scale_transform;
 
-fn has_render_buffer(surface: &WlSurface) -> bool {
+pub(super) fn has_render_buffer(surface: &WlSurface) -> bool {
     // If there's no renderer surface data, just assume the surface didn't even get recognized by
     // the renderer
     with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or_else(|| {
@@ -45,6 +45,32 @@ impl CompositorHandler for State {
     }
 
     fn new_surface(&mut self, surface: &WlSurface) {
+        add_destruction_hook::<Self, _>(surface, |state, surface| {
+            let root = state
+                .fht
+                .root_surfaces
+                .get(surface)
+                .cloned()
+                .unwrap_or_else(|| surface.clone());
+
+            if let Some((window, workspace)) = state.fht.space.find_window_and_workspace_mut(&root) {
+                state.backend.with_renderer(|renderer| {
+                    workspace.prepare_close_animation_for_window(&window, renderer);
+                });
+            } else if let Some(mapped) = state
+                .fht
+                .mapped_layer_surfaces
+                .values_mut()
+                .find(|m| m.layer.wl_surface() == &root)
+            {
+                let scale = mapped.output.current_scale().integer_scale();
+                let config = state.fht.config.clone();
+                state.backend.with_renderer(|renderer| {
+                    mapped.prepare_close_animation_if_needed(renderer, scale, &config);
+                });
+            }
+        });
+
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
             #[cfg(feature = "udev-backend")]
             let mut acquire_point = None;
@@ -209,7 +235,7 @@ impl CompositorHandler for State {
         }
 
         // This could be a layer-shell.
-        if let Some(output) = State::process_layer_shell_commit(&root_surface, &mut self.fht) {
+        if let Some(output) = self.process_layer_shell_commit(&root_surface) {
             self.fht.queue_redraw(&output);
             return;
         }
@@ -280,6 +306,17 @@ impl CompositorHandler for State {
             if let Some((window, workspace)) = self.fht.space.find_window_and_workspace_mut(&root) {
                 self.backend.with_renderer(|renderer| {
                     workspace.prepare_close_animation_for_window(&window, renderer);
+                });
+            } else if let Some(mapped) = self
+                .fht
+                .mapped_layer_surfaces
+                .values_mut()
+                .find(|m| m.layer.wl_surface() == &root)
+            {
+                let scale = mapped.output.current_scale().integer_scale();
+                let config = self.fht.config.clone();
+                self.backend.with_renderer(|renderer| {
+                    mapped.prepare_close_animation_if_needed(renderer, scale, &config);
                 });
             }
         }
