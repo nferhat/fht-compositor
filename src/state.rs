@@ -55,7 +55,7 @@ use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::SessionLockManagerState;
-use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, WlrLayerShellState};
+use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::dialog::XdgDialogState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -1122,6 +1122,7 @@ impl Fht {
     }
 
     pub fn focus_output(&mut self, output: &Output) {
+        self.set_on_demand_layer_shell_focus(None);
         if let Some(window) = self.space.set_active_output(output) {
             self.loop_handle.insert_idle(move |state| {
                 state.set_keyboard_focus(Some(window.wl_surface().clone()));
@@ -1407,16 +1408,15 @@ impl Fht {
         }
     }
 
-    /// Focus the given layer surface if its keyboard interactivity is set to
-    /// [`KeyboardInteractivity::OnDemand`], and returns whether it focused it or not
+    /// Focus the given layer surface if it can receive keyboard focus.
     pub fn set_on_demand_layer_shell_focus(&mut self, layer: Option<&LayerSurface>) {
         if let Some(layer) = layer {
-            if layer.cached_state().keyboard_interactivity == KeyboardInteractivity::OnDemand {
+            if layer.can_receive_keyboard_focus() {
                 if self.focused_on_demand_layer_shell.as_ref() != Some(layer) {
                     self.focused_on_demand_layer_shell = Some(layer.clone());
                     self.queue_redraw_all(); // FIXME: Granular with layer output
-                    return;
                 }
+                return;
             }
         }
 

@@ -10,7 +10,9 @@ use async_channel::{Sender, TrySendError};
 use calloop::io::Async;
 use fht_compositor_ipc as types;
 use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use smithay::desktop::layer_map_for_output;
 use smithay::input::pointer::{Focus, GrabStartData};
+use smithay::output::Output;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
     Dispatcher, Interest, LoopHandle, Mode, PostAction, RegistrationToken,
@@ -790,6 +792,35 @@ impl State {
 
                 anyhow::bail!("No window with matching ID")
             }
+            types::Action::FocusLayerShell { namespace } => {
+                let active_output = self.fht.space.active_output().clone();
+                let find_on_output = |output: &Output| {
+                    layer_map_for_output(output)
+                        .layers()
+                        .find(|layer| {
+                            layer.namespace() == namespace && layer.can_receive_keyboard_focus()
+                        })
+                        .cloned()
+                        .map(|layer| (layer, output.clone()))
+                };
+
+                let (layer, output) = find_on_output(&active_output)
+                    .or_else(|| {
+                        self.fht
+                            .space
+                            .outputs()
+                            .filter(|&o| o != &active_output)
+                            .find_map(find_on_output)
+                    })
+                    .context("No focusable layer-shell with matching namespace")?;
+
+                if output != active_output {
+                    self.fht.space.set_active_output(&output);
+                }
+
+                self.fht.set_on_demand_layer_shell_focus(Some(&layer));
+                self.update_keyboard_focus();
+            }
             types::Action::FocusNextWindow { workspace_id } => {
                 let workspace = match workspace_id {
                     Some(id) => self
@@ -801,6 +832,7 @@ impl State {
                 };
 
                 workspace.activate_next_tile(true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::FocusPreviousWindow { workspace_id } => {
@@ -814,6 +846,7 @@ impl State {
                 };
 
                 workspace.activate_previous_tile(true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::FocusWindowDirectional {
@@ -830,6 +863,7 @@ impl State {
                 };
 
                 workspace.activate_tile_by_direction(&direction, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::SwapWithNextWindow {
@@ -846,6 +880,7 @@ impl State {
                 };
 
                 workspace.swap_active_tile_with_next(keep_focus, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::SwapWithPreviousWindow {
@@ -862,6 +897,7 @@ impl State {
                 };
 
                 workspace.swap_active_tile_with_previous(keep_focus, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::SwapWindowDirectional {
@@ -879,6 +915,7 @@ impl State {
                 };
 
                 workspace.swap_tile_by_direction(&direction, keep_focus, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::FocusOutput { output } => {
@@ -953,6 +990,7 @@ impl State {
                 anyhow::ensure!((0..9).contains(&workspace_idx), "Invalid workspace index");
 
                 monitor.set_active_workspace_idx(workspace_idx, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::FocusNextWorkspace { output } => {
@@ -968,6 +1006,7 @@ impl State {
 
                 let idx = (monitor.active_workspace_idx() + 1).clamp(0, 8);
                 monitor.set_active_workspace_idx(idx, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::FocusPreviousWorkspace { output } => {
@@ -983,6 +1022,7 @@ impl State {
 
                 let idx = monitor.active_workspace_idx().saturating_sub(1);
                 monitor.set_active_workspace_idx(idx, true);
+                self.fht.set_on_demand_layer_shell_focus(None);
                 self.update_keyboard_focus();
             }
             types::Action::CloseWindow { window_id, kill } => {
