@@ -701,6 +701,8 @@ pub struct General {
     pub outer_gaps: i32,
     #[serde(default = "default_gaps")]
     pub inner_gaps: i32,
+    #[serde(default = "default_false")]
+    pub session_lock_xray: bool,
 }
 
 impl Default for General {
@@ -715,6 +717,7 @@ impl Default for General {
             mwfact: default_mwfact(),
             outer_gaps: default_gaps(),
             inner_gaps: default_gaps(),
+            session_lock_xray: default_false(),
         }
     }
 }
