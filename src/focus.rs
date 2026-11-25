@@ -163,16 +163,20 @@ impl State {
             let mut ft = layer_shell_focus(Layer::Overlay);
             if mon.render_above_top() {
                 ft = ft.or_else(|| fullscreen_window_on_monitor());
-                ft = ft.or_else(|| focused_window());
                 ft = ft.or_else(|| layer_shell_focus(Layer::Top));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Bottom));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Background));
+                ft = ft.or_else(|| on_demand_layer_shell(Layer::Bottom));
+                ft = ft.or_else(|| on_demand_layer_shell(Layer::Background));
+                ft = ft.or_else(|| focused_window());
+                ft = ft.or_else(|| exclusive_layer_shell(Layer::Bottom));
+                ft = ft.or_else(|| exclusive_layer_shell(Layer::Background));
             } else {
                 ft = ft.or_else(|| layer_shell_focus(Layer::Top));
                 ft = ft.or_else(|| fullscreen_window_on_monitor());
+                ft = ft.or_else(|| on_demand_layer_shell(Layer::Bottom));
+                ft = ft.or_else(|| on_demand_layer_shell(Layer::Background));
                 ft = ft.or_else(|| focused_window());
-                ft = ft.or_else(|| layer_shell_focus(Layer::Bottom));
-                ft = ft.or_else(|| layer_shell_focus(Layer::Background));
+                ft = ft.or_else(|| exclusive_layer_shell(Layer::Bottom));
+                ft = ft.or_else(|| exclusive_layer_shell(Layer::Background));
             }
 
             ft

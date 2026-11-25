@@ -38,7 +38,7 @@ impl State {
             return;
         }
 
-        if self.fht.pointer.is_grabbed() {
+        if self.fht.pointer.is_grabbed() || self.fht.focused_on_demand_layer_shell.is_some() {
             return;
         }
 
@@ -74,6 +74,15 @@ impl State {
     }
 
     pub fn set_keyboard_focus(&mut self, ft: Option<WlSurface>) {
+        if self
+            .fht
+            .focused_on_demand_layer_shell
+            .as_ref()
+            .is_some_and(|layer| Some(layer.wl_surface()) != ft.as_ref())
+        {
+            self.fht.set_on_demand_layer_shell_focus(None);
+        }
+
         let ft = ft.map(Into::into);
         self.fht
             .keyboard
@@ -462,7 +471,9 @@ impl State {
             .find(|output| output.geometry().to_f64().contains(pointer_location))
             .cloned();
         if let Some(new_output) = maybe_new_output {
-            self.fht.space.set_active_output(&new_output);
+            if self.fht.focused_on_demand_layer_shell.is_none() {
+                self.fht.space.set_active_output(&new_output);
+            }
         }
 
         // Confine pointer if possible.
@@ -541,10 +552,13 @@ impl State {
             let focus = self.fht.get_pointer_focus(pointer_loc);
 
             if let Some(ref focus) = focus {
+                if self.fht.space.active_output() != &focus.output {
+                    self.fht.space.set_active_output(&focus.output);
+                }
+
                 if let Some(layer) = focus
                     .layer_surface
                     .as_ref()
-                    .filter(|l| matches!(l.layer(), Layer::Top | Layer::Overlay))
                     .filter(|l| l.can_receive_keyboard_focus())
                 {
                     self.fht.set_on_demand_layer_shell_focus(Some(&layer));

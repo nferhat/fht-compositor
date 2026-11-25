@@ -519,6 +519,11 @@ pub enum Action {
         #[serde(rename = "window-id")]
         window_id: usize,
     },
+    /// Focus a [`LayerShell`] by its namespace.
+    FocusLayerShell {
+        /// The [`LayerShell::namespace`] to focus.
+        namespace: String,
+    },
     /// Focus the next window in a [`Workspace`].
     FocusNextWindow {
         /// The [`Workspace::id`] layout to change. Leave as `None` for active workspace.
