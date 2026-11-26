@@ -20,7 +20,7 @@ use smithay::input::keyboard::{FilterResult, Keysym, ModifiersState};
 use smithay::input::pointer::{self, AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_pointer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat;
 use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint};
 use smithay::wayland::seat::WaylandFocus;
@@ -512,9 +512,19 @@ impl State {
         &mut self,
         event: B::PointerMotionAbsoluteEvent,
     ) {
-        let output_geo = self.fht.space.active_output().geometry();
+        // Absolute devices span the whole layout. OpenTabletDriver relies on this, since it maps
+        // to outputs itself.
+        let Some(layout_geo) = self
+            .fht
+            .space
+            .outputs()
+            .map(OutputExt::geometry)
+            .reduce(Rectangle::merge)
+        else {
+            return;
+        };
         let pointer_location =
-            event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+            event.position_transformed(layout_geo.size) + layout_geo.loc.to_f64();
         let serial = SERIAL_COUNTER.next_serial();
 
         let pointer = self.fht.pointer.clone();
