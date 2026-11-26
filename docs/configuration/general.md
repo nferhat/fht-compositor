@@ -107,10 +107,10 @@ Default is `8` for both.
 
 #### 'session-lock-xray'
 
-We call "xray" the effect of showing the content of the screen behind the sessuion lock. 
+We call "xray" the effect of showing the content of the screen behind the session lock. 
 
 This option allows to enable or disable this effect. Default is `false` (disabled).
 
-If disabled, the compositor will show a solid red color behind the session lock, to prevent any content from being visible. If enabled, the compositor will show the content of the screen behind the session lock, with a red tint.
+If disabled, the compositor will show a solid red color behind the session lock, to prevent any content from being visible. If enabled, the compositor will show the content of the screen behind the session lock.
 
 This option is intended for users who uses custom lockscreens with effects and animations that require to see the content of the screen behind the lockscreen.
