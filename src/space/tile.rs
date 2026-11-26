@@ -1,8 +1,10 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use fht_animation::Animation;
 use smithay::backend::allocator::Fourcc;
+use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
@@ -10,25 +12,27 @@ use smithay::backend::renderer::element::{Element, Id, Kind};
 use smithay::backend::renderer::gles::element::TextureShaderElement;
 use smithay::backend::renderer::gles::Uniform;
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::Renderer as _;
+use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::{Color32F, Renderer as _};
 use smithay::desktop::{PopupManager, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_surface_tree_downward, TraversalAction};
 
 use super::border::Border;
 use super::closing_tile::ClosingTile;
 use super::{border, shadow, Config};
 use crate::egui::EguiRenderElement;
+use crate::handlers::background_effect::surface_background_effect_region;
 use crate::output::OutputExt;
-use crate::renderer::blur::element::BlurElement;
+use crate::renderer::blur::{Blur, BlurElement};
 use crate::renderer::extra_damage::ExtraDamage;
 use crate::renderer::rounded_window::RoundedWindowElement;
 use crate::renderer::shaders::{ShaderElement, Shaders};
 use crate::renderer::texture_element::FhtTextureElement;
 use crate::renderer::texture_shader_element::FhtTextureShaderElement;
-use crate::renderer::{has_transparent_region, render_to_texture, FhtRenderer};
+use crate::renderer::{render_to_texture, FhtRenderer};
 use crate::utils::RectCenterExt;
 use crate::window::{ConfigureThrottleState, Window};
 
@@ -87,9 +91,16 @@ pub struct Tile {
     /// The last saved floating geometry
     previous_floating_geometry: Option<Rectangle<i32, Logical>>,
 
+    /// Blur state for the background effect regions.
+    ///
+    /// Shared with the [`BlurElement`] of each frame, since the capture happens during rendering.
+    blur: Rc<RefCell<Blur>>,
+
     /// Configuration specific to the workspace system.
     pub config: Rc<Config>,
 }
+
+const BACKGROUND_EFFECT_REGION_COLOR: Color32F = Color32F::new(0.3, 0.3, 0.0, 0.3);
 
 crate::fht_render_elements! {
     TileRenderElement<R> => {
@@ -98,9 +109,10 @@ crate::fht_render_elements! {
         RoundedSurfaceDamage = ExtraDamage,
         ResizingSurface = FhtTextureShaderElement,
         Decoration = ShaderElement,
-        Blur = BlurElement,
         DebugOverlay = EguiRenderElement,
         Opening = RescaleRenderElement<FhtTextureElement>,
+        BackgroundEffectRegion = SolidColorRenderElement,
+        BlurElement = BlurElement,
     }
 }
 
@@ -151,6 +163,7 @@ impl Tile {
             extra_damage: ExtraDamage::new(size),
             close_animation_snapshot: None,
             previous_floating_geometry: None,
+            blur: Rc::new(RefCell::new(Blur::new())),
             config,
         }
     }
@@ -494,15 +507,6 @@ impl Tile {
         self.save_floating_geometry();
     }
 
-    /// Return whether this tile has a transparent region.
-    pub fn has_transparent_region(&self) -> bool {
-        let wl_surface = self.window().wl_surface();
-        // We only care about main window surface blurring, subsurfaces (for example
-        // popups) are not accoutned for and will not be rendered
-        // with blur.
-        has_transparent_region(&wl_surface, self.window.size())
-    }
-
     /// Advance animations for this [`Tile`].
     pub fn advance_animations(&mut self, target_presentation_time: Duration) -> bool {
         crate::profile_function!();
@@ -622,6 +626,20 @@ impl Tile {
             push(TileRenderElement::RoundedSurfaceDamage(damage));
         }
 
+        if self.config.draw_background_effect_regions {
+            let (region, _) = self.background_effect_region(location, scale);
+            for rect in &region {
+                let color = SolidColorRenderElement::new(
+                    Id::new(),
+                    *rect,
+                    CommitCounter::default(),
+                    BACKGROUND_EFFECT_REGION_COLOR,
+                    Kind::Unspecified,
+                );
+                push(TileRenderElement::BackgroundEffectRegion(color));
+            }
+        }
+
         self.window.render_popup_elements(
             renderer,
             window_geometry.loc.to_physical_precise_round(scale),
@@ -739,6 +757,137 @@ impl Tile {
         };
     }
 
+    /// The background effect region of the window, in physical coordinates.
+    ///
+    /// `location` is where the [`Tile`] is drawn, see [`Tile::render_inner`]. Without a region,
+    /// this is the whole window, unless blur is disabled.
+    fn background_effect_region(
+        &self,
+        location: Point<i32, Logical>,
+        scale: i32,
+    ) -> (Vec<Rectangle<i32, Physical>>, CommitCounter) {
+        let border_thickness = if self.window.fullscreen() {
+            0
+        } else {
+            self.border.current_parameters().thickness
+        };
+        let blur = self.config.blur.with_overrides(&self.window.rules().blur);
+        let window_geometry = Rectangle::new(
+            location + Point::<i32, Logical>::from((border_thickness, border_thickness)),
+            (
+                self.visual_size().w - 2 * border_thickness,
+                self.visual_size().h - 2 * border_thickness,
+            )
+                .into(),
+        );
+
+        // Region rects are surface-local, so offset them by where the surface is drawn.
+        let surface_loc = window_geometry.loc.to_physical_precise_round(scale)
+            - self.window.render_offset().to_physical_precise_round(scale);
+        // calculate how much we should stretch the background effect regions.
+        //
+        // if the target size is larger than the current one, we will simply crop off the region to
+        // the window visual size, instead of scaling it down.
+        let stretch = if self.size_animation.is_some() {
+            let win = self.window.size();
+            let curr = window_geometry.size;
+            Scale::from((
+                if win.w > 0 && win.w < curr.w {
+                    curr.w as f64 / win.w as f64
+                } else {
+                    1.0
+                },
+                if win.h > 0 && win.h < curr.h {
+                    curr.h as f64 / win.h as f64
+                } else {
+                    1.0
+                },
+            ))
+        } else {
+            Scale::from(1.0)
+        };
+        let window_rect: Rectangle<i32, Physical> = Rectangle::new(
+            window_geometry.loc.to_physical_precise_round(scale),
+            window_geometry.size.to_physical_precise_round(scale),
+        );
+        // Without a region, blur the whole window, unless blur is disabled.
+        let fallback = (!blur.disabled()).then_some(window_rect);
+        // Growing resizes crop the window content instead of stretching it, so the region can
+        // extend past the window while it's animating.
+        surface_background_effect_region(
+            self.window.wl_surface(),
+            scale,
+            surface_loc,
+            stretch,
+            window_rect,
+            fallback,
+        )
+    }
+
+    /// Push the blur of the background effect region, it is below the window surfaces.
+    ///
+    /// `location` is the same as [`Tile::render_inner`] got, the blur follows it.
+    fn render_blur<R: FhtRenderer>(
+        &self,
+        location: Point<i32, Logical>,
+        scale: i32,
+        push: &mut dyn FnMut(TileRenderElement<R>),
+    ) {
+        let blur = self.config.blur.with_overrides(&self.window.rules().blur);
+        if blur.disabled() {
+            return;
+        }
+
+        let (mut region, region_commit) = self.background_effect_region(location, scale);
+        if region.is_empty() {
+            return;
+        }
+
+        // NOTE: the opening anim rescales the window texture around the tile center, so do the
+        // same with the blur region, otherwise it just sits there at full size.
+        let open_scale = self
+            .opening_animation
+            .as_ref()
+            .map_or(1.0, |a| opening_animation_progress_to_scale(*a.value()));
+        if open_scale != 1.0 {
+            let center = Rectangle::new(location, self.visual_size())
+                .to_physical(scale)
+                .center();
+            for rect in &mut region {
+                rect.loc -= center;
+                *rect = rect.to_f64().upscale(open_scale).to_i32_round();
+                rect.loc += center;
+            }
+        }
+
+        let border::Parameters {
+            thickness,
+            radius,
+            power,
+            ..
+        } = self.border.current_parameters();
+        let border_thickness = if self.window.fullscreen() {
+            0
+        } else {
+            thickness
+        };
+        // Use the inner radius, like the window does.
+        let corner_radius = (radius - border_thickness as f32).max(0.0);
+        let corner_radius = border::fit_corner_radius_to_geometry(
+            Rectangle::new(location, self.visual_size()),
+            corner_radius,
+        );
+
+        push(TileRenderElement::BlurElement(BlurElement::new(
+            region,
+            blur,
+            self.blur.clone(),
+            corner_radius * scale as f32 * open_scale as f32,
+            power,
+            region_commit,
+        )));
+    }
+
     /// Render the elements for this [`Tile`].
     ///
     /// The [`Tile`] uses its `location` to render the elements.
@@ -747,8 +896,6 @@ impl Tile {
         renderer: &mut R,
         scale: i32,
         mut alpha: f32,
-        output: &Output,
-        render_offset: Point<i32, Logical>,
         push: &mut dyn FnMut(TileRenderElement<R>),
     ) {
         crate::profile_function!();
@@ -757,12 +904,12 @@ impl Tile {
         // Rendering tile goes through the following phases.
         //
         // 1. Tile::render_inner renders the tile's window and popups, and applies the resize the
-        //    current size_animation if any to the main window surface(s) and rounded corners
+        //    current size_animation if any to the main window surface(s) and rounded corners.
         //
         // 2. If there's a resize animation ongoing, we draw the generated render elements into a
         //    texture and draw it with a custom size and rescale it.
         //
-        // 3. We draw additional decorations: blur, shadow, border, etc.
+        // 3. We draw additional decorations: shadow, border, etc.
         //
         // FIXME: Redundant calculations here and and in render_inner, but compiler should optimize
         // them away (hopefully)? Either way they are not too expensive.
@@ -839,17 +986,11 @@ impl Tile {
         let rules = self.window.rules();
         let border::Parameters {
             thickness: mut border_thickness,
-            radius: corner_radius,
-            power: corner_power,
             ..
         } = self.border.current_parameters();
         if is_fullscreen {
             border_thickness = 0
         }
-        let (blur, optimized_blur) = (
-            self.config.blur.with_overrides(&rules.blur),
-            rules.blur.optimized,
-        );
 
         drop(rules);
 
@@ -876,42 +1017,10 @@ impl Tile {
             push(TileRenderElement::Decoration(element))
         }
 
-        if !blur.disabled() && self.has_transparent_region() {
-            // Optimized blur uses a pre-blurred texture containing background and bottom
-            // layer shells. True blur (non-optimized) blurs in real time whatever is behind the
-            // window.
-            //
-            // When a window is tiled, it will most likely only display the background, IE there
-            // are no windows behind it, so we win quit a lot of performance when enabling
-            // optimized blur here since tiled windows are *huge*
-            //
-            // Floating windows on the other hand might have other windows below it, so they
-            // don't use optimized. They are also (in comparaison) relatively
-            // small, so its even better
-            //
-            // HACK: Since the true blur implementation is quite expensive as of right now, we
-            // use optimized blur by default. Unless the user asks for it.
-            let optimized = optimized_blur.unwrap_or(true);
-
-            // render_offset is from the workspace, to account for switching animations
-            let sample_area =
-                Rectangle::new(window_geometry.loc + render_offset, window_geometry.size);
-
-            let element = BlurElement::new(
-                renderer,
-                output,
-                sample_area,
-                window_geometry.loc.to_physical(scale),
-                corner_radius,
-                corner_power,
-                optimized,
-                scale,
-                alpha,
-                blur,
-            );
-
-            push(element.into());
-        }
+        // Push the element here since pushing it above would make it blur the shadow and border.
+        // We can't do this in render-inner either since it would make the blur not appear during
+        // the opening animation (since we pre-render everything to a temporary texture)
+        self.render_blur(self.visual_location(), scale, push);
     }
 }
 
