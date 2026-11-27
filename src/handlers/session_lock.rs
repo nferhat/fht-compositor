@@ -190,20 +190,22 @@ impl Fht {
             );
         }
 
-        // Always cover the output, so nothing leaks when there's no lock surface (yet), for
-        // example on a newly connected output or if the lock client died.
-        output_state
-            .lock_backdrop
-            .update(output.geometry().size, backdrop_color);
-        push(SessionLockRenderElement::ClearBackdrop(
-            SolidColorRenderElement::from_buffer(
-                &output_state.lock_backdrop,
-                Point::default(),
-                scale,
-                1.0,
-                Kind::Unspecified,
-            ),
-        ));
+        // Always cover the output unless xray is enabled, so nothing leaks when there's no lock
+        // surface (yet), for example on a newly connected output or if the lock client died.
+        if !self.config.general.session_lock_xray {
+            output_state
+                .lock_backdrop
+                .update(output.geometry().size, backdrop_color);
+            push(SessionLockRenderElement::ClearBackdrop(
+                SolidColorRenderElement::from_buffer(
+                    &output_state.lock_backdrop,
+                    Point::default(),
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                ),
+            ));
+        }
     }
 }
 

@@ -205,8 +205,10 @@ impl Fht {
             self.render_session_lock(renderer, output, &mut |e| {
                 push(FhtRenderElement::SessionLock(e))
             });
-            // The lock covers everything, don't even render session contents below it.
-            return rv;
+            if !self.config.general.session_lock_xray {
+                // The lock covers everything, don't even render session contents below it.
+                return rv;
+            }
         }
 
         let layer_map = layer_map_for_output(output);
