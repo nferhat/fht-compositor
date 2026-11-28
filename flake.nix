@@ -47,7 +47,7 @@
           # whatever is specified inside ./rust-toolchain.toml
           (rust-bin.selectLatestNightlyWith (toolchain:
             toolchain.default.override {
-              extensions = ["rust-analyzer" "rust-src" "rustc-codegen-cranelift-preview"];
+              extensions = ["rust-analyzer" "rust-src"];
             }))
           pkgs.tracy # profiler
           pkgs.alejandra # for formatting this flake if needed
@@ -64,7 +64,7 @@
           # in the package expression
           #
           # This should only be set with `CARGO_BUILD_RUSTFLAGS="$CARGO_BUILD_RUSTFLAGS -C your-flags"`
-          CARGO_BUILD_RUSTFLAGS = "${fht-compositor.RUSTFLAGS} -Zcodegen-backend=cranelift";
+          CARGO_BUILD_RUSTFLAGS = "${fht-compositor.RUSTFLAGS}";
         };
       };
   };
