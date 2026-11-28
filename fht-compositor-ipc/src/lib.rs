@@ -122,6 +122,8 @@ pub enum Response {
     CursorPosition { x: f64, y: f64 },
     /// All registered global shortcuts.
     GlobalShortcuts(Vec<GlobalShortcut>),
+    /// The path of the screenshot data as PNG.
+    Screenshot(String),
     /// There was an error handling the request.
     Error(String),
     /// Noop, for requests that do not need a result/output.
@@ -523,6 +525,16 @@ pub enum Action {
     FocusLayerShell {
         /// The [`LayerShell::namespace`] to focus.
         namespace: String,
+    },
+    /// Screenshot a window with its popups, as a PNG. If `out_path` is `None`, the screenshot
+    /// is saved in the temporary directory. The path is sent back in [`Response::Screenshot`].
+    ScreenshotWindow {
+        /// The [`Window::id`] to screenshot.
+        #[cfg_attr(feature = "clap", arg(long))]
+        #[serde(rename = "window-id")]
+        window_id: usize,
+        /// Pass `-` to have the CLI print the PNG data to stdout instead.
+        out_path: Option<String>,
     },
     /// Focus the next window in a [`Workspace`].
     FocusNextWindow {

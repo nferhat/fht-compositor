@@ -104,6 +104,7 @@ drm-ffi = "0.9.0"
 sd-notify = { version = "0.4.5", optional = true }
 futures-util = { version = "0.3.31", features = ["std", "io"] }
 wayland-scanner = "0.31.7"
+png = "0.18.1"
 [dependencies.pipewire]
 git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git"
 rev = "8248451f82cb2b886ea9762917ae4baade4e164b"

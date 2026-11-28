@@ -9,6 +9,12 @@ use crate::cli;
 /// It uses the IPC socket specified by the `FHTC_SOCKET_PATH` environment variable.
 pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
     let mut subscribe = false;
+    let screenshot_to_stdout = matches!(
+        &request,
+        cli::Request::Action {
+            action: fht_compositor_ipc::Action::ScreenshotWindow { out_path: Some(t), .. }
+        } if t == "-"
+    );
     let request = match request {
         cli::Request::Version => fht_compositor_ipc::Request::Version,
         cli::Request::Outputs => fht_compositor_ipc::Request::Outputs,
@@ -76,6 +82,15 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
         res => res,
     };
 
+    if let (true, fht_compositor_ipc::Response::Screenshot(path)) =
+        (screenshot_to_stdout, &response)
+    {
+        let contents = std::fs::read(path)?;
+        io::stdout().write_all(&contents)?;
+        std::fs::remove_file(path)?;
+        return Ok(());
+    }
+
     if json {
         let json_buffer = match response {
             fht_compositor_ipc::Response::Version(version) => {
@@ -120,6 +135,7 @@ pub fn make_request(request: cli::Request, json: bool) -> anyhow::Result<()> {
             fht_compositor_ipc::Response::GlobalShortcuts(shortcuts) => {
                 serde_json::to_string(&shortcuts)
             }
+            fht_compositor_ipc::Response::Screenshot(path) => serde_json::to_string(&path),
             fht_compositor_ipc::Response::Noop => return Ok(()),
         }?;
         println!("{}", json_buffer);
@@ -273,6 +289,7 @@ fn print_formatted(res: &fht_compositor_ipc::Response) -> anyhow::Result<()> {
         fht_compositor_ipc::Response::CursorPosition { x, y } => {
             writeln!(&mut writer, "Cursor position: {x}, {y}")?;
         }
+        fht_compositor_ipc::Response::Screenshot(path) => writeln!(&mut writer, "{path}")?,
         fht_compositor_ipc::Response::GlobalShortcuts(shortcuts) => {
             if shortcuts.is_empty() {
                 writeln!(&mut writer, "No global shortcuts registered.")?;

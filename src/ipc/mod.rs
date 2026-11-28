@@ -246,7 +246,10 @@ enum ClientRequest {
     PickLayerShell(async_channel::Sender<types::PickLayerShellResult>),
     CursorPosition(async_channel::Sender<(f64, f64)>),
     GlobalShortcuts(async_channel::Sender<Vec<types::GlobalShortcut>>),
-    Action(types::Action, async_channel::Sender<anyhow::Result<()>>),
+    Action(
+        types::Action,
+        async_channel::Sender<anyhow::Result<Response>>,
+    ),
     NewSubscriber(async_channel::Sender<types::Event>),
 }
 
@@ -371,10 +374,7 @@ async fn handle_request(
                 .send(ClientRequest::Action(action, tx))
                 .context("IPC communication channel closed")?;
             let result = rx.recv().await.context("Failed to receive action result")?;
-            let resp = match result {
-                Ok(()) => Response::Noop,
-                Err(err) => Response::Error(err.to_string()),
-            };
+            let resp = result.unwrap_or_else(|err| Response::Error(err.to_string()));
             Ok(resp)
         }
     }
@@ -539,7 +539,7 @@ impl State {
         Ok(())
     }
 
-    fn handle_ipc_action(&mut self, action: types::Action) -> anyhow::Result<()> {
+    fn handle_ipc_action(&mut self, action: types::Action) -> anyhow::Result<Response> {
         match action {
             types::Action::Quit => self.fht.stop = true,
             types::Action::DisableOutputs => self.fht.disable_outputs(),
@@ -592,7 +592,7 @@ impl State {
                         if let Some(window) = self.fht.space.active_window() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -617,7 +617,7 @@ impl State {
                         if let Some(window) = self.fht.space.active_window() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -643,7 +643,7 @@ impl State {
                         if let Some(window) = self.fht.space.active_window() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -669,13 +669,13 @@ impl State {
                             tile
                         } else {
                             // If there's no active window, we just silently return
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
 
                 if window.tiled() {
-                    return Ok(());
+                    return Ok(Response::Noop);
                 }
 
                 self.fht.space.center_window(&window, true);
@@ -693,13 +693,13 @@ impl State {
                         if let Some(window) = self.fht.space.active_tile_mut() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
 
                 if tile.window().tiled() {
-                    return Ok(());
+                    return Ok(Response::Noop);
                 }
 
                 let new_loc = match change {
@@ -727,7 +727,7 @@ impl State {
                         if let Some(window) = self.fht.space.active_tile_mut() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -735,7 +735,7 @@ impl State {
                 if tile.window().tiled() {
                     // FIXME: Figure out whether we should error or actually tell the user about
                     // the fact the window is not floating? Key-actions just ignore silently
-                    return Ok(());
+                    return Ok(Response::Noop);
                 }
 
                 let new_size = match change {
@@ -787,7 +787,7 @@ impl State {
 
                 if let Some(window) = window {
                     self.set_keyboard_focus(Some(window.wl_surface().clone()));
-                    return Ok(());
+                    return Ok(Response::Noop);
                 }
 
                 anyhow::bail!("No window with matching ID")
@@ -1039,7 +1039,7 @@ impl State {
                             tile
                         } else {
                             // If there's no active window, we just silently return
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -1107,7 +1107,7 @@ impl State {
                         if let Some(window) = self.fht.space.active_tile_mut() {
                             window
                         } else {
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -1137,7 +1137,7 @@ impl State {
                             tile
                         } else {
                             // If there's no active window, we just silently return
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -1163,7 +1163,7 @@ impl State {
                             tile
                         } else {
                             // If there's no active window, we just silently return
-                            return Ok(());
+                            return Ok(Response::Noop);
                         }
                     }
                 };
@@ -1177,8 +1177,28 @@ impl State {
                     .context("no output with given name!")?;
                 self.fht.space.move_window_to_output(&window, &output, true);
             }
+            types::Action::ScreenshotWindow {
+                window_id,
+                out_path,
+            } => {
+                let path = out_path.map(PathBuf::from).unwrap_or_else(|| {
+                    let nanos = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos();
+                    std::env::temp_dir().join(format!("fht-window-{window_id}-{nanos}.png"))
+                });
+
+                let (pixels, size) = self.screenshot_window(window_id)?;
+                let file = io::BufWriter::new(std::fs::File::create(&path)?);
+                let mut encoder = png::Encoder::new(file, size.w as u32, size.h as u32);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder.write_header()?.write_image_data(&pixels)?;
+                return Ok(Response::Screenshot(path.to_string_lossy().to_string()));
+            }
         }
 
-        Ok(())
+        Ok(Response::Noop)
     }
 }

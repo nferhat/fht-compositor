@@ -59,7 +59,7 @@ use crate::layer::LayerShellRenderElement;
 use crate::protocols::screencopy::{ScreencopyBuffer, ScreencopyFrame};
 use crate::renderer::surface::push_elements_from_surface_tree;
 use crate::space::{MonitorRenderElement, TileRenderElement};
-use crate::state::Fht;
+use crate::state::{Fht, State};
 use crate::utils::get_monotonic_time;
 
 crate::fht_render_elements! {
@@ -631,6 +631,60 @@ impl Fht {
                 }
             }
         }
+    }
+}
+
+impl State {
+    /// Screenshots a window returning PNG pixels.
+    pub fn screenshot_window(
+        &mut self,
+        window_id: usize,
+    ) -> anyhow::Result<(Vec<u8>, Size<i32, Physical>)> {
+        let window = self
+            .fht
+            .space
+            .windows()
+            .find(|window| window.id() == window_id)
+            .cloned()
+            .context("No window with matching ID")?;
+        let scale = self
+            .fht
+            .space
+            .output_for_surface(&window.wl_surface())
+            .unwrap()
+            .current_scale()
+            .integer_scale();
+        let scale = Scale::from(scale as f64);
+        let bbox = window.bbox_with_popups().to_physical_precise_up(scale);
+        let loc = window.render_offset().to_physical_precise_round(scale) - bbox.loc;
+        let size = bbox.size;
+
+        let pixels = self
+            .backend
+            .with_renderer(|renderer| -> anyhow::Result<Vec<u8>> {
+                let mut elements = vec![];
+                window.render_popup_elements(renderer, loc, scale, 1.0, &mut |e| elements.push(e));
+                window
+                    .render_toplevel_elements(renderer, loc, scale, 1.0, &mut |e| elements.push(e));
+                // Original code from `render_to_vec` in niri-wm/niri (GPL-3.0)
+                // thank you very much!
+                let (mut tex, _) = crate::renderer::render_to_texture(
+                    renderer,
+                    size,
+                    scale,
+                    Transform::Normal,
+                    Fourcc::Abgr8888,
+                    elements.iter(),
+                )?;
+                let fb = renderer.bind(&mut tex)?;
+                let region =
+                    Rectangle::from_size(size.to_logical(1).to_buffer(1, Transform::Normal));
+                let mapping = renderer.copy_framebuffer(&fb, region, Fourcc::Abgr8888)?;
+                Ok(renderer.map_texture(&mapping)?.to_vec())
+            })
+            .context("No renderer available")??;
+
+        Ok((pixels, size))
     }
 }
 
